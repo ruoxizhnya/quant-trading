@@ -1,0 +1,37 @@
+server:
+  host: "0.0.0.0"
+  port: 8083
+
+risk:
+  target_volatility: 0.15
+  max_position_weight: 0.10
+  min_position_weight: 0.01
+  
+  stoploss:
+    atr_period: 14
+    base_multiplier: 2.5
+    bull_multiplier: 2.0
+    bear_multiplier: 3.5
+    sideways_multiplier: 2.5
+  
+  take_profit:
+    atr_multiplier: 3.0
+
+volatility:
+  lookback_days: 20
+  annualization_factor: 16.0  # sqrt(252)
+
+regime:
+  fast_ma_period: 50
+  slow_ma_period: 200
+  vol_lookback: 252
+
+redis:
+  url: "redis://localhost:6379"
+
+data_service:
+  url: "http://localhost:8081"
+
+logging:
+  level: "info"
+  format: "json"

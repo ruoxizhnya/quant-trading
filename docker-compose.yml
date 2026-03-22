@@ -1,0 +1,116 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: quant_trading
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  data-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: ["/app/data-service"]
+    ports:
+      - "8081:8081"
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN}
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  strategy-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: ["/app/strategy-service"]
+    ports:
+      - "8082:8082"
+    environment:
+      REDIS_URL: redis://redis:6379
+      DATA_SERVICE_URL: http://data-service:8081
+      LOG_LEVEL: info
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  risk-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: ["/app/risk-service"]
+    ports:
+      - "8083:8083"
+    environment:
+      REDIS_URL: redis://redis:6379
+      DATA_SERVICE_URL: http://data-service:8081
+      LOG_LEVEL: info
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  execution-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: ["/app/execution-service"]
+    ports:
+      - "8084:8084"
+    environment:
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  analysis-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+    command: ["/app/analysis-service"]
+    ports:
+      - "8085:8085"
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      REDIS_URL: redis://redis:6379
+      DATA_SERVICE_URL: http://data-service:8081
+      STRATEGY_SERVICE_URL: http://strategy-service:8082
+      RISK_SERVICE_URL: http://risk-service:8083
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

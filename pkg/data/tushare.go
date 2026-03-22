@@ -1,0 +1,398 @@
+package data
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/httpclient"
+	"github.com/ruoxizhnya/quant-trading/pkg/logging"
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
+	"github.com/rs/zerolog"
+)
+
+const (
+	tushareRateLimit     = 200 // requests per minute on free tier
+	tushareRateLimitDur  = time.Minute
+)
+
+// TushareClient wraps the tushare.pro HTTP API.
+type TushareClient struct {
+	httpClient *httpclient.Client
+	token     string
+	logger    zerolog.Logger
+	store     *storage.PostgresStore
+	cache     *storage.Cache
+
+	mu           sync.Mutex
+	lastRequest  time.Time
+	requestCount int
+}
+
+// NewTushareClient creates a new Tushare API client.
+func NewTushareClient(token, baseURL string, maxRetries int, store *storage.PostgresStore, cache *storage.Cache) *TushareClient {
+	return &TushareClient{
+		httpClient: httpclient.New(baseURL, 30*time.Second, maxRetries),
+		token:     token,
+		logger:    logging.WithContext(map[string]any{"component": "tushare_client"}),
+		store:     store,
+		cache:     cache,
+	}
+}
+
+// TushareRequest represents a tushare API request payload.
+type TushareRequest struct {
+	APIName  string                 `json:"api_name"`
+	Token    string                 `json:"token"`
+	Params   map[string]interface{} `json:"params,omitempty"`
+	Fields   string                 `json:"fields,omitempty"`
+}
+
+// TushareResponse represents a tushare API response.
+type TushareResponse struct {
+	Code    int             `json:"code"`
+	Msg     string          `json:"msg"`
+	Request TushareRequestMeta `json:"request"`
+	Data    TushareData     `json:"data"`
+}
+
+// TushareRequestMeta contains metadata about the request.
+type TushareRequestMeta struct {
+	API      string `json:"api"`
+	Token    string `json:"token"`
+	Params   any    `json:"params"`
+	Fields   string `json:"fields"`
+	TS       int64  `json:"ts"`
+}
+
+// TushareData contains the response data.
+type TushareData struct {
+	Fields []string        `json:"fields"`
+	Items  [][]interface{} `json:"items"`
+}
+
+// waitForRateLimit ensures we don't exceed 200 req/min.
+func (c *TushareClient) waitForRateLimit() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	if c.requestCount >= tushareRateLimit {
+		elapsed := now.Sub(c.lastRequest)
+		if elapsed < tushareRateLimitDur {
+			sleepDur := tushareRateLimitDur - elapsed
+			c.logger.Info().Dur("sleep", sleepDur).Msg("Rate limit reached, waiting")
+			time.Sleep(sleepDur)
+		}
+		c.requestCount = 0
+	}
+
+	if c.requestCount == 0 {
+		c.lastRequest = time.Now()
+	}
+	c.requestCount++
+}
+
+// call invokes the tushare API with rate limiting and retry.
+func (c *TushareClient) call(ctx context.Context, apiName string, params map[string]interface{}, fields string) (*TushareResponse, error) {
+	c.waitForRateLimit()
+
+	req := TushareRequest{
+		APIName: apiName,
+		Token:   c.token,
+		Params:  params,
+		Fields:  fields,
+	}
+
+	resp, err := c.httpClient.Post(ctx, "", req)
+	if err != nil {
+		return nil, fmt.Errorf("tushare API call failed: %w", err)
+	}
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("tushare API returned status %d: %s", resp.StatusCode, string(resp.Body))
+	}
+
+	var tushareResp TushareResponse
+	if err := httpclient.DecodeJSON(resp.Body, &tushareResp); err != nil {
+		return nil, fmt.Errorf("failed to decode tushare response: %w", err)
+	}
+
+	if tushareResp.Code != 0 {
+		return nil, fmt.Errorf("tushare API error %d: %s", tushareResp.Code, tushareResp.Msg)
+	}
+
+	return &tushareResp, nil
+}
+
+// FetchStocks retrieves stock list from tushare and saves to database.
+func (c *TushareClient) FetchStocks(ctx context.Context, exchange string, listStatus string) ([]domain.Stock, error) {
+	params := map[string]interface{}{
+		"exchange":   exchange,
+		"list_status": listStatus,
+	}
+
+	resp, err := c.call(ctx, "stock_basic", params, "ts_code,symbol,name,area,industry,market,list_date,delist_date,is_hs")
+	if err != nil {
+		return nil, err
+	}
+
+	stocks := c.normalizeStocks(resp)
+	if len(stocks) == 0 {
+		return nil, nil
+	}
+
+	if err := c.store.SaveStockBatch(ctx, stocks); err != nil {
+		c.logger.Warn().Err(err).Msg("Failed to batch save stocks")
+	}
+
+	// Invalidate cache
+	if exchange != "" {
+		c.cache.InvalidateStocks(ctx, exchange)
+	} else {
+		c.cache.InvalidateStocks(ctx, "all")
+	}
+
+	c.logger.Info().Int("count", len(stocks)).Msg("Stocks fetched and saved")
+	return stocks, nil
+}
+
+// normalizeStocks converts tushare stock_basic response to domain.Stock.
+func (c *TushareClient) normalizeStocks(resp *TushareResponse) []domain.Stock {
+	var stocks []domain.Stock
+	for _, item := range resp.Data.Items {
+		if len(item) < 9 {
+			continue
+		}
+
+		symbol := c.fieldStr(item, 1)
+		if symbol == "" {
+			continue
+		}
+
+		stock := domain.Stock{
+			Symbol:   symbol,
+			Name:     c.fieldStr(item, 2),
+			Exchange: c.extractExchange(c.fieldStr(item, 0)),
+			Industry: c.fieldStr(item, 4),
+			Status:   "active",
+		}
+
+		if listDate := c.fieldStr(item, 6); listDate != "" {
+			if t, err := time.Parse("20060102", listDate); err == nil {
+				stock.ListDate = t
+			}
+		}
+
+		stocks = append(stocks, stock)
+	}
+	return stocks
+}
+
+// FetchDailyOHLCV retrieves daily OHLCV data from tushare.
+func (c *TushareClient) FetchDailyOHLCV(ctx context.Context, symbol string, startDate, endDate string) ([]domain.OHLCV, error) {
+	params := map[string]interface{}{
+		"ts_code": symbol,
+		"start_date": startDate,
+		"end_date": endDate,
+	}
+
+	resp, err := c.call(ctx, "daily", params, "ts_code,trade_date,open,high,low,close,vol,amount,turnover,trade_days")
+	if err != nil {
+		return nil, err
+	}
+
+	records := c.normalizeDailyOHLCV(resp, symbol)
+	if len(records) == 0 {
+		return nil, nil
+	}
+
+	// Save to database
+	domainRecords := make([]*domain.OHLCV, len(records))
+	for i := range records {
+		domainRecords[i] = &records[i]
+	}
+	if err := c.store.SaveOHLCVBatch(ctx, domainRecords); err != nil {
+		c.logger.Warn().Err(err).Msg("Failed to batch save OHLCV")
+	}
+
+	c.logger.Info().Str("symbol", symbol).Int("count", len(records)).Msg("OHLCV fetched and saved")
+	return records, nil
+}
+
+// normalizeDailyOHLCV converts tushare daily response to domain.OHLCV.
+func (c *TushareClient) normalizeDailyOHLCV(resp *TushareResponse, symbol string) []domain.OHLCV {
+	var records []domain.OHLCV
+	for _, item := range resp.Data.Items {
+		if len(item) < 9 {
+			continue
+		}
+
+		tradeDate := c.fieldStr(item, 1)
+		if tradeDate == "" {
+			continue
+		}
+
+		t, err := time.Parse("20060102", tradeDate)
+		if err != nil {
+			continue
+		}
+
+		ohlcv := domain.OHLCV{
+			Symbol:   symbol,
+			Date:     t,
+			Open:     c.fieldFloat(item, 2),
+			High:     c.fieldFloat(item, 3),
+			Low:      c.fieldFloat(item, 4),
+			Close:    c.fieldFloat(item, 5),
+			Volume:   c.fieldFloat(item, 6),
+			Turnover: c.fieldFloat(item, 7),
+			TradeDays: int(c.fieldFloat(item, 9)),
+		}
+		records = append(records, ohlcv)
+	}
+	return records
+}
+
+// FetchFundamentals retrieves financial data from tushare.
+func (c *TushareClient) FetchFundamentals(ctx context.Context, symbol string, date string) ([]domain.Fundamental, error) {
+	params := map[string]interface{}{
+		"ts_code": symbol,
+		"ann_date": date,
+	}
+
+	resp, err := c.call(ctx, "financial_data", params, "ts_code,ann_date,end_date,pe,pb,ps,roe,roa,debt_to_equity,gross_margin,net_margin,revenue,net_profit,total_assets,total_liab")
+	if err != nil {
+		return nil, err
+	}
+
+	records := c.normalizeFundamentals(resp)
+	if len(records) == 0 {
+		return nil, nil
+	}
+
+	domainRecords := make([]*domain.Fundamental, len(records))
+	for i := range records {
+		domainRecords[i] = &records[i]
+	}
+	if err := c.store.SaveFundamentalBatch(ctx, domainRecords); err != nil {
+		c.logger.Warn().Err(err).Msg("Failed to batch save fundamentals")
+	}
+
+	c.logger.Info().Str("symbol", symbol).Int("count", len(records)).Msg("Fundamentals fetched and saved")
+	return records, nil
+}
+
+// normalizeFundamentals converts tushare financial_data response to domain.Fundamental.
+func (c *TushareClient) normalizeFundamentals(resp *TushareResponse) []domain.Fundamental {
+	var records []domain.Fundamental
+	for _, item := range resp.Data.Items {
+		if len(item) < 15 {
+			continue
+		}
+
+		symbol := c.fieldStr(item, 0)
+		if symbol == "" {
+			continue
+		}
+
+		endDateStr := c.fieldStr(item, 2)
+		t, _ := time.Parse("20060102", endDateStr)
+
+		fund := domain.Fundamental{
+			Symbol:       symbol,
+			Date:         t,
+			PE:           c.fieldFloat(item, 3),
+			PB:           c.fieldFloat(item, 4),
+			PS:           c.fieldFloat(item, 5),
+			ROE:          c.fieldFloat(item, 6),
+			ROA:          c.fieldFloat(item, 7),
+			DebtToEquity: c.fieldFloat(item, 8),
+			GrossMargin:  c.fieldFloat(item, 9),
+			NetMargin:    c.fieldFloat(item, 10),
+			Revenue:      c.fieldFloat(item, 11),
+			NetProfit:    c.fieldFloat(item, 12),
+			TotalAssets:  c.fieldFloat(item, 13),
+			TotalLiab:    c.fieldFloat(item, 14),
+		}
+		records = append(records, fund)
+	}
+	return records
+}
+
+// FetchIndexConstituents retrieves index constituents from tushare.
+func (c *TushareClient) FetchIndexConstituents(ctx context.Context, indexCode string, date string) ([]string, error) {
+	params := map[string]interface{}{
+		"index_code": indexCode,
+	}
+	if date != "" {
+		params["trade_date"] = date
+	}
+
+	resp, err := c.call(ctx, "index_weight", params, "index_code,con_code,in_date,out_date")
+	if err != nil {
+		return nil, err
+	}
+
+	var constituents []string
+	for _, item := range resp.Data.Items {
+		if len(item) < 2 {
+			continue
+		}
+		conCode := c.fieldStr(item, 1)
+		if conCode != "" {
+			constituents = append(constituents, conCode)
+		}
+	}
+
+	c.logger.Info().Str("index", indexCode).Int("count", len(constituents)).Msg("Index constituents fetched")
+	return constituents, nil
+}
+
+// Helper methods
+
+func (c *TushareClient) fieldStr(item []interface{}, idx int) string {
+	if idx >= len(item) || item[idx] == nil {
+		return ""
+	}
+	switch v := item[idx].(type) {
+	case string:
+		return v
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+func (c *TushareClient) fieldFloat(item []interface{}, idx int) float64 {
+	if idx >= len(item) || item[idx] == nil {
+		return 0
+	}
+	switch v := item[idx].(type) {
+	case float64:
+		return v
+	case string:
+		f, _ := strconv.ParseFloat(v, 64)
+		return f
+	default:
+		return 0
+	}
+}
+
+func (c *TushareClient) extractExchange(tsCode string) string {
+	if len(tsCode) >= 4 {
+		suffix := tsCode[len(tsCode)-2:]
+		switch suffix {
+		case ".SH":
+			return "SSE"
+		case ".SZ":
+			return "SZSE"
+		}
+	}
+	return strings.Split(tsCode, ".")[0]
+}
