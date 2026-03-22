@@ -1,0 +1,31 @@
+# Credentials (never commit)
+.github-token
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/test/
+*_test.go
+
+# Build output
+/bin/
+/dist/
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+logs/
