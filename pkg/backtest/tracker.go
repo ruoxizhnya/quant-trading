@@ -155,11 +155,10 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 			existing.Quantity = totalQty
 			existing.EntryDate = timestamp
 
-			// T+1 tracking: shift yesterday qty if new day, accumulate today's qty
+			// T+1 tracking: if new trading day, reset today's qty (yesterday's already set by AdvanceDay)
 			lastBuyDate := existing.BuyDate.Truncate(24 * time.Hour)
 			if !lastBuyDate.Equal(tradeDate) {
-				// New trading day: yesterday's today becomes today's yesterday
-				existing.QuantityYesterday = existing.QuantityToday
+				// New trading day: today's qty starts fresh (yesterday's carry already in QuantityYesterday)
 				existing.QuantityToday = 0
 			}
 			existing.QuantityToday += quantity
@@ -195,69 +194,70 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 	case domain.DirectionClose:
 		if pos, exists := t.positions[symbol]; exists {
 			closeQty := abs(pos.Quantity)
-			actualQty := min(quantity, closeQty)
-			if actualQty <= 0 {
+			if closeQty <= 0 {
 				return nil, fmt.Errorf("cannot close position: quantity is zero")
 			}
 
 			if pos.Quantity > 0 {
 				// Closing long position — enforce T+1 settlement (A-share rule)
-				// Shares sellable today = yesterday's carry-over + yesterday's buys
-				// (QuantityToday shares bought today cannot be sold today)
-				canSell := pos.QuantityYesterday + pos.QuantityToday
-
-				// If BuyDate is today, all shares are from today → cannot sell
 				tradeDate := timestamp.Truncate(24 * time.Hour)
 				buyDate := pos.BuyDate.Truncate(24 * time.Hour)
-				if buyDate.Equal(tradeDate) {
-					// All shares in this position were bought today — T+1 violation
+
+				// If BuyDate is today AND no carryover from previous days, all shares bought today — T+1 violation
+				// Note: if BuyDate == today but QuantityYesterday > 0, we have sellable shares from a prior position
+				if buyDate.Equal(tradeDate) && pos.QuantityYesterday == 0 {
 					t.logger.Warn().
 						Str("symbol", symbol).
-						Float64("attempted_sell", actualQty).
+						Float64("attempted_sell", quantity).
 						Float64("can_sell", 0).
 						Time("trade_date", timestamp).
 						Msg("T+1 violation: attempted to sell shares bought today")
 					return nil, fmt.Errorf("T+1 settlement violation: cannot sell shares bought on %s (today: %s)", buyDate.Format("2006-01-02"), tradeDate.Format("2006-01-02"))
 				}
 
-				// Recalculate canSell excluding today's QuantityToday
-				// (quantityYesterday may include shares from a prior position, which ARE sellable)
-				canSell = pos.QuantityYesterday
-				if actualQty > canSell {
-					t.logger.Warn().
-						Str("symbol", symbol).
-						Float64("attempted_sell", actualQty).
-						Float64("can_sell", canSell).
-						Float64("quantity_today", pos.QuantityToday).
-						Time("timestamp", timestamp).
-						Msg("T+1 partial fill: reducing sell quantity to sellable shares")
-					actualQty = canSell
-					if actualQty <= 0 {
-						return nil, fmt.Errorf("T+1 settlement violation: no shares available to sell (all bought today)")
-					}
-					// Return partial fill with updated trade qty
-					trade.Quantity = actualQty
-					// Recalculate commission and stamp tax for reduced qty
-					trade.Commission = actualQty * executionPrice * t.commissionRate
-					trade.StampTax = actualQty * executionPrice * stampTaxRate
+				// canSell = QuantityYesterday (shares from previous days that can be sold today)
+				// QuantityToday shares cannot be sold today (T+1 rule)
+				canSell := pos.QuantityYesterday
+
+				// actualQty = min(canSell, requested, position_size)
+				actualQty := min(canSell, min(quantity, closeQty))
+				if actualQty <= 0 {
+					return nil, fmt.Errorf("T+1 settlement violation: no shares available to sell (all bought today)")
 				}
 
-				// Update yesterday qty: reduce by actualQty sold (from the oldest pool first)
-				if pos.QuantityYesterday >= actualQty {
-					pos.QuantityYesterday -= actualQty
-				} else {
-					// Sold some of today's qty — this shouldn't happen if canSell is calculated correctly
-					// but guard against rounding issues
-					pos.QuantityYesterday = 0
+				if actualQty < quantity {
+					t.logger.Warn().
+						Str("symbol", symbol).
+						Float64("attempted_sell", quantity).
+						Float64("actual_sell", actualQty).
+						Float64("can_sell", canSell).
+						Time("timestamp", timestamp).
+						Msg("T+1 partial fill: reducing sell quantity to sellable shares")
 				}
+
+				// Recalculate commission and stamp tax based on actualQty
+				actualCommission := actualQty * executionPrice * t.commissionRate
+				actualStampTax := actualQty * executionPrice * stampTaxRate
+
+				// Update trade record
+				trade.Quantity = actualQty
+				trade.Commission = actualCommission
+				trade.StampTax = actualStampTax
+
+				// Update yesterday qty
+				pos.QuantityYesterday -= actualQty
 
 				// Closing long: apply stamp tax (0.1%) + commission, calculate PnL
 				pnl := (executionPrice - pos.AvgCost) * actualQty
-				pos.RealizedPnL += pnl - trade.Commission - trade.StampTax
-				t.cash += actualQty*executionPrice - trade.Commission - trade.StampTax
+				pos.RealizedPnL += pnl - actualCommission - actualStampTax
+				t.cash += actualQty*executionPrice - actualCommission - actualStampTax
 				pos.Quantity -= actualQty
 			} else {
 				// Closing short position — no T+1 restriction
+				actualQty := min(quantity, closeQty)
+				if actualQty <= 0 {
+					return nil, fmt.Errorf("cannot close position: quantity is zero")
+				}
 				pnl := (pos.AvgCost - executionPrice) * actualQty
 				pos.RealizedPnL += pnl - commission
 				t.cash += actualQty*executionPrice - commission
