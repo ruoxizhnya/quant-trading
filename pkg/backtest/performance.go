@@ -280,8 +280,7 @@ func calculateTradeMetrics(trades []domain.Trade, portfolioValues []domain.Portf
 		return 0, 0, 0, 0, 0
 	}
 
-	// Calculate trade PnLs
-	// Group trades by symbol and calculate realized PnL
+	// Group trades by symbol
 	symbolTrades := make(map[string][]domain.Trade)
 	for _, trade := range trades {
 		symbolTrades[trade.Symbol] = append(symbolTrades[trade.Symbol], trade)
@@ -292,59 +291,111 @@ func calculateTradeMetrics(trades []domain.Trade, portfolioValues []domain.Portf
 	var holdingDaysCount int
 
 	for _, symTrades := range symbolTrades {
-		// Calculate position changes to determine entry/exit
-		var entryPrice, exitPrice float64
+		// Track open position state
+		var entryPrice float64
 		var entryTime time.Time
 		var positionQty float64
-		var realizedPnL float64
+		var entryDir domain.Direction // "long" or "short"
 
-		for i, trade := range symTrades {
+		for _, trade := range symTrades {
 			switch trade.Direction {
 			case domain.DirectionLong:
 				if positionQty == 0 {
+					// Fresh long entry
 					entryPrice = trade.Price
 					entryTime = trade.Timestamp
+					entryDir = domain.DirectionLong
+					positionQty = trade.Quantity
+				} else if entryDir == domain.DirectionLong {
+					// Adding to existing long
+					newQty := positionQty + trade.Quantity
+					entryPrice = (entryPrice*positionQty + trade.Price*trade.Quantity) / newQty
+					positionQty = newQty
+				} else {
+					// Was short, now going long — this is a reversal (close short + open long)
+					// Close short position first
+					if positionQty < 0 {
+						pnl := (entryPrice - trade.Price) * abs(positionQty)
+						holdingDays := trade.Timestamp.Sub(entryTime).Hours() / 24
+						totalHoldingDays += holdingDays
+						holdingDaysCount++
+						if pnl - trade.Commission > 0 {
+							winningTrades++
+						} else {
+							losingTrades++
+						}
+					}
+					// Open new long
+					entryPrice = trade.Price
+					entryTime = trade.Timestamp
+					entryDir = domain.DirectionLong
+					positionQty = trade.Quantity
 				}
-				positionQty += trade.Quantity
 
 			case domain.DirectionShort:
 				if positionQty == 0 {
+					// Fresh short entry
 					entryPrice = trade.Price
 					entryTime = trade.Timestamp
+					entryDir = domain.DirectionShort
+					positionQty = -trade.Quantity
+				} else if entryDir == domain.DirectionShort {
+					// Adding to existing short
+					newQty := positionQty - trade.Quantity
+					entryPrice = (entryPrice*abs(positionQty) + trade.Price*trade.Quantity) / abs(newQty)
+					positionQty = newQty
+				} else {
+					// Was long, now going short — reversal (close long + open short)
+					if positionQty > 0 {
+						pnl := (trade.Price - entryPrice) * positionQty
+						holdingDays := trade.Timestamp.Sub(entryTime).Hours() / 24
+						totalHoldingDays += holdingDays
+						holdingDaysCount++
+						if pnl - trade.Commission > 0 {
+							winningTrades++
+						} else {
+							losingTrades++
+						}
+					}
+					// Open new short
+					entryPrice = trade.Price
+					entryTime = trade.Timestamp
+					entryDir = domain.DirectionShort
+					positionQty = -trade.Quantity
 				}
-				positionQty -= trade.Quantity
 
 			case domain.DirectionClose:
-				exitPrice = trade.Price
+				// Explicit close
 				if positionQty > 0 {
 					// Closing long
-					pnl := (exitPrice - entryPrice) * min(trade.Quantity, positionQty)
-					realizedPnL = pnl - trade.Commission
-				} else if positionQty < 0 {
-					// Closing short
-					pnl := (entryPrice - exitPrice) * min(trade.Quantity, -positionQty)
-					realizedPnL = pnl - trade.Commission
-				}
-
-				if positionQty != 0 {
+					pnl := (trade.Price - entryPrice) * min(trade.Quantity, positionQty)
 					holdingDays := trade.Timestamp.Sub(entryTime).Hours() / 24
 					totalHoldingDays += holdingDays
 					holdingDaysCount++
-
-					if realizedPnL > 0 {
+					if pnl - trade.Commission > 0 {
 						winningTrades++
-					} else if realizedPnL < 0 {
+					} else {
 						losingTrades++
 					}
-
-					// Reset for next round trip
-					positionQty = 0
-
-					// If there's remaining quantity to close, start new tracking
-					remainingQty := abs(trade.Quantity) - abs(positionQty)
-					if remainingQty > 0 && i+1 < len(symTrades) {
-						// Look ahead for next entry
+					positionQty -= min(trade.Quantity, positionQty)
+				} else if positionQty < 0 {
+					// Closing short
+					pnl := (entryPrice - trade.Price) * min(trade.Quantity, abs(positionQty))
+					holdingDays := trade.Timestamp.Sub(entryTime).Hours() / 24
+					totalHoldingDays += holdingDays
+					holdingDaysCount++
+					if pnl - trade.Commission > 0 {
+						winningTrades++
+					} else {
+						losingTrades++
 					}
+					positionQty += min(trade.Quantity, abs(positionQty))
+				}
+				// Reset if fully closed
+				if abs(positionQty) < 1e-8 {
+					positionQty = 0
+					entryPrice = 0
+					entryDir = ""
 				}
 			}
 		}
@@ -422,8 +473,11 @@ func GenerateBacktestResult(
 		totalReturn = (endValue - startValue) / startValue
 	}
 
-	// Annualized return
-	years := endDate.Sub(startDate).Hours() / (24 * 365.25)
+	// Annualized return - use actual dates from portfolio values, not backtest date range
+	// This ensures correct annualization even when backtest dates don't align with trading days
+	actualStartDate := portfolioValues[0].Date
+	actualEndDate := portfolioValues[len(portfolioValues)-1].Date
+	years := actualEndDate.Sub(actualStartDate).Hours() / (24 * 365.25)
 	annualReturn := totalReturn
 	if years > 0 && startValue > 0 {
 		annualReturn = math.Pow(1+totalReturn, 1/years) - 1

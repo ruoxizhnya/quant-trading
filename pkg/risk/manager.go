@@ -90,12 +90,13 @@ func NewRiskManager(cfg RiskManagerConfig, logger zerolog.Logger) (*RiskManager,
 }
 
 // CalculatePosition calculates the appropriate position size for a signal.
-func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Signal, portfolio *domain.Portfolio, regime *domain.MarketRegime) (domain.PositionSize, error) {
+func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Signal, portfolio *domain.Portfolio, regime *domain.MarketRegime, currentPrice float64) (domain.PositionSize, error) {
 	rm.logger.Debug().
 		Str("symbol", signal.Symbol).
 		Str("direction", string(signal.Direction)).
 		Float64("strength", signal.Strength).
 		Float64("composite_score", signal.CompositeScore).
+		Float64("current_price", currentPrice).
 		Msg("calculating position size")
 
 	// Validate inputs
@@ -114,14 +115,12 @@ func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Sign
 		}
 	}
 
-	// For now, we need to fetch OHLCV data
-	// In a real implementation, this would come from a data service
-	// We return a basic calculation based on regime and portfolio
+	// Calculate base weight from market regime
 	baseWeight := rm.calculateBaseWeightFromRegime(regime)
-	
+
 	// Adjust for signal strength
 	weight := baseWeight * signal.Strength
-	
+
 	// Ensure weight is within bounds
 	if weight < rm.config.MinPositionWeight {
 		weight = rm.config.MinPositionWeight
@@ -130,12 +129,12 @@ func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Sign
 		weight = rm.config.MaxPositionWeight
 	}
 
-	// Calculate position size
-	// In practice, we would get the latest price from market data
-	// Using a placeholder price here
+	// Calculate position size using the provided current price
 	positionValue := portfolio.TotalValue * weight
-	estimatedPrice := 100.0 // This would be fetched from market data
-	size := math.Floor(positionValue / estimatedPrice)
+	if currentPrice <= 0 {
+		currentPrice = 100.0 // Fallback if price is invalid
+	}
+	size := math.Floor(positionValue / currentPrice)
 
 	// Calculate risk score (higher strength = lower risk)
 	riskScore := 1.0 - signal.CompositeScore

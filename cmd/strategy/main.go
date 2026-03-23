@@ -52,9 +52,10 @@ type LoggingConfig struct {
 
 // SignalRequest represents the request body for generating signals.
 type SignalRequest struct {
-	StockPool    []string `json:"stock_pool" binding:"required"`
-	Date         string   `json:"date" binding:"required"`
-	LookbackDays int      `json:"lookback_days"`
+	StockPool    []string                       `json:"stock_pool" binding:"required"`
+	Date         string                         `json:"date" binding:"required"`
+	LookbackDays int                            `json:"lookback_days"`
+	MarketData   map[string][]domain.OHLCV     `json:"market_data"`
 }
 
 // SignalResponse represents the response for signal generation.
@@ -68,6 +69,7 @@ type SignalResponse struct {
 // SignalDetail represents detailed signal information.
 type SignalDetail struct {
 	Symbol          string             `json:"symbol"`
+	Date            time.Time          `json:"date"`
 	Direction       domain.Direction   `json:"direction"`
 	Strength        float64            `json:"strength"`
 	CompositeScore  float64            `json:"composite_score"`
@@ -191,6 +193,22 @@ func loadConfig(logger zerolog.Logger) (*Config, error) {
 
 // registerStrategies registers all available strategies.
 func registerStrategies(logger zerolog.Logger) {
+	// Register momentum strategy
+	strategy.Register("momentum", func() domain.Strategy {
+		s := examples.NewMomentumStrategy()
+		defaultConfig := map[string]any{
+			"lookback_days":  20,
+			"long_threshold":  0.0,
+			"short_threshold": 0.0,
+			"top_n":          5,
+			"max_positions":   5,
+		}
+		if err := s.Configure(defaultConfig); err != nil {
+			logger.Error().Err(err).Msg("failed to configure momentum strategy")
+		}
+		return s
+	})
+
 	// Register value_momentum strategy
 	strategy.Register("value_momentum", func() domain.Strategy {
 		s := examples.NewValueMomentumStrategy()
@@ -324,17 +342,28 @@ func registerRoutes(router *gin.Engine, logger zerolog.Logger) {
 			ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 			defer cancel()
 
-			// For now, use empty stock data - in production this would come from data service
-			stocks := make([]domain.Stock, 0, len(req.StockPool))
-			ohlcv := make(map[string][]domain.OHLCV)
-			fundamental := make(map[string][]domain.Fundamental)
-
 			// Build stock list from pool
+			stocks := make([]domain.Stock, 0, len(req.StockPool))
 			for _, symbol := range req.StockPool {
 				stocks = append(stocks, domain.Stock{
 					Symbol:    symbol,
 					MarketCap: 1_000_000_000, // Placeholder - would come from data service
 				})
+			}
+
+			// Use market_data from request if provided, otherwise empty
+			ohlcv := req.MarketData
+			if ohlcv == nil {
+				ohlcv = make(map[string][]domain.OHLCV)
+			}
+			fundamental := make(map[string][]domain.Fundamental)
+
+			// Override lookback days if provided in request
+			if req.LookbackDays > 0 {
+				overrideConfig := map[string]any{"lookback_days": req.LookbackDays}
+				if err := s.Configure(overrideConfig); err != nil {
+					logger.Warn().Err(err).Msg("failed to override lookback days")
+				}
 			}
 
 			// Generate signals
@@ -352,6 +381,7 @@ func registerRoutes(router *gin.Engine, logger zerolog.Logger) {
 			for _, sig := range signals {
 				signalDetails = append(signalDetails, SignalDetail{
 					Symbol:         sig.Symbol,
+					Date:           sig.Date,
 					Direction:      sig.Direction,
 					Strength:       sig.Strength,
 					CompositeScore: sig.CompositeScore,

@@ -31,6 +31,8 @@ func Init(level, format string) {
 	}
 
 	zerolog.SetGlobalLevel(logLevel)
+	// Force debug level for testing
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
 	var writer io.Writer = os.Stdout
 	if format == "console" {

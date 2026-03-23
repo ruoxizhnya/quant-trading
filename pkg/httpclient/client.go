@@ -118,7 +118,7 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 
 		c.logger.Debug().
 			Int("status", resp.StatusCode).
-			Int("body_size", len(body)).
+			Int("body_size", len(body)).Str("body", string(body[:min(len(body),200)])).
 			Msg("HTTP response received")
 
 		// Retry on 5xx errors or rate limiting

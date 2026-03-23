@@ -72,7 +72,32 @@ type TushareRequestMeta struct {
 // TushareData contains the response data.
 type TushareData struct {
 	Fields []string        `json:"fields"`
-	Items  [][]interface{} `json:"items"`
+	Items  [][]any         `json:"items"`
+}
+
+// fieldToFloat safely converts an interface{} to float64.
+func fieldToFloat(v any) float64 {
+	switch val := v.(type) {
+	case float64:
+		return val
+	case int:
+		return float64(val)
+	case int64:
+		return float64(val)
+	case string:
+		f, _ := strconv.ParseFloat(val, 64)
+		return f
+	default:
+		return 0
+	}
+}
+
+// fieldToStr safely converts an interface{} to string.
+func fieldToStr(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // waitForRateLimit ensures we don't exceed 200 req/min.
@@ -119,12 +144,14 @@ func (c *TushareClient) call(ctx context.Context, apiName string, params map[str
 
 	var tushareResp TushareResponse
 	if err := httpclient.DecodeJSON(resp.Body, &tushareResp); err != nil {
-		return nil, fmt.Errorf("failed to decode tushare response: %w", err)
+		return nil, fmt.Errorf("failed to decode tushare response: %w, body: %s", err, string(resp.Body))
 	}
 
 	if tushareResp.Code != 0 {
 		return nil, fmt.Errorf("tushare API error %d: %s", tushareResp.Code, tushareResp.Msg)
 	}
+
+	c.logger.Debug().Interface("data_fields", tushareResp.Data.Fields).Int("items_count", len(tushareResp.Data.Items)).Msg("tushare response received")
 
 	return &tushareResp, nil
 }
@@ -193,12 +220,20 @@ func (c *TushareClient) normalizeStocks(resp *TushareResponse) []domain.Stock {
 	return stocks
 }
 
+// formatDate converts YYYY-MM-DD to YYYYMMDD for tushare API.
+func formatDate(s string) string {
+	if len(s) == 10 && s[4] == '-' && s[7] == '-' {
+		return s[:4] + s[5:7] + s[8:10]
+	}
+	return s
+}
+
 // FetchDailyOHLCV retrieves daily OHLCV data from tushare.
 func (c *TushareClient) FetchDailyOHLCV(ctx context.Context, symbol string, startDate, endDate string) ([]domain.OHLCV, error) {
 	params := map[string]interface{}{
 		"ts_code": symbol,
-		"start_date": startDate,
-		"end_date": endDate,
+		"start_date": formatDate(startDate),
+		"end_date": formatDate(endDate),
 	}
 
 	resp, err := c.call(ctx, "daily", params, "ts_code,trade_date,open,high,low,close,vol,amount,turnover,trade_days")
@@ -227,8 +262,10 @@ func (c *TushareClient) FetchDailyOHLCV(ctx context.Context, symbol string, star
 // normalizeDailyOHLCV converts tushare daily response to domain.OHLCV.
 func (c *TushareClient) normalizeDailyOHLCV(resp *TushareResponse, symbol string) []domain.OHLCV {
 	var records []domain.OHLCV
+	c.logger.Debug().Int("items_count", len(resp.Data.Items)).Msg("normalizeDailyOHLCV start")
 	for _, item := range resp.Data.Items {
-		if len(item) < 9 {
+		if len(item) < 8 {
+			c.logger.Debug().Int("item_len", len(item)).Msg("item skipped: too short")
 			continue
 		}
 
@@ -355,7 +392,7 @@ func (c *TushareClient) FetchIndexConstituents(ctx context.Context, indexCode st
 
 // Helper methods
 
-func (c *TushareClient) fieldStr(item []interface{}, idx int) string {
+func (c *TushareClient) fieldStr(item []any, idx int) string {
 	if idx >= len(item) || item[idx] == nil {
 		return ""
 	}
@@ -369,7 +406,7 @@ func (c *TushareClient) fieldStr(item []interface{}, idx int) string {
 	}
 }
 
-func (c *TushareClient) fieldFloat(item []interface{}, idx int) float64 {
+func (c *TushareClient) fieldFloat(item []any, idx int) float64 {
 	if idx >= len(item) || item[idx] == nil {
 		return 0
 	}

@@ -19,7 +19,6 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/data-service ./cmd/data && \
     CGO_ENABLED=0 GOOS=linux go build -o /app/strategy-service ./cmd/strategy && \
     CGO_ENABLED=0 GOOS=linux go build -o /app/risk-service ./cmd/risk && \
-    CGO_ENABLED=0 GOOS=linux go build -o /app/execution-service ./cmd/execution && \
     CGO_ENABLED=0 GOOS=linux go build -o /app/analysis-service ./cmd/analysis
 
 # Final stage
@@ -34,9 +33,11 @@ RUN apk add --no-cache ca-certificates
 COPY --from=builder /app/data-service /app/data-service
 COPY --from=builder /app/strategy-service /app/strategy-service
 COPY --from=builder /app/risk-service /app/risk-service
-COPY --from=builder /app/execution-service /app/execution-service
 COPY --from=builder /app/analysis-service /app/analysis-service
 
-EXPOSE 8081 8082 8083 8084 8085
+# Copy config files
+COPY config /app/config
 
-ENTRYPOINT ["/app/data-service"]
+EXPOSE 8081 8082 8083 8085
+
+# No ENTRYPOINT - docker-compose CMD specifies which service to run

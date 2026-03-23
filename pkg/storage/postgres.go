@@ -74,7 +74,7 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS ohlcv_daily (
 			symbol VARCHAR(20) NOT NULL,
-			date DATE NOT NULL,
+			trade_date DATE NOT NULL,
 			open DOUBLE PRECISION NOT NULL,
 			high DOUBLE PRECISION NOT NULL,
 			low DOUBLE PRECISION NOT NULL,
@@ -83,11 +83,11 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			turnover DOUBLE PRECISION DEFAULT 0,
 			trade_days INT DEFAULT 0,
 			created_at TIMESTAMPTZ DEFAULT NOW(),
-			PRIMARY KEY (symbol, date)
+			PRIMARY KEY (symbol, trade_date)
 		)`,
 		`CREATE TABLE IF NOT EXISTS fundamentals (
 			symbol VARCHAR(20) NOT NULL,
-			date DATE NOT NULL,
+			trade_date DATE NOT NULL,
 			pe DOUBLE PRECISION,
 			pb DOUBLE PRECISION,
 			ps DOUBLE PRECISION,
@@ -101,7 +101,7 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			total_assets DOUBLE PRECISION,
 			total_liab DOUBLE PRECISION,
 			created_at TIMESTAMPTZ DEFAULT NOW(),
-			PRIMARY KEY (symbol, date)
+			PRIMARY KEY (symbol, trade_date)
 		)`,
 	}
 
@@ -112,7 +112,7 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	}
 
 	// Create TimescaleDB hypertable for ohlcv_daily
-	hypertableSQL := `SELECT create_hypertable('ohlcv_daily', 'date', if_not_exists => TRUE)`
+	hypertableSQL := `SELECT create_hypertable('ohlcv_daily', 'trade_date', if_not_exists => TRUE)`
 	if _, err := s.pool.Exec(ctx, hypertableSQL); err != nil {
 		s.logger.Warn().Err(err).Msg("Could not create hypertable (TimescaleDB may not be available)")
 	} else {
@@ -122,9 +122,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	// Create indexes
 	indexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_ohlcv_symbol ON ohlcv_daily(symbol)`,
-		`CREATE INDEX IF NOT EXISTS idx_ohlcv_date ON ohlcv_daily(date)`,
+		`CREATE INDEX IF NOT EXISTS idx_ohlcv_trade_date ON ohlcv_daily(trade_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_fundamentals_symbol ON fundamentals(symbol)`,
-		`CREATE INDEX IF NOT EXISTS idx_fundamentals_date ON fundamentals(date)`,
+		`CREATE INDEX IF NOT EXISTS idx_fundamentals_trade_date ON fundamentals(trade_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_stocks_exchange ON stocks(exchange)`,
 	}
 
@@ -141,9 +141,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 // SaveOHLCV saves or updates OHLCV data.
 func (s *PostgresStore) SaveOHLCV(ctx context.Context, ohlcv *domain.OHLCV) error {
 	query := `
-		INSERT INTO ohlcv_daily (symbol, date, open, high, low, close, volume, turnover, trade_days)
+		INSERT INTO ohlcv_daily (symbol, trade_date, open, high, low, close, volume, turnover, trade_days)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (symbol, date) DO UPDATE SET
+		ON CONFLICT (symbol, trade_date) DO UPDATE SET
 			open = EXCLUDED.open,
 			high = EXCLUDED.high,
 			low = EXCLUDED.low,
@@ -173,9 +173,9 @@ func (s *PostgresStore) SaveOHLCVBatch(ctx context.Context, records []*domain.OH
 	batch := &pgx.Batch{}
 	for _, o := range records {
 		batch.Queue(`
-			INSERT INTO ohlcv_daily (symbol, date, open, high, low, close, volume, turnover, trade_days)
+			INSERT INTO ohlcv_daily (symbol, trade_date, open, high, low, close, volume, turnover, trade_days)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-			ON CONFLICT (symbol, date) DO UPDATE SET
+			ON CONFLICT (symbol, trade_date) DO UPDATE SET
 				open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
 				close = EXCLUDED.close, volume = EXCLUDED.volume,
 				turnover = EXCLUDED.turnover, trade_days = EXCLUDED.trade_days
@@ -198,10 +198,10 @@ func (s *PostgresStore) SaveOHLCVBatch(ctx context.Context, records []*domain.OH
 // GetOHLCV retrieves OHLCV data for a symbol within a date range.
 func (s *PostgresStore) GetOHLCV(ctx context.Context, symbol string, startDate, endDate time.Time) ([]domain.OHLCV, error) {
 	query := `
-		SELECT symbol, date, open, high, low, close, volume, turnover, trade_days
+		SELECT symbol, trade_date, open, high, low, close, volume, turnover, trade_days
 		FROM ohlcv_daily
-		WHERE symbol = $1 AND date >= $2 AND date <= $3
-		ORDER BY date ASC
+		WHERE symbol = $1 AND trade_date >= $2 AND trade_date <= $3
+		ORDER BY trade_date ASC
 	`
 	rows, err := s.pool.Query(ctx, query, symbol, startDate, endDate)
 	if err != nil {
@@ -223,6 +223,30 @@ func (s *PostgresStore) GetOHLCV(ctx context.Context, symbol string, startDate, 
 	}
 
 	return results, nil
+}
+
+// GetTradingDays returns distinct trading days within a date range.
+func (s *PostgresStore) GetTradingDays(ctx context.Context, startDate, endDate time.Time) ([]time.Time, error) {
+	query := `
+		SELECT DISTINCT trade_date FROM ohlcv_daily
+		WHERE trade_date >= $1 AND trade_date <= $2
+		ORDER BY trade_date ASC
+	`
+	rows, err := s.pool.Query(ctx, query, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query trading days: %w", err)
+	}
+	defer rows.Close()
+
+	var days []time.Time
+	for rows.Next() {
+		var d time.Time
+		if err := rows.Scan(&d); err != nil {
+			return nil, fmt.Errorf("failed to scan trading day: %w", err)
+		}
+		days = append(days, d)
+	}
+	return days, rows.Err()
 }
 
 // SaveStock saves or updates a stock record.
@@ -341,10 +365,10 @@ func (s *PostgresStore) GetStock(ctx context.Context, symbol string) (*domain.St
 // SaveFundamental saves or updates fundamental data.
 func (s *PostgresStore) SaveFundamental(ctx context.Context, f *domain.Fundamental) error {
 	query := `
-		INSERT INTO fundamentals (symbol, date, pe, pb, ps, roe, roa, debt_to_equity,
+		INSERT INTO fundamentals (symbol, trade_date, pe, pb, ps, roe, roa, debt_to_equity,
 			gross_margin, net_margin, revenue, net_profit, total_assets, total_liab)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-		ON CONFLICT (symbol, date) DO UPDATE SET
+		ON CONFLICT (symbol, trade_date) DO UPDATE SET
 			pe = EXCLUDED.pe, pb = EXCLUDED.pb, ps = EXCLUDED.ps,
 			roe = EXCLUDED.roe, roa = EXCLUDED.roa, debt_to_equity = EXCLUDED.debt_to_equity,
 			gross_margin = EXCLUDED.gross_margin, net_margin = EXCLUDED.net_margin,
@@ -371,10 +395,10 @@ func (s *PostgresStore) SaveFundamentalBatch(ctx context.Context, records []*dom
 	batch := &pgx.Batch{}
 	for _, f := range records {
 		batch.Queue(`
-			INSERT INTO fundamentals (symbol, date, pe, pb, ps, roe, roa, debt_to_equity,
+			INSERT INTO fundamentals (symbol, trade_date, pe, pb, ps, roe, roa, debt_to_equity,
 				gross_margin, net_margin, revenue, net_profit, total_assets, total_liab)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-			ON CONFLICT (symbol, date) DO UPDATE SET
+			ON CONFLICT (symbol, trade_date) DO UPDATE SET
 				pe = EXCLUDED.pe, pb = EXCLUDED.pb, ps = EXCLUDED.ps,
 				roe = EXCLUDED.roe, roa = EXCLUDED.roa, debt_to_equity = EXCLUDED.debt_to_equity
 		`, f.Symbol, f.Date, f.PE, f.PB, f.PS, f.ROE, f.ROA, f.DebtToEquity,
@@ -397,9 +421,9 @@ func (s *PostgresStore) SaveFundamentalBatch(ctx context.Context, records []*dom
 // GetFundamental retrieves fundamental data for a symbol on a specific date.
 func (s *PostgresStore) GetFundamental(ctx context.Context, symbol string, date time.Time) (*domain.Fundamental, error) {
 	query := `
-		SELECT symbol, date, pe, pb, ps, roe, roa, debt_to_equity,
+		SELECT symbol, trade_date, pe, pb, ps, roe, roa, debt_to_equity,
 			gross_margin, net_margin, revenue, net_profit, total_assets, total_liab
-		FROM fundamentals WHERE symbol = $1 AND date = $2
+		FROM fundamentals WHERE symbol = $1 AND trade_date = $2
 	`
 	var f domain.Fundamental
 	err := s.pool.QueryRow(ctx, query, symbol, date).Scan(

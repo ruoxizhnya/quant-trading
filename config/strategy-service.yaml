@@ -3,10 +3,10 @@ server:
   port: 8082
 
 redis:
-  url: "redis://localhost:6379"
+  url: "redis://redis:6379"
 
 data_service:
-  url: "http://localhost:8081"
+  url: "http://data-service:8081"
 
 logging:
   level: "info"

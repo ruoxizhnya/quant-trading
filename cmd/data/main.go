@@ -205,6 +205,9 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 	// Index endpoints
 	r.GET("/index/:code/constituents", getIndexConstituentsHandler(tc))
 
+	// Trading calendar
+	r.GET("/api/v1/trading/calendar", getTradingCalendarHandler(store))
+
 	// Sync endpoints
 	r.POST("/sync/stocks", syncStocksHandler(tc))
 	r.POST("/sync/ohlcv", syncOHLCVHandler(tc))
@@ -418,7 +421,9 @@ func syncOHLCVHandler(tc *data.TushareClient) gin.HandlerFunc {
 
 		totalCount := 0
 		for _, symbol := range req.Symbols {
+			logging.Logger.Info().Str("symbol", symbol).Str("start", req.StartDate).Str("end", req.EndDate).Msg("fetching OHLCV")
 			ohlcv, err := tc.FetchDailyOHLCV(ctx, symbol, req.StartDate, req.EndDate)
+			logging.Logger.Info().Err(err).Str("symbol", symbol).Int("count", len(ohlcv)).Msg("OHLCV fetch result")
 			if err != nil {
 				logging.Logger.Warn().Err(err).Str("symbol", symbol).Msg("Failed to sync OHLCV")
 				continue
@@ -470,5 +475,41 @@ func syncFundamentalHandler(tc *data.TushareClient) gin.HandlerFunc {
 			"message": "Fundamentals synced successfully",
 			"count":   totalCount,
 		})
+	}
+}
+
+func getTradingCalendarHandler(store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		startStr := c.Query("start")
+		endStr := c.Query("end")
+
+		if startStr == "" || endStr == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "start and end query params required"})
+			return
+		}
+
+		startDate, err := time.Parse("2006-01-02", startStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start date format, use YYYY-MM-DD"})
+			return
+		}
+		endDate, err := time.Parse("2006-01-02", endStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end date format, use YYYY-MM-DD"})
+			return
+		}
+
+		days, err := store.GetTradingDays(ctx, startDate, endDate)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		dayStrs := make([]string, len(days))
+		for i, d := range days {
+			dayStrs[i] = d.Format("2006-01-02")
+		}
+		c.JSON(http.StatusOK, gin.H{"trading_days": dayStrs})
 	}
 }

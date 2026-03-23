@@ -187,7 +187,7 @@ func (s *valueMomentumStrategy) Signals(
 	scores := s.calculateCompositeScores(zScores)
 
 	// Step 6: Generate signals based on composite scores
-	signals := s.generateSignals(scores)
+	signals := s.generateSignals(scores, date)
 
 	// Step 7: Sort by composite score and take top N
 	sort.Slice(signals, func(i, j int) bool {
@@ -412,6 +412,7 @@ func (s *valueMomentumStrategy) calculateCompositeScores(
 // generateSignals generates trading signals from composite scores.
 func (s *valueMomentumStrategy) generateSignals(
 	scores map[string]*compositeScoreData,
+	date time.Time,
 ) []domain.Signal {
 	signals := make([]domain.Signal, 0)
 
@@ -432,6 +433,7 @@ func (s *valueMomentumStrategy) generateSignals(
 
 		signals = append(signals, domain.Signal{
 			Symbol:         symbol,
+			Date:           date, // Use the date passed to Signals()
 			Direction:      direction,
 			Strength:       strength,
 			CompositeScore: sc.CompositeScore,

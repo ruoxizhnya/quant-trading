@@ -95,7 +95,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.service
-    command: ["/app/analysis-service"]
+    entrypoint: ["/app/analysis-service"]
     ports:
       - "8085:8085"
     environment:

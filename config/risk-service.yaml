@@ -22,15 +22,15 @@ volatility:
   annualization_factor: 16.0  # sqrt(252)
 
 regime:
-  fast_ma_period: 50
-  slow_ma_period: 200
-  vol_lookback: 252
+  fast_ma_period: 10
+  slow_ma_period: 20
+  vol_lookback: 60
 
 redis:
-  url: "redis://localhost:6379"
+  url: "redis://redis:6379"
 
 data_service:
-  url: "http://localhost:8081"
+  url: "http://data-service:8081"
 
 logging:
   level: "info"

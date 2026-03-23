@@ -315,7 +315,8 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 
 			// Calculate position size
 			portfolio := state.Tracker.GetPortfolio(pricesCache)
-			positionSize, err := e.calculatePosition(ctx, signal, portfolio, regime)
+			currentPrice := pricesCache[signal.Symbol]
+			positionSize, err := e.calculatePosition(ctx, signal, portfolio, regime, currentPrice)
 			if err != nil {
 				logger.Warn().
 					Str("symbol", signal.Symbol).
@@ -471,8 +472,8 @@ func (e *Engine) getTradingDays(ctx context.Context, start, end time.Time) ([]ti
 
 // getOHLCV retrieves OHLCV data for a symbol.
 func (e *Engine) getOHLCV(ctx context.Context, symbol string, start, end time.Time) ([]domain.OHLCV, error) {
-	url := fmt.Sprintf("%s/api/v1/market/ohlcv?symbol=%s&start=%s&end=%s",
-		e.dataServiceURL, symbol, start.Format("2006-01-02"), end.Format("2006-01-02"))
+	url := fmt.Sprintf("%s/ohlcv/%s?start_date=%s&end_date=%s",
+		e.dataServiceURL, symbol, start.Format("20060102"), end.Format("20060102"))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -490,13 +491,13 @@ func (e *Engine) getOHLCV(ctx context.Context, symbol string, start, end time.Ti
 	}
 
 	var result struct {
-		Data []domain.OHLCV `json:"data"`
+		OHLCV []domain.OHLCV `json:"ohlcv"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
 
-	return result.Data, nil
+	return result.OHLCV, nil
 }
 
 // detectRegime detects market regime using risk service.
@@ -553,19 +554,27 @@ func (e *Engine) detectRegime(ctx context.Context, marketData map[string][]domai
 
 // getSignals retrieves trading signals from strategy service.
 func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool []string, marketData map[string][]domain.OHLCV, date time.Time) ([]domain.Signal, error) {
-	url := fmt.Sprintf("%s/api/v1/strategy/signals", e.strategyServiceURL)
+	url := fmt.Sprintf("%s/strategies/%s/signals", e.strategyServiceURL, strategyName)
+
+	// Get stock info from market data keys (symbol only, no external data needed for momentum)
+	stocks := make([]domain.Stock, len(stockPool))
+	for i, sym := range stockPool {
+		stocks[i] = domain.Stock{Symbol: sym}
+	}
 
 	// Convert market data to the format expected by strategy service
 	reqBody := struct {
-		Strategy   string                      `json:"strategy"`
 		StockPool  []string                    `json:"stock_pool"`
+		Stocks     []domain.Stock              `json:"stocks"`
 		MarketData map[string][]domain.OHLCV   `json:"market_data"`
+		Fundamental map[string][]domain.Fundamental `json:"fundamental"`
 		Date       string                      `json:"date"`
 	}{
-		Strategy:   strategyName,
-		StockPool:  stockPool,
-		MarketData: marketData,
-		Date:       date.Format("2006-01-02"),
+		StockPool:   stockPool,
+		Stocks:      stocks,
+		MarketData:  marketData,
+		Fundamental: map[string][]domain.Fundamental{},
+		Date:        date.Format("2006-01-02"),
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -600,17 +609,19 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 }
 
 // calculatePosition calculates position size using risk service.
-func (e *Engine) calculatePosition(ctx context.Context, signal domain.Signal, portfolio *domain.Portfolio, regime *domain.MarketRegime) (domain.PositionSize, error) {
-	url := fmt.Sprintf("%s/api/v1/risk/position", e.riskServiceURL)
+func (e *Engine) calculatePosition(ctx context.Context, signal domain.Signal, portfolio *domain.Portfolio, regime *domain.MarketRegime, currentPrice float64) (domain.PositionSize, error) {
+	url := fmt.Sprintf("%s/calculate_position", e.riskServiceURL)
 
 	reqBody := struct {
-		Signal    domain.Signal       `json:"signal"`
-		Portfolio domain.Portfolio    `json:"portfolio"`
-		Regime    domain.MarketRegime `json:"regime"`
+		Signal       domain.Signal       `json:"signal"`
+		Portfolio    domain.Portfolio    `json:"portfolio"`
+		Regime       domain.MarketRegime `json:"regime"`
+		CurrentPrice float64             `json:"current_price"`
 	}{
-		Signal:    signal,
-		Portfolio: *portfolio,
-		Regime:    *regime,
+		Signal:       signal,
+		Portfolio:    *portfolio,
+		Regime:       *regime,
+		CurrentPrice: currentPrice,
 	}
 
 	jsonData, err := json.Marshal(reqBody)

@@ -185,7 +185,7 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 				// Closing short position
 				pnl := (pos.AvgCost - executionPrice) * actualQty
 				pos.RealizedPnL += pnl - commission
-				t.cash += actualQty*executionPrice + commission
+				t.cash += actualQty*executionPrice - commission
 				pos.Quantity += actualQty
 			}
 
@@ -232,7 +232,13 @@ func (t *Tracker) RecordDailyValue(date time.Time, prices map[string]float64) do
 			pos.CurrentPrice = price
 			pos.MarketValue = abs(pos.Quantity) * price
 			pos.UnrealizedPnL = (price - pos.AvgCost) * pos.Quantity
-			positionsValue += pos.MarketValue
+			// For long positions: add market value to equity
+			// For short positions: subtract market value (liability to buy back)
+			if pos.Quantity > 0 {
+				positionsValue += pos.MarketValue
+			} else {
+				positionsValue -= pos.MarketValue
+			}
 		}
 	}
 
@@ -322,7 +328,12 @@ func (t *Tracker) GetPortfolio(prices map[string]float64) *domain.Portfolio {
 
 	totalValue := t.cash
 	for _, pos := range positions {
-		totalValue += pos.MarketValue
+		// Long positions add value, short positions are liabilities
+		if pos.Quantity > 0 {
+			totalValue += pos.MarketValue
+		} else {
+			totalValue -= pos.MarketValue
+		}
 	}
 
 	return &domain.Portfolio{

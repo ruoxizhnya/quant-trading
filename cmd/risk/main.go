@@ -244,9 +244,10 @@ func healthHandler(c *gin.Context) {
 
 // CalculatePosition request/response types
 type CalculatePositionRequest struct {
-	Signal    domain.Signal    `json:"signal"`
-	Portfolio domain.Portfolio `json:"portfolio"`
-	Regime    *domain.MarketRegime `json:"regime"`
+	Signal       domain.Signal       `json:"signal"`
+	Portfolio    domain.Portfolio     `json:"portfolio"`
+	Regime       *domain.MarketRegime `json:"regime"`
+	CurrentPrice float64             `json:"current_price"`
 }
 
 type CalculatePositionResponse struct {
@@ -268,7 +269,7 @@ func calculatePositionHandler(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	positionSize, err := riskManager.CalculatePosition(ctx, req.Signal, &req.Portfolio, req.Regime)
+	positionSize, err := riskManager.CalculatePosition(ctx, req.Signal, &req.Portfolio, req.Regime, req.CurrentPrice)
 	if err != nil {
 		log.Error().Err(err).Msg("position calculation failed")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -309,7 +310,28 @@ type DetectRegimeRequest struct {
 	LookbackDays int    `json:"lookback_days"`
 }
 
+// Alternative format: direct OHLCV data passed from backtest engine
+type DetectRegimeDataRequest struct {
+	Data []domain.OHLCV `json:"data"`
+}
+
 func detectRegimeHandler(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	// Try new format first (from backtest engine)
+	var dataReq DetectRegimeDataRequest
+	if err := c.ShouldBindJSON(&dataReq); err == nil && len(dataReq.Data) > 0 {
+		regime, err := riskManager.DetectRegime(ctx, dataReq.Data)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, regime)
+		return
+	}
+
+	// Fall back to original format
 	var req DetectRegimeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.Error().Err(err).Msg("invalid request body")
@@ -317,17 +339,11 @@ func detectRegimeHandler(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
-	defer cancel()
-
-	// In production, this would fetch OHLCV data from a data service
-	// For now, we return a mock regime
 	lookbackDays := req.LookbackDays
 	if lookbackDays == 0 {
 		lookbackDays = 200
 	}
 
-	// Mock OHLCV data - in production, fetch from data service
 	ohlcv := generateMockOHLCV(req.Symbol, lookbackDays)
 
 	regime, err := riskManager.DetectRegime(ctx, ohlcv)
