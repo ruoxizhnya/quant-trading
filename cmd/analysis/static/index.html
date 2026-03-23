@@ -10,71 +10,65 @@
   
   .header { background: #1a1f2e; border-bottom: 1px solid #2d3748; padding: 14px 24px; display: flex; align-items: center; gap: 12px; }
   .logo { font-size: 24px; } .logo-text { font-size: 18px; font-weight: 600; color: #60a5fa; }
-  .header-links { margin-left: auto; display: flex; gap: 16px; }
-  .header-links a { color: #94a3b8; text-decoration: none; font-size: 13px; }
-  .header-links a:hover { color: #60a5fa; }
   
-  .main { display: grid; grid-template-columns: 300px 1fr; min-height: calc(100vh - 57px); }
+  .main { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 57px); }
   
   .sidebar { background: #1a1f2e; border-right: 1px solid #2d3748; padding: 16px; overflow-y: auto; }
-  .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: #60a5fa; margin: 16px 0 10px; }
+  .section-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: #60a5fa; margin: 14px 0 8px; }
   
-  .form-group { margin-bottom: 12px; }
-  label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
-  input, select { width: 100%; padding: 8px 10px; background: #0f1419; border: 1px solid #2d3748; border-radius: 6px; color: #e7e9ea; font-size: 13px; }
+  .form-group { margin-bottom: 10px; }
+  label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 3px; }
+  input, select { width: 100%; padding: 7px 9px; background: #0f1419; border: 1px solid #2d3748; border-radius: 5px; color: #e7e9ea; font-size: 12px; }
   input:focus, select:focus { outline: none; border-color: #60a5fa; }
   
-  .btn { width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
-  .btn-primary { background: #60a5fa; color: #0f1419; } .btn-primary:hover { background: #93c5fd; }
-  .btn-primary:disabled { background: #374151; color: #6b7280; cursor: not-allowed; }
+  .btn { width: 100%; padding: 9px; border: none; border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer; background: #60a5fa; color: #0f1419; }
+  .btn:hover { background: #93c5fd; }
+  .btn:disabled { background: #374151; color: #6b7280; cursor: not-allowed; }
   
-  .content { padding: 20px; overflow-y: auto; }
+  .content { padding: 16px; overflow-y: auto; }
   
-  .card { background: #1a1f2e; border: 1px solid #2d3748; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-  .card-title { font-size: 13px; font-weight: 600; color: #94a3b8; }
-  .card-tabs { display: flex; gap: 4px; }
-  .tab { padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; background: #0f1419; color: #64748b; border: none; }
-  .tab.active { background: #60a5fa; color: #0f1419; }
+  .status { display: none; align-items: center; gap: 8px; padding: 8px 12px; background: #1a1f2e; border: 1px solid #2d3748; border-radius: 6px; margin-bottom: 12px; font-size: 12px; }
+  .status.show { display: flex; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #fbbf24; animation: spin 1s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   
-  .metrics-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
-  .metric { background: #0f1419; border-radius: 6px; padding: 12px 8px; text-align: center; }
-  .metric-value { font-size: 20px; font-weight: 700; color: #60a5fa; }
+  .card { background: #1a1f2e; border: 1px solid #2d3748; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+  .card-title { font-size: 11px; font-weight: 600; color: #64748b; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  
+  .metrics { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+  .metric { background: #0f1419; border-radius: 5px; padding: 10px 6px; text-align: center; }
+  .metric-value { font-size: 18px; font-weight: 700; color: #60a5fa; }
   .metric-value.positive { color: #34d399; }
   .metric-value.negative { color: #f87171; }
-  .metric-label { font-size: 10px; color: #64748b; margin-top: 3px; text-transform: uppercase; }
+  .metric-label { font-size: 9px; color: #475569; margin-top: 2px; text-transform: uppercase; }
   
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1f2937; font-size: 12px; }
-  th { color: #475569; font-weight: 500; text-transform: uppercase; font-size: 10px; }
-  tbody tr:hover { background: #1f2937; }
-  .symbol-cell { color: #60a5fa; font-weight: 600; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   
-  .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+  .chart-box { background: #0f1419; border-radius: 6px; overflow: hidden; }
+  canvas { display: block; }
+  
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { color: #475569; font-weight: 500; text-transform: uppercase; font-size: 9px; padding: 7px 8px; text-align: left; border-bottom: 1px solid #1f2937; }
+  td { padding: 7px 8px; border-bottom: 1px solid #1a1f2e; color: #94a3b8; }
+  tbody tr:hover td { background: #1f2937; }
+  .sym { color: #60a5fa; font-weight: 600; }
+  .badge { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; }
   .badge-long { background: #064e3b; color: #34d399; }
   .badge-short { background: #7f1d1d; color: #f87171; }
   .badge-close { background: #1e3a5f; color: #60a5fa; }
+  .pnl-pos { color: #34d399; }
+  .pnl-neg { color: #f87171; }
   
-  .chart-container { position: relative; height: 280px; }
-  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .empty-state { text-align: center; padding: 60px; color: #374151; font-size: 13px; }
+  .empty-icon { font-size: 40px; margin-bottom: 12px; }
   
-  .empty-state { text-align: center; padding: 80px 20px; color: #475569; }
-  .empty-icon { font-size: 56px; margin-bottom: 16px; }
-  
-  .status { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #1a1f2e; border: 1px solid #2d3748; border-radius: 8px; margin-bottom: 16px; font-size: 12px; }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; flex-shrink: 0; }
-  .status-dot.loading { background: #fbbf24; animation: pulse 1s infinite; }
-  
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-  
-  .toast { position: fixed; bottom: 20px; right: 20px; background: #1a1f2e; border: 1px solid #2d3748; border-radius: 8px; padding: 12px 18px; font-size: 13px; z-index: 1000; transform: translateY(80px); opacity: 0; transition: all 0.3s; }
-  .toast.show { transform: translateY(0); opacity: 1; }
-  .toast.error { border-color: #f87171; }
-  
-  .hist-list { font-size: 12px; }
-  .hist-item { padding: 8px 0; border-bottom: 1px solid #1f2937; cursor: pointer; }
+  .hist-item { padding: 7px 0; border-bottom: 1px solid #1f2937; cursor: pointer; font-size: 11px; color: #64748b; }
   .hist-item:hover { color: #60a5fa; }
-  .hist-date { color: #475569; font-size: 11px; }
+  .hist-date { font-size: 10px; color: #374151; margin-top: 1px; }
+  
+  .toast { position: fixed; bottom: 16px; right: 16px; background: #1a1f2e; border: 1px solid #2d3748; border-radius: 6px; padding: 10px 16px; font-size: 12px; z-index: 1000; opacity: 0; transform: translateY(20px); transition: all 0.2s; }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.error { border-color: #f87171; }
 </style>
 </head>
 <body>
@@ -82,138 +76,94 @@
 <div class="header">
   <span class="logo">📈</span>
   <span class="logo-text">Quant Lab</span>
-  <div class="header-links">
-    <a href="http://localhost:8085" onclick="location.reload(); return false;">回测</a>
-  </div>
 </div>
 
 <div class="main">
   <div class="sidebar">
     <div class="section-title">策略配置</div>
     
-    <div class="form-group">
-      <label>策略</label>
-      <select id="strategy">
+    <div class="form-group"><label>策略</label>
+      <select id="s-strategy">
         <option value="momentum">动量策略 (Momentum)</option>
         <option value="value_momentum">价值动量</option>
       </select>
     </div>
-    
-    <div class="form-group">
-      <label>股票池</label>
-      <input id="stock-pool" value="600000.SH" placeholder="600000.SH">
+    <div class="form-group"><label>股票池</label>
+      <input id="s-pool" value="600000.SH" placeholder="600000.SH">
+    </div>
+    <div class="form-group"><label>开始日期</label>
+      <input type="date" id="s-start" value="2024-01-01">
+    </div>
+    <div class="form-group"><label>结束日期</label>
+      <input type="date" id="s-end" value="2024-06-30">
+    </div>
+    <div class="form-group"><label>初始资金</label>
+      <input type="number" id="s-capital" value="1000000">
     </div>
     
-    <div class="form-group">
-      <label>开始日期</label>
-      <input type="date" id="start-date" value="2024-01-01">
+    <div class="section-title">交易成本</div>
+    <div class="form-group"><label>手续费率</label>
+      <input type="number" id="s-comm" value="0.0003" step="0.0001">
+    </div>
+    <div class="form-group"><label>滑点率</label>
+      <input type="number" id="s-slip" value="0.0001" step="0.0001">
     </div>
     
-    <div class="form-group">
-      <label>结束日期</label>
-      <input type="date" id="end-date" value="2024-06-30">
+    <div style="margin-top: 12px;">
+      <button class="btn" id="btn-run" onclick="runBt()">🚀 运行回测</button>
     </div>
     
-    <div class="form-group">
-      <label>初始资金</label>
-      <input type="number" id="capital" value="1000000">
-    </div>
-    
-    <div class="section-title">高级配置</div>
-    
-    <div class="form-group">
-      <label>手续费率</label>
-      <input type="number" id="commission" value="0.0003" step="0.0001">
-    </div>
-    
-    <div class="form-group">
-      <label>滑点率</label>
-      <input type="number" id="slippage" value="0.0001" step="0.0001">
-    </div>
-    
-    <button class="btn btn-primary" id="run-btn" onclick="runBacktest()">🚀 运行回测</button>
-    
-    <div class="section-title">最近回测</div>
-    <div id="history-list" class="hist-list"></div>
+    <div class="section-title" style="margin-top: 16px;">最近回测</div>
+    <div id="hist-list"></div>
   </div>
   
   <div class="content">
-    <div id="status-bar" class="status" style="display: none;">
-      <div class="status-dot loading"></div>
-      <span id="status-text">运行中...</span>
+    <div class="status" id="status">
+      <div class="status-dot"></div>
+      <span id="status-msg">运行中...</span>
     </div>
     
-    <div id="empty-state" class="empty-state">
+    <div id="empty" class="empty-state">
       <div class="empty-icon">📊</div>
-      <div>配置参数，点击「运行回测」开始</div>
+      <div>配置参数，点击「运行回测」</div>
     </div>
     
-    <div id="results" style="display: none;">
+    <div id="results" style="display:none">
       <!-- Metrics -->
       <div class="card">
-        <div class="metrics-grid">
-          <div class="metric">
-            <div class="metric-value" id="m-total-return">-</div>
-            <div class="metric-label">总收益率</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value" id="m-annual-return">-</div>
-            <div class="metric-label">年化收益</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value" id="m-sharpe">-</div>
-            <div class="metric-label">Sharpe</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value negative" id="m-maxdd">-</div>
-            <div class="metric-label">最大回撤</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value" id="m-calmar">-</div>
-            <div class="metric-label">Calmar</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value" id="m-trades">-</div>
-            <div class="metric-label">交易次数</div>
-          </div>
+        <div class="metrics">
+          <div class="metric"><div class="metric-value" id="m-ret">-</div><div class="metric-label">总收益</div></div>
+          <div class="metric"><div class="metric-value" id="m-ann">-</div><div class="metric-label">年化</div></div>
+          <div class="metric"><div class="metric-value" id="m-shp">-</div><div class="metric-label">Sharpe</div></div>
+          <div class="metric"><div class="metric-value negative" id="m-dd">-</div><div class="metric-label">最大回撤</div></div>
+          <div class="metric"><div class="metric-value" id="m-clm">-</div><div class="metric-label">Calmar</div></div>
+          <div class="metric"><div class="metric-value" id="m-n">-</div><div class="metric-label">交易数</div></div>
         </div>
       </div>
       
       <!-- Charts -->
-      <div class="chart-row">
+      <div class="charts">
         <div class="card">
-          <div class="card-header">
-            <div class="card-title">📉 净值曲线</div>
+          <div class="card-title">📈 净值曲线</div>
+          <div class="chart-box">
+            <canvas id="c-equity" width="500" height="220"></canvas>
           </div>
-          <div class="chart-container"><canvas id="equity-canvas"></canvas></div>
         </div>
         <div class="card">
-          <div class="card-header">
-            <div class="card-title">🕯️ K线 + 交易</div>
+          <div class="card-title">🕯️ K线 + 交易点</div>
+          <div class="chart-box">
+            <canvas id="c-kline" width="500" height="220"></canvas>
           </div>
-          <div class="chart-container"><canvas id="kline-canvas"></canvas></div>
         </div>
       </div>
       
       <!-- Trades -->
       <div class="card">
-        <div class="card-header">
-          <div class="card-title">📋 交易记录</div>
-        </div>
-        <div style="max-height: 320px; overflow-y: auto;">
+        <div class="card-title">📋 交易记录</div>
+        <div style="max-height: 280px; overflow-y: auto;">
           <table>
-            <thead>
-              <tr>
-                <th>日期</th>
-                <th>标的</th>
-                <th>方向</th>
-                <th>数量</th>
-                <th>价格</th>
-                <th>盈亏</th>
-                <th>收益率</th>
-              </tr>
-            </thead>
-            <tbody id="trades-body"></tbody>
+            <thead><tr><th>日期</th><th>标的</th><th>方向</th><th>数量</th><th>价格</th><th>盈亏</th></tr></thead>
+            <tbody id="tb-trades"></tbody>
           </table>
         </div>
       </div>
@@ -223,386 +173,325 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Load Chart.js first -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
+<!-- Date adapter -->
+<script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+
 <script>
 const API = 'http://localhost:8085';
-let equityChart = null;
-let klineChart = null;
-let currentResult = null;
+let eqChart = null;
+let klChart = null;
 
-function toast(msg, isError = false) {
-  const t = document.getElementById('toast');
+function $(id) { return document.getElementById(id); }
+function toast(msg, err) {
+  const t = $('toast');
   t.textContent = msg;
-  t.className = 'toast' + (isError ? ' error' : '');
+  t.className = 'toast' + (err ? ' error' : '');
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 3000);
 }
-
 function fmt(n) {
   if (n == null || isNaN(n)) return '-';
   return (n >= 0 ? '+' : '') + (n * 100).toFixed(2) + '%';
 }
+function fmtN(n, d) { return n == null || isNaN(n) ? '-' : n.toFixed(d == null ? 0 : d); }
 
-function fmtNum(n, d = 0) {
-  if (n == null || isNaN(n)) return '-';
-  return n.toFixed(d);
-}
-
-function parseDate(s) {
-  if (!s) return null;
-  return new Date(s + 'T00:00:00');
-}
-
-async function runBacktest() {
-  const btn = document.getElementById('run-btn');
+// ─── Backtest ────────────────────────────────────────────────
+async function runBt() {
+  const btn = $('btn-run');
   btn.disabled = true;
-  document.getElementById('status-bar').style.display = 'flex';
-  document.getElementById('empty-state').style.display = 'none';
-  document.getElementById('results').style.display = 'none';
+  $('status').classList.add('show');
+  $('empty').style.display = 'none';
+  $('results').style.display = 'none';
 
-  const stocks = document.getElementById('stock-pool').value.split(',').map(s => s.trim()).filter(Boolean);
+  const stocks = $('s-pool').value.split(',').map(s => s.trim()).filter(Boolean);
   const req = {
-    strategy: document.getElementById('strategy').value,
+    strategy: $('s-strategy').value,
     stock_pool: stocks,
-    start_date: document.getElementById('start-date').value,
-    end_date: document.getElementById('end-date').value,
-    initial_capital: parseFloat(document.getElementById('capital').value),
-    commission_rate: parseFloat(document.getElementById('commission').value),
-    slippage_rate: parseFloat(document.getElementById('slippage').value)
+    start_date: $('s-start').value,
+    end_date: $('s-end').value,
+    initial_capital: parseFloat($('s-capital').value),
+    commission_rate: parseFloat($('s-comm').value),
+    slippage_rate: parseFloat($('s-slip').value)
   };
 
   try {
-    document.getElementById('status-text').textContent = '运行回测中...';
-    const r = await fetch(API + '/backtest', {
+    $('status-msg').textContent = '运行回测中...';
+    let r = await fetch(API + '/backtest', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req)
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    let result = await r.json();
+    let d = await r.json();
 
-    // Poll
-    while (result.status === 'running' || result.status === 'pending') {
-      await new Promise(r => setTimeout(r, 500));
-      const r2 = await fetch(API + '/backtest/' + result.id + '/report');
-      result = await r2.json();
+    while (d.status === 'running' || d.status === 'pending') {
+      await new Promise(r2 => setTimeout(r2, 600));
+      r = await fetch(API + '/backtest/' + d.id + '/report');
+      d = await r.json();
     }
-    if (result.status === 'failed') throw new Error('回测失败');
+    if (d.status === 'failed') throw new Error('回测失败');
 
-    currentResult = result;
-    currentResult.backtestId = result.id || window.currentId;
-    displayAll(result, stocks);
-    addHistory(result.id || result.backtest_id, req);
+    showResults(d, stocks);
+    saveHist(d.id || d.backtest_id, req);
 
   } catch (e) {
     toast(e.message, true);
-    document.getElementById('status-bar').style.display = 'none';
-    document.getElementById('empty-state').style.display = 'block';
+    $('empty').style.display = 'block';
   } finally {
     btn.disabled = false;
-    setTimeout(() => document.getElementById('status-bar').style.display = 'none', 500);
+    setTimeout(() => $('status').classList.remove('show'), 400);
   }
 }
 
-async function displayAll(r, stocks) {
-  document.getElementById('results').style.display = 'block';
+// ─── Display ─────────────────────────────────────────────────
+async function showResults(d, stocks) {
+  $('results').style.display = 'block';
 
   // Metrics
-  const ret = r.total_return || 0;
-  document.getElementById('m-total-return').textContent = fmt(ret);
-  document.getElementById('m-total-return').className = 'metric-value ' + (ret >= 0 ? 'positive' : 'negative');
-  document.getElementById('m-annual-return').textContent = fmt(r.annual_return);
-  document.getElementById('m-sharpe').textContent = fmtNum(r.sharpe_ratio, 2);
-  document.getElementById('m-maxdd').textContent = fmt(r.max_drawdown);
-  document.getElementById('m-calmar').textContent = fmtNum(r.calmar_ratio, 2);
-  document.getElementById('m-trades').textContent = r.total_trades || 0;
+  const ret = d.total_return || 0;
+  $('m-ret').textContent = fmt(ret);
+  $('m-ret').className = 'metric-value ' + (ret >= 0 ? 'positive' : 'negative');
+  $('m-ann').textContent = fmt(d.annual_return);
+  $('m-shp').textContent = fmtN(d.sharpe_ratio, 2);
+  $('m-dd').textContent = fmt(d.max_drawdown);
+  $('m-clm').textContent = fmtN(d.calmar_ratio, 2);
+  $('m-n').textContent = d.total_trades || 0;
 
   // Equity curve
-  await drawEquityCurve(r.portfolio_values, r.initial_capital);
+  await drawEquity(d.portfolio_values, d.initial_capital || 1000000);
 
-  // K-line (fetch OHLCV for first stock in pool)
+  // K-line
   if (stocks && stocks.length > 0) {
-    await drawKLineWithTrades(stocks[0], r.start_date, r.end_date, r.trades || []);
+    await drawKLine(stocks[0], d.start_date, d.end_date, d.trades);
   }
 
   // Trades table
-  renderTrades(r.trades || []);
+  renderTrades(d.trades);
 }
 
-async function drawEquityCurve(pv, initCap) {
-  const canvas = document.getElementById('equity-canvas');
+// ─── Equity Chart ─────────────────────────────────────────────
+async function drawEquity(pv, initCap) {
+  const canvas = $('c-equity');
   if (!pv || pv.length === 0) return;
 
-  const labels = pv.map(v => v.date ? v.date.split('T')[0] : v.date);
-  const values = pv.map(v => v.total_value);
-  const startVal = initCap || values[0];
+  const labels = pv.map(v => v.date ? v.date.replace('T', ' ').slice(0, 10) : '');
+  const vals = pv.map(v => v.total_value);
+  const startVal = initCap || vals[0];
+  const pct = vals.map(v => (v - startVal) / startVal);
 
-  if (equityChart) { equityChart.destroy(); equityChart = null; }
-
-  const pctChange = values.map(v => (v - startVal) / startVal);
-  const minP = Math.min(...pctChange);
-  const maxP = Math.max(...pctChange);
-  const range = Math.max(maxP - minP, 0.001);
+  if (eqChart) { eqChart.destroy(); eqChart = null; }
 
   const ctx = canvas.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = canvas.offsetWidth * dpr;
-  canvas.height = canvas.offsetHeight * dpr;
-  ctx.scale(dpr, dpr);
-
-  equityChart = new Chart(ctx, {
+  eqChart = new Chart(ctx, {
     type: 'line',
     data: {
       labels,
       datasets: [{
-        label: '净值',
-        data: pctChange,
-        borderColor: pctChange[pctChange.length-1] >= 0 ? '#34d399' : '#f87171',
-        backgroundColor: pctChange[pctChange.length-1] >= 0 ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)',
+        data: pct,
+        borderColor: pct[pct.length-1] >= 0 ? '#34d399' : '#f87171',
+        backgroundColor: pct[pct.length-1] >= 0 ? 'rgba(52,211,153,0.06)' : 'rgba(248,113,113,0.06)',
         fill: true,
-        tension: 0.1,
+        tension: 0.15,
         pointRadius: 0,
         borderWidth: 2,
       }]
     },
     options: {
-      responsive: true,
+      responsive: false,
       maintainAspectRatio: false,
+      animation: false,
       interaction: { intersect: false, mode: 'index' },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#1a1f2e',
-          borderColor: '#2d3748',
-          borderWidth: 1,
-          callbacks: {
-            label: ctx => {
-              const v = ctx.raw;
-              const dollarVal = startVal * (1 + v);
-              return ' ' + (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%  (¥' + dollarVal.toFixed(0) + ')';
-            }
+      plugins: { legend: { display: false }, tooltip: {
+        backgroundColor: '#1a1f2e',
+        borderColor: '#2d3748',
+        borderWidth: 1,
+        callbacks: {
+          label: ctx => {
+            const v = ctx.raw;
+            const dv = startVal * (1 + v);
+            return ' ' + (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%  ¥' + dv.toFixed(0);
           }
         }
-      },
+      }},
       scales: {
-        x: {
-          grid: { color: '#1f2937' },
-          ticks: { color: '#475569', maxTicksLimit: 8, font: { size: 10 } },
-        },
-        y: {
-          grid: { color: '#1f2937' },
-          ticks: {
-            color: '#475569',
-            font: { size: 10 },
-            callback: v => (v * 100).toFixed(1) + '%'
-          }
-        }
+        x: { grid: { color: '#1f2937' }, ticks: { color: '#475569', maxTicksLimit: 6, font: { size: 9 } } },
+        y: { grid: { color: '#1f2937' }, ticks: { color: '#475569', font: { size: 9 }, callback: v => (v * 100).toFixed(1) + '%' } }
       }
     }
   });
 }
 
-async function drawKLineWithTrades(symbol, startDate, endDate, trades) {
-  const canvas = document.getElementById('kline-canvas');
+// ─── K-Line Chart ─────────────────────────────────────────────
+async function drawKLine(symbol, startDate, endDate, trades) {
+  const canvas = $('c-kline');
   
-  // Fetch OHLCV data
+  // Fetch OHLCV
   let ohlcv = [];
   try {
     const s = startDate.replace(/-/g, '');
     const e = endDate.replace(/-/g, '');
-    const r = await fetch(`${API}/ohlcv/${symbol}?start_date=${s}&end_date=${e}`);
+    const r = await fetch(API + '/ohlcv/' + symbol + '?start_date=' + s + '&end_date=' + e);
     if (r.ok) {
-      const d = await r.json();
-      ohlcv = d.ohlcv || [];
+      const data = await r.json();
+      ohlcv = data.ohlcv || [];
     }
-  } catch (e) { console.error('Failed to load OHLCV', e); }
+  } catch (e) { console.error('OHLCV fetch failed', e); }
+
+  if (klChart) { klChart.destroy(); klChart = null; }
+
+  const ctx = canvas.getContext('2d');
 
   if (ohlcv.length === 0) {
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#475569';
-    ctx.font = '13px sans-serif';
+    ctx.fillStyle = '#374151';
+    ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('K线数据暂不可用', canvas.offsetWidth/2, canvas.offsetHeight/2);
+    ctx.fillText('K线数据暂不可用', canvas.width / 2, canvas.height / 2);
     return;
   }
 
-  // Format for Chart.js financial
-  const candlestickData = ohlcv.map(d => ({
-    x: new Date(d.date).getTime(),
+  const candleData = ohlcv.map(d => ({
+    x: new Date(d.date),
     o: d.open, h: d.high, l: d.low, c: d.close
   }));
 
-  // Match trades to OHLCV dates
-  const tradeMap = {};
+  // Trade markers
+  const tradeAnnotations = {};
   (trades || []).forEach(t => {
     if (!t.timestamp) return;
-    const dateStr = t.timestamp.split('T')[0];
-    if (!tradeMap[dateStr]) tradeMap[dateStr] = [];
-    tradeMap[dateStr].push(t);
+    const x = new Date(t.timestamp).getTime();
+    const color = t.direction === 'long' ? '#34d399' : t.direction === 'short' ? '#f87171' : '#60a5fa';
+    const label = t.direction === 'long' ? '▲' : t.direction === 'short' ? '▼' : '●';
+    const key = 't' + Math.random().toString(36).slice(2);
+    tradeAnnotations[key] = {
+      type: 'line',
+      xMin: x, xMax: x,
+      borderColor: color, borderWidth: 1.2,
+      borderDash: [3, 2],
+      label: { display: true, content: label, color, font: { size: 11, weight: 'bold' }, position: 'start' }
+    };
   });
 
-  // Build trade annotations
-  const longAnnotations = {};
-  const shortAnnotations = {};
-  let annIdx = 0;
-  Object.entries(tradeMap).forEach(([date, ts]) => {
-    ts.forEach(t => {
-      const d = new Date(date).getTime();
-      const color = t.direction === 'long' ? '#34d399' : t.direction === 'short' ? '#f87171' : '#60a5fa';
-      const key = 'trade' + annIdx++;
-      const ann = {
-        type: 'line',
-        xMin: d, xMax: d,
-        borderColor: color,
-        borderWidth: 1.5,
-        borderDash: [3, 3],
-        label: {
-          display: true,
-          content: t.direction === 'long' ? '▲' : t.direction === 'short' ? '▼' : '●',
-          color: color,
-          font: { size: 12, weight: 'bold' },
-          position: 'start'
-        }
-      };
-      if (t.direction === 'long') longAnnotations[key] = ann;
-      else if (t.direction === 'short') shortAnnotations[key] = ann;
-    });
-  });
+  const plugin = {
+    id: 'tradeAnnotations',
+    afterDraw(chart) {
+      const ctx2 = chart.ctx;
+      const xAxis = chart.scales.x;
+      const yAxis = chart.scales.y;
+      (trades || []).forEach(t => {
+        if (!t.timestamp) return;
+        const x = xAxis.getPixelForValue(new Date(t.timestamp).getTime());
+        if (x < xAxis.left || x > xAxis.right) return;
+        const color = t.direction === 'long' ? '#34d399' : t.direction === 'short' ? '#f87171' : '#60a5fa';
+        const label = t.direction === 'long' ? '▲' : t.direction === 'short' ? '▼' : '●';
+        ctx2.fillStyle = color;
+        ctx2.font = 'bold 10px sans-serif';
+        ctx2.fillText(label, x + 2, yAxis.top + 12);
+      });
+    }
+  };
 
-  const ctx = canvas.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = canvas.offsetWidth * dpr;
-  canvas.height = canvas.offsetHeight * dpr;
-  ctx.scale(dpr, dpr);
-
-  if (klineChart) { klineChart.destroy(); klineChart = null; }
-
-  const { CandlestickController, CandlestickElement, OhlcController, OhlcElement } = ChartJsFinancial;
-
-  if (!Chart.registry.controllers.candlestick) {
-    Chart.register(CandlestickController, CandlestickElement, OhlcController, OhlcElement);
-  }
-
-  klineChart = new Chart(ctx, {
-    type: 'candlestick',
-    data: {
-      datasets: [{
-        label: symbol,
-        data: candlestickData,
-        color: { up: '#34d399', down: '#f87171', unchanged: '#64748b' },
-        borderColor: { up: '#34d399', down: '#f87171', unchanged: '#64748b' },
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { intersect: false, mode: 'index' },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
+  try {
+    klChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        datasets: [{
+          label: symbol,
+          data: candleData.map(d => ({ x: d.x, y: [d.o, d.h, d.l, d.c] })),
+          // Candlestick via bar chart with ohlc format
+          backgroundColor: candleData.map(d => d.c >= d.o ? 'rgba(52,211,153,0.8)' : 'rgba(248,113,113,0.8)'),
+          borderColor: candleData.map(d => d.c >= d.o ? '#34d399' : '#f87171'),
+          borderWidth: 1,
+        }]
+      },
+      options: {
+        responsive: false,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { intersect: false, mode: 'index' },
+        plugins: { legend: { display: false }, tooltip: {
           backgroundColor: '#1a1f2e',
           borderColor: '#2d3748',
           borderWidth: 1,
           callbacks: {
             label: ctx => {
-              const d = candlestickData[ctx.dataIndex];
-              return [
-                '开: ' + d.o.toFixed(2),
-                '高: ' + d.h.toFixed(2),
-                '低: ' + d.l.toFixed(2),
-                '收: ' + d.c.toFixed(2),
-              ];
+              const d = candleData[ctx.dataIndex];
+              return ['开: ¥' + d.o.toFixed(2), '高: ¥' + d.h.toFixed(2), '低: ¥' + d.l.toFixed(2), '收: ¥' + d.c.toFixed(2)];
             }
           }
+        }},
+        scales: {
+          x: { type: 'time', grid: { color: '#1f2937' }, time: { unit: 'day', displayFormats: { day: 'MM/dd' } },
+            ticks: { color: '#475569', maxTicksLimit: 6, font: { size: 9 } } },
+          y: { grid: { color: '#1f2937' }, ticks: { color: '#475569', font: { size: 9 }, callback: v => '¥' + v.toFixed(2) } }
         }
       },
-      scales: {
-        x: {
-          type: 'time',
-          grid: { color: '#1f2937' },
-          ticks: { color: '#475569', maxTicksLimit: 8, font: { size: 10 } },
-        },
-        y: {
-          grid: { color: '#1f2937' },
-          ticks: { color: '#475569', font: { size: 10 }, callback: v => '¥' + v.toFixed(2) }
-        }
-      }
-    }
-  });
+      plugins: [plugin]
+    });
+  } catch (e) {
+    console.error('K-line chart error', e);
+    ctx.fillStyle = '#374151';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('K线渲染失败', canvas.width / 2, canvas.height / 2);
+  }
 }
 
+// ─── Trades Table ─────────────────────────────────────────────
 function renderTrades(trades) {
-  const tbody = document.getElementById('trades-body');
+  const tb = $('tb-trades');
   if (!trades || trades.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#475569;padding:30px">暂无交易记录</td></tr>';
+    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#374151;padding:30px">暂无交易记录</td></tr>';
     return;
   }
-  tbody.innerHTML = trades.map(t => {
+  tb.innerHTML = trades.map(t => {
     const dir = t.direction;
     const cls = dir === 'long' ? 'badge-long' : dir === 'short' ? 'badge-short' : 'badge-close';
     const txt = dir === 'long' ? '买入' : dir === 'short' ? '卖出' : '平仓';
-    const date = t.timestamp ? t.timestamp.split('T')[0] : '-';
-    const pnl = t.pnl !== undefined ? fmt(t.pnl) : '-';
-    const ret = t.return_rate !== undefined ? fmt(t.return_rate) : '-';
-    return `<tr>
-      <td>${date}</td>
-      <td class="symbol-cell">${t.symbol || '-'}</td>
-      <td><span class="badge ${cls}">${txt}</span></td>
-      <td>${fmtNum(t.quantity, 0)}</td>
-      <td>¥${fmtNum(t.price, 2)}</td>
-      <td style="color:${t.pnl >= 0 ? '#34d399' : '#f87171'}">${pnl}</td>
-      <td>${ret}</td>
-    </tr>`;
+    const pnl = t.pnl;
+    const pnlCls = pnl > 0 ? 'pnl-pos' : pnl < 0 ? 'pnl-neg' : '';
+    return '<tr>' +
+      '<td>' + (t.timestamp ? t.timestamp.split('T')[0] : '-') + '</td>' +
+      '<td class="sym">' + (t.symbol || '-') + '</td>' +
+      '<td><span class="badge ' + cls + '">' + txt + '</span></td>' +
+      '<td>' + fmtN(t.quantity, 0) + '</td>' +
+      '<td>¥' + fmtN(t.price, 2) + '</td>' +
+      '<td class="' + pnlCls + '">' + (pnl != null ? fmt(pnl) : '-') + '</td>' +
+      '</tr>';
   }).join('');
 }
 
-// History
-let history = JSON.parse(localStorage.getItem('qbacktest_history') || '[]');
-function addHistory(id, req) {
-  history.unshift({ id, req, time: Date.now() });
+// ─── History ──────────────────────────────────────────────────
+let history = JSON.parse(localStorage.getItem('qbh') || '[]');
+function saveHist(id, req) {
+  history.unshift({ id, req, t: Date.now() });
   history = history.slice(0, 10);
-  localStorage.setItem('qbacktest_history', JSON.stringify(history));
-  renderHistory();
+  localStorage.setItem('qbh', JSON.stringify(history));
+  renderHist();
 }
-
-function renderHistory() {
-  const el = document.getElementById('history-list');
-  if (history.length === 0) {
-    el.innerHTML = '<div style="color:#475569;font-size:12px">暂无历史</div>';
-    return;
-  }
+function renderHist() {
+  const el = $('hist-list');
+  if (history.length === 0) { el.innerHTML = '<div style="font-size:11px;color:#374151">暂无</div>'; return; }
   el.innerHTML = history.map(h => {
-    const d = new Date(h.time);
-    const ds = d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    return `<div class="hist-item" onclick="loadHistory('${h.id}')">
-      <div>${h.req.strategy}</div>
-      <div class="hist-date">${ds}</div>
-    </div>`;
+    const d = new Date(h.t);
+    const ds = d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    return '<div class="hist-item" onclick="loadHist(\'' + h.id + '\')"><div>' + h.req.strategy + '</div><div class="hist-date">' + ds + '</div></div>';
   }).join('');
 }
-
-async function loadHistory(id) {
+async function loadHist(id) {
+  $('status').classList.add('show');
+  $('status-msg').textContent = '加载中...';
   try {
-    document.getElementById('status-text').textContent = '加载中...';
-    document.getElementById('status-bar').style.display = 'flex';
     const r = await fetch(API + '/backtest/' + id + '/report');
-    const result = await r.json();
-    if (result.error) throw new Error(result.error);
-    currentResult = result;
-    currentResult.backtestId = id;
-    const stocks = result.stock_pool || [];
-    displayAll(result, stocks);
-  } catch (e) {
-    toast('加载失败: ' + e.message, true);
-  } finally {
-    document.getElementById('status-bar').style.display = 'none';
-  }
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    showResults(d, d.stock_pool || []);
+  } catch (e) { toast('加载失败: ' + e.message, true); }
+  finally { $('status').classList.remove('show'); }
 }
 
-// Init
-renderHistory();
+renderHist();
 </script>
-<script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
 </body>
 </html>
