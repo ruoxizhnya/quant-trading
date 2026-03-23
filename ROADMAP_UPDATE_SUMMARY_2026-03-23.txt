@@ -1,0 +1,72 @@
+# Roadmap Research Summary — 2026-03-23
+
+## What I Found
+
+### Already Well-Implemented ✅
+- **前复权 (forward-adjusted prices)**: Using stk_factor_pro API — correct
+- **Commission + slippage**: 0.03% / 0.01% — implemented correctly
+- **Volatility-based position sizing**: Target volatility approach with regime awareness — solid
+- **ATR-based stop losses**: Bull/bear/sideways multipliers — good
+- **Trading calendar (partial)**: Derived from OHLCV data — works but fragile
+
+### Critical Gaps (Must Fix) 🔴
+
+1. **T+1 Settlement (A股) — NOT IMPLEMENTED**
+   - A股 requires shares bought today cannot be sold today
+   - Current tracker has NO buy-date tracking per position
+   - Impact: Return overestimation of ~5-15%
+   - Fix: Add `buyDate` to Position struct, enforce settlement rule before sells
+
+2. **Trading Calendar — Fragile**
+   - Currently: SELECT DISTINCT trade_date FROM ohlcv_daily_qfq
+   - This only works if OHLCV data is complete for all trading days
+   - Risk: Miss a holiday sync gap → wrong calendar → signal misalignment
+   - Fix: Use tushare `trade_cal` API with explicit `is_open` flag
+
+3. **Short Selling Cost = 0**
+   - A股 margin interest ~10.6% annual, but no modeling in tracker
+   - Also: no borrow cost for hard-to-borrow small caps
+   - Fix: Add daily margin interest accrual on short position value
+
+### Important Gaps (Should Add) 🟡
+
+4. **Stock Screener** — no dynamic filtering by fundamentals
+5. **Factor Scoring System** — domain types exist but no scoring engine
+6. **Market Impact** — flat slippage assumption is wrong for illiquid stocks
+7. **VaR/CVaR** — domain types exist but no calculation
+
+### Nice to Have 🟢
+- Strategy hot-swapping (partial — registry exists)
+- Multiple strategy portfolio
+- Real-time paper trading
+- Broker API (Futu/Tiger/Snowball)
+
+## Recommended Actions (Priority Order)
+
+1. **[P0] Fix T+1 settlement** — add buyDate tracking to Position, enforce settlement rule
+2. **[P0] Fix trading calendar** — add trading_calendar table, use trade_cal API
+3. **[P1] Add short selling cost model** — margin interest rate
+4. **[P1] Build stock screener** — filter by PE/PB/ROE/volume
+5. **[P1] Build factor scoring** — normalized z-score composite
+6. **[P2] Implement VaR/CVaR calculation**
+7. **[P2] Add market impact model**
+
+## Files Reviewed
+- `/Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/engine.go` — backtest loop, calendar integration
+- `/Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/tracker.go` — trade execution, slippage, commission
+- `/Users/ruoxi/longshaosWorld/quant-trading/pkg/data/tushare.go` — data fetching (qfq, fundamentals)
+- `/Users/ruoxi/longshaosWorld/quant-trading/pkg/risk/manager.go` — position sizing, regime detection
+- `/Users/ruoxi/longshaosWorld/quant-trading/pkg/risk/stoploss.go` — ATR-based stops
+- `/Users/ruoxi/longshaosWorld/quant-trading/pkg/risk/volatility.go` — volatility targeting
+- `/Users/ruoxi/longshaosWorld/quant-trading/pkg/domain/types.go` — domain types
+- `/Users/ruoxi/longshaosWorld/quant-trading/pkg/storage/postgres.go` — GetTradingDays implementation
+- `/Users/ruoxi/longshaosWorld/quant-trading/cmd/data/main.go` — trading calendar handler
+- `/Users/ruoxi/longshaosWorld/quant-trading/ROADMAP.md` — existing roadmap
+
+## Output Files
+- `/tmp/roadmap_update.md` — detailed findings + recommended roadmap changes
+- `/tmp/roadmap_summary.txt` — this summary
+
+## Git Status
+- Did NOT modify the existing ROADMAP.md — recommendations are in /tmp/roadmap_update.md
+- Recommend updating ROADMAP.md with new Phase 1.5: "Data Quality" for T+1, calendar, and short selling cost
