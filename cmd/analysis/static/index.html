@@ -264,8 +264,9 @@ async function showResults(d, stocks) {
   await drawEquity(d.portfolio_values, d.initial_capital || 1000000);
 
   // K-line - derive symbol from trades if stock_pool not available
-  const sdRaw = (d.start_date || '').split('T')[0];
-  const edRaw = (d.end_date || '').split('T')[0];
+  // Fall back to form inputs for date inputs (for historical backtests where d.start_date may be missing)
+  const sdRaw = (d.start_date || $('s-start').value || '').split('T')[0];
+  const edRaw = (d.end_date || $('s-end').value || '').split('T')[0];
   const symbol = (stocks && stocks.length > 0) ? stocks[0]
                : (d.trades && d.trades.length > 0) ? d.trades[0].symbol : null;
   if (symbol) {
