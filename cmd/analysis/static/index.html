@@ -175,8 +175,6 @@
 
 <!-- Load Chart.js first -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<!-- Financial chart plugin for candlestick -->
-<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
 <!-- Date adapter -->
 <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
@@ -269,11 +267,13 @@ async function showResults(d, stocks) {
   // Equity curve
   await drawEquity(d.portfolio_values, d.initial_capital || 1000000);
 
-  // K-line
-  if (stocks && stocks.length > 0) {
-    const sd = (d.start_date || '').split('T')[0];
-    const ed = (d.end_date || '').split('T')[0];
-    await drawKLine(stocks[0], sd, ed, d.trades);
+  // K-line - derive symbol from trades if stock_pool not available
+  const sdRaw = (d.start_date || '').split('T')[0];
+  const edRaw = (d.end_date || '').split('T')[0];
+  const symbol = (stocks && stocks.length > 0) ? stocks[0]
+               : (d.trades && d.trades.length > 0) ? d.trades[0].symbol : null;
+  if (symbol) {
+    await drawKLine(symbol, sdRaw, edRaw, d.trades);
   }
 
   // Trades table
@@ -332,15 +332,15 @@ async function drawEquity(pv, initCap) {
   });
 }
 
-// ─── K-Line Chart ─────────────────────────────────────────────
+// ─── K-Line Chart (Close Price + Trade Markers) ─────────────────
 async function drawKLine(symbol, startDate, endDate, trades) {
   const canvas = $('c-kline');
-  
+
   // Fetch OHLCV
   let ohlcv = [];
   try {
-    const s = startDate.split('T')[0].replace(/-/g, '');
-    const e = endDate.split('T')[0].replace(/-/g, '');
+    const s = startDate.replace(/-/g, '');
+    const e = endDate.replace(/-/g, '');
     const r = await fetch(API + '/ohlcv/' + symbol + '?start_date=' + s + '&end_date=' + e);
     if (r.ok) {
       const data = await r.json();
@@ -360,83 +360,125 @@ async function drawKLine(symbol, startDate, endDate, trades) {
     return;
   }
 
-  const candleData = ohlcv.map(d => ({
-    x: new Date(d.date),
-    o: d.open, h: d.high, l: d.low, c: d.close
-  }));
+  const labels = ohlcv.map(d => new Date(d.date));
+  const closes = ohlcv.map(d => d.close);
+  const highs = ohlcv.map(d => d.high);
+  const lows = ohlcv.map(d => d.low);
 
-  // Trade markers
-  const tradeAnnotations = {};
+  // Build trade price map: timestamp -> price for markers
+  const tradePrices = {};
   (trades || []).forEach(t => {
     if (!t.timestamp) return;
-    const x = new Date(t.timestamp).getTime();
-    const color = t.direction === 'long' ? '#34d399' : t.direction === 'short' ? '#f87171' : '#60a5fa';
-    const label = t.direction === 'long' ? '▲' : t.direction === 'short' ? '▼' : '●';
-    const key = 't' + Math.random().toString(36).slice(2);
-    tradeAnnotations[key] = {
-      type: 'line',
-      xMin: x, xMax: x,
-      borderColor: color, borderWidth: 1.2,
-      borderDash: [3, 2],
-      label: { display: true, content: label, color, font: { size: 11, weight: 'bold' }, position: 'start' }
-    };
+    const key = new Date(t.timestamp).getTime();
+    tradePrices[key] = { price: t.price, direction: t.direction };
   });
 
-  const plugin = {
-    id: 'tradeAnnotations',
+  // Determine color based on overall trend
+  const trendUp = closes[closes.length - 1] >= closes[0];
+  const lineColor = trendUp ? '#34d399' : '#f87171';
+
+  const tradeMarkerPlugin = {
+    id: 'tradeMarkers',
     afterDraw(chart) {
       const ctx2 = chart.ctx;
       const xAxis = chart.scales.x;
       const yAxis = chart.scales.y;
       (trades || []).forEach(t => {
         if (!t.timestamp) return;
-        const x = xAxis.getPixelForValue(new Date(t.timestamp).getTime());
+        const xVal = new Date(t.timestamp).getTime();
+        const x = xAxis.getPixelForValue(xVal);
         if (x < xAxis.left || x > xAxis.right) return;
+        // Find the close price at that date for y placement
+        const dateStr = t.timestamp.split('T')[0];
+        const ohlcvRow = ohlcv.find(d => d.date && d.date.startsWith(dateStr));
+        let y;
+        if (ohlcvRow) {
+          y = yAxis.getPixelForValue(ohlcvRow.close);
+        } else {
+          y = yAxis.top + 20;
+        }
         const color = t.direction === 'long' ? '#34d399' : t.direction === 'short' ? '#f87171' : '#60a5fa';
         const label = t.direction === 'long' ? '▲' : t.direction === 'short' ? '▼' : '●';
         ctx2.fillStyle = color;
-        ctx2.font = 'bold 10px sans-serif';
-        ctx2.fillText(label, x + 2, yAxis.top + 12);
+        ctx2.font = 'bold 12px sans-serif';
+        ctx2.fillText(label, x - 5, y - 4);
       });
     }
   };
 
   try {
     klChart = new Chart(ctx, {
-      type: 'bar',
+      type: 'line',
       data: {
-        datasets: [{
-          label: symbol,
-          data: candleData.map(d => ({ x: d.x, y: [d.o, d.h, d.l, d.c] })),
-          // Candlestick via bar chart with ohlc format
-          backgroundColor: candleData.map(d => d.c >= d.o ? 'rgba(52,211,153,0.8)' : 'rgba(248,113,113,0.8)'),
-          borderColor: candleData.map(d => d.c >= d.o ? '#34d399' : '#f87171'),
-          borderWidth: 1,
-        }]
+        labels,
+        datasets: [
+          {
+            label: '收盘价',
+            data: closes,
+            borderColor: lineColor,
+            backgroundColor: trendUp ? 'rgba(52,211,153,0.06)' : 'rgba(248,113,113,0.06)',
+            fill: true,
+            tension: 0.1,
+            pointRadius: 0,
+            borderWidth: 1.5,
+            order: 2,
+          },
+          {
+            label: '高低区间',
+            data: highs.map((h, i) => ({ x: labels[i], y: [lows[i], h] })),
+            borderColor: 'rgba(148,163,184,0.3)',
+            backgroundColor: 'transparent',
+            borderWidth: 1,
+            pointRadius: 0,
+            showLine: false,
+            order: 3,
+          }
+        ]
       },
       options: {
         responsive: false,
         maintainAspectRatio: false,
         animation: false,
         interaction: { intersect: false, mode: 'index' },
-        plugins: { legend: { display: false }, tooltip: {
-          backgroundColor: '#1a1f2e',
-          borderColor: '#2d3748',
-          borderWidth: 1,
-          callbacks: {
-            label: ctx => {
-              const d = candleData[ctx.dataIndex];
-              return ['开: ¥' + d.o.toFixed(2), '高: ¥' + d.h.toFixed(2), '低: ¥' + d.l.toFixed(2), '收: ¥' + d.c.toFixed(2)];
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#1a1f2e',
+            borderColor: '#2d3748',
+            borderWidth: 1,
+            callbacks: {
+              title: ctx => {
+                const d = ohlcv[ctx[0].dataIndex];
+                return d ? d.date.split('T')[0] : '';
+              },
+              label: ctx => {
+                if (ctx.datasetIndex === 1) return null;
+                const d = ohlcv[ctx.dataIndex];
+                if (!d) return '';
+                return [
+                  '收: ¥' + d.close.toFixed(2),
+                  '开: ¥' + d.open.toFixed(2),
+                  '高: ¥' + d.high.toFixed(2),
+                  '低: ¥' + d.low.toFixed(2),
+                ];
+              }
             }
           }
-        }},
+        },
         scales: {
-          x: { type: 'time', grid: { color: '#1f2937' }, time: { unit: 'day', displayFormats: { day: 'MM/dd' } },
-            ticks: { color: '#475569', maxTicksLimit: 6, font: { size: 9 } } },
-          y: { grid: { color: '#1f2937' }, ticks: { color: '#475569', font: { size: 9 }, callback: v => '¥' + v.toFixed(2) } }
+          x: {
+            type: 'time',
+            grid: { color: '#1f2937' },
+            time: { unit: 'day', displayFormats: { day: 'MM/dd' } },
+            ticks: { color: '#475569', maxTicksLimit: 6, font: { size: 9 } }
+          },
+          y: {
+            grid: { color: '#1f2937' },
+            ticks: { color: '#475569', font: { size: 9 }, callback: v => '¥' + v.toFixed(2) }
+          }
         }
       },
-      plugins: [plugin]
+      plugins: [tradeMarkerPlugin]
     });
   } catch (e) {
     console.error('K-line chart error', e);
