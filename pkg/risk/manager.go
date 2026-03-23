@@ -91,7 +91,7 @@ func NewRiskManager(cfg RiskManagerConfig, logger zerolog.Logger) (*RiskManager,
 
 // CalculatePosition calculates the appropriate position size for a signal.
 func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Signal, portfolio *domain.Portfolio, regime *domain.MarketRegime) (domain.PositionSize, error) {
-	rm.logger.Info().
+	rm.logger.Debug().
 		Str("symbol", signal.Symbol).
 		Str("direction", string(signal.Direction)).
 		Float64("strength", signal.Strength).
@@ -140,7 +140,7 @@ func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Sign
 	// Calculate risk score (higher strength = lower risk)
 	riskScore := 1.0 - signal.CompositeScore
 
-	rm.logger.Info().
+	rm.logger.Debug().
 		Str("symbol", signal.Symbol).
 		Float64("weight", weight).
 		Float64("size", size).
@@ -186,7 +186,7 @@ func (rm *RiskManager) calculateBaseWeightFromRegime(regime *domain.MarketRegime
 
 // DetectRegime detects the current market regime from OHLCV data.
 func (rm *RiskManager) DetectRegime(ctx context.Context, ohlcv []domain.OHLCV) (*domain.MarketRegime, error) {
-	rm.logger.Info().
+	rm.logger.Debug().
 		Int("data_points", len(ohlcv)).
 		Msg("detecting market regime")
 
@@ -204,7 +204,7 @@ func (rm *RiskManager) DetectRegime(ctx context.Context, ohlcv []domain.OHLCV) (
 		return nil, err
 	}
 
-	rm.logger.Info().
+	rm.logger.Debug().
 		Str("trend", regime.Trend).
 		Str("volatility", regime.Volatility).
 		Float64("sentiment", regime.Sentiment).
@@ -215,7 +215,7 @@ func (rm *RiskManager) DetectRegime(ctx context.Context, ohlcv []domain.OHLCV) (
 
 // CheckStopLoss checks positions for stop loss and take profit triggers.
 func (rm *RiskManager) CheckStopLoss(ctx context.Context, positions []domain.Position, prices map[string]float64) ([]domain.StopLossEvent, error) {
-	rm.logger.Info().
+	rm.logger.Debug().
 		Int("positions", len(positions)).
 		Int("prices", len(prices)).
 		Msg("checking stop losses")
@@ -250,7 +250,7 @@ func (rm *RiskManager) CheckStopLoss(ctx context.Context, positions []domain.Pos
 		return nil, err
 	}
 
-	rm.logger.Info().
+	rm.logger.Debug().
 		Int("events", len(events)).
 		Msg("stop loss check completed")
 
