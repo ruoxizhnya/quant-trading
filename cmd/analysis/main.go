@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -156,6 +157,31 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.
 			"service":   "analysis-service",
 			"timestamp": time.Now().Format(time.RFC3339),
 		})
+	})
+
+	// OHLCV proxy for UI (avoids CORS issues)
+	router.GET("/ohlcv/:symbol", func(c *gin.Context) {
+		symbol := c.Param("symbol")
+		startDate := c.Query("start_date")
+		endDate := c.Query("end_date")
+		if startDate == "" || endDate == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date required (YYYYMMDD)"})
+			return
+		}
+		// Proxy to data service
+		dataURL := fmt.Sprintf("http://data-service:8081/ohlcv/%s?start_date=%s&end_date=%s", symbol, startDate, endDate)
+		resp, err := http.Get(dataURL)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "data service unavailable: " + err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		var result map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "invalid response from data service"})
+			return
+		}
+		c.JSON(resp.StatusCode, result)
 	})
 
 	// Backtest endpoints

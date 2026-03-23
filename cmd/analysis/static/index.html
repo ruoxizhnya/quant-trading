@@ -8,60 +8,73 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f1419; color: #e7e9ea; min-height: 100vh; }
   
-  .header { background: #1a1f2e; border-bottom: 1px solid #2d3748; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+  .header { background: #1a1f2e; border-bottom: 1px solid #2d3748; padding: 14px 24px; display: flex; align-items: center; gap: 12px; }
   .logo { font-size: 24px; } .logo-text { font-size: 18px; font-weight: 600; color: #60a5fa; }
+  .header-links { margin-left: auto; display: flex; gap: 16px; }
+  .header-links a { color: #94a3b8; text-decoration: none; font-size: 13px; }
+  .header-links a:hover { color: #60a5fa; }
   
-  .main { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 65px); }
+  .main { display: grid; grid-template-columns: 300px 1fr; min-height: calc(100vh - 57px); }
   
-  .sidebar { background: #1a1f2e; border-right: 1px solid #2d3748; padding: 20px; overflow-y: auto; }
-  .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: #60a5fa; margin: 20px 0 12px; }
+  .sidebar { background: #1a1f2e; border-right: 1px solid #2d3748; padding: 16px; overflow-y: auto; }
+  .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: #60a5fa; margin: 16px 0 10px; }
   
-  .form-group { margin-bottom: 16px; }
-  label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 6px; }
-  input, select { width: 100%; padding: 10px 12px; background: #0f1419; border: 1px solid #2d3748; border-radius: 8px; color: #e7e9ea; font-size: 14px; }
+  .form-group { margin-bottom: 12px; }
+  label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 8px 10px; background: #0f1419; border: 1px solid #2d3748; border-radius: 6px; color: #e7e9ea; font-size: 13px; }
   input:focus, select:focus { outline: none; border-color: #60a5fa; }
   
-  .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .btn { width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
   .btn-primary { background: #60a5fa; color: #0f1419; } .btn-primary:hover { background: #93c5fd; }
   .btn-primary:disabled { background: #374151; color: #6b7280; cursor: not-allowed; }
   
-  .content { padding: 24px; overflow-y: auto; }
+  .content { padding: 20px; overflow-y: auto; }
   
-  .card { background: #1a1f2e; border: 1px solid #2d3748; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
-  .card-title { font-size: 14px; font-weight: 600; color: #94a3b8; margin-bottom: 16px; }
+  .card { background: #1a1f2e; border: 1px solid #2d3748; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .card-title { font-size: 13px; font-weight: 600; color: #94a3b8; }
+  .card-tabs { display: flex; gap: 4px; }
+  .tab { padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; background: #0f1419; color: #64748b; border: none; }
+  .tab.active { background: #60a5fa; color: #0f1419; }
   
-  .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
-  .metric { background: #0f1419; border-radius: 8px; padding: 16px; text-align: center; }
-  .metric-value { font-size: 24px; font-weight: 700; color: #60a5fa; }
+  .metrics-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .metric { background: #0f1419; border-radius: 6px; padding: 12px 8px; text-align: center; }
+  .metric-value { font-size: 20px; font-weight: 700; color: #60a5fa; }
   .metric-value.positive { color: #34d399; }
   .metric-value.negative { color: #f87171; }
-  .metric-label { font-size: 11px; color: #64748b; margin-top: 4px; text-transform: uppercase; }
+  .metric-label { font-size: 10px; color: #64748b; margin-top: 3px; text-transform: uppercase; }
   
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 12px; border-bottom: 1px solid #2d3748; font-size: 13px; }
-  th { color: #64748b; font-weight: 500; text-transform: uppercase; font-size: 11px; }
-  tr:hover { background: #1f2937; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1f2937; font-size: 12px; }
+  th { color: #475569; font-weight: 500; text-transform: uppercase; font-size: 10px; }
+  tbody tr:hover { background: #1f2937; }
+  .symbol-cell { color: #60a5fa; font-weight: 600; }
   
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
   .badge-long { background: #064e3b; color: #34d399; }
   .badge-short { background: #7f1d1d; color: #f87171; }
   .badge-close { background: #1e3a5f; color: #60a5fa; }
   
-  #equity-chart { width: 100%; height: 300px; }
+  .chart-container { position: relative; height: 280px; }
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   
-  .status { display: flex; align-items: center; gap: 8px; padding: 12px; background: #0f1419; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; }
+  .empty-state { text-align: center; padding: 80px 20px; color: #475569; }
+  .empty-icon { font-size: 56px; margin-bottom: 16px; }
+  
+  .status { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #1a1f2e; border: 1px solid #2d3748; border-radius: 8px; margin-bottom: 16px; font-size: 12px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; flex-shrink: 0; }
   .status-dot.loading { background: #fbbf24; animation: pulse 1s infinite; }
-  .status-dot.error { background: #f87171; }
   
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
   
-  .empty-state { text-align: center; padding: 60px 20px; color: #64748b; }
-  .empty-state-icon { font-size: 48px; margin-bottom: 16px; }
-  
-  .toast { position: fixed; bottom: 24px; right: 24px; background: #1a1f2e; border: 1px solid #2d3748; border-radius: 12px; padding: 16px 20px; font-size: 14px; z-index: 1000; transform: translateY(100px); opacity: 0; transition: all 0.3s; }
+  .toast { position: fixed; bottom: 20px; right: 20px; background: #1a1f2e; border: 1px solid #2d3748; border-radius: 8px; padding: 12px 18px; font-size: 13px; z-index: 1000; transform: translateY(80px); opacity: 0; transition: all 0.3s; }
   .toast.show { transform: translateY(0); opacity: 1; }
   .toast.error { border-color: #f87171; }
+  
+  .hist-list { font-size: 12px; }
+  .hist-item { padding: 8px 0; border-bottom: 1px solid #1f2937; cursor: pointer; }
+  .hist-item:hover { color: #60a5fa; }
+  .hist-date { color: #475569; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -69,6 +82,9 @@
 <div class="header">
   <span class="logo">📈</span>
   <span class="logo-text">Quant Lab</span>
+  <div class="header-links">
+    <a href="http://localhost:8085" onclick="location.reload(); return false;">回测</a>
+  </div>
 </div>
 
 <div class="main">
@@ -79,13 +95,13 @@
       <label>策略</label>
       <select id="strategy">
         <option value="momentum">动量策略 (Momentum)</option>
-        <option value="value_momentum">价值动量 (Value Momentum)</option>
+        <option value="value_momentum">价值动量</option>
       </select>
     </div>
     
     <div class="form-group">
-      <label>股票池（逗号分隔）</label>
-      <input id="stock-pool" value="600000.SH, 000001.SZ" placeholder="600000.SH, 000001.SZ">
+      <label>股票池</label>
+      <input id="stock-pool" value="600000.SH" placeholder="600000.SH">
     </div>
     
     <div class="form-group">
@@ -118,7 +134,7 @@
     <button class="btn btn-primary" id="run-btn" onclick="runBacktest()">🚀 运行回测</button>
     
     <div class="section-title">最近回测</div>
-    <div id="history-list" style="font-size: 12px; color: #64748b;"></div>
+    <div id="history-list" class="hist-list"></div>
   </div>
   
   <div class="content">
@@ -128,61 +144,78 @@
     </div>
     
     <div id="empty-state" class="empty-state">
-      <div class="empty-state-icon">📊</div>
-      <div>配置回测参数，点击"运行回测"开始</div>
+      <div class="empty-icon">📊</div>
+      <div>配置参数，点击「运行回测」开始</div>
     </div>
     
     <div id="results" style="display: none;">
+      <!-- Metrics -->
       <div class="card">
-        <div class="card-title">📈 收益概览</div>
         <div class="metrics-grid">
           <div class="metric">
-            <div class="metric-value" id="total-return">-</div>
+            <div class="metric-value" id="m-total-return">-</div>
             <div class="metric-label">总收益率</div>
           </div>
           <div class="metric">
-            <div class="metric-value" id="annual-return">-</div>
-            <div class="metric-label">年化收益率</div>
+            <div class="metric-value" id="m-annual-return">-</div>
+            <div class="metric-label">年化收益</div>
           </div>
           <div class="metric">
-            <div class="metric-value" id="sharpe">-</div>
+            <div class="metric-value" id="m-sharpe">-</div>
             <div class="metric-label">Sharpe</div>
           </div>
           <div class="metric">
-            <div class="metric-value negative" id="max-dd">-</div>
+            <div class="metric-value negative" id="m-maxdd">-</div>
             <div class="metric-label">最大回撤</div>
           </div>
           <div class="metric">
-            <div class="metric-value" id="calmar">-</div>
+            <div class="metric-value" id="m-calmar">-</div>
             <div class="metric-label">Calmar</div>
           </div>
           <div class="metric">
-            <div class="metric-value" id="total-trades">-</div>
+            <div class="metric-value" id="m-trades">-</div>
             <div class="metric-label">交易次数</div>
           </div>
         </div>
       </div>
       
-      <div class="card">
-        <div class="card-title">📉 净值曲线</div>
-        <canvas id="equity-chart"></canvas>
+      <!-- Charts -->
+      <div class="chart-row">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📉 净值曲线</div>
+          </div>
+          <div class="chart-container"><canvas id="equity-canvas"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">🕯️ K线 + 交易</div>
+          </div>
+          <div class="chart-container"><canvas id="kline-canvas"></canvas></div>
+        </div>
       </div>
       
+      <!-- Trades -->
       <div class="card">
-        <div class="card-title">📋 交易记录</div>
-        <table>
-          <thead>
-            <tr>
-              <th>日期</th>
-              <th>标的</th>
-              <th>方向</th>
-              <th>数量</th>
-              <th>价格</th>
-              <th>盈亏</th>
-            </tr>
-          </thead>
-          <tbody id="trades-body"></tbody>
-        </table>
+        <div class="card-header">
+          <div class="card-title">📋 交易记录</div>
+        </div>
+        <div style="max-height: 320px; overflow-y: auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>标的</th>
+                <th>方向</th>
+                <th>数量</th>
+                <th>价格</th>
+                <th>盈亏</th>
+                <th>收益率</th>
+              </tr>
+            </thead>
+            <tbody id="trades-body"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -190,10 +223,15 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
 <script>
 const API = 'http://localhost:8085';
+let equityChart = null;
+let klineChart = null;
+let currentResult = null;
 
-function showToast(msg, isError = false) {
+function toast(msg, isError = false) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'toast' + (isError ? ' error' : '');
@@ -201,30 +239,29 @@ function showToast(msg, isError = false) {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-function fmt(n, dec = 2) {
-  if (n === null || n === undefined || isNaN(n)) return '-';
-  return (n >= 0 ? '+' : '') + (n * 100).toFixed(dec) + '%';
+function fmt(n) {
+  if (n == null || isNaN(n)) return '-';
+  return (n >= 0 ? '+' : '') + (n * 100).toFixed(2) + '%';
 }
 
-function fmtNum(n, dec = 0) {
-  if (n === null || n === undefined || isNaN(n)) return '-';
-  return n.toFixed(dec);
+function fmtNum(n, d = 0) {
+  if (n == null || isNaN(n)) return '-';
+  return n.toFixed(d);
+}
+
+function parseDate(s) {
+  if (!s) return null;
+  return new Date(s + 'T00:00:00');
 }
 
 async function runBacktest() {
   const btn = document.getElementById('run-btn');
-  const status = document.getElementById('status-bar');
-  const empty = document.getElementById('empty-state');
-  const results = document.getElementById('results');
-  
   btn.disabled = true;
-  status.style.display = 'flex';
-  empty.style.display = 'none';
-  results.style.display = 'none';
-  document.getElementById('status-text').textContent = '运行回测中...';
-  
+  document.getElementById('status-bar').style.display = 'flex';
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('results').style.display = 'none';
+
   const stocks = document.getElementById('stock-pool').value.split(',').map(s => s.trim()).filter(Boolean);
-  
   const req = {
     strategy: document.getElementById('strategy').value,
     stock_pool: stocks,
@@ -234,221 +271,338 @@ async function runBacktest() {
     commission_rate: parseFloat(document.getElementById('commission').value),
     slippage_rate: parseFloat(document.getElementById('slippage').value)
   };
-  
+
   try {
+    document.getElementById('status-text').textContent = '运行回测中...';
     const r = await fetch(API + '/backtest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req)
     });
-    
-    if (!r.ok) throw new Error('回测请求失败: ' + r.status);
-    const data = await r.json();
-    
-    document.getElementById('status-text').textContent = '加载结果...';
-    
-    // Poll for completion
-    let result = data;
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    let result = await r.json();
+
+    // Poll
     while (result.status === 'running' || result.status === 'pending') {
       await new Promise(r => setTimeout(r, 500));
       const r2 = await fetch(API + '/backtest/' + result.id + '/report');
       result = await r2.json();
     }
-    
     if (result.status === 'failed') throw new Error('回测失败');
-    
-    displayResults(result);
-    addToHistory(result.id, req);
-    
+
+    currentResult = result;
+    currentResult.backtestId = result.id || window.currentId;
+    displayAll(result, stocks);
+    addHistory(result.id || result.backtest_id, req);
+
   } catch (e) {
-    showToast(e.message, true);
-    status.style.display = 'none';
-    empty.style.display = 'block';
+    toast(e.message, true);
+    document.getElementById('status-bar').style.display = 'none';
+    document.getElementById('empty-state').style.display = 'block';
   } finally {
     btn.disabled = false;
-    setTimeout(() => status.style.display = 'none', 500);
+    setTimeout(() => document.getElementById('status-bar').style.display = 'none', 500);
   }
 }
 
-function displayResults(r) {
+async function displayAll(r, stocks) {
   document.getElementById('results').style.display = 'block';
-  
+
+  // Metrics
   const ret = r.total_return || 0;
-  document.getElementById('total-return').textContent = fmt(ret);
-  document.getElementById('total-return').className = 'metric-value ' + (ret >= 0 ? 'positive' : 'negative');
-  
-  document.getElementById('annual-return').textContent = fmt(r.annual_return);
-  document.getElementById('sharpe').textContent = fmtNum(r.sharpe_ratio, 2);
-  document.getElementById('max-dd').textContent = fmt(r.max_drawdown);
-  document.getElementById('calmar').textContent = fmtNum(r.calmar_ratio, 2);
-  document.getElementById('total-trades').textContent = r.total_trades || 0;
-  
-  drawEquityCurve(r.portfolio_values);
-  loadTrades(r.backtest_id || window.currentBacktestId);
-}
+  document.getElementById('m-total-return').textContent = fmt(ret);
+  document.getElementById('m-total-return').className = 'metric-value ' + (ret >= 0 ? 'positive' : 'negative');
+  document.getElementById('m-annual-return').textContent = fmt(r.annual_return);
+  document.getElementById('m-sharpe').textContent = fmtNum(r.sharpe_ratio, 2);
+  document.getElementById('m-maxdd').textContent = fmt(r.max_drawdown);
+  document.getElementById('m-calmar').textContent = fmtNum(r.calmar_ratio, 2);
+  document.getElementById('m-trades').textContent = r.total_trades || 0;
 
-async function loadTrades(backtestId) {
-  if (!backtestId) return;
-  window.currentBacktestId = backtestId;
-  
-  try {
-    const r = await fetch(API + '/backtest/' + backtestId + '/trades');
-    const data = await r.json();
-    
-    const tbody = document.getElementById('trades-body');
-    if (!data.trades || data.trades.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#64748b">暂无交易记录</td></tr>';
-      return;
-    }
-    
-    tbody.innerHTML = data.trades.slice(0, 50).map(t => {
-      const dir = t.direction;
-      const badgeClass = dir === 'long' ? 'badge-long' : dir === 'short' ? 'badge-short' : 'badge-close';
-      const badgeText = dir === 'long' ? '买入' : dir === 'short' ? '卖出' : '平仓';
-      return `<tr>
-        <td>${t.timestamp ? t.timestamp.split('T')[0] : '-'}</td>
-        <td>${t.symbol}</td>
-        <td><span class="badge ${badgeClass}">${badgeText}</span></td>
-        <td>${fmtNum(t.quantity, 0)}</td>
-        <td>¥${fmtNum(t.price, 2)}</td>
-        <td>${t.pnl !== undefined ? fmt(t.pnl) : '-'}</td>
-      </tr>`;
-    }).join('');
-  } catch (e) {
-    console.error('Failed to load trades', e);
+  // Equity curve
+  await drawEquityCurve(r.portfolio_values, r.initial_capital);
+
+  // K-line (fetch OHLCV for first stock in pool)
+  if (stocks && stocks.length > 0) {
+    await drawKLineWithTrades(stocks[0], r.start_date, r.end_date, r.trades || []);
   }
+
+  // Trades table
+  renderTrades(r.trades || []);
 }
 
-function drawEquityCurve(values) {
-  const canvas = document.getElementById('equity-chart');
+async function drawEquityCurve(pv, initCap) {
+  const canvas = document.getElementById('equity-canvas');
+  if (!pv || pv.length === 0) return;
+
+  const labels = pv.map(v => v.date ? v.date.split('T')[0] : v.date);
+  const values = pv.map(v => v.total_value);
+  const startVal = initCap || values[0];
+
+  if (equityChart) { equityChart.destroy(); equityChart = null; }
+
+  const pctChange = values.map(v => (v - startVal) / startVal);
+  const minP = Math.min(...pctChange);
+  const maxP = Math.max(...pctChange);
+  const range = Math.max(maxP - minP, 0.001);
+
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
-  
   canvas.width = canvas.offsetWidth * dpr;
   canvas.height = canvas.offsetHeight * dpr;
   ctx.scale(dpr, dpr);
-  
-  const w = canvas.offsetWidth;
-  const h = canvas.offsetHeight;
-  const pad = 40;
-  
-  if (!values || values.length === 0) {
-    ctx.fillStyle = '#64748b';
-    ctx.font = '14px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('暂无数据', w/2, h/2);
-    return;
-  }
-  
-  const vals = values.map(v => v.total_value);
-  const minV = Math.min(...vals);
-  const maxV = Math.max(...vals);
-  const range = maxV - minV || 1;
-  
-  const startCap = values[0].total_value;
-  const pct = vals.map(v => (v - startCap) / startCap);
-  const minP = Math.min(...pct);
-  const maxP = Math.max(...pct);
-  const pctRange = Math.max(maxP - minP, 0.01);
-  
-  ctx.clearRect(0, 0, w, h);
-  
-  // Grid lines
-  ctx.strokeStyle = '#2d3748';
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = pad + (h - 2*pad) * i / 4;
-    ctx.beginPath();
-    ctx.moveTo(pad, y);
-    ctx.lineTo(w - pad, y);
-    ctx.stroke();
-    
-    const val = maxV - range * i / 4;
-    ctx.fillStyle = '#64748b';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText('¥' + (val/10000).toFixed(1) + 'w', pad - 5, y + 3);
-  }
-  
-  // Equity line
-  const isPositive = pct[pct.length-1] >= 0;
-  ctx.strokeStyle = isPositive ? '#34d399' : '#f87171';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  
-  pct.forEach((p, i) => {
-    const x = pad + (w - 2*pad) * i / (pct.length - 1);
-    const y = pad + (h - 2*pad) * (1 - (p - minP) / pctRange);
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+
+  equityChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: '净值',
+        data: pctChange,
+        borderColor: pctChange[pctChange.length-1] >= 0 ? '#34d399' : '#f87171',
+        backgroundColor: pctChange[pctChange.length-1] >= 0 ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)',
+        fill: true,
+        tension: 0.1,
+        pointRadius: 0,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { intersect: false, mode: 'index' },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1f2e',
+          borderColor: '#2d3748',
+          borderWidth: 1,
+          callbacks: {
+            label: ctx => {
+              const v = ctx.raw;
+              const dollarVal = startVal * (1 + v);
+              return ' ' + (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%  (¥' + dollarVal.toFixed(0) + ')';
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: '#1f2937' },
+          ticks: { color: '#475569', maxTicksLimit: 8, font: { size: 10 } },
+        },
+        y: {
+          grid: { color: '#1f2937' },
+          ticks: {
+            color: '#475569',
+            font: { size: 10 },
+            callback: v => (v * 100).toFixed(1) + '%'
+          }
+        }
+      }
+    }
   });
-  ctx.stroke();
-  
-  // Area fill
-  ctx.lineTo(pad + (w - 2*pad), pad + (h - 2*pad));
-  ctx.lineTo(pad, pad + (h - 2*pad));
-  ctx.closePath();
-  ctx.fillStyle = isPositive ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)';
-  ctx.fill();
-  
-  // Zero line
-  const zeroY = pad + (h - 2*pad) * (1 - (0 - minP) / pctRange);
-  ctx.strokeStyle = '#475569';
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath();
-  ctx.moveTo(pad, zeroY);
-  ctx.lineTo(w - pad, zeroY);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  
-  // Labels
-  ctx.fillStyle = '#64748b';
-  ctx.font = '10px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText(values[0].date ? values[0].date.split('T')[0] : '', pad, h - 10);
-  ctx.textAlign = 'right';
-  ctx.fillText(values[values.length-1].date ? values[values.length-1].date.split('T')[0] : '', w - pad, h - 10);
 }
 
-let history = JSON.parse(localStorage.getItem('backtest_history') || '[]');
+async function drawKLineWithTrades(symbol, startDate, endDate, trades) {
+  const canvas = document.getElementById('kline-canvas');
+  
+  // Fetch OHLCV data
+  let ohlcv = [];
+  try {
+    const s = startDate.replace(/-/g, '');
+    const e = endDate.replace(/-/g, '');
+    const r = await fetch(`${API}/ohlcv/${symbol}?start_date=${s}&end_date=${e}`);
+    if (r.ok) {
+      const d = await r.json();
+      ohlcv = d.ohlcv || [];
+    }
+  } catch (e) { console.error('Failed to load OHLCV', e); }
 
-function addToHistory(id, req) {
-  const item = { id, req, time: new Date().toISOString() };
-  history.unshift(item);
+  if (ohlcv.length === 0) {
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#475569';
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('K线数据暂不可用', canvas.offsetWidth/2, canvas.offsetHeight/2);
+    return;
+  }
+
+  // Format for Chart.js financial
+  const candlestickData = ohlcv.map(d => ({
+    x: new Date(d.date).getTime(),
+    o: d.open, h: d.high, l: d.low, c: d.close
+  }));
+
+  // Match trades to OHLCV dates
+  const tradeMap = {};
+  (trades || []).forEach(t => {
+    if (!t.timestamp) return;
+    const dateStr = t.timestamp.split('T')[0];
+    if (!tradeMap[dateStr]) tradeMap[dateStr] = [];
+    tradeMap[dateStr].push(t);
+  });
+
+  // Build trade annotations
+  const longAnnotations = {};
+  const shortAnnotations = {};
+  let annIdx = 0;
+  Object.entries(tradeMap).forEach(([date, ts]) => {
+    ts.forEach(t => {
+      const d = new Date(date).getTime();
+      const color = t.direction === 'long' ? '#34d399' : t.direction === 'short' ? '#f87171' : '#60a5fa';
+      const key = 'trade' + annIdx++;
+      const ann = {
+        type: 'line',
+        xMin: d, xMax: d,
+        borderColor: color,
+        borderWidth: 1.5,
+        borderDash: [3, 3],
+        label: {
+          display: true,
+          content: t.direction === 'long' ? '▲' : t.direction === 'short' ? '▼' : '●',
+          color: color,
+          font: { size: 12, weight: 'bold' },
+          position: 'start'
+        }
+      };
+      if (t.direction === 'long') longAnnotations[key] = ann;
+      else if (t.direction === 'short') shortAnnotations[key] = ann;
+    });
+  });
+
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.offsetWidth * dpr;
+  canvas.height = canvas.offsetHeight * dpr;
+  ctx.scale(dpr, dpr);
+
+  if (klineChart) { klineChart.destroy(); klineChart = null; }
+
+  const { CandlestickController, CandlestickElement, OhlcController, OhlcElement } = ChartJsFinancial;
+
+  if (!Chart.registry.controllers.candlestick) {
+    Chart.register(CandlestickController, CandlestickElement, OhlcController, OhlcElement);
+  }
+
+  klineChart = new Chart(ctx, {
+    type: 'candlestick',
+    data: {
+      datasets: [{
+        label: symbol,
+        data: candlestickData,
+        color: { up: '#34d399', down: '#f87171', unchanged: '#64748b' },
+        borderColor: { up: '#34d399', down: '#f87171', unchanged: '#64748b' },
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { intersect: false, mode: 'index' },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1a1f2e',
+          borderColor: '#2d3748',
+          borderWidth: 1,
+          callbacks: {
+            label: ctx => {
+              const d = candlestickData[ctx.dataIndex];
+              return [
+                '开: ' + d.o.toFixed(2),
+                '高: ' + d.h.toFixed(2),
+                '低: ' + d.l.toFixed(2),
+                '收: ' + d.c.toFixed(2),
+              ];
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'time',
+          grid: { color: '#1f2937' },
+          ticks: { color: '#475569', maxTicksLimit: 8, font: { size: 10 } },
+        },
+        y: {
+          grid: { color: '#1f2937' },
+          ticks: { color: '#475569', font: { size: 10 }, callback: v => '¥' + v.toFixed(2) }
+        }
+      }
+    }
+  });
+}
+
+function renderTrades(trades) {
+  const tbody = document.getElementById('trades-body');
+  if (!trades || trades.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#475569;padding:30px">暂无交易记录</td></tr>';
+    return;
+  }
+  tbody.innerHTML = trades.map(t => {
+    const dir = t.direction;
+    const cls = dir === 'long' ? 'badge-long' : dir === 'short' ? 'badge-short' : 'badge-close';
+    const txt = dir === 'long' ? '买入' : dir === 'short' ? '卖出' : '平仓';
+    const date = t.timestamp ? t.timestamp.split('T')[0] : '-';
+    const pnl = t.pnl !== undefined ? fmt(t.pnl) : '-';
+    const ret = t.return_rate !== undefined ? fmt(t.return_rate) : '-';
+    return `<tr>
+      <td>${date}</td>
+      <td class="symbol-cell">${t.symbol || '-'}</td>
+      <td><span class="badge ${cls}">${txt}</span></td>
+      <td>${fmtNum(t.quantity, 0)}</td>
+      <td>¥${fmtNum(t.price, 2)}</td>
+      <td style="color:${t.pnl >= 0 ? '#34d399' : '#f87171'}">${pnl}</td>
+      <td>${ret}</td>
+    </tr>`;
+  }).join('');
+}
+
+// History
+let history = JSON.parse(localStorage.getItem('qbacktest_history') || '[]');
+function addHistory(id, req) {
+  history.unshift({ id, req, time: Date.now() });
   history = history.slice(0, 10);
-  localStorage.setItem('backtest_history', JSON.stringify(history));
+  localStorage.setItem('qbacktest_history', JSON.stringify(history));
   renderHistory();
 }
 
 function renderHistory() {
   const el = document.getElementById('history-list');
   if (history.length === 0) {
-    el.innerHTML = '<div style="color:#475569;font-size:12px">暂无历史记录</div>';
+    el.innerHTML = '<div style="color:#475569;font-size:12px">暂无历史</div>';
     return;
   }
   el.innerHTML = history.map(h => {
     const d = new Date(h.time);
-    const date = d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-    const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-    return `<div style="padding:8px 0;border-bottom:1px solid #2d3748;cursor:pointer" onclick="loadHistory('${h.id}')">
-      <div style="color:#94a3b8">${h.req.strategy}</div>
-      <div style="color:#64748b;font-size:11px">${date} ${time}</div>
+    const ds = d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return `<div class="hist-item" onclick="loadHistory('${h.id}')">
+      <div>${h.req.strategy}</div>
+      <div class="hist-date">${ds}</div>
     </div>`;
   }).join('');
 }
 
 async function loadHistory(id) {
   try {
+    document.getElementById('status-text').textContent = '加载中...';
+    document.getElementById('status-bar').style.display = 'flex';
     const r = await fetch(API + '/backtest/' + id + '/report');
-    const data = await r.json();
-    displayResults(data);
-    window.currentBacktestId = id;
+    const result = await r.json();
+    if (result.error) throw new Error(result.error);
+    currentResult = result;
+    currentResult.backtestId = id;
+    const stocks = result.stock_pool || [];
+    displayAll(result, stocks);
   } catch (e) {
-    showToast('加载失败: ' + e.message, true);
+    toast('加载失败: ' + e.message, true);
+  } finally {
+    document.getElementById('status-bar').style.display = 'none';
   }
 }
 
 // Init
 renderHistory();
 </script>
+<script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
 </body>
 </html>
