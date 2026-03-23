@@ -72,7 +72,7 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
-		`CREATE TABLE IF NOT EXISTS ohlcv_daily (
+		`CREATE TABLE IF NOT EXISTS ohlcv_daily_qfq (
 			symbol VARCHAR(20) NOT NULL,
 			trade_date DATE NOT NULL,
 			open DOUBLE PRECISION NOT NULL,
@@ -111,18 +111,18 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		}
 	}
 
-	// Create TimescaleDB hypertable for ohlcv_daily
-	hypertableSQL := `SELECT create_hypertable('ohlcv_daily', 'trade_date', if_not_exists => TRUE)`
+	// Create TimescaleDB hypertable for ohlcv_daily_qfq
+	hypertableSQL := `SELECT create_hypertable('ohlcv_daily_qfq', 'trade_date', if_not_exists => TRUE)`
 	if _, err := s.pool.Exec(ctx, hypertableSQL); err != nil {
 		s.logger.Warn().Err(err).Msg("Could not create hypertable (TimescaleDB may not be available)")
 	} else {
-		s.logger.Info().Msg("TimescaleDB hypertable created/verified for ohlcv_daily")
+		s.logger.Info().Msg("TimescaleDB hypertable created/verified for ohlcv_daily_qfq")
 	}
 
 	// Create indexes
 	indexes := []string{
-		`CREATE INDEX IF NOT EXISTS idx_ohlcv_symbol ON ohlcv_daily(symbol)`,
-		`CREATE INDEX IF NOT EXISTS idx_ohlcv_trade_date ON ohlcv_daily(trade_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_ohlcv_symbol ON ohlcv_daily_qfq(symbol)`,
+		`CREATE INDEX IF NOT EXISTS idx_ohlcv_trade_date ON ohlcv_daily_qfq(trade_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_fundamentals_symbol ON fundamentals(symbol)`,
 		`CREATE INDEX IF NOT EXISTS idx_fundamentals_trade_date ON fundamentals(trade_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_stocks_exchange ON stocks(exchange)`,
@@ -138,10 +138,10 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	return nil
 }
 
-// SaveOHLCV saves or updates OHLCV data.
+// SaveOHLCV saves or updates OHLCV data to ohlcv_daily_qfq.
 func (s *PostgresStore) SaveOHLCV(ctx context.Context, ohlcv *domain.OHLCV) error {
 	query := `
-		INSERT INTO ohlcv_daily (symbol, trade_date, open, high, low, close, volume, turnover, trade_days)
+		INSERT INTO ohlcv_daily_qfq (symbol, trade_date, open, high, low, close, volume, turnover, trade_days)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (symbol, trade_date) DO UPDATE SET
 			open = EXCLUDED.open,
@@ -173,7 +173,7 @@ func (s *PostgresStore) SaveOHLCVBatch(ctx context.Context, records []*domain.OH
 	batch := &pgx.Batch{}
 	for _, o := range records {
 		batch.Queue(`
-			INSERT INTO ohlcv_daily (symbol, trade_date, open, high, low, close, volume, turnover, trade_days)
+			INSERT INTO ohlcv_daily_qfq (symbol, trade_date, open, high, low, close, volume, turnover, trade_days)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			ON CONFLICT (symbol, trade_date) DO UPDATE SET
 				open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
@@ -199,7 +199,7 @@ func (s *PostgresStore) SaveOHLCVBatch(ctx context.Context, records []*domain.OH
 func (s *PostgresStore) GetOHLCV(ctx context.Context, symbol string, startDate, endDate time.Time) ([]domain.OHLCV, error) {
 	query := `
 		SELECT symbol, trade_date, open, high, low, close, volume, turnover, trade_days
-		FROM ohlcv_daily
+		FROM ohlcv_daily_qfq
 		WHERE symbol = $1 AND trade_date >= $2 AND trade_date <= $3
 		ORDER BY trade_date ASC
 	`
@@ -228,7 +228,7 @@ func (s *PostgresStore) GetOHLCV(ctx context.Context, symbol string, startDate, 
 // GetTradingDays returns distinct trading days within a date range.
 func (s *PostgresStore) GetTradingDays(ctx context.Context, startDate, endDate time.Time) ([]time.Time, error) {
 	query := `
-		SELECT DISTINCT trade_date FROM ohlcv_daily
+		SELECT DISTINCT trade_date FROM ohlcv_daily_qfq
 		WHERE trade_date >= $1 AND trade_date <= $2
 		ORDER BY trade_date ASC
 	`
@@ -466,7 +466,7 @@ func (s *PostgresStore) GetAllStocks(ctx context.Context) ([]domain.Stock, error
 
 // HasOHLCVData checks whether we have OHLCV data for a given symbol.
 func (s *PostgresStore) HasOHLCVData(ctx context.Context, symbol string) (bool, error) {
-	query := `SELECT EXISTS(SELECT 1 FROM ohlcv_daily WHERE symbol = $1 LIMIT 1)`
+	query := `SELECT EXISTS(SELECT 1 FROM ohlcv_daily_qfq WHERE symbol = $1 LIMIT 1)`
 	var exists bool
 	if err := s.pool.QueryRow(ctx, query, symbol).Scan(&exists); err != nil {
 		return false, fmt.Errorf("failed to check OHLCV data: %w", err)
@@ -476,7 +476,7 @@ func (s *PostgresStore) HasOHLCVData(ctx context.Context, symbol string) (bool, 
 
 // GetLatestOHLCVDate returns the most recent OHLCV trade date for a symbol.
 func (s *PostgresStore) GetLatestOHLCVDate(ctx context.Context, symbol string) (time.Time, error) {
-	query := `SELECT MAX(trade_date) FROM ohlcv_daily WHERE symbol = $1`
+	query := `SELECT MAX(trade_date) FROM ohlcv_daily_qfq WHERE symbol = $1`
 	var t *time.Time
 	if err := s.pool.QueryRow(ctx, query, symbol).Scan(&t); err != nil {
 		return time.Time{}, fmt.Errorf("failed to get latest OHLCV date: %w", err)

@@ -235,15 +235,15 @@ func formatDate(s string) string {
 	return s
 }
 
-// FetchDailyOHLCV retrieves daily OHLCV data from tushare.
+// FetchDailyOHLCV retrieves daily OHLCV data from tushare using stk_factor_pro API with 前复权 (qfq) adjustment.
 func (c *TushareClient) FetchDailyOHLCV(ctx context.Context, symbol string, startDate, endDate string) ([]domain.OHLCV, error) {
 	params := map[string]interface{}{
-		"ts_code": symbol,
+		"ts_code":   symbol,
 		"start_date": formatDate(startDate),
-		"end_date": formatDate(endDate),
+		"end_date":   formatDate(endDate),
 	}
 
-	resp, err := c.call(ctx, "daily", params, "ts_code,trade_date,open,high,low,close,vol,amount,turnover,trade_days")
+	resp, err := c.call(ctx, "stk_factor_pro", params, "ts_code,trade_date,open_qfq,high_qfq,low_qfq,close_qfq,vol,amount")
 	if err != nil {
 		return nil, err
 	}
@@ -262,11 +262,12 @@ func (c *TushareClient) FetchDailyOHLCV(ctx context.Context, symbol string, star
 		c.logger.Warn().Err(err).Msg("Failed to batch save OHLCV")
 	}
 
-	c.logger.Info().Str("symbol", symbol).Int("count", len(records)).Msg("OHLCV fetched and saved")
+	c.logger.Info().Str("symbol", symbol).Int("count", len(records)).Msg("OHLCV (qfq) fetched and saved")
 	return records, nil
 }
 
-// normalizeDailyOHLCV converts tushare daily response to domain.OHLCV.
+// normalizeDailyOHLCV converts tushare stk_factor_pro response to domain.OHLCV.
+// stk_factor_pro fields: ts_code, trade_date, open_qfq, high_qfq, low_qfq, close_qfq, vol, amount
 func (c *TushareClient) normalizeDailyOHLCV(resp *TushareResponse, symbol string) []domain.OHLCV {
 	var records []domain.OHLCV
 	c.logger.Debug().Int("items_count", len(resp.Data.Items)).Msg("normalizeDailyOHLCV start")
@@ -287,15 +288,15 @@ func (c *TushareClient) normalizeDailyOHLCV(resp *TushareResponse, symbol string
 		}
 
 		ohlcv := domain.OHLCV{
-			Symbol:   symbol,
-			Date:     t,
-			Open:     c.fieldFloat(item, 2),
-			High:     c.fieldFloat(item, 3),
-			Low:      c.fieldFloat(item, 4),
-			Close:    c.fieldFloat(item, 5),
-			Volume:   c.fieldFloat(item, 6),
-			Turnover: c.fieldFloat(item, 7),
-			TradeDays: int(c.fieldFloat(item, 9)),
+			Symbol:    symbol,
+			Date:      t,
+			Open:      c.fieldFloat(item, 2),   // open_qfq
+			High:      c.fieldFloat(item, 3),   // high_qfq
+			Low:       c.fieldFloat(item, 4),   // low_qfq
+			Close:     c.fieldFloat(item, 5),   // close_qfq
+			Volume:    c.fieldFloat(item, 6),   // vol
+			Turnover:  c.fieldFloat(item, 7),   // amount
+			TradeDays: 0,                       // not available from stk_factor_pro
 		}
 		records = append(records, ohlcv)
 	}
