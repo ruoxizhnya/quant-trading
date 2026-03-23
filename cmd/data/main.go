@@ -211,6 +211,7 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 
 	// Trading calendar
 	r.GET("/api/v1/trading/calendar", getTradingCalendarHandler(store))
+	r.POST("/sync/calendar", syncCalendarHandler(tc, store))
 
 	// Sync endpoints
 	r.POST("/sync/stocks", syncStocksHandler(tc, store))
@@ -627,7 +628,7 @@ func getTradingCalendarHandler(store *storage.PostgresStore) gin.HandlerFunc {
 			return
 		}
 
-		days, err := store.GetTradingDays(ctx, startDate, endDate)
+		days, err := store.GetTradingDates(ctx, startDate, endDate)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -638,5 +639,86 @@ func getTradingCalendarHandler(store *storage.PostgresStore) gin.HandlerFunc {
 			dayStrs[i] = d.Format("2006-01-02")
 		}
 		c.JSON(http.StatusOK, gin.H{"trading_days": dayStrs})
+	}
+}
+
+type syncCalendarRequest struct {
+	StartDate string `json:"start_date"`
+	EndDate   string `json:"end_date"`
+	Exchange  string `json:"exchange"`
+}
+
+func syncCalendarHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req syncCalendarRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			// Use defaults if no body provided
+			req.StartDate = time.Now().AddDate(-1, 0, 0).Format("20060102")
+			req.EndDate = time.Now().Format("20060102")
+		}
+
+		if req.Exchange == "" {
+			req.Exchange = "SSE"
+		}
+		if req.StartDate == "" {
+			req.StartDate = time.Now().AddDate(-1, 0, 0).Format("20060102")
+		}
+		if req.EndDate == "" {
+			req.EndDate = time.Now().Format("20060102")
+		}
+
+		// Convert YYYYMMDD to YYYY-MM-DD for the handler
+		startFormatted := fmt.Sprintf("%s-%s-%s", req.StartDate[:4], req.StartDate[4:6], req.StartDate[6:8])
+		endFormatted := fmt.Sprintf("%s-%s-%s", req.EndDate[:4], req.EndDate[4:6], req.EndDate[6:8])
+
+		if _, err := time.Parse("20060102", req.StartDate); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
+			return
+		}
+		if _, err := time.Parse("20060102", req.EndDate); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+			return
+		}
+
+		ctx := c.Request.Context()
+
+		// Fetch trading calendar from Tushare
+		entries, err := tc.FetchTradingCalendar(ctx, req.Exchange, startFormatted, endFormatted)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch calendar from Tushare: " + err.Error()})
+			return
+		}
+
+		if len(entries) == 0 {
+			c.JSON(http.StatusOK, gin.H{"message": "no calendar entries returned from Tushare", "count": 0})
+			return
+		}
+
+		// Save to database
+		domainEntries := make([]*storage.TradingCalendarEntry, len(entries))
+		for i := range entries {
+			domainEntries[i] = &entries[i]
+		}
+		if err := store.SaveTradingCalendarBatch(ctx, domainEntries); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save calendar: " + err.Error()})
+			return
+		}
+
+		tradingCount := 0
+		for _, e := range entries {
+			if e.IsTradingDay {
+				tradingCount++
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":        "calendar synced successfully",
+			"count":          len(entries),
+			"trading_days":   tradingCount,
+			"holidays":       len(entries) - tradingCount,
+			"start_date":     startFormatted,
+			"end_date":       endFormatted,
+			"exchange":       req.Exchange,
+		})
 	}
 }

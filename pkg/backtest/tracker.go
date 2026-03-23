@@ -32,6 +32,9 @@ type Tracker struct {
 	logger zerolog.Logger
 }
 
+// stampTaxRate is the A-share stamp tax rate (0.1% on sell only)
+const stampTaxRate = 0.001
+
 // NewTracker creates a new portfolio tracker.
 func NewTracker(initialCapital, commissionRate, slippageRate float64, logger zerolog.Logger) *Tracker {
 	return &Tracker{
@@ -117,6 +120,12 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 
 	commission := quantity * executionPrice * t.commissionRate
 
+	// Stamp tax only applies to sell trades (A-share rule: 0.1%)
+	stampTax := 0.0
+	if direction == domain.DirectionClose {
+		stampTax = quantity * executionPrice * stampTaxRate
+	}
+
 	trade := &domain.Trade{
 		ID:         uuid.New().String(),
 		Symbol:     symbol,
@@ -124,17 +133,20 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 		Quantity:   quantity,
 		Price:      executionPrice,
 		Commission: commission,
+		StampTax:   stampTax,
 		Timestamp:  timestamp,
 	}
 
 	switch direction {
 	case domain.DirectionLong:
-		// Cost includes commission
+		// Cost includes commission (stamp tax does not apply to buy)
 		cost := quantity*executionPrice + commission
 		if cost > t.cash {
 			return nil, fmt.Errorf("insufficient cash: required %.2f, available %.2f", cost, t.cash)
 		}
 		t.cash -= cost
+
+		tradeDate := timestamp.Truncate(24 * time.Hour)
 
 		if existing, exists := t.positions[symbol]; exists {
 			// Update average cost
@@ -142,12 +154,25 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 			existing.AvgCost = (existing.AvgCost*existing.Quantity + executionPrice*quantity) / totalQty
 			existing.Quantity = totalQty
 			existing.EntryDate = timestamp
+
+			// T+1 tracking: shift yesterday qty if new day, accumulate today's qty
+			lastBuyDate := existing.BuyDate.Truncate(24 * time.Hour)
+			if !lastBuyDate.Equal(tradeDate) {
+				// New trading day: yesterday's today becomes today's yesterday
+				existing.QuantityYesterday = existing.QuantityToday
+				existing.QuantityToday = 0
+			}
+			existing.QuantityToday += quantity
+			existing.BuyDate = timestamp
 		} else {
 			t.positions[symbol] = &domain.Position{
-				Symbol:    symbol,
-				Quantity:  quantity,
-				AvgCost:   executionPrice,
-				EntryDate: timestamp,
+				Symbol:           symbol,
+				Quantity:         quantity,
+				AvgCost:          executionPrice,
+				EntryDate:        timestamp,
+				BuyDate:          timestamp,
+				QuantityToday:    quantity, // newly bought, not sellable until T+1
+				QuantityYesterday: 0,
 			}
 		}
 
@@ -176,13 +201,63 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 			}
 
 			if pos.Quantity > 0 {
-				// Closing long position
+				// Closing long position — enforce T+1 settlement (A-share rule)
+				// Shares sellable today = yesterday's carry-over + yesterday's buys
+				// (QuantityToday shares bought today cannot be sold today)
+				canSell := pos.QuantityYesterday + pos.QuantityToday
+
+				// If BuyDate is today, all shares are from today → cannot sell
+				tradeDate := timestamp.Truncate(24 * time.Hour)
+				buyDate := pos.BuyDate.Truncate(24 * time.Hour)
+				if buyDate.Equal(tradeDate) {
+					// All shares in this position were bought today — T+1 violation
+					t.logger.Warn().
+						Str("symbol", symbol).
+						Float64("attempted_sell", actualQty).
+						Float64("can_sell", 0).
+						Time("trade_date", timestamp).
+						Msg("T+1 violation: attempted to sell shares bought today")
+					return nil, fmt.Errorf("T+1 settlement violation: cannot sell shares bought on %s (today: %s)", buyDate.Format("2006-01-02"), tradeDate.Format("2006-01-02"))
+				}
+
+				// Recalculate canSell excluding today's QuantityToday
+				// (quantityYesterday may include shares from a prior position, which ARE sellable)
+				canSell = pos.QuantityYesterday
+				if actualQty > canSell {
+					t.logger.Warn().
+						Str("symbol", symbol).
+						Float64("attempted_sell", actualQty).
+						Float64("can_sell", canSell).
+						Float64("quantity_today", pos.QuantityToday).
+						Time("timestamp", timestamp).
+						Msg("T+1 partial fill: reducing sell quantity to sellable shares")
+					actualQty = canSell
+					if actualQty <= 0 {
+						return nil, fmt.Errorf("T+1 settlement violation: no shares available to sell (all bought today)")
+					}
+					// Return partial fill with updated trade qty
+					trade.Quantity = actualQty
+					// Recalculate commission and stamp tax for reduced qty
+					trade.Commission = actualQty * executionPrice * t.commissionRate
+					trade.StampTax = actualQty * executionPrice * stampTaxRate
+				}
+
+				// Update yesterday qty: reduce by actualQty sold (from the oldest pool first)
+				if pos.QuantityYesterday >= actualQty {
+					pos.QuantityYesterday -= actualQty
+				} else {
+					// Sold some of today's qty — this shouldn't happen if canSell is calculated correctly
+					// but guard against rounding issues
+					pos.QuantityYesterday = 0
+				}
+
+				// Closing long: apply stamp tax (0.1%) + commission, calculate PnL
 				pnl := (executionPrice - pos.AvgCost) * actualQty
-				pos.RealizedPnL += pnl - commission
-				t.cash += actualQty*executionPrice - commission
+				pos.RealizedPnL += pnl - trade.Commission - trade.StampTax
+				t.cash += actualQty*executionPrice - trade.Commission - trade.StampTax
 				pos.Quantity -= actualQty
 			} else {
-				// Closing short position
+				// Closing short position — no T+1 restriction
 				pnl := (pos.AvgCost - executionPrice) * actualQty
 				pos.RealizedPnL += pnl - commission
 				t.cash += actualQty*executionPrice - commission
@@ -216,6 +291,28 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 		Msg("Trade executed")
 
 	return trade, nil
+}
+
+// AdvanceDay shifts QuantityToday → QuantityYesterday at the end of each trading day.
+// This implements T+1 settlement: shares bought today become sellable tomorrow.
+func (t *Tracker) AdvanceDay(date time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.logger.Debug().
+		Time("date", date).
+		Msg("Advancing day for T+1 settlement")
+
+	for sym, pos := range t.positions {
+		if pos.QuantityToday > 0 {
+			pos.QuantityYesterday += pos.QuantityToday
+			pos.QuantityToday = 0
+			t.logger.Debug().
+				Str("symbol", sym).
+				Float64("quantity_yesterday", pos.QuantityYesterday).
+				Msg("T+1 rollover: yesterday quantity updated")
+		}
+	}
 }
 
 // RecordDailyValue records the portfolio value for a given day.

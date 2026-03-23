@@ -72,15 +72,19 @@ type Signal struct {
 
 // Position represents a single position in the portfolio
 type Position struct {
-	Symbol        string    `json:"symbol"`
-	Quantity      float64   `json:"quantity"`
-	AvgCost       float64   `json:"avg_cost"`
-	CurrentPrice  float64   `json:"current_price"`
-	MarketValue   float64   `json:"market_value"`
-	UnrealizedPnL float64   `json:"unrealized_pnl"`
-	RealizedPnL   float64   `json:"realized_pnl"`
-	Weight        float64   `json:"weight"`
-	EntryDate     time.Time `json:"entry_date"`
+	Symbol           string    `json:"symbol"`
+	Quantity         float64   `json:"quantity"`
+	AvgCost          float64   `json:"avg_cost"`
+	CurrentPrice     float64   `json:"current_price"`
+	MarketValue      float64   `json:"market_value"`
+	UnrealizedPnL    float64   `json:"unrealized_pnl"`
+	RealizedPnL      float64   `json:"realized_pnl"`
+	Weight           float64   `json:"weight"`
+	EntryDate        time.Time `json:"entry_date"`
+	// T+1 Settlement tracking (A-share rule: shares bought today cannot be sold today)
+	BuyDate          time.Time `json:"buy_date"`            // Last buy date for this position
+	QuantityToday    float64   `json:"quantity_today"`      // Shares bought today (not yet sellable)
+	QuantityYesterday float64  `json:"quantity_yesterday"`  // Shares from previous days (sellable today)
 }
 
 // Portfolio represents the current portfolio state
@@ -148,6 +152,7 @@ type Trade struct {
 	Quantity   float64   `json:"quantity"`
 	Price      float64   `json:"price"`
 	Commission float64   `json:"commission"`
+	StampTax   float64   `json:"stamp_tax"` // 0.1% on sell only (A-share)
 	Timestamp  time.Time `json:"timestamp"`
 }
 

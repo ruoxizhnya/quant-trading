@@ -414,6 +414,9 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 
 		// Step 6: Record daily portfolio value
 		state.Tracker.RecordDailyValue(date, pricesCache)
+
+		// Step 7: Advance day for T+1 settlement (shift QuantityToday → QuantityYesterday)
+		state.Tracker.AdvanceDay(date)
 	}
 
 	// Generate final results

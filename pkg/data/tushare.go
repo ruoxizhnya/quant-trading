@@ -441,3 +441,58 @@ func (c *TushareClient) extractExchange(tsCode string) string {
 	}
 	return strings.Split(tsCode, ".")[0]
 }
+
+// FetchTradingCalendar retrieves the trading calendar from Tushare trade_cal API.
+// exchange: "SSE" (Shanghai Stock Exchange) or "SZSE" (Shenzhen Stock Exchange)
+// startDate, endDate: format "YYYY-MM-DD"
+func (c *TushareClient) FetchTradingCalendar(ctx context.Context, exchange, startDate, endDate string) ([]storage.TradingCalendarEntry, error) {
+	params := map[string]interface{}{
+		"exchange":   exchange,
+		"start_date": formatDate(startDate),
+		"end_date":   formatDate(endDate),
+	}
+
+	resp, err := c.call(ctx, "trade_cal", params, "exchange,cal_date,is_open")
+	if err != nil {
+		return nil, err
+	}
+
+	return c.normalizeTradingCalendar(resp, exchange)
+}
+
+// normalizeTradingCalendar converts tushare trade_cal response to storage.TradingCalendarEntry.
+// trade_cal fields: exchange, cal_date, is_open
+// is_open: 1 = trading day, 0 = holiday
+func (c *TushareClient) normalizeTradingCalendar(resp *TushareResponse, exchange string) ([]storage.TradingCalendarEntry, error) {
+	var entries []storage.TradingCalendarEntry
+	for _, item := range resp.Data.Items {
+		if len(item) < 3 {
+			continue
+		}
+
+		calDate := c.fieldStr(item, 1)
+		if calDate == "" {
+			continue
+		}
+
+		// Parse date: YYYYMMDD
+		t, err := time.Parse("20060102", calDate)
+		if err != nil {
+			c.logger.Warn().Str("cal_date", calDate).Msg("failed to parse calendar date")
+			continue
+		}
+
+		// is_open: "1" = trading day, "0" = holiday/closed
+		isOpenStr := c.fieldStr(item, 2)
+		isTradingDay := isOpenStr == "1"
+
+		entries = append(entries, storage.TradingCalendarEntry{
+			TradeDate:      t,
+			Exchange:       exchange,
+			IsTradingDay:   isTradingDay,
+		})
+	}
+
+	c.logger.Info().Int("count", len(entries)).Str("exchange", exchange).Msg("Trading calendar normalized")
+	return entries, nil
+}
