@@ -196,15 +196,22 @@ func (c *TushareClient) normalizeStocks(resp *TushareResponse) []domain.Stock {
 			continue
 		}
 
+		tsCode := c.fieldStr(item, 0)
 		symbol := c.fieldStr(item, 1)
-		if symbol == "" {
+		if tsCode == "" && symbol == "" {
 			continue
 		}
 
+		// Use full ts_code (e.g. 000001.SZ) as Symbol for API compatibility
+		useSymbol := tsCode
+		if useSymbol == "" {
+			useSymbol = symbol
+		}
+
 		stock := domain.Stock{
-			Symbol:   symbol,
+			Symbol:   useSymbol,
 			Name:     c.fieldStr(item, 2),
-			Exchange: c.extractExchange(c.fieldStr(item, 0)),
+			Exchange: c.extractExchange(useSymbol),
 			Industry: c.fieldStr(item, 4),
 			Status:   "active",
 		}

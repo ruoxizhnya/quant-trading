@@ -440,3 +440,49 @@ func (s *PostgresStore) GetFundamental(ctx context.Context, symbol string, date 
 func (s *PostgresStore) Ping(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }
+
+// GetAllStocks returns all stocks from the database.
+func (s *PostgresStore) GetAllStocks(ctx context.Context) ([]domain.Stock, error) {
+	query := `
+		SELECT symbol, name, exchange, industry, market_cap, list_date, status
+		FROM stocks ORDER BY symbol
+	`
+	rows, err := s.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all stocks: %w", err)
+	}
+	defer rows.Close()
+
+	var results []domain.Stock
+	for rows.Next() {
+		var st domain.Stock
+		if err := rows.Scan(&st.Symbol, &st.Name, &st.Exchange, &st.Industry, &st.MarketCap, &st.ListDate, &st.Status); err != nil {
+			return nil, fmt.Errorf("failed to scan stock row: %w", err)
+		}
+		results = append(results, st)
+	}
+	return results, rows.Err()
+}
+
+// HasOHLCVData checks whether we have OHLCV data for a given symbol.
+func (s *PostgresStore) HasOHLCVData(ctx context.Context, symbol string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM ohlcv_daily WHERE symbol = $1 LIMIT 1)`
+	var exists bool
+	if err := s.pool.QueryRow(ctx, query, symbol).Scan(&exists); err != nil {
+		return false, fmt.Errorf("failed to check OHLCV data: %w", err)
+	}
+	return exists, nil
+}
+
+// GetLatestOHLCVDate returns the most recent OHLCV trade date for a symbol.
+func (s *PostgresStore) GetLatestOHLCVDate(ctx context.Context, symbol string) (time.Time, error) {
+	query := `SELECT MAX(trade_date) FROM ohlcv_daily WHERE symbol = $1`
+	var t *time.Time
+	if err := s.pool.QueryRow(ctx, query, symbol).Scan(&t); err != nil {
+		return time.Time{}, fmt.Errorf("failed to get latest OHLCV date: %w", err)
+	}
+	if t == nil {
+		return time.Time{}, nil
+	}
+	return *t, nil
+}

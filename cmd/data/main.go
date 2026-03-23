@@ -63,8 +63,12 @@ func main() {
 	defer cache.Close()
 
 	// Initialize Tushare client
+	tushareToken := viper.GetString("tushare.token")
+	if tushareToken == "" {
+		logger.Warn().Msg("TUSHARE_TOKEN is not set; sync endpoints will fail")
+	}
 	tushareClient := data.NewTushareClient(
-		viper.GetString("tushare.token"),
+		tushareToken,
 		viper.GetString("tushare.base_url"),
 		viper.GetInt("tushare.max_retries"),
 		store,
@@ -209,8 +213,9 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 	r.GET("/api/v1/trading/calendar", getTradingCalendarHandler(store))
 
 	// Sync endpoints
-	r.POST("/sync/stocks", syncStocksHandler(tc))
-	r.POST("/sync/ohlcv", syncOHLCVHandler(tc))
+	r.POST("/sync/stocks", syncStocksHandler(tc, store))
+	r.POST("/sync/ohlcv", syncOHLCVHandler(tc, store))
+	r.POST("/sync/ohlcv/all", syncAllOHLCVHandler(tc, store))
 	r.POST("/sync/fundamental", syncFundamentalHandler(tc))
 }
 
@@ -378,12 +383,12 @@ type syncStocksRequest struct {
 	ListStatus string `json:"list_status"`
 }
 
-func syncStocksHandler(tc *data.TushareClient) gin.HandlerFunc {
+func syncStocksHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		var req syncStocksRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			req.ListStatus = "active"
+			req.ListStatus = "L"
 		}
 
 		stocks, err := tc.FetchStocks(ctx, req.Exchange, req.ListStatus)
@@ -405,7 +410,7 @@ type syncOHLCVRequest struct {
 	EndDate   string   `json:"end_date"`
 }
 
-func syncOHLCVHandler(tc *data.TushareClient) gin.HandlerFunc {
+func syncOHLCVHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		var req syncOHLCVRequest
@@ -415,8 +420,16 @@ func syncOHLCVHandler(tc *data.TushareClient) gin.HandlerFunc {
 		}
 
 		if len(req.Symbols) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "symbols array is required"})
-			return
+			// Fall back to all stocks from DB
+			allStocks, err := store.GetAllStocks(ctx)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks from DB: " + err.Error()})
+				return
+			}
+			for _, s := range allStocks {
+				req.Symbols = append(req.Symbols, s.Symbol)
+			}
+			logging.Logger.Info().Int("count", len(req.Symbols)).Msg("No symbols provided, fetched all from DB")
 		}
 
 		totalCount := 0
@@ -435,6 +448,120 @@ func syncOHLCVHandler(tc *data.TushareClient) gin.HandlerFunc {
 			"message": "OHLCV synced successfully",
 			"count":   totalCount,
 		})
+	}
+}
+
+type syncAllOHLCVRequest struct {
+	StartDate   string `json:"start_date"`
+	EndDate     string `json:"end_date"`
+	BatchSize   int    `json:"batch_size"`
+	SkipExisting bool  `json:"skip_existing"`
+}
+
+// syncAllOHLCVHandler reads all stocks from DB and syncs OHLCV in batches.
+// POST /sync/ohlcv/all
+// Runs asynchronously — returns immediately and processes in background.
+func syncAllOHLCVHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req syncAllOHLCVRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Defaults
+		if req.BatchSize <= 0 {
+			req.BatchSize = 10
+		}
+		if req.EndDate == "" {
+			req.EndDate = time.Now().Format("20060102")
+		}
+		if req.StartDate == "" {
+			req.StartDate = time.Now().AddDate(-1, 0, 0).Format("20060102")
+		}
+
+		// Fetch all stocks from DB (non-blocking context)
+		ctx := context.Background()
+		stocks, err := store.GetAllStocks(ctx)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks: " + err.Error()})
+			return
+		}
+
+		if len(stocks) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no stocks found in DB. Run POST /sync/stocks first."})
+			return
+		}
+
+		logging.Logger.Info().
+			Int("total_stocks", len(stocks)).
+			Int("batch_size", req.BatchSize).
+			Str("start_date", req.StartDate).
+			Str("end_date", req.EndDate).
+			Bool("skip_existing", req.SkipExisting).
+			Msg("Bulk OHLCV sync started in background")
+
+		// Return immediately — process in background with independent context
+		c.JSON(http.StatusAccepted, gin.H{
+			"message":      "bulk OHLCV sync started",
+			"total_stocks": len(stocks),
+		})
+
+		// Background processing
+		go func() {
+			bgCtx := context.Background()
+			totalSynced := 0
+			totalSkipped := 0
+			totalFailed := 0
+
+			for i := 0; i < len(stocks); i += req.BatchSize {
+				end := i + req.BatchSize
+				if end > len(stocks) {
+					end = len(stocks)
+				}
+				batch := stocks[i:end]
+
+				for _, stock := range batch {
+					if req.SkipExisting {
+						hasData, err := store.HasOHLCVData(bgCtx, stock.Symbol)
+						if err != nil {
+							logging.Logger.Warn().Err(err).Str("symbol", stock.Symbol).Msg("Error checking OHLCV data")
+						}
+						if hasData {
+							totalSkipped++
+							logging.Logger.Debug().Str("symbol", stock.Symbol).Msg("Skipping - already has data")
+							continue
+						}
+					}
+
+					logging.Logger.Info().Str("symbol", stock.Symbol).Str("start", req.StartDate).Str("end", req.EndDate).Msg("fetching OHLCV")
+					ohlcv, err := tc.FetchDailyOHLCV(bgCtx, stock.Symbol, req.StartDate, req.EndDate)
+					if err != nil {
+						totalFailed++
+						logging.Logger.Warn().Err(err).Str("symbol", stock.Symbol).Msg("Failed to sync OHLCV")
+						continue
+					}
+					totalSynced += len(ohlcv)
+					logging.Logger.Info().Str("symbol", stock.Symbol).Int("count", len(ohlcv)).Msg("OHLCV synced")
+				}
+
+				logging.Logger.Info().
+					Int("batch", (i/req.BatchSize)+1).
+					Int("progress", end).
+					Int("total", len(stocks)).
+					Int("synced", totalSynced).
+					Int("skipped", totalSkipped).
+					Int("failed", totalFailed).
+					Msg("Batch complete")
+			}
+
+			logging.Logger.Info().
+				Int("total_stocks", len(stocks)).
+				Int("records_synced", totalSynced).
+				Int("skipped", totalSkipped).
+				Int("failed", totalFailed).
+				Msg("Bulk OHLCV sync completed")
+		}()
 	}
 }
 
