@@ -1,7 +1,7 @@
 # Quant Trading System - Roadmap
 
 > Last updated: 2026-03-23
-> Version: 0.1.0
+> Version: 0.2.0
 
 ---
 
@@ -15,106 +15,154 @@
 
 ---
 
+## 📊 Current Status (as of 2026-03-23)
+
+### What We Have
+- Go backtest engine (high performance, not Python)
+- PostgreSQL + TimescaleDB for OHLCV storage
+- Momentum + Value Momentum strategies
+- Slippage + Commission modeling
+- ATR-based stop loss
+- Weekly rebalancing
+- Browser-based Web UI
+
+### What We Learned from vnpy
+- vnpy is mature but Python-based (slow)
+- Target/Actual position separation is a best practice
+- T+1 settlement must be enforced at OMS level (TD/YD buckets)
+- Trading calendar is essential for A-share accuracy
+- Stamp tax (0.1% sell only) must be separate from commission
+- Price limit (涨跌停) detection needed
+
+### What We're Fixing
+- **OHLCV data**: Switching to 前复权 (qfq) from Tushare stk_factor_pro API
+- Old 不复权 data deleted → must re-sync all stocks
+
+---
+
 ## 🛤️ Roadmap
 
-### Phase 1: Foundation (Now → 1 month)
-**Goal: Make the backtest engine reliable and usable**
+### Phase 1: Accuracy & Data Foundation (NOW → 1 week)
+**Goal: Fix critical accuracy issues before any live use**
 
-- [x] Fix API URL mismatches between services
-- [x] Add currentPrice to risk service (fix hardcoded 100.0)
-- [x] Slippage modeling (0.01% per trade)
-- [x] Commission modeling
-- [x] Equity curve calculation fix (short positions)
-- [x] Metrics calculation fix (annual return/Sharpe using actual dates)
-- [x] **UI Dashboard** — browser-based backtesting interface at http://localhost:8085
-- [x] Optimize momentum strategy — weekly rebalancing (not daily) to avoid position accumulation
-- [ ] ATR-based dynamic stop loss
-- [ ] Max drawdown monitoring and alerts
+- [ ] **T+1 Settlement (P0)**
+  - Track buyDate per position (TD = today, YD = yesterday)
+  - Cannot sell same-day bought shares
+  - vnpy pattern: OffsetConverter with TD/YD buckets
+  - Impact: without this, returns overstated 5-15%
 
-### Phase 2: Factor System + Smart Stock Selection (1-3 months)
+- [ ] **Trading Calendar (P0)**
+  - Create `trade_calendar` table (date + is_trading_day)
+  - Sync from Tushare trade_cal API
+  - A股 holidays: CNY, National Day, Memorial days
+  - Use calendar to iterate trading days in backtest engine
+
+- [ ] **Commission Structure Fix (P1)**
+  - A股: commission ~0.03% + stamp tax 0.1% (SELL ONLY) + transfer fee 0.001%
+  - Separate stamp tax from commission
+  - vnpy shows these must be split
+
+- [ ] **涨跌停 Detection (P1)**
+  - Detect daily limit-up / limit-down in backtest
+  - Cannot buy on limit-up day, cannot sell on limit-down day
+  - Price continues from limit for next valid day
+
+- [ ] **Data Sync (BACKGROUND, ~4-5 hours)**
+  - ohlcv_daily_qfq table exists (600519.SH test done)
+  - Need to sync all 5,491 stocks from 2000-01-01 to 2026-03-20
+  - Year-by-year chunks (~27 requests per stock)
+  - Rate limited: 250ms between requests
+
+---
+
+### Phase 2: Core Architecture (2-4 weeks)
+**Goal: Add professional quant system features**
+
+- [ ] **Target/Actual Position Separation**
+  - vnpy pattern: `target_position` vs `actual_position`
+  - Strategy generates signals → target position
+  - Execution layer fills gap to actual
+  - Enables partial fills, position limits
+
+- [ ] **Strategy Plugin System (Hot-swap)**
+  - Define `Strategy` interface with `GenerateSignals()`, `Name()`, `Parameters()`
+  - Strategies loaded dynamically from `plugins/` directory
+  - No rebuild needed to add new strategy
+  - Strategy registry via API
+
+- [ ] **Signal-driven Strategy Interface**
+  - vnpy pattern: `get_signal()` returns pre-computed signals
+  - `execute_trading()` handles target vs actual gap
+  - Cleaner separation of signal generation vs execution
+
+- [ ] **Strategy Copilot (AI-assisted coding)**
+  - User describes strategy in natural language
+  - AI generates Go strategy code
+  - User can edit and refine with validation
+
+---
+
+### Phase 3: Factor System + Stock Selection (1-2 months)
 **Goal: Intelligent stock screening + multi-factor strategies**
 
 #### Factor Library
 - [ ] **Value Factors**: PE, PB, PS, PCFR, EV/EBITDA
-- [ ] **Momentum Factors**: 1M/3M/6M/12M momentum + momentum reversal (falling knife detection)
+- [ ] **Momentum Factors**: 1M/3M/6M/12M momentum + reversal detection
 - [ ] **Quality Factors**: ROE, ROA, debt-to-equity, operating cash flow
 - [ ] **Growth Factors**: revenue growth, profit growth, PEG
-- [ ] **Analyst Factors**: rating upgrades/downgrades, price target deviation
-- [ ] **Sentiment Factors**: news情绪, social media (雪球/东财股吧)
-- [ ] **Macro Factors**: interest rates, CPI, FX, geopolitical events
+- [ ] **Analyst Factors**: rating changes, price target deviation
 
 #### Stock Selector
 - [ ] Screen stocks by multiple factors simultaneously
-- [ ] Rank stocks by composite factor score
-- [ ] Select top N stocks for strategy deployment
+- [ ] Rank by composite factor score
+- [ ] Select top N for strategy deployment
 
 #### News & Sentiment AI
-- [ ] Crawl financial news (东方财富, 同花顺, Reuters, Bloomberg)
-- [ ] AI sentiment analysis → sentiment factor score
-- [ ] Geopolitical event impact assessment → macro shock factor
+- [ ] Crawl financial news (东方财富, 同花顺, Reuters)
+- [ ] AI sentiment analysis → sentiment score
+- [ ] Geopolitical event impact → macro shock factor
 
-### Phase 3: Strategy Framework (Plugin Architecture) (2-4 months)
-**Goal: Hot-swappable strategy plugins**
+---
 
-- [ ] **Strategy Plugin Interface**
-  - Define `Strategy` interface with `GenerateSignals()`, `Name()`, `Parameters()`
-  - Strategies are loaded dynamically (no rebuild needed to add new strategy)
-  - Strategy registry — list available strategies via API
+### Phase 4: Portfolio & Risk (2-3 months)
+**Goal: Multi-strategy portfolio with professional risk management**
 
-- [ ] **Strategy UI**
-  - View all available strategies
-  - Configure strategy parameters
-  - Enable/disable strategies
+- [ ] **Multi-Strategy Portfolio**
+  - Run multiple strategies simultaneously
+  - Weight allocation optimization (equal weight, risk parity, etc.)
+  - Strategy correlation analysis
 
-- [ ] **Strategy Copilot (AI-assisted coding)**
-  - User describes strategy in natural language
-  - AI generates strategy code
-  - User can edit and refine
-  - Syntax highlighting + strategy validation
+- [ ] **Portfolio Risk Metrics**
+  - VaR / CVaR calculation
+  - Portfolio-level drawdown monitoring
+  - Strategy diversification metrics
 
-- [ ] **Built-in Strategy Library**
-  - Momentum (needs fixing — monthly rebalancing)
-  - Value Momentum (needs financial data)
-  - Mean Reversion
-  - Breakout
-  - Pair Trading
+- [ ] **Dynamic Position Sizing**
+  - Volatility-adjusted position sizing (risk parity)
+  - ATR-based dynamic stops
+  - Max drawdown → position reduction
 
-### Phase 4: Strategy Selection & Portfolio (3-6 months)
-**Goal: AI helps pick best strategies**
+---
 
-- [ ] **Backtest All Strategies**
-  - Run backtest for every strategy in the library
-  - Compare performance metrics
-
-- [ ] **Strategy Selector**
-  - AI (龙少) analyzes backtest results
-  - Recommends best strategy for current market conditions
-  - Or: recommends portfolio of multiple strategies
-
-- [ ] **Strategy Combination**
-  - Combine multiple strategies in one portfolio
-  - Weight allocation optimization
-
-### Phase 5: Live Trading (6+ months)
-**Goal: Real money**
+### Phase 5: Live Trading (3-6 months)
+**Goal: Real money (paper trading first)**
 
 - [ ] **Paper Trading Mode**
   - Simulated execution, real market data
   - No real orders placed
+  - Compare live vs backtest
 
 - [ ] **Broker Integration**
   - Futu (港美股) — https://open.futunn.com/
   - Tiger (港美股) — https://quant.tigerbrokers.com/
-  - Snowball (港股) — https://www.snowball.com/
 
-- [ ] **Real-time Risk Management**
-  - Live ATR stop loss
-  - Drawdown-based position reduction
-  - Position size limits
+- [ ] **Real-time Risk Alerts**
+  - Push notifications on drawdown thresholds
+  - Daily/weekly performance summaries
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ Architecture (Reference)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -123,8 +171,8 @@
 └─────────────────────┬───────────────────────────────────────┘
                       │ HTTP API
 ┌─────────────────────▼───────────────────────────────────────┐
-│                 Analysis Service (Port 8085)                  │
-│   Backtest Engine / Report Generator / Strategy Selector     │
+│                 Analysis Service (Port 8085)                   │
+│   Backtest Engine / Report Generator / Strategy Selector      │
 └──────┬──────────────────┬───────────────────┬───────────────┘
        │                  │                   │
 ┌──────▼──────┐  ┌───────▼─────┐  ┌────────▼────────┐
@@ -141,14 +189,28 @@
                               └───────────────────────────┘
 ```
 
+### Key Lessons from vnpy
+1. **T+1 = TD/YD buckets** (OffsetConverter pattern)
+2. **Target vs Actual positions** (execute_trading fills gap)
+3. **Signal-driven** (get_signal → execute_trading)
+4. **Commission must be split** (stamp tax is sell-only)
+
 ---
 
-## 📝 Notes
+## 📝 Implementation Notes
 
-- **2026-03-23 Morning**: System launched. Backtest engine working with momentum strategy. Slippage and commission modeled. UI dashboard built.
-- **2026-03-23 Morning**: Identified key issues: (1) momentum strategy generates signals daily causing position accumulation; (2) news/sentiment pipeline not yet built; (3) strategy plugin system not yet implemented.
-- **2026-03-23 Afternoon**: Fixed momentum strategy — weekly rebalancing is now default (not daily). Results much more realistic: 5 trades (weekly) vs 21 trades (daily). UI pushed to http://localhost:8085. ROADMAP.md created.
-- **2026-03-23 Evening**: Momentum strategy weekly rebalancing verified: 600000.SH (Mar-Apr 2024) = +0.27%, 5 weekly trades, Sharpe 5.66, MaxDD 0.04%.
+### A-share Trading Rules
+- **Trading hours**: 9:30-11:30, 13:00-15:00 (T+1 settlement)
+- **Commission**: ~0.03% (min 5元 per trade)
+- **Stamp tax**: 0.1% on sell only
+- **Transfer fee**: 0.001% both sides
+- **Price limits**: ±10% (ST stocks ±5%)
+- **T+1**: Cannot sell shares bought same day
+
+### Tushare Data
+- **API**: stk_factor_pro for qfq data
+- **Rate limit**: 200 req/min (use 250ms sleep = 240 req/min)
+- **Record limit**: ~1000 records per request (use year-by-year chunks)
 
 ---
 
@@ -159,5 +221,5 @@
 | Backtest Sharpe Ratio | > 1.5 |
 | Max Drawdown | < 15% |
 | Strategy Count | 5+ pluggable strategies |
-| Backtest Runs | < 5 seconds for 1 year |
-| Paper Trading Accuracy | > 80% vs backtest |
+| Backtest Speed | < 5 seconds for 1 year |
+| Paper vs Backtest Drift | < 10% |
