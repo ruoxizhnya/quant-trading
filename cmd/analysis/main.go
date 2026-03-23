@@ -143,6 +143,12 @@ func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 
 // registerRoutes registers all HTTP routes.
 func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.Logger) {
+	// Serve UI
+	router.GET("/", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.File("./static/index.html")
+	})
+
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
