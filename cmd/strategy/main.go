@@ -197,11 +197,12 @@ func registerStrategies(logger zerolog.Logger) {
 	strategy.Register("momentum", func() domain.Strategy {
 		s := examples.NewMomentumStrategy()
 		defaultConfig := map[string]any{
-			"lookback_days":  20,
-			"long_threshold":  0.0,
-			"short_threshold": 0.0,
-			"top_n":          5,
-			"max_positions":   5,
+			"lookback_days":        20,
+			"long_threshold":        0.0,
+			"short_threshold":       0.0,
+			"top_n":                5,
+			"max_positions":        5,
+			"rebalance_frequency":  "weekly",
 		}
 		if err := s.Configure(defaultConfig); err != nil {
 			logger.Error().Err(err).Msg("failed to configure momentum strategy")

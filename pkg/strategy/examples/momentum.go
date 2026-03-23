@@ -11,11 +11,12 @@ import (
 
 // MomentumConfig holds configuration for the momentum strategy.
 type MomentumConfig struct {
-	LookbackDays int     `mapstructure:"lookback_days"` // days to calculate momentum
-	LongThreshold float64 `mapstructure:"long_threshold"` // momentum > this → long
-	ShortThreshold float64 `mapstructure:"short_threshold"` // momentum < this → short
-	MaxPositions  int     `mapstructure:"max_positions"` // max signals to return
-	TopN          int     `mapstructure:"top_n"` // return top N by momentum
+	LookbackDays       int     `mapstructure:"lookback_days"`        // days to calculate momentum
+	LongThreshold      float64 `mapstructure:"long_threshold"`        // momentum > this → long
+	ShortThreshold     float64 `mapstructure:"short_threshold"`        // momentum < this → short
+	MaxPositions       int     `mapstructure:"max_positions"`         // max signals to return
+	TopN               int     `mapstructure:"top_n"`                 // return top N by momentum
+	RebalanceFrequency string  `mapstructure:"rebalance_frequency"`    // "daily", "weekly", "monthly"
 }
 
 // momentumStrategy implements a simple price momentum strategy.
@@ -57,12 +58,27 @@ func (s *momentumStrategy) Configure(config map[string]any) error {
 		case int: s.config.TopN = v
 		}
 	}
+	if c, ok := config["rebalance_frequency"]; ok {
+		switch v := c.(type) {
+		case string: s.config.RebalanceFrequency = v
+		case float64: s.config.RebalanceFrequency = string(rune(v))
+		}
+	}
+	// Default to daily if not set
+	if s.config.RebalanceFrequency == "" {
+		s.config.RebalanceFrequency = "daily"
+	}
 	return nil
 }
 
 func (s *momentumStrategy) Signals(ctx context.Context, stocks []domain.Stock, ohlcv map[string][]domain.OHLCV, fundamental map[string][]domain.Fundamental, date time.Time) ([]domain.Signal, error) {
 	if len(stocks) == 0 {
 		return nil, nil
+	}
+
+	// Check if today is a rebalance day
+	if !isRebalanceDay(date, s.config.RebalanceFrequency) {
+		return nil, nil // no signals on non-rebalance days
 	}
 
 	type stockMomentum struct {
@@ -184,15 +200,56 @@ func (s *momentumStrategy) Weight(sig domain.Signal, portfolioValue float64) flo
 
 func (s *momentumStrategy) Cleanup() {}
 
+// isRebalanceDay returns true if today is a rebalance day based on frequency.
+// - "daily": every trading day is a rebalance day
+// - "weekly": Monday of each week (or first trading day if Monday is a holiday)
+// - "monthly": first trading day of each month
+func isRebalanceDay(date time.Time, frequency string) bool {
+	switch frequency {
+	case "weekly":
+		// Rebalance on Monday (or first trading day after weekend if Monday was holiday)
+		if date.Weekday() == time.Monday {
+			return true
+		}
+		prevDay := date.AddDate(0, 0, -1)
+		// Monday was holiday, today is first trading day of week
+		if prevDay.Weekday() == time.Sunday && date.Weekday() == time.Tuesday {
+			return true
+		}
+		if prevDay.Weekday() == time.Saturday && date.Weekday() == time.Monday {
+			return true
+		}
+		return false
+	case "monthly":
+		// First trading day of month
+		if date.Day() == 1 {
+			return true
+		}
+		// First trading day after month boundary (if day 1-3 was holiday)
+		if date.Day() <= 3 {
+			prevDay := date.AddDate(0, 0, -1)
+			if prevDay.Month() != date.Month() {
+				return true
+			}
+		}
+		return false
+	case "daily", "":
+		return true
+	default:
+		return true
+	}
+}
+
 // NewMomentumStrategy creates a new momentum strategy instance.
 func NewMomentumStrategy() domain.Strategy {
 	return &momentumStrategy{
 		config: MomentumConfig{
-			LookbackDays:  20,
-			LongThreshold:  0.03,
-			ShortThreshold: -0.03,
-			TopN:           5,
-			MaxPositions:   5,
+			LookbackDays:       20,
+			LongThreshold:      0.03,
+			ShortThreshold:     -0.03,
+			TopN:               5,
+			MaxPositions:       5,
+			RebalanceFrequency: "weekly", // weekly rebalancing, not daily (avoids position accumulation)
 		},
 	}
 }
