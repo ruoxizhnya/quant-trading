@@ -145,14 +145,14 @@
       <div class="charts">
         <div class="card">
           <div class="card-title">📈 净值曲线</div>
-          <div class="chart-box">
-            <canvas id="c-equity" width="500" height="220"></canvas>
+          <div class="chart-box" style="height:240px">
+            <canvas id="c-equity"></canvas>
           </div>
         </div>
         <div class="card">
           <div class="card-title">🕯️ K线 + 交易点</div>
-          <div class="chart-box">
-            <canvas id="c-kline" width="500" height="220"></canvas>
+          <div class="chart-box" style="height:240px">
+            <canvas id="c-kline"></canvas>
           </div>
         </div>
       </div>
@@ -304,7 +304,7 @@ async function drawEquity(pv, initCap) {
       }]
     },
     options: {
-      responsive: false,
+      responsive: true,
       maintainAspectRatio: false,
       animation: false,
       interaction: { intersect: false, mode: 'index' },
@@ -432,7 +432,7 @@ async function drawKLine(symbol, startDate, endDate, trades) {
         ]
       },
       options: {
-        responsive: false,
+        responsive: true,
         maintainAspectRatio: false,
         animation: false,
         interaction: { intersect: false, mode: 'index' },
