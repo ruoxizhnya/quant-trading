@@ -150,6 +150,15 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 		return nil, fmt.Errorf("invalid end_date format: %w", err)
 	}
 
+	// Pre-check: verify trading calendar has data for the requested date range
+	hasCalendar, err := e.checkCalendarExists(ctx, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check trading calendar: %w", err)
+	}
+	if !hasCalendar {
+		return nil, fmt.Errorf("trading calendar not synced, please run POST /sync/calendar first (with exchange 'SSE' or 'both')")
+	}
+
 	// Use default initial capital if not provided
 	initialCapital := req.InitialCapital
 	if initialCapital <= 0 {
@@ -440,6 +449,40 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		Msg("Backtest completed")
 
 	return &result, nil
+}
+
+// checkCalendarExists verifies the trading calendar has entries for the given range.
+func (e *Engine) checkCalendarExists(ctx context.Context, start, end time.Time) (bool, error) {
+	url := fmt.Sprintf("%s/api/v1/trading/calendar?start=%s&end=%s",
+		e.dataServiceURL, start.Format("2006-01-02"), end.Format("2006-01-02"))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false, err
+	}
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest {
+		// Calendar not synced — no data at all
+		return false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("data service returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		TradingDays []string `json:"trading_days"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, err
+	}
+
+	return len(result.TradingDays) > 0, nil
 }
 
 // getTradingDays retrieves trading days from data service.

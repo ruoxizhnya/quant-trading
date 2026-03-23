@@ -643,9 +643,9 @@ func getTradingCalendarHandler(store *storage.PostgresStore) gin.HandlerFunc {
 }
 
 type syncCalendarRequest struct {
-	StartDate string `json:"start_date"`
-	EndDate   string `json:"end_date"`
-	Exchange  string `json:"exchange"`
+	StartDate string   `json:"start_date"`
+	EndDate   string   `json:"end_date"`
+	Exchange  string   `json:"exchange"` // "SSE", "SZSE", or "both" (default: "both")
 }
 
 func syncCalendarHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.HandlerFunc {
@@ -658,7 +658,7 @@ func syncCalendarHandler(tc *data.TushareClient, store *storage.PostgresStore) g
 		}
 
 		if req.Exchange == "" {
-			req.Exchange = "SSE"
+			req.Exchange = "both"
 		}
 		if req.StartDate == "" {
 			req.StartDate = time.Now().AddDate(-1, 0, 0).Format("20060102")
@@ -682,43 +682,77 @@ func syncCalendarHandler(tc *data.TushareClient, store *storage.PostgresStore) g
 
 		ctx := c.Request.Context()
 
-		// Fetch trading calendar from Tushare
-		entries, err := tc.FetchTradingCalendar(ctx, req.Exchange, startFormatted, endFormatted)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch calendar from Tushare: " + err.Error()})
-			return
+		// Determine which exchanges to sync
+		exchanges := []string{req.Exchange}
+		if req.Exchange == "both" {
+			exchanges = []string{"SSE", "SZSE"}
 		}
 
-		if len(entries) == 0 {
+		var allEntries []storage.TradingCalendarEntry
+		exchangeResults := make(map[string]struct {
+			count    int
+			trading  int
+			holidays int
+		})
+
+		for _, exchange := range exchanges {
+			entries, err := tc.FetchTradingCalendar(ctx, exchange, startFormatted, endFormatted)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to fetch %s calendar from Tushare: %v", exchange, err)})
+				return
+			}
+
+			tradingCount := 0
+			for _, e := range entries {
+				if e.IsTradingDay {
+					tradingCount++
+				}
+			}
+
+			exchangeResults[exchange] = struct {
+				count    int
+				trading  int
+				holidays int
+			}{
+				count:    len(entries),
+				trading:  tradingCount,
+				holidays: len(entries) - tradingCount,
+			}
+
+			allEntries = append(allEntries, entries...)
+		}
+
+		if len(allEntries) == 0 {
 			c.JSON(http.StatusOK, gin.H{"message": "no calendar entries returned from Tushare", "count": 0})
 			return
 		}
 
-		// Save to database
-		domainEntries := make([]*storage.TradingCalendarEntry, len(entries))
-		for i := range entries {
-			domainEntries[i] = &entries[i]
+		// Save all entries to database in one batch
+		domainEntries := make([]*storage.TradingCalendarEntry, len(allEntries))
+		for i := range allEntries {
+			domainEntries[i] = &allEntries[i]
 		}
 		if err := store.SaveTradingCalendarBatch(ctx, domainEntries); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save calendar: " + err.Error()})
 			return
 		}
 
-		tradingCount := 0
-		for _, e := range entries {
-			if e.IsTradingDay {
-				tradingCount++
-			}
+		totalCount := 0
+		totalTrading := 0
+		for _, r := range exchangeResults {
+			totalCount += r.count
+			totalTrading += r.trading
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"message":        "calendar synced successfully",
-			"count":          len(entries),
-			"trading_days":   tradingCount,
-			"holidays":       len(entries) - tradingCount,
-			"start_date":     startFormatted,
-			"end_date":       endFormatted,
-			"exchange":       req.Exchange,
+			"message":          "calendar synced successfully",
+			"count":            totalCount,
+			"trading_days":     totalTrading,
+			"holidays":         totalCount - totalTrading,
+			"start_date":       startFormatted,
+			"end_date":         endFormatted,
+			"exchanges_synced": exchanges,
+			"by_exchange":      exchangeResults,
 		})
 	}
 }
