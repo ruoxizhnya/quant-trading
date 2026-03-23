@@ -27,7 +27,7 @@
 - [x] Equity curve calculation fix (short positions)
 - [x] Metrics calculation fix (annual return/Sharpe using actual dates)
 - [x] **UI Dashboard** — browser-based backtesting interface at http://localhost:8085
-- [ ] Optimize momentum strategy — change from daily to weekly/monthly rebalancing signals
+- [x] Optimize momentum strategy — weekly rebalancing (not daily) to avoid position accumulation
 - [ ] ATR-based dynamic stop loss
 - [ ] Max drawdown monitoring and alerts
 
@@ -145,8 +145,10 @@
 
 ## 📝 Notes
 
-- **2026-03-23**: System launched. Backtest engine working with momentum strategy. Slippage and commission modeled. UI dashboard built.
-- **2026-03-23**: Identified key issues: (1) momentum strategy generates signals daily causing position accumulation; (2) news/sentiment pipeline not yet built; (3) strategy plugin system not yet implemented.
+- **2026-03-23 Morning**: System launched. Backtest engine working with momentum strategy. Slippage and commission modeled. UI dashboard built.
+- **2026-03-23 Morning**: Identified key issues: (1) momentum strategy generates signals daily causing position accumulation; (2) news/sentiment pipeline not yet built; (3) strategy plugin system not yet implemented.
+- **2026-03-23 Afternoon**: Fixed momentum strategy — weekly rebalancing is now default (not daily). Results much more realistic: 5 trades (weekly) vs 21 trades (daily). UI pushed to http://localhost:8085. ROADMAP.md created.
+- **2026-03-23 Evening**: Momentum strategy weekly rebalancing verified: 600000.SH (Mar-Apr 2024) = +0.27%, 5 weekly trades, Sharpe 5.66, MaxDD 0.04%.
 
 ---
 
