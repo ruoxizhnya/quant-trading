@@ -333,6 +333,17 @@ async function drawEquity(pv, initCap) {
 async function drawKLine(symbol, startDate, endDate, trades) {
   const canvas = $('c-kline');
 
+  // Ensure canvas has explicit pixel dimensions matching its container
+  function sizeCanvas() {
+    const box = canvas.parentElement;
+    if (box) {
+      canvas.width = box.clientWidth;
+      canvas.height = 240;
+    }
+  }
+  sizeCanvas();
+  new ResizeObserver(sizeCanvas).observe(canvas.parentElement);
+
   // Fetch OHLCV
   let ohlcv = [];
   try {
