@@ -69,23 +69,27 @@ type BacktestRequest struct {
 
 // BacktestResponse represents the API response for a backtest run.
 type BacktestResponse struct {
-	ID            string  `json:"id"`
-	Status        string  `json:"status"`
-	TotalReturn   float64 `json:"total_return,omitempty"`
-	AnnualReturn  float64 `json:"annual_return,omitempty"`
-	SharpeRatio   float64 `json:"sharpe_ratio,omitempty"`
-	SortinoRatio  float64 `json:"sortino_ratio,omitempty"`
-	MaxDrawdown   float64 `json:"max_drawdown,omitempty"`
-	MaxDrawdownDate string `json:"max_drawdown_date,omitempty"`
-	WinRate       float64 `json:"win_rate,omitempty"`
-	TotalTrades   int     `json:"total_trades,omitempty"`
-	WinTrades     int     `json:"win_trades,omitempty"`
-	LoseTrades    int     `json:"lose_trades,omitempty"`
-	AvgHoldingDays float64 `json:"avg_holding_days,omitempty"`
-	CalmarRatio   float64 `json:"calmar_ratio,omitempty"`
-	StartedAt     string  `json:"started_at,omitempty"`
-	CompletedAt   string  `json:"completed_at,omitempty"`
-	Error         string  `json:"error,omitempty"`
+	ID              string                  `json:"id"`
+	Status          string                  `json:"status"`
+	TotalReturn     float64                 `json:"total_return,omitempty"`
+	AnnualReturn    float64                 `json:"annual_return,omitempty"`
+	SharpeRatio     float64                 `json:"sharpe_ratio,omitempty"`
+	SortinoRatio    float64                 `json:"sortino_ratio,omitempty"`
+	MaxDrawdown     float64                 `json:"max_drawdown,omitempty"`
+	MaxDrawdownDate string                  `json:"max_drawdown_date,omitempty"`
+	WinRate         float64                 `json:"win_rate,omitempty"`
+	TotalTrades     int                     `json:"total_trades,omitempty"`
+	WinTrades       int                     `json:"win_trades,omitempty"`
+	LoseTrades      int                     `json:"lose_trades,omitempty"`
+	AvgHoldingDays  float64                 `json:"avg_holding_days,omitempty"`
+	CalmarRatio     float64                 `json:"calmar_ratio,omitempty"`
+	StartedAt       string                  `json:"started_at,omitempty"`
+	CompletedAt     string                  `json:"completed_at,omitempty"`
+	Error           string                  `json:"error,omitempty"`
+	PortfolioValues []domain.PortfolioValue `json:"portfolio_values,omitempty"`
+	Trades          []domain.Trade         `json:"trades,omitempty"`
+	StockPool       []string               `json:"stock_pool,omitempty"`
+	InitialCapital  float64                `json:"initial_capital,omitempty"`
 }
 
 // NewEngine creates a new backtest engine.
@@ -201,22 +205,26 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 	state.CompletedAt = time.Now()
 
 	return &BacktestResponse{
-		ID:             backtestID,
-		Status:         "completed",
-		TotalReturn:    result.TotalReturn,
-		AnnualReturn:   result.AnnualReturn,
+		ID:              backtestID,
+		Status:          "completed",
+		TotalReturn:     result.TotalReturn,
+		AnnualReturn:    result.AnnualReturn,
 		SharpeRatio:    result.SharpeRatio,
 		SortinoRatio:   result.SortinoRatio,
 		MaxDrawdown:    result.MaxDrawdown,
 		MaxDrawdownDate: result.MaxDrawdownDate.Format("2006-01-02"),
-		WinRate:        result.WinRate,
-		TotalTrades:    result.TotalTrades,
-		WinTrades:      result.WinTrades,
-		LoseTrades:     result.LoseTrades,
-		AvgHoldingDays: result.AvgHoldingDays,
-		CalmarRatio:    result.CalmarRatio,
-		StartedAt:      state.StartedAt.Format(time.RFC3339),
-		CompletedAt:   state.CompletedAt.Format(time.RFC3339),
+		WinRate:         result.WinRate,
+		TotalTrades:     result.TotalTrades,
+		WinTrades:       result.WinTrades,
+		LoseTrades:      result.LoseTrades,
+		AvgHoldingDays:  result.AvgHoldingDays,
+		CalmarRatio:     result.CalmarRatio,
+		StartedAt:       state.StartedAt.Format(time.RFC3339),
+		CompletedAt:    state.CompletedAt.Format(time.RFC3339),
+		PortfolioValues: result.PortfolioValues,
+		Trades:          result.Trades,
+		StockPool:       req.StockPool,
+		InitialCapital:   initialCapital,
 	}, nil
 }
 
