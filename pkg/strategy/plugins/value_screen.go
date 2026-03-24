@@ -214,7 +214,7 @@ func (s *valueScreeningStrategy) callScreenAPI(dateStr string) ([]domain.ScreenR
 		return nil, fmt.Errorf("failed to marshal screen request: %w", err)
 	}
 
-	url := "http://localhost:8081/screen"
+	url := "http://data-service:8081/screen"
 	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create screen request: %w", err)

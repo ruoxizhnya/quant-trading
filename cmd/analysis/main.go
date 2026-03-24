@@ -16,6 +16,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
+	_ "github.com/ruoxizhnya/quant-trading/pkg/strategy/plugins"
 )
 
 func main() {
@@ -182,6 +184,12 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.
 			return
 		}
 		c.JSON(resp.StatusCode, result)
+	})
+
+	// Strategy list endpoint
+	router.GET("/api/strategies", func(c *gin.Context) {
+		strategies := strategy.DefaultRegistry.ListWithInfo()
+		c.JSON(http.StatusOK, gin.H{"strategies": strategies})
 	})
 
 	// Backtest endpoints

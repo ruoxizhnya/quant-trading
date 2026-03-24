@@ -310,7 +310,7 @@ func (c *TushareClient) FetchFundamentals(ctx context.Context, symbol string, da
 		"ann_date": date,
 	}
 
-	resp, err := c.call(ctx, "financial_data", params, "ts_code,ann_date,end_date,pe,pb,ps,roe,roa,debt_to_equity,gross_margin,net_margin,revenue,net_profit,total_assets,total_liab")
+	resp, err := c.call(ctx, "fina_indicator", params, "ts_code,ann_date,end_date,pe,pb,ps,roe,roa,debt_to_equity,gross_margin,net_margin,revenue,net_profit,total_assets,total_liab")
 	if err != nil {
 		return nil, err
 	}
@@ -336,7 +336,7 @@ func (c *TushareClient) FetchFundamentals(ctx context.Context, symbol string, da
 func (c *TushareClient) normalizeFundamentals(resp *TushareResponse) []domain.Fundamental {
 	var records []domain.Fundamental
 	for _, item := range resp.Data.Items {
-		if len(item) < 15 {
+		if len(item) < 3 {
 			continue
 		}
 
@@ -382,7 +382,7 @@ func (c *TushareClient) FetchFundamentalsData(ctx context.Context, symbol, start
 		params["end_date"] = formatDate(endDate)
 	}
 
-	resp, err := c.call(ctx, "financial_data", params, "ts_code,ann_date,end_date,pe,pb,ps,roe,roa,debt_to_equity,gross_margin,net_margin,revenue,net_profit,total_assets,total_liab")
+	resp, err := c.call(ctx, "fina_indicator", params, "ts_code,ann_date,end_date,pe,pb,ps,roe,roa,debt_to_equity,gross_margin,net_margin,revenue,net_profit,total_assets,total_liab")
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +412,7 @@ func (c *TushareClient) FetchFundamentalsData(ctx context.Context, symbol, start
 func (c *TushareClient) normalizeFundamentalsData(resp *TushareResponse) []domain.FundamentalData {
 	var records []domain.FundamentalData
 	for _, item := range resp.Data.Items {
-		if len(item) < 15 {
+		if len(item) < 3 {
 			continue
 		}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
 // Config holds backtest engine configuration.
@@ -381,7 +382,7 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		}
 
 		// Step 3: Get signals from strategy service
-		signals, err := e.getSignals(ctx, params.StrategyName, params.StockPool, marketDataCache, date)
+		signals, err := e.getSignals(ctx, params.StrategyName, params.StockPool, marketDataCache, date, state.Tracker)
 		if err != nil {
 			logger.Warn().
 				Time("date", date).
@@ -821,7 +822,53 @@ func (e *Engine) detectRegime(ctx context.Context, marketData map[string][]domai
 }
 
 // getSignals retrieves trading signals from strategy service.
-func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool []string, marketData map[string][]domain.OHLCV, date time.Time) ([]domain.Signal, error) {
+func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool []string, marketData map[string][]domain.OHLCV, date time.Time, tracker *Tracker) ([]domain.Signal, error) {
+	// Step 1: Try local strategy registry first (plugins/ directory)
+	if strat, err := strategy.DefaultRegistry.Get(strategyName); err == nil {
+		// Build current portfolio from tracker state
+		prices := make(map[string]float64)
+		for sym, bars := range marketData {
+			if len(bars) > 0 {
+				prices[sym] = bars[len(bars)-1].Close
+			}
+		}
+		portfolio := tracker.GetPortfolio(prices)
+
+		signals, err := strat.GenerateSignals(ctx, marketData, portfolio)
+		if err != nil {
+			return nil, fmt.Errorf("local strategy %s failed: %w", strategyName, err)
+		}
+
+		// Convert strategy.Signal to domain.Signal
+		domainSignals := make([]domain.Signal, 0, len(signals))
+		for _, s := range signals {
+			if s.Action == "hold" {
+				continue
+			}
+			var dir domain.Direction
+			if s.Action == "buy" {
+				dir = domain.DirectionLong
+			} else if s.Action == "sell" {
+				dir = domain.DirectionShort
+			} else {
+				continue
+			}
+			domainSignals = append(domainSignals, domain.Signal{
+				Symbol:    s.Symbol,
+				Direction: dir,
+				Strength:  s.Strength,
+				Date:      date,
+			})
+		}
+
+		e.logger.Debug().
+			Str("strategy", strategyName).
+			Int("signals", len(domainSignals)).
+			Msg("Generated signals from local registry")
+		return domainSignals, nil
+	}
+
+	// Step 2: Fall back to external strategy service
 	url := fmt.Sprintf("%s/strategies/%s/signals", e.strategyServiceURL, strategyName)
 
 	// Get stock info from market data keys (symbol only, no external data needed for momentum)
@@ -832,11 +879,11 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 
 	// Convert market data to the format expected by strategy service
 	reqBody := struct {
-		StockPool  []string                    `json:"stock_pool"`
-		Stocks     []domain.Stock              `json:"stocks"`
-		MarketData map[string][]domain.OHLCV   `json:"market_data"`
+		StockPool   []string                       `json:"stock_pool"`
+		Stocks      []domain.Stock                 `json:"stocks"`
+		MarketData  map[string][]domain.OHLCV      `json:"market_data"`
 		Fundamental map[string][]domain.Fundamental `json:"fundamental"`
-		Date       string                      `json:"date"`
+		Date        string                         `json:"date"`
 	}{
 		StockPool:   stockPool,
 		Stocks:      stocks,
