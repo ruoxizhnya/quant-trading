@@ -722,7 +722,11 @@ func (s *PostgresStore) ScreenFundamentals(ctx context.Context, filters domain.S
 	}
 
 	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
+		if strings.Contains(query, "WHERE sf.rn = 1") {
+			query += " AND " + strings.Join(conditions, " AND ")
+		} else {
+			query += " WHERE " + strings.Join(conditions, " AND ")
+		}
 	}
 
 	if limit > 0 {

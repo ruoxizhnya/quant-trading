@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -152,6 +153,11 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.
 		c.File("./static/index.html")
 	})
 
+	router.GET("/screen", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.File("./static/screen.html")
+	})
+
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -173,6 +179,29 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.
 		// Proxy to data service
 		dataURL := fmt.Sprintf("http://data-service:8081/ohlcv/%s?start_date=%s&end_date=%s", symbol, startDate, endDate)
 		resp, err := http.Get(dataURL)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "data service unavailable: " + err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		var result map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "invalid response from data service"})
+			return
+		}
+		c.JSON(resp.StatusCode, result)
+	})
+
+	// Screen proxy for UI (proxies to data service)
+	router.POST("/screen", func(c *gin.Context) {
+		var reqBody map[string]interface{}
+		if err := json.NewDecoder(c.Request.Body).Decode(&reqBody); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+		bodyBytes, _ := json.Marshal(reqBody)
+		dataURL := "http://data-service:8081/screen"
+		resp, err := http.Post(dataURL, "application/json", bytes.NewReader(bodyBytes))
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": "data service unavailable: " + err.Error()})
 			return
