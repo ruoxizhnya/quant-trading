@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
@@ -105,6 +107,279 @@ func main() {
 	logger.Info().Msg("Server exited")
 }
 
+// ── Copilot Handlers ──────────────────────────────────────────
+
+const copilotSystemPrompt = `You are an expert Go programmer specializing in quantitative trading strategies. Your task is to generate a valid Go file that implements a trading Strategy.
+
+## Strategy Interface
+The Strategy interface (from github.com/ruoxizhnya/quant-trading/pkg/strategy) is:
+
+type Strategy interface {
+    Name() string
+    Description() string
+    Parameters() []Parameter
+    GenerateSignals(ctx context.Context, bars map[string][]domain.OHLCV, portfolio *domain.Portfolio) ([]Signal, error)
+}
+
+type Parameter struct {
+    Name        string
+    Type        string  // "int", "float", "string", "bool"
+    Default     any
+    Description string
+    Min        float64
+    Max        float64
+}
+
+type Signal struct {
+    Symbol   string
+    Action   string  // "buy", "sell", "hold"
+    Strength float64 // 0.0-1.0
+    Price    float64
+}
+
+## Key Types (from github.com/ruoxizhnya/quant-trading/pkg/domain)
+- type OHLCV struct { Symbol, Date time.Time, Open, High, Low, Close, Volume float64 }
+- type Portfolio struct { Cash float64; Positions map[string]Position }
+- type Position struct { Symbol string; Quantity float64; CurrentPrice, AvgCost float64 }
+
+## Requirements for the generated code:
+1. Package name: plugins
+2. Use package-level struct with exported config and strategy structs
+3. Implement ALL interface methods: Name(), Description(), Parameters(), GenerateSignals()
+4. Include Configure(map[string]any) method for parameter injection
+5. Include init() that calls strategy.GlobalRegister(&yourStrategy{})
+6. Add Chinese comments explaining the strategy logic (use // comments)
+7. Validate parameters in GenerateSignals() (check nil bars, bounds, etc.)
+8. Return "hold" signals by default; only "buy" or "sell" when clear signal
+9. Use meaningful variable names in Chinese pinyin or English
+10. Output ONLY the Go code in a code block, no explanations before or after
+
+## File structure template:
+package plugins
+
+import (
+    "context"
+    "sort"
+    "time"
+
+    "github.com/ruoxizhnya/quant-trading/pkg/domain"
+    "github.com/ruoxizhnya/quant-trading/pkg/strategy"
+)
+
+// StrategyConfig holds configuration for this strategy.
+type StrategyConfig struct {
+    // Add your parameters here
+}
+
+// strategyImpl implements the Strategy interface.
+type strategyImpl struct {
+    name        string
+    description string
+    params      StrategyConfig
+}
+
+func (s *strategyImpl) Name() string { return "your_strategy_name" }
+func (s *strategyImpl) Description() string { return "中文描述" }
+func (s *strategyImpl) Parameters() []strategy.Parameter { /* return params */ }
+func (s *strategyImpl) Configure(params map[string]any) { /* inject params */ }
+func (s *strategyImpl) GenerateSignals(ctx context.Context, bars map[string][]domain.OHLCV, portfolio *domain.Portfolio) ([]strategy.Signal, error) { /* implement logic */ }
+
+func init() {
+    strategy.GlobalRegister(&strategyImpl{name: "your_strategy_name", description: "中文描述"})
+}
+
+## IMPORTANT:
+- Output only the complete Go code block, nothing else
+- The code must compile and be syntactically valid
+- Strategy name should be slug-style lowercase (e.g., "rsi_mean_reversion")
+- Include proper imports
+- Use time.Time for dates
+`
+
+type copilotRequest struct {
+	Prompt string `json:"prompt" binding:"required"`
+}
+
+type copilotResponse struct {
+	Code         string `json:"code"`
+	StrategyName string `json:"strategy_name"`
+	Description  string `json:"description"`
+}
+
+type saveRequest struct {
+	Code         string `json:"code" binding:"required"`
+	StrategyName string `json:"strategy_name" binding:"required"`
+}
+
+func generateStrategyHandler(c *gin.Context) {
+	var req copilotRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "prompt is required"})
+		return
+	}
+
+	apiKey := os.Getenv("AI_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
+	if apiKey == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "AI_API_KEY or OPENAI_API_KEY environment variable not set"})
+		return
+	}
+
+	// Build OpenAI-compatible request
+	payload := map[string]any{
+		"model": "gpt-4o-mini",
+		"messages": []map[string]string{
+			{"role": "system", "content": copilotSystemPrompt},
+			{"role": "user", "content": req.Prompt},
+		},
+		"max_tokens": 2000,
+	}
+
+	payloadBytes, _ := json.Marshal(payload)
+	aiURL := os.Getenv("AI_API_URL")
+	if aiURL == "" {
+		aiURL = "https://api.openai.com/v1/chat/completions"
+	}
+
+	reqCtx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", aiURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create request: " + err.Error()})
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "AI request failed: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to parse AI response: " + err.Error()})
+		return
+	}
+
+	// Extract content from OpenAI-style response
+	choices, ok := result["choices"].([]any)
+	if !ok || len(choices) == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "empty response from AI model"})
+		return
+	}
+
+	choice0, ok := choices[0].(map[string]any)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "malformed AI response"})
+		return
+	}
+
+	msg, ok := choice0["message"].(map[string]any)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "malformed AI message"})
+		return
+	}
+
+	content, ok := msg["content"].(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "AI returned non-text content"})
+		return
+	}
+
+	// Parse strategy name from code
+	strategyName := extractStrategyName(content)
+	description := extractDescription(content)
+
+	c.JSON(http.StatusOK, copilotResponse{
+		Code:         content,
+		StrategyName: strategyName,
+		Description:  description,
+	})
+}
+
+func extractStrategyName(code string) string {
+	// Try to extract Name() return value
+	for _, line := range strings.Split(code, "\n") {
+		if strings.Contains(line, "func (s *") && strings.Contains(line, "Name()") {
+			continue
+		}
+		if strings.Contains(line, `return "`) {
+			name := strings.TrimSpace(line)
+			name = strings.TrimPrefix(name, "return \"")
+			name = strings.TrimSuffix(name, "\"")
+			if len(name) > 0 && len(name) < 60 {
+				return name
+			}
+		}
+	}
+	// Try GlobalRegister
+	re := regexp.MustCompile(`GlobalRegister\s*\(\s*&[a-zA-Z]+\{\s*name:\s*"([^"]+)"`)
+	m := re.FindStringSubmatch(code)
+	if len(m) > 1 {
+		return m[1]
+	}
+	return "generated_strategy"
+}
+
+func extractDescription(code string) string {
+	for _, line := range strings.Split(code, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "Description()") || strings.Contains(line, "description") {
+			continue
+		}
+		if strings.Contains(line, `return "`) {
+			desc := strings.TrimSpace(line)
+			desc = strings.TrimPrefix(desc, "return \"")
+			desc = strings.TrimSuffix(desc, "\"")
+			if len(desc) > 5 && len(desc) < 200 {
+				return desc
+			}
+		}
+	}
+	return ""
+}
+
+func saveStrategyHandler(c *gin.Context) {
+	var req saveRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "code and strategy_name are required"})
+		return
+	}
+
+	// Sanitize filename
+	safeName := strings.Map(func(r rune) rune {
+		if r == '/' || r == '\\' || r == ':' || r == 0 {
+			return '_'
+		}
+		return r
+	}, req.StrategyName)
+
+	filename := safeName + ".go"
+	dir := "./generated_strategies"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create directory: " + err.Error()})
+		return
+	}
+
+	filepath := dir + "/" + filename
+	if err := os.WriteFile(filepath, []byte(req.Code), 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write file: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "strategy saved successfully",
+		"strategy_name": req.StrategyName,
+		"file":          filepath,
+	})
+}
+
 // initLogger initializes the zerolog logger.
 func initLogger() zerolog.Logger {
 	zerolog.TimeFieldFormat = time.RFC3339Nano
@@ -171,6 +446,16 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.
 	router.GET("/dashboard.html", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./static/dashboard.html")
+	})
+
+	router.GET("/copilot", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.File("./static/copilot.html")
+	})
+
+	router.GET("/copilot.html", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.File("./static/copilot.html")
 	})
 
 	router.GET("/index.html", func(c *gin.Context) {
@@ -368,4 +653,11 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.
 			},
 		})
 	})
+
+	// ── Strategy Copilot ──────────────────────────────────────
+	copilot := router.Group("/api/copilot")
+	{
+		copilot.POST("/generate", generateStrategyHandler)
+		copilot.POST("/save", saveStrategyHandler)
+	}
 }
