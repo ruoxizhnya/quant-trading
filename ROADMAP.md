@@ -95,7 +95,7 @@
   - `execute_trading()` handles target vs actual gap
   - Cleaner separation of signal generation vs execution
 
-- [ ] **Strategy Copilot (AI-assisted coding)**
+- [x] **Strategy Copilot (AI-assisted coding)** ✅
   - User describes strategy in natural language
   - AI generates Go strategy code
   - User can edit and refine with validation

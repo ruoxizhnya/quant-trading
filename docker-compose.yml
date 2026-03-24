@@ -104,7 +104,7 @@ services:
       DATA_SERVICE_URL: http://data-service:8081
       STRATEGY_SERVICE_URL: http://strategy-service:8082
       RISK_SERVICE_URL: http://risk-service:8083
-      AI_API_KEY: ${AI_API_KEY:?AI_API_KEY must be set}
+      AI_API_KEY: ${AI_API_KEY:-}
       AI_API_URL: ${AI_API_URL:-https://api.openai.com/v1/chat/completions}
       LOG_LEVEL: info
     depends_on:
