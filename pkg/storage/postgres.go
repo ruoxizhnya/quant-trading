@@ -721,7 +721,7 @@ func (s *PostgresStore) ScreenFundamentals(ctx context.Context, filters domain.S
 		argIdx++
 	}
 
-	if len(conditions) > 0 && date != nil {
+	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 

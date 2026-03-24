@@ -85,8 +85,12 @@
     <div class="form-group"><label>策略</label>
       <select id="s-strategy">
         <option value="momentum">动量策略 (Momentum)</option>
-        <option value="value_momentum">价值动量</option>
+        <option value="mean_reversion">均值回归 (Mean Reversion)</option>
       </select>
+    </div>
+    <div id="strategy-params" class="form-group" style="display:none;">
+      <label>策略参数</label>
+      <div id="param-container"></div>
     </div>
     <div class="form-group"><label>股票池</label>
       <input id="s-pool" value="600000.SH" placeholder="600000.SH">
@@ -207,6 +211,7 @@ async function runBt() {
   $('results').style.display = 'none';
 
   const stocks = $('s-pool').value.split(',').map(s => s.trim()).filter(Boolean);
+  const strategyParams = gatherStrategyParams();
   const req = {
     strategy: $('s-strategy').value,
     stock_pool: stocks,
@@ -214,7 +219,8 @@ async function runBt() {
     end_date: $('s-end').value,
     initial_capital: parseFloat($('s-capital').value),
     commission_rate: parseFloat($('s-comm').value),
-    slippage_rate: parseFloat($('s-slip').value)
+    slippage_rate: parseFloat($('s-slip').value),
+    strategy_params: strategyParams
   };
 
   try {
@@ -550,7 +556,98 @@ async function loadHist(id) {
   finally { $('status').classList.remove('show'); }
 }
 
+// ─── Strategy Loader ──────────────────────────────────────────
+let strategyInfoCache = {};
+
+async function loadStrategies() {
+  try {
+    const r = await fetch(API + '/api/strategies');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    strategyInfoCache = {};
+    const sel = $('s-strategy');
+    sel.innerHTML = '';
+    for (const s of d.strategies || []) {
+      strategyInfoCache[s.name] = s;
+      const opt = document.createElement('option');
+      opt.value = s.name;
+      opt.textContent = s.description || s.name;
+      sel.appendChild(opt);
+    }
+    // Trigger param render for default selection
+    sel.addEventListener('change', onStrategyChange);
+    onStrategyChange();
+  } catch (e) { console.error('Failed to load strategies', e); }
+}
+
+function onStrategyChange() {
+  const sel = $('s-strategy');
+  const name = sel.value;
+  const info = strategyInfoCache[name];
+  const container = $('param-container');
+  const paramsDiv = $('strategy-params');
+  if (!info || !info.parameters || info.parameters.length === 0) {
+    paramsDiv.style.display = 'none';
+    return;
+  }
+  paramsDiv.style.display = 'block';
+  container.innerHTML = '';
+  for (const p of info.parameters) {
+    const div = document.createElement('div');
+    div.style.marginBottom = '6px';
+    const label = document.createElement('label');
+    label.textContent = p.name + ' (' + (p.default !== undefined ? p.default : '') + ')';
+    label.style.fontSize = '10px';
+    div.appendChild(label);
+    let input;
+    if (p.type === 'bool') {
+      input = document.createElement('input');
+      input.type = 'checkbox';
+      input.id = 'p-' + p.name;
+      if (p.default === true) input.checked = true;
+    } else if (p.type === 'int' || p.type === 'float') {
+      input = document.createElement('input');
+      input.type = 'number';
+      input.id = 'p-' + p.name;
+      input.value = p.default !== undefined ? p.default : '';
+      if (p.min !== undefined) input.min = p.min;
+      if (p.max !== undefined) input.max = p.max;
+      if (p.type === 'float') input.step = '0.01';
+    } else {
+      input = document.createElement('input');
+      input.type = 'text';
+      input.id = 'p-' + p.name;
+      input.value = p.default !== undefined ? p.default : '';
+    }
+    div.appendChild(input);
+    container.appendChild(div);
+  }
+}
+
+function gatherStrategyParams() {
+  const params = {};
+  const info = strategyInfoCache[$('s-strategy').value];
+  if (!info || !info.parameters) return params;
+  for (const p of info.parameters) {
+    const el = $('p-' + p.name);
+    if (!el) continue;
+    if (p.type === 'bool') {
+      params[p.name] = el.checked;
+    } else if (p.type === 'int') {
+      const v = parseInt(el.value);
+      if (!isNaN(v)) params[p.name] = v;
+    } else if (p.type === 'float') {
+      const v = parseFloat(el.value);
+      if (!isNaN(v)) params[p.name] = v;
+    } else {
+      params[p.name] = el.value;
+    }
+  }
+  return params;
+}
+
 renderHist();
+loadStrategies();
 </script>
 </body>
 </html>

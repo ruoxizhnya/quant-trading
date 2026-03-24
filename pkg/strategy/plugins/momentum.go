@@ -93,8 +93,6 @@ func (s *momentumStrategy) GenerateSignals(ctx context.Context, bars map[string]
 			return sorted[i].Date.Before(sorted[j].Date)
 		})
 
-		// Get latest bar
-		latestBar := sorted[len(sorted)-1]
 		endIdx := len(sorted) - 1
 
 		// Check if we have enough data for lookback
