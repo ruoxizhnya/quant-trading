@@ -158,6 +158,11 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.
 		c.File("./static/screen.html")
 	})
 
+	router.GET("/screen.html", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.File("./static/screen.html")
+	})
+
 	router.GET("/dashboard", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./static/dashboard.html")
