@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 )
@@ -218,6 +219,12 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 	r.POST("/sync/ohlcv", syncOHLCVHandler(tc, store))
 	r.POST("/sync/ohlcv/all", syncAllOHLCVHandler(tc, store))
 	r.POST("/sync/fundamental", syncFundamentalHandler(tc))
+	r.POST("/sync/fundamentals", syncFundamentalsHandler(tc, store))
+
+	// Fundamental data endpoints (stock_fundamentals table)
+	r.GET("/fundamentals/:symbol", getFundamentalsHandler(store))
+	r.GET("/fundamentals/:symbol/history", getFundamentalsHistoryHandler(store))
+	r.POST("/screen", screenStocksHandler(store))
 }
 
 // Handlers
@@ -605,6 +612,176 @@ func syncFundamentalHandler(tc *data.TushareClient) gin.HandlerFunc {
 		})
 	}
 }
+
+// ---- Fundamental Data Handlers (stock_fundamentals) ----
+
+type syncFundamentalsRequest struct {
+	Symbols []string `json:"symbols"`
+	Date    string   `json:"date"` // YYYYMMDD - if provided, fetch for that specific date; otherwise fetch recent
+}
+
+func syncFundamentalsHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		var req syncFundamentalsRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			// If no body, use empty request (sync all stocks)
+			req = syncFundamentalsRequest{}
+		}
+
+		var symbols []string
+		if len(req.Symbols) > 0 {
+			symbols = req.Symbols
+		} else {
+			// Fetch all stocks from DB
+			allStocks, err := store.GetAllStocks(ctx)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks from DB: " + err.Error()})
+				return
+			}
+			for _, s := range allStocks {
+				symbols = append(symbols, s.Symbol)
+			}
+			logging.Logger.Info().Int("count", len(symbols)).Msg("No symbols provided, fetched all from DB")
+		}
+
+		if len(symbols) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no stocks found in DB. Run POST /sync/stocks first."})
+			return
+		}
+
+		totalCount := 0
+		totalSynced := 0
+		totalFailed := 0
+
+		// Process in batches of 10 to respect rate limits
+		batchSize := 10
+		for i := 0; i < len(symbols); i += batchSize {
+			end := i + batchSize
+			if end > len(symbols) {
+				end = len(symbols)
+			}
+			batch := symbols[i:end]
+
+			for _, symbol := range batch {
+				records, err := tc.FetchFundamentalsData(ctx, symbol, req.Date, req.Date)
+				if err != nil {
+					totalFailed++
+					logging.Logger.Warn().Err(err).Str("symbol", symbol).Msg("Failed to sync fundamentals data")
+					continue
+				}
+				totalSynced++
+				totalCount += len(records)
+			}
+
+			logging.Logger.Info().
+				Int("batch", (i/batchSize)+1).
+				Int("progress", end).
+				Int("total", len(symbols)).
+				Msg("Fundamentals batch complete")
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":        "Fundamentals synced successfully",
+			"stocks_synced":  totalSynced,
+			"records_saved":  totalCount,
+			"failed_stocks": totalFailed,
+		})
+	}
+}
+
+func getFundamentalsHandler(store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		symbol := c.Param("symbol")
+
+		fundamental, err := store.GetFundamentalDataLatest(ctx, symbol)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if fundamental == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "fundamental data not found for symbol"})
+			return
+		}
+
+		c.JSON(http.StatusOK, fundamental)
+	}
+}
+
+func getFundamentalsHistoryHandler(store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		symbol := c.Param("symbol")
+		startStr := c.Query("start_date")
+		endStr := c.Query("end_date")
+
+		var startDate, endDate *time.Time
+		if startStr != "" {
+			t, err := time.Parse("20060102", startStr)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
+				return
+			}
+			startDate = &t
+		}
+		if endStr != "" {
+			t, err := time.Parse("20060102", endStr)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+				return
+			}
+			endDate = &t
+		}
+
+		history, err := store.GetFundamentalDataHistory(ctx, symbol, startDate, endDate)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"history": history})
+	}
+}
+
+func screenStocksHandler(store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		var req domain.ScreenRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		var date *time.Time
+		if req.Date != "" {
+			t, err := time.Parse("20060102", req.Date)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, use YYYYMMDD"})
+				return
+			}
+			date = &t
+		}
+
+		limit := req.Limit
+		if limit <= 0 {
+			limit = 100
+		}
+
+		results, err := store.ScreenFundamentals(ctx, req.Filters, date, limit)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"count":   len(results),
+			"results": results,
+		})
+	}
+}
+
+// ---- End Fundamental Data Handlers ----
 
 func getTradingCalendarHandler(store *storage.PostgresStore) gin.HandlerFunc {
 	return func(c *gin.Context) {

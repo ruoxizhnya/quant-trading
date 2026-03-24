@@ -369,6 +369,97 @@ func (c *TushareClient) normalizeFundamentals(resp *TushareResponse) []domain.Fu
 	return records
 }
 
+// FetchFundamentalsData retrieves financial data from tushare financial_data API
+// and stores it in the stock_fundamentals table.
+func (c *TushareClient) FetchFundamentalsData(ctx context.Context, symbol, startDate, endDate string) ([]domain.FundamentalData, error) {
+	params := map[string]interface{}{
+		"ts_code": symbol,
+	}
+	if startDate != "" {
+		params["start_date"] = formatDate(startDate)
+	}
+	if endDate != "" {
+		params["end_date"] = formatDate(endDate)
+	}
+
+	resp, err := c.call(ctx, "financial_data", params, "ts_code,ann_date,end_date,pe,pb,ps,roe,roa,debt_to_equity,gross_margin,net_margin,revenue,net_profit,total_assets,total_liab")
+	if err != nil {
+		return nil, err
+	}
+
+	records := c.normalizeFundamentalsData(resp)
+	if len(records) == 0 {
+		return nil, nil
+	}
+
+	// Save to stock_fundamentals table via store
+	if c.store != nil {
+		ptrs := make([]*domain.FundamentalData, len(records))
+		for i := range records {
+			ptrs[i] = &records[i]
+		}
+		if err := c.store.SaveFundamentalDataBatch(ctx, ptrs); err != nil {
+			c.logger.Warn().Err(err).Msg("Failed to batch save fundamentals data")
+		}
+	}
+
+	c.logger.Info().Str("symbol", symbol).Int("count", len(records)).Msg("FundamentalsData fetched and saved")
+	return records, nil
+}
+
+// normalizeFundamentalsData converts tushare financial_data response to domain.FundamentalData.
+// financial_data fields: ts_code,ann_date,end_date,pe,pb,ps,roe,roa,debt_to_equity,gross_margin,net_margin,revenue,net_profit,total_assets,total_liab
+func (c *TushareClient) normalizeFundamentalsData(resp *TushareResponse) []domain.FundamentalData {
+	var records []domain.FundamentalData
+	for _, item := range resp.Data.Items {
+		if len(item) < 15 {
+			continue
+		}
+
+		tsCode := c.fieldStr(item, 0)
+		if tsCode == "" {
+			continue
+		}
+
+		annDateStr := c.fieldStr(item, 1)
+		endDateStr := c.fieldStr(item, 2)
+
+		annDate, _ := time.Parse("20060102", annDateStr)
+		endDate, _ := time.Parse("20060102", endDateStr)
+
+		// Use end_date as trade_date for factor analysis
+		fund := domain.FundamentalData{
+			TsCode:    tsCode,
+			TradeDate: endDate,
+			AnnDate:   annDate,
+			EndDate:   endDate,
+			PE:        c.fieldFloatPtr(item, 3),
+			PB:        c.fieldFloatPtr(item, 4),
+			PS:        c.fieldFloatPtr(item, 5),
+			ROE:       c.fieldFloatPtr(item, 6),
+			ROA:       c.fieldFloatPtr(item, 7),
+			DebtToEquity: c.fieldFloatPtr(item, 8),
+			GrossMargin:  c.fieldFloatPtr(item, 9),
+			NetMargin:    c.fieldFloatPtr(item, 10),
+			Revenue:      c.fieldFloatPtr(item, 11),
+			NetProfit:    c.fieldFloatPtr(item, 12),
+			TotalAssets:  c.fieldFloatPtr(item, 13),
+			TotalLiab:    c.fieldFloatPtr(item, 14),
+		}
+		records = append(records, fund)
+	}
+	return records
+}
+
+// fieldFloatPtr returns a pointer to float64, handling nil values.
+func (c *TushareClient) fieldFloatPtr(item []any, idx int) *float64 {
+	if idx >= len(item) || item[idx] == nil {
+		return nil
+	}
+	v := c.fieldFloat(item, idx)
+	return &v
+}
+
 // FetchIndexConstituents retrieves index constituents from tushare.
 func (c *TushareClient) FetchIndexConstituents(ctx context.Context, indexCode string, date string) ([]string, error) {
 	params := map[string]interface{}{

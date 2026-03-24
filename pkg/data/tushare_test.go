@@ -200,3 +200,143 @@ func TestTushareRateLimitConstants(t *testing.T) {
 	assert.Equal(t, 200, tushareRateLimit)
 	assert.Equal(t, time.Minute, tushareRateLimitDur)
 }
+
+// TestNormalizeFundamentalsData tests the normalization of Tushare financial_data API response.
+func TestNormalizeFundamentalsData(t *testing.T) {
+	client := &TushareClient{}
+
+	tests := []struct {
+		name            string
+		resp            *TushareResponse
+		wantCount       int
+		wantFirstTsCode string
+		wantFirstPENil  bool
+	}{
+		{
+			name: "valid response with multiple records",
+			resp: &TushareResponse{
+				Code: 0,
+				Msg:  "ok",
+				Data: TushareData{
+					Fields: []string{"ts_code", "ann_date", "end_date", "pe", "pb", "ps", "roe", "roa", "debt_to_equity", "gross_margin", "net_margin", "revenue", "net_profit", "total_assets", "total_liab"},
+					Items: [][]any{
+						{"600000.SH", "20241025", "20240930", 12.5, 1.2, 1.8, 0.15, 0.08, 0.5, 0.30, 0.15, 1000000000.0, 150000000.0, 5000000000.0, 2000000000.0},
+						{"000001.SZ", "20241020", "20240930", 8.3, 1.1, 1.5, 0.12, 0.06, 0.4, 0.28, 0.12, 800000000.0, 96000000.0, 4000000000.0, 1600000000.0},
+					},
+				},
+			},
+			wantCount:       2,
+			wantFirstTsCode: "600000.SH",
+			wantFirstPENil:  false,
+		},
+		{
+			name: "response with nil values",
+			resp: &TushareResponse{
+				Code: 0,
+				Msg:  "ok",
+				Data: TushareData{
+					Fields: []string{"ts_code", "ann_date", "end_date", "pe", "pb", "ps", "roe", "roa", "debt_to_equity", "gross_margin", "net_margin", "revenue", "net_profit", "total_assets", "total_liab"},
+					Items: [][]any{
+						{"600000.SH", "20241025", "20240930", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil},
+					},
+				},
+			},
+			wantCount:       1,
+			wantFirstTsCode: "600000.SH",
+			wantFirstPENil:  true,
+		},
+		{
+			name: "empty items",
+			resp: &TushareResponse{
+				Code: 0,
+				Msg:  "ok",
+				Data: TushareData{
+					Fields: []string{"ts_code", "ann_date", "end_date", "pe", "pb", "ps", "roe", "roa", "debt_to_equity", "gross_margin", "net_margin", "revenue", "net_profit", "total_assets", "total_liab"},
+					Items: [][]any{},
+				},
+			},
+			wantCount: 0,
+		},
+		{
+			name: "item with insufficient fields",
+			resp: &TushareResponse{
+				Code: 0,
+				Msg:  "ok",
+				Data: TushareData{
+					Fields: []string{"ts_code", "ann_date", "end_date", "pe", "pb", "ps", "roe", "roa", "debt_to_equity", "gross_margin", "net_margin", "revenue", "net_profit", "total_assets", "total_liab"},
+					Items: [][]any{
+						{"600000.SH", "20241025"}, // only 2 fields
+					},
+				},
+			},
+			wantCount: 0,
+		},
+		{
+			name: "item with empty ts_code",
+			resp: &TushareResponse{
+				Code: 0,
+				Msg:  "ok",
+				Data: TushareData{
+					Fields: []string{"ts_code", "ann_date", "end_date", "pe", "pb", "ps", "roe", "roa", "debt_to_equity", "gross_margin", "net_margin", "revenue", "net_profit", "total_assets", "total_liab"},
+					Items: [][]any{
+						{"", "20241025", "20240930", 12.5, 1.2, 1.8, 0.15, 0.08, 0.5, 0.30, 0.15, 1000000000.0, 150000000.0, 5000000000.0, 2000000000.0},
+					},
+				},
+			},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := client.normalizeFundamentalsData(tc.resp)
+			assert.Equal(t, tc.wantCount, len(result))
+			if tc.wantCount > 0 && len(result) > 0 {
+				assert.Equal(t, tc.wantFirstTsCode, result[0].TsCode)
+				// Check that dates are parsed correctly
+				expectedTradeDate, _ := time.Parse("20060102", "20240930")
+				assert.Equal(t, expectedTradeDate, result[0].TradeDate)
+				// Check PE pointer based on test case
+				if tc.wantFirstPENil {
+					assert.Nil(t, result[0].PE)
+				} else {
+					assert.NotNil(t, result[0].PE)
+					if result[0].PE != nil {
+						assert.Equal(t, 12.5, *result[0].PE)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestFieldFloatPtr tests the fieldFloatPtr helper method.
+func TestFieldFloatPtr(t *testing.T) {
+	client := &TushareClient{}
+
+	tests := []struct {
+		name     string
+		item     []any
+		idx      int
+		wantNil  bool
+		wantVal  float64
+	}{
+		{"valid float", []any{1.5}, 0, false, 1.5},
+		{"nil value", []any{nil}, 0, true, 0},
+		{"out of bounds", []any{1.5}, 5, true, 0},
+		{"empty slice", []any{}, 0, true, 0},
+		{"string to float", []any{"2.5"}, 0, false, 2.5},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := client.fieldFloatPtr(tc.item, tc.idx)
+			if tc.wantNil {
+				assert.Nil(t, result)
+			} else {
+				assert.NotNil(t, result)
+				assert.InDelta(t, tc.wantVal, *result, 0.001)
+			}
+		})
+	}
+}
