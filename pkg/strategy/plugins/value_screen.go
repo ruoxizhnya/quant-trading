@@ -37,11 +37,15 @@ type valueScreeningStrategy struct {
 	// Cache: date string -> screening results
 	// Avoids repeated API calls within the same backtest day
 	cache      sync.Map
-	cacheLimit int // max cached dates
+	cacheLimit int // max cached dates (default 30, set in init)
 }
 
 // Configure sets the strategy parameters.
 func (s *valueScreeningStrategy) Configure(params map[string]any) {
+	// Ensure cacheLimit has a sane default even if init() was skipped
+	if s.cacheLimit == 0 {
+		s.cacheLimit = 30
+	}
 	if v, ok := params["pe_max"]; ok {
 		switch val := v.(type) {
 		case float64:
@@ -151,7 +155,7 @@ func (s *valueScreeningStrategy) Parameters() []strategy.Parameter {
 	}
 }
 
-// isRebalanceDay checks if today is a rebalance day per the configured frequency.
+// isRebalanceDay checks if the given date is a rebalance day per the configured frequency.
 func (s *valueScreeningStrategy) isRebalanceDay(date time.Time) bool {
 	switch s.params.RebalanceFrequency {
 	case "weekly":
@@ -287,16 +291,17 @@ func (s *valueScreeningStrategy) GenerateSignals(
 		topN = 10
 	}
 
-	// Determine the date for screening from portfolioUpdatedAt
-	var screenDateStr string
+	// Determine the date for screening and rebalance check from portfolioUpdatedAt
+	var screenDate time.Time
 	if portfolio != nil && !portfolio.UpdatedAt.IsZero() {
-		screenDateStr = portfolio.UpdatedAt.Format("20060102")
+		screenDate = portfolio.UpdatedAt
 	} else {
-		screenDateStr = time.Now().Format("20060102")
+		screenDate = time.Now()
 	}
+	screenDateStr := screenDate.Format("20060102")
 
 	// Check rebalance frequency
-	if !s.isRebalanceDay(time.Now()) {
+	if !s.isRebalanceDay(screenDate) {
 		// Not a rebalance day: return sell signals only for positions that
 		// should be exited (momentum turned negative), no new buys
 		sellSignals, _ := s.generateSellSignals(bars, portfolio, momentumDays)

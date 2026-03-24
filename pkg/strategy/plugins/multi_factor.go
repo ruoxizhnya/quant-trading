@@ -41,6 +41,10 @@ type multiFactorStrategy struct {
 
 // Configure sets the strategy parameters.
 func (s *multiFactorStrategy) Configure(params map[string]any) {
+	// Ensure cacheLimit has a sane default even if init() was skipped
+	if s.cacheLimit == 0 {
+		s.cacheLimit = 30
+	}
 	if v, ok := params["value_weight"]; ok {
 		switch val := v.(type) {
 		case float64:
@@ -150,7 +154,7 @@ func (s *multiFactorStrategy) Parameters() []strategy.Parameter {
 	}
 }
 
-// isRebalanceDay checks if today is a rebalance day per the configured frequency.
+// isRebalanceDay checks if the given date is a rebalance day per the configured frequency.
 func (s *multiFactorStrategy) isRebalanceDay(date time.Time) bool {
 	switch s.params.RebalanceFrequency {
 	case "weekly":
@@ -246,52 +250,47 @@ func (s *multiFactorStrategy) callScreenAPI(dateStr string) ([]domain.ScreenResu
 	return result.Results, nil
 }
 
-// percentileRank computes the percentile rank of value in a sorted float64 slice.
-// Returns a value in [0, 1] where 1 = highest rank.
-// Uses linear interpolation for precision.
-func percentileRank(value float64, sorted []float64) float64 {
-	n := len(sorted)
-	if n == 0 {
-		return 0.5 // middle of the range if no data
-	}
-
-	// Count how many values are less than or equal to the given value
-	count := 0
-	for _, v := range sorted {
-		if v <= value {
-			count++
-		}
-	}
-
-	return float64(count) / float64(n)
-}
-
 // rankPercentile sorts the input values and returns each element's percentile rank.
+// Tied values receive the same percentile rank (average of their positions).
+// Uses a stable sort so that equal values preserve original relative order.
 func rankPercentile(values []float64) []float64 {
 	n := len(values)
 	if n == 0 {
 		return nil
 	}
 
-	// Create index-value pairs and sort by value
+	// Create index-value pairs and sort by value (stable sort for tie-breaking)
 	type iv struct {
-		idx    int
-		value  float64
+		idx   int
+		value float64
 	}
 	pairs := make([]iv, n)
 	for i, v := range values {
 		pairs[i] = iv{idx: i, value: v}
 	}
-	sort.Slice(pairs, func(i, j int) bool {
+	sort.SliceStable(pairs, func(i, j int) bool {
 		return pairs[i].value < pairs[j].value
 	})
 
-	// Assign percentile ranks (0-1)
+	// Assign percentile ranks, grouping ties and assigning the average rank
 	ranks := make([]float64, n)
-	for i, p := range pairs {
-		// percentile = position / n (1-based) converted to 0-1 range
-		// Use (i+1)/n so highest value gets ~1.0
-		ranks[p.idx] = float64(i+1) / float64(n)
+	i := 0
+	for i < n {
+		// Find the range of equal values
+		j := i + 1
+		for j < n && pairs[j].value == pairs[i].value {
+			j++
+		}
+		// Assign average rank (in 0-1 range) to all tied items
+		avgRank := 0.0
+		for k := i; k < j; k++ {
+			avgRank += float64(k+1) / float64(n)
+		}
+		avgRank /= float64(j - i)
+		for k := i; k < j; k++ {
+			ranks[pairs[k].idx] = avgRank
+		}
+		i = j
 	}
 
 	return ranks
@@ -338,16 +337,17 @@ func (s *multiFactorStrategy) GenerateSignals(
 	qw /= totalWeight
 	mw /= totalWeight
 
-	// Determine screening date
-	var screenDateStr string
+	// Determine the date for screening and rebalance check from portfolioUpdatedAt
+	var screenDate time.Time
 	if portfolio != nil && !portfolio.UpdatedAt.IsZero() {
-		screenDateStr = portfolio.UpdatedAt.Format("20060102")
+		screenDate = portfolio.UpdatedAt
 	} else {
-		screenDateStr = time.Now().Format("20060102")
+		screenDate = time.Now()
 	}
+	screenDateStr := screenDate.Format("20060102")
 
 	// Check rebalance frequency
-	if !s.isRebalanceDay(time.Now()) {
+	if !s.isRebalanceDay(screenDate) {
 		sellSignals, _ := s.generateSellSignals(bars, portfolio, lookback)
 		return sellSignals, nil
 	}
