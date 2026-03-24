@@ -159,6 +159,16 @@ type Trade struct {
 	TransferFee float64   `json:"transfer_fee"` // 0.001% on both buy and sell (A-share)
 	StampTax    float64   `json:"stamp_tax"`    // 0.1% on sell only (A-share)
 	Timestamp   time.Time `json:"timestamp"`
+	PendingQty  float64   `json:"pending_qty"` // quantity not yet filled from target position
+}
+
+// TargetPosition tracks the target vs actual position for execution gap management.
+type TargetPosition struct {
+	Symbol      string    `json:"symbol"`
+	TargetQty   float64   `json:"target_qty"`    // desired quantity from strategy signal
+	ActualQty   float64   `json:"actual_qty"`   // what was actually executed
+	PendingQty  float64   `json:"pending_qty"`  // quantity not yet filled
+	LastUpdated time.Time `json:"last_updated"`
 }
 
 // BacktestParams contains parameters for a backtest run

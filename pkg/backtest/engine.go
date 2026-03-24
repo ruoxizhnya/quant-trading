@@ -55,14 +55,15 @@ type Engine struct {
 
 // BacktestState holds the state of a backtest run.
 type BacktestState struct {
-	ID             string
-	Status         string // "running", "completed", "failed"
-	Params         domain.BacktestParams
-	Result         *domain.BacktestResult
-	Tracker        *Tracker
-	StartedAt      time.Time
-	CompletedAt    time.Time
-	Error          error
+	ID              string
+	Status          string // "running", "completed", "failed"
+	Params          domain.BacktestParams
+	Result          *domain.BacktestResult
+	Tracker         *Tracker
+	StartedAt       time.Time
+	CompletedAt     time.Time
+	Error           error
+	targetPositions map[string]*domain.TargetPosition // symbol -> target vs actual tracking
 }
 
 // BacktestRequest represents the API request to start a backtest.
@@ -181,9 +182,9 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 	// Create backtest state
 	backtestID := uuid.New().String()
 	state := &BacktestState{
-		ID:     backtestID,
-		Status: "running",
-		Params: domain.BacktestParams{
+		ID:              backtestID,
+		Status:          "running",
+		Params:          domain.BacktestParams{
 			StrategyName:   req.Strategy,
 			StockPool:      req.StockPool,
 			StartDate:      startDate,
@@ -191,13 +192,14 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 			InitialCapital: initialCapital,
 			RiskFreeRate:   riskFreeRate,
 		},
-		StartedAt: time.Now(),
+		StartedAt:       time.Now(),
 		Tracker: NewTracker(
 			initialCapital,
 			e.config.CommissionRate,
 			e.config.SlippageRate,
 			e.logger,
 		),
+		targetPositions: make(map[string]*domain.TargetPosition),
 	}
 
 	e.mu.Lock()
@@ -427,19 +429,73 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 				continue
 			}
 
-			// Execute trade if position size > 0
-			if positionSize.Size > 0 {
+			// Target/Actual Position Separation:
+			// Compute effective target by netting pending qty from prior unfilled signals
+			targetQty := positionSize.Size
+			if targetQty <= 0 {
+				continue
+			}
+
+			// Get or create target position record
+			tp, exists := state.targetPositions[signal.Symbol]
+			if !exists {
+				tp = &domain.TargetPosition{
+					Symbol:      signal.Symbol,
+					TargetQty:   0,
+					ActualQty:   0,
+					PendingQty:  0,
+					LastUpdated: date,
+				}
+				state.targetPositions[signal.Symbol] = tp
+			}
+
+			// Net pending qty against new target
+			// If we have pending buy qty, reduce the new target accordingly
+			effectiveTarget := targetQty
+			if tp.PendingQty > 0 {
+				if signal.Direction == domain.DirectionLong {
+					effectiveTarget = targetQty - tp.PendingQty
+					if effectiveTarget <= 0 {
+						logger.Info().
+							Str("symbol", signal.Symbol).
+							Float64("pending_qty", tp.PendingQty).
+							Float64("new_target", targetQty).
+							Time("date", date).
+							Msg("Signal skipped: pending buy qty covers new target")
+						continue
+					}
+					logger.Info().
+						Str("symbol", signal.Symbol).
+						Float64("pending_qty", tp.PendingQty).
+						Float64("new_target", targetQty).
+						Float64("effective_target", effectiveTarget).
+						Time("date", date).
+						Msg("Adjusted target: netting pending qty")
+				} else if signal.Direction == domain.DirectionClose && tp.PendingQty > 0 {
+					// Closing with pending buy: net against the pending (partial fill scenario)
+					// Reduce the close qty by the pending buy qty
+					effectiveTarget = targetQty
+				}
+			}
+
+			// Update target position with new target
+			tp.TargetQty = targetQty
+			tp.LastUpdated = date
+
+			// Execute trade if effective target > 0
+			if effectiveTarget > 0 {
 				price := pricesCache[signal.Symbol]
 				if price <= 0 {
 					continue
 				}
 
+				var trade *domain.Trade
 				switch signal.Direction {
 				case domain.DirectionLong:
-					_, err := state.Tracker.ExecuteTrade(
+					trade, err = state.Tracker.ExecuteTrade(
 						signal.Symbol,
 						domain.DirectionLong,
-						positionSize.Size,
+						effectiveTarget,
 						price,
 						date,
 					)
@@ -448,13 +504,17 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 							Str("symbol", signal.Symbol).
 							Err(err).
 							Msg("Failed to execute long trade")
+						// Record unfilled qty as pending
+						tp.PendingQty = targetQty - tp.ActualQty
+						tp.LastUpdated = date
+						continue
 					}
 
 				case domain.DirectionShort:
-					_, err := state.Tracker.ExecuteTrade(
+					trade, err = state.Tracker.ExecuteTrade(
 						signal.Symbol,
 						domain.DirectionShort,
-						positionSize.Size,
+						effectiveTarget,
 						price,
 						date,
 					)
@@ -463,19 +523,58 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 							Str("symbol", signal.Symbol).
 							Err(err).
 							Msg("Failed to execute short trade")
+						tp.PendingQty = targetQty - tp.ActualQty
+						tp.LastUpdated = date
+						continue
 					}
 
 				case domain.DirectionClose:
-					_, err := state.Tracker.ClosePosition(signal.Symbol, price, date)
+					trade, err = state.Tracker.ClosePosition(signal.Symbol, price, date)
 					if err != nil {
 						logger.Warn().
 							Str("symbol", signal.Symbol).
 							Err(err).
 							Msg("Failed to close position")
+						continue
 					}
 
 				case domain.DirectionHold:
 					// No action needed
+					continue
+				}
+
+				// Update target vs actual gap after trade execution
+				if trade != nil {
+					// Track how much of the target was actually filled
+					if signal.Direction == domain.DirectionLong || signal.Direction == domain.DirectionShort {
+						// For opening positions: actual is the qty that was filled
+						tp.ActualQty += trade.Quantity
+						// Pending = target - actual (what wasn't filled)
+						tp.PendingQty = tp.TargetQty - tp.ActualQty
+						// Record pending qty in the trade for visibility
+						trade.PendingQty = tp.PendingQty
+						if tp.PendingQty > 0 {
+							logger.Info().
+								Str("symbol", signal.Symbol).
+								Float64("target_qty", tp.TargetQty).
+								Float64("actual_qty", tp.ActualQty).
+								Float64("pending_qty", tp.PendingQty).
+								Time("date", date).
+								Msg("Partial fill: target vs actual gap recorded")
+						}
+					} else if signal.Direction == domain.DirectionClose {
+						// Closing resolves any pending buy qty — we're no longer trying to buy
+						tp.PendingQty = 0
+						tp.TargetQty = 0
+						tp.ActualQty = 0
+						trade.PendingQty = 0
+					}
+					tp.LastUpdated = date
+
+					// If pending is resolved, clean up the target position
+					if tp.PendingQty <= 0 && tp.TargetQty <= 0 {
+						delete(state.targetPositions, signal.Symbol)
+					}
 				}
 			}
 		}
