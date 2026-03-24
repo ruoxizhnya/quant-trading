@@ -368,6 +368,8 @@ async function fetchMarket() {
 }
 
 // ── Stats ────────────────────────────────────────────────────
+let strategiesCache = [];
+
 async function fetchStats() {
   try {
     const [stockR, stratR] = await Promise.all([
@@ -383,8 +385,9 @@ async function fetchStats() {
 
     if (stratR && stratR.ok) {
       const d = await stratR.json();
-      document.getElementById('stat-strategies').textContent = (d.strategies || []).length;
-      const names = (d.strategies || []).map(s => s.description || s.name).slice(0, 2).join(', ');
+      strategiesCache = d.strategies || [];
+      document.getElementById('stat-strategies').textContent = strategiesCache.length;
+      const names = strategiesCache.map(s => s.description || s.name).slice(0, 2).join(', ');
       if (names) document.getElementById('stat-strat-names').textContent = names;
     }
   } catch (e) { console.warn('Stats fetch failed:', e.message); }
@@ -480,21 +483,30 @@ async function quickRun() {
   location.href = 'index.html';
 }
 
-// ── Strategy list for quick form ─────────────────────────────
-async function loadStrategyOptions() {
-  try {
-    const r = await fetch(API + '/api/strategies');
-    if (!r.ok) return;
-    const d = await r.json();
-    const sel = document.getElementById('qf-strategy');
-    sel.innerHTML = '';
-    for (const s of d.strategies || []) {
+// ── Strategy list for quick form (reuses fetchStats cache) ───
+function loadStrategyOptions() {
+  const sel = document.getElementById('qf-strategy');
+  sel.innerHTML = '';
+  if (strategiesCache.length === 0) {
+    // Fallback: hardcoded options if cache not populated yet
+    const fallback = [
+      { name: 'momentum', description: '动量策略' },
+      { name: 'mean_reversion', description: '均值回归' },
+    ];
+    fallback.forEach(s => {
       const opt = document.createElement('option');
       opt.value = s.name;
       opt.textContent = s.description || s.name;
       sel.appendChild(opt);
-    }
-  } catch (e) {}
+    });
+    return;
+  }
+  strategiesCache.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.name;
+    opt.textContent = s.description || s.name;
+    sel.appendChild(opt);
+  });
 }
 
 // ── Bootstrap ────────────────────────────────────────────────

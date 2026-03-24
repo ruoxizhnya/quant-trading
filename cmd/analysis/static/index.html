@@ -9,19 +9,19 @@
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f1419; color: #e7e9ea; min-height: 100vh; }
   
   .header { background: #1a1f2e; border-bottom: 1px solid #2d3748; padding: 14px 24px; display: flex; align-items: center; gap: 12px; }
-  .logo { font-size: 24px; } .logo-text { font-size: 18px; font-weight: 600; color: #60a5fa; }
+  .logo { font-size: 24px; } .logo-text { font-size: 18px; font-weight: 600; color: #1d9bf0; }
   
   .main { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 57px); }
   
   .sidebar { background: #1a1f2e; border-right: 1px solid #2d3748; padding: 16px; overflow-y: auto; }
-  .section-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: #60a5fa; margin: 14px 0 8px; }
+  .section-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: #1d9bf0; margin: 14px 0 8px; }
   
   .form-group { margin-bottom: 10px; }
   label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 3px; }
   input, select { width: 100%; padding: 7px 9px; background: #0f1419; border: 1px solid #2d3748; border-radius: 5px; color: #e7e9ea; font-size: 12px; }
-  input:focus, select:focus { outline: none; border-color: #60a5fa; }
+  input:focus, select:focus { outline: none; border-color: #1d9bf0; }
   
-  .btn { width: 100%; padding: 9px; border: none; border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer; background: #60a5fa; color: #0f1419; }
+  .btn { width: 100%; padding: 9px; border: none; border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer; background: #1d9bf0; color: #0f1419; }
   .btn:hover { background: #93c5fd; }
   .btn:disabled { background: #374151; color: #6b7280; cursor: not-allowed; }
   
@@ -37,7 +37,7 @@
   
   .metrics { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
   .metric { background: #0f1419; border-radius: 5px; padding: 10px 6px; text-align: center; }
-  .metric-value { font-size: 18px; font-weight: 700; color: #60a5fa; }
+  .metric-value { font-size: 18px; font-weight: 700; color: #1d9bf0; }
   .metric-value.positive { color: #34d399; }
   .metric-value.negative { color: #f87171; }
   .metric-label { font-size: 9px; color: #475569; margin-top: 2px; text-transform: uppercase; }
@@ -51,11 +51,11 @@
   th { color: #475569; font-weight: 500; text-transform: uppercase; font-size: 9px; padding: 7px 8px; text-align: left; border-bottom: 1px solid #1f2937; }
   td { padding: 7px 8px; border-bottom: 1px solid #1a1f2e; color: #94a3b8; }
   tbody tr:hover td { background: #1f2937; }
-  .sym { color: #60a5fa; font-weight: 600; }
+  .sym { color: #1d9bf0; font-weight: 600; }
   .badge { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; }
   .badge-long { background: #064e3b; color: #34d399; }
   .badge-short { background: #7f1d1d; color: #f87171; }
-  .badge-close { background: #1e3a5f; color: #60a5fa; }
+  .badge-close { background: #1e3a5f; color: #1d9bf0; }
   .pnl-pos { color: #34d399; }
   .pnl-neg { color: #f87171; }
   
@@ -63,7 +63,7 @@
   .empty-icon { font-size: 40px; margin-bottom: 12px; }
   
   .hist-item { padding: 7px 0; border-bottom: 1px solid #1f2937; cursor: pointer; font-size: 11px; color: #64748b; }
-  .hist-item:hover { color: #60a5fa; }
+  .hist-item:hover { color: #1d9bf0; }
   .hist-date { font-size: 10px; color: #374151; margin-top: 1px; }
   
   .toast { position: fixed; bottom: 16px; right: 16px; background: #1a1f2e; border: 1px solid #2d3748; border-radius: 6px; padding: 10px 16px; font-size: 12px; z-index: 1000; opacity: 0; transform: translateY(20px); transition: all 0.2s; }
@@ -76,7 +76,7 @@
 <div class="header">
   <span class="logo">📈</span>
   <span class="logo-text">Quant Lab</span>
-  <a href="dashboard.html" style="margin-left:16px;color:#60a5fa;text-decoration:none;font-size:13px;font-weight:600;border-left:1px solid #2d3748;padding-left:16px">‹ 控制台</a>
+  <a href="dashboard.html" style="margin-left:16px;color:#1d9bf0;text-decoration:none;font-size:13px;font-weight:600;border-left:1px solid #2d3748;padding-left:16px">‹ 控制台</a>
 </div>
 
 <div class="main">
@@ -412,7 +412,7 @@ async function drawKLine(symbol, startDate, endDate, trades) {
         } else {
           y = yAxis.top + 20;
         }
-        const color = t.direction === 'long' ? '#34d399' : t.direction === 'short' ? '#f87171' : '#60a5fa';
+        const color = t.direction === 'long' ? '#34d399' : t.direction === 'short' ? '#f87171' : '#1d9bf0';
         const label = t.direction === 'long' ? '▲' : t.direction === 'short' ? '▼' : '●';
         ctx2.fillStyle = color;
         ctx2.font = 'bold 12px sans-serif';
@@ -437,16 +437,6 @@ async function drawKLine(symbol, startDate, endDate, trades) {
             pointRadius: 0,
             borderWidth: 1.5,
             order: 2,
-          },
-          {
-            label: '高低区间',
-            data: highs.map((h, i) => ({ x: labels[i], y: [lows[i], h] })),
-            borderColor: 'rgba(148,163,184,0.3)',
-            backgroundColor: 'transparent',
-            borderWidth: 1,
-            pointRadius: 0,
-            showLine: false,
-            order: 3,
           }
         ]
       },
