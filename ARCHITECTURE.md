@@ -1,387 +1,273 @@
-# Quant Trading System - Architecture
+# 量化交易系统架构文档
 
-## System Overview
+_最后更新: 2026-03-24_
+
+---
+
+## 系统概览
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              QUANT TRADING SYSTEM                                │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │                         EXTERNAL DATA SOURCES                              │   │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │   │
-│  │  │ tushare.pro │  │  Wind API    │  │  Bloomberg  │  │  Custom     │     │   │
-│  │  │  (A-share)  │  │  (China)     │  │  (Global)   │  │  Feeds      │     │   │
-│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘     │   │
-│  └─────────┼────────────────┼────────────────┼────────────────┼────────────┘   │
-│            │                │                │                │                 │
-│  ┌─────────▼────────────────▼────────────────▼────────────────▼────────────┐   │
-│  │                           DATA SERVICE (Port 8081)                        │   │
-│  │  ┌─────────────────────────────────────────────────────────────────┐      │   │
-│  │  │  • Data Fetching & Normalization                                   │      │   │
-│  │  │  • TimescaleDB Storage                                             │      │   │
-│  │  │  • Data Validation & Quality Checks                                │      │   │
-│  │  │  • Caching Layer (Redis)                                           │      │   │
-│  │  └─────────────────────────────────────────────────────────────────┘      │   │
-│  │                                      │                                      │   │
-│  │                    ┌──────────────────┼──────────────────┐                   │   │
-│  │                    │                  │                  │                   │   │
-│  │                    ▼                  ▼                  ▼                   │   │
-│  │              ┌──────────┐      ┌──────────┐      ┌──────────┐               │   │
-│  │              │TimescaleDB│      │  Redis   │      │  Disk    │               │   │
-│  │              │(OHLCV, Fnds│      │ (Cache)  │      │ (Backup) │               │   │
-│  │              └──────────┘      └──────────┘      └──────────┘               │   │
-│  └─────────────────────────────────────┬──────────────────────────────────────────┘   │
-│                                        │                                              │
-│  ┌─────────────────────────────────────▼──────────────────────────────────────────┐   │
-│  │                                                                                  │   │
-│  │    ┌─────────────────────────────────────────────────────────────────────┐     │   │
-│  │    │                      STRATEGY SERVICE (Port 8082)                     │     │   │
-│  │    │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │     │   │
-│  │    │  │ value_      │  │ mean_       │  │ trend_      │  │ custom_     │   │     │   │
-│  │    │  │ momentum    │  │ reversion   │  │ following   │  │ strategy    │   │     │   │
-│  │    │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘   │     │   │
-│  │    │         │               │               │               │           │     │   │
-│  │    │         └───────────────┴───────────────┴───────────────┘           │     │   │
-│  │    │                               │                                       │     │   │
-│  │    │                    ┌──────────▼──────────┐                           │     │   │
-│  │    │                    │   Strategy Loader    │◄── Hot-Swap Interface     │     │   │
-│  │    │                    │   (Plugin-based)     │                           │     │   │
-│  │    │                    └──────────┬──────────┘                           │     │   │
-│  │    │                               │                                       │     │   │
-│  │    │                    ┌──────────▼──────────┐                           │     │   │
-│  │    │                    │   Signal Generator │                           │     │   │
-│  │    │                    │   (Multi-factor)   │                           │     │   │
-│  │    │                    └─────────────────────┘                           │     │   │
-│  │    └─────────────────────────────────────────────────────────────────────────┘     │   │
-│  │                                      │                                             │   │
-│  └──────────────────────────────────────┼─────────────────────────────────────────────────┘   │
-│                                         │                                                   │
-│  ┌──────────────────────────────────────┼─────────────────────────────────────────────────┐   │
-│  │                           RISK SERVICE (Port 8083)                                    │   │
-│  │                                                                                        │   │
-│  │   ┌──────────────────────────────────────────────────────────────────────────────┐    │   │
-│  │   │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  ┌─────────────┐ │    │   │
-│  │   │  │ Volatility    │  │ Position       │  │ Stop-Loss      │  │ Market      │ │    │   │
-│  │   │  │ Targeting     │  │ Sizing         │  │ Manager        │  │ Regime      │ │    │   │
-│  │   │  └───────┬────────┘  └───────┬────────┘  └───────┬────────┘  └──────┬──────┘ │    │   │
-│  │   │          │                 │                  │                  │        │    │   │
-│  │   │          └─────────────────┼──────────────────┴──────────────────┘        │    │   │
-│  │   │                            │                                                  │    │   │
-│  │   │                 ┌──────────▼──────────┐                                      │    │   │
-│  │   │                 │   Risk Aggregator   │                                      │    │   │
-│  │   │                 │   (Final Position)  │                                      │    │   │
-│  │   │                 └─────────────────────┘                                      │    │   │
-│  │   └───────────────────────────────────────────────────────────────────────────────┘    │   │
-│  │                                      │                                               │   │
-│  └──────────────────────────────────────┼───────────────────────────────────────────────────┘   │
-│                                         │                                                       │
-│  ┌──────────────────────────────────────┼───────────────────────────────────────────────────┐   │
-│  │                         EXECUTION SERVICE (Port 8084)                                  │   │
-│  │                                                                                          │   │
-│  │   ┌────────────────┐  ┌────────────────┐  ┌────────────────┐                              │   │
-│  │   │ Order Manager  │  │ Position       │  │ Execution     │                              │   │
-│  │   │                │  │ Tracker        │  │ Simulator     │                              │   │
-│  │   └────────────────┘  └────────────────┘  └────────────────┘                              │   │
-│  │                                                                                          │   │
-│  └────────────────────────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                                │
-│  ┌────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│  │                         ANALYSIS SERVICE (Port 8085)                                     │   │
-│  │                                                                                            │   │
-│  │   ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐           │   │
-│  │   │ Backtest       │  │ Performance   │  │ Report        │  │ Factor        │           │   │
-│  │   │ Engine         │  │ Calculator    │  │ Generator     │  │ Analyzer      │           │   │
-│  │   └────────────────┘  └────────────────┘  └────────────────┘  └────────────────┘           │   │
-│  │                                                                                            │   │
-│  └────────────────────────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                                │
-└────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                        用户 (Browser)                        │
+│           http://localhost:8085/[dashboard|screen|]           │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Analysis Service (:8085)                  │
+│                    (Go + Gin + ZeroLog)                     │
+│                                                             │
+│  GET /            → index.html (回测 UI)                   │
+│  GET /dashboard   → dashboard.html (控制台)                  │
+│  GET /screen      → screen.html (选股器)                    │
+│  GET /health      → 健康检查                                │
+│  GET /api/strategies → 可用策略列表                         │
+│  POST /screen     → proxy → data-service:8081/screen        │
+│  GET /ohlcv/:sym  → proxy → data-service:8081/ohlcv/*      │
+│  POST /backtest   → 回测引擎                                │
+└─────────────────────────────────────────────────────────────┘
+         │                                           │
+         │  HTTP (docker network)                     │
+         ▼                                           ▼
+┌──────────────────────┐              ┌──────────────────────────┐
+│   Data Service (:8081) │            │   Strategy Service (:8082) │
+│   Go + Gin + ZeroLog   │            │   Go + Gin                │
+│                        │              │                          │
+│  POST /sync/ohlcv/all  │              │  (外部策略服务，HTTP API)  │
+│  POST /sync/fundamentals│              └──────────────────────────┘
+│  GET  /screen          │
+│  GET  /fundamentals/:sym│
+└──────────┬─────────────┘
+           │
+           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      PostgreSQL (:5432)                      │
+│                                                             │
+│  stocks              — 5491 只股票列表                       │
+│  ohlcv_daily_qfq     — 1527 万条 K 线（前复权）             │
+│  stock_fundamentals  — 财务数据（PE/PB/ROE 等）              │
+│  trading_calendar     — 沪深交易日历                          │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Interface Definitions
+---
 
-### Core Domain Interfaces
+## 服务端口映射
 
+| 服务 | 容器内端口 | Host 端口 | 用途 |
+|------|-----------|----------|------|
+| analysis-service | 8085 | 8085 | 回测 UI + API 网关 |
+| data-service | 8081 | 8081 | 数据同步 + 选股 API |
+| strategy-service | 8082 | - | 外部策略服务（备用）|
+| postgres | 5432 | - | 数据库 |
+| redis | 6379 | - | 缓存（备用）|
+
+---
+
+## API 端点
+
+### Analysis Service (8085)
+
+```
+GET  /                     — 回测首页 (index.html)
+GET  /dashboard            — 控制台 (dashboard.html)
+GET  /screen               — 选股器 (screen.html)
+GET  /index.html           — 回测首页 (别名)
+
+GET  /health              — 健康检查
+     → {"status": "healthy", "service": "analysis-service"}
+
+GET  /api/strategies       — 可用策略列表
+     → {"strategies": [{"name": "momentum", ...}, ...]}
+
+POST /screen               — 选股请求 (proxy → data-service)
+     Body: {"filters": {"pe_max": 30, "roe_min": 0.1}, "limit": 10}
+     → {"count": 5, "results": [...]}
+
+GET  /ohlcv/:symbol        — K 线数据 (proxy → data-service)
+     Query: ?start_date=YYYYMMDD&end_date=YYYYMMDD
+
+POST /backtest             — 发起回测
+     Body: BacktestRequest
+     → BacktestResponse
+
+GET  /backtest/:id/report  — 回测报告
+```
+
+### Data Service (8081)
+
+```
+POST /sync/ohlcv              — 同步单只 K 线
+POST /sync/ohlcv/all          — 全量 K 线同步
+POST /sync/fundamentals       — 同步财务数据
+     Body: {"symbols": ["600519.SH"], "date": "20240930"}
+
+GET  /fundamentals/:symbol   — 最新财务数据
+GET  /fundamentals/:symbol/history — 历史财务数据
+
+POST /screen                  — 选股筛选
+     Body: {"filters": ScreenFilters, "date": "YYYYMMDD", "limit": 50}
+     → {"count": N, "results": [ScreenResult]}
+```
+
+---
+
+## 数据模型
+
+### stocks
+```sql
+symbol VARCHAR(20) PK
+name VARCHAR(100)
+exchange VARCHAR(10)  -- "SSE" | "SZSE"
+industry VARCHAR(50)
+market_cap BIGINT
+list_date DATE
+status VARCHAR(20)
+```
+
+### ohlcv_daily_qfq
+```sql
+symbol VARCHAR(20) PK
+trade_date DATE PK
+open FLOAT
+high FLOAT
+low FLOAT
+close FLOAT
+volume BIGINT
+turnover FLOAT
+```
+
+### stock_fundamentals
+```sql
+id SERIAL PK
+ts_code VARCHAR(20) + trade_date DATE → UNIQUE
+trade_date DATE
+pe FLOAT          -- 市盈率（可能为 NULL）
+pb FLOAT           -- 市净率
+ps FLOAT           -- 市销率
+roe FLOAT          -- 净资产收益率
+roa FLOAT          -- 总资产收益率
+debt_to_equity FLOAT
+gross_margin FLOAT
+net_margin FLOAT
+revenue_growth FLOAT
+net_profit_growth FLOAT
+```
+
+### trading_calendar
+```sql
+trade_date DATE PK
+exchange VARCHAR(10)
+is_trading_day BOOLEAN
+```
+
+---
+
+## 策略架构
+
+### 策略接口 (pkg/strategy/strategy.go)
 ```go
-// MarketData is the primary interface for accessing market data
-type MarketData interface {
-    // GetOHLCV returns candlestick data for a symbol in a date range
-    GetOHLCV(ctx context.Context, symbol string, start, end time.Time) ([]OHLCV, error)
-    
-    // GetFundamental returns fundamental data for a symbol on a specific date
-    GetFundamental(ctx context.Context, symbol string, date time.Time) (*Fundamental, error)
-    
-    // GetStocks returns stocks matching the given filter
-    GetStocks(ctx context.Context, filter StockFilter) ([]Stock, error)
-    
-    // GetLatestPrice returns the most recent close price for a symbol
-    GetLatestPrice(ctx context.Context, symbol string) (float64, error)
-}
-
-// StockFilter defines filtering criteria for stock queries
-type StockFilter struct {
-    Exchange   string
-    Sector     string
-    Status     string
-    MinMCap    float64
-    MaxMCap    float64
-    Limit      int
-}
-
-// Strategy is the core interface for all trading strategies
 type Strategy interface {
-    // Name returns the unique name of the strategy
     Name() string
-    
-    // Description returns a human-readable description
     Description() string
-    
-    // Version returns the strategy version
-    Version() string
-    
-    // Configure loads strategy-specific configuration
-    Configure(config map[string]interface{}) error
-    
-    // Signals generates trading signals for the given universe and market data
-    Signals(ctx context.Context, universe []Stock, data MarketData, date time.Time) ([]Signal, error)
-    
-    // Weight calculates the position weight for a signal
-    Weight(signal Signal) float64
-    
-    // Cleanup releases any resources held by the strategy
-    Cleanup()
-}
-
-// Signal represents a trading signal generated by a strategy
-type Signal struct {
-    Symbol      string
-    Date        time.Time
-    Direction   Direction    // Long, Short, Close
-    Strength    float64      // Confidence: 0.0 - 1.0
-    Factors     map[string]float64  // Factor contributions
-    CompositeScore float64    // Overall composite factor score
-    Metadata    map[string]interface{}
-}
-
-// RiskManager defines the interface for risk management
-type RiskManager interface {
-    // CalculatePosition calculates the optimal position size
-    CalculatePosition(ctx context.Context, params PositionParams) (*PositionResult, error)
-    
-    // GetRiskMetrics calculates current portfolio risk metrics
-    GetRiskMetrics(ctx context.Context, portfolio *Portfolio) (*RiskMetrics, error)
-    
-    // CheckStopLoss checks if any positions hit stop-loss thresholds
-    CheckStopLoss(ctx context.Context, positions []Position, prices map[string]float64) ([]StopLossEvent, error)
-    
-    // DetectRegime detects the current market regime
-    DetectRegime(ctx context.Context, data MarketData) (*MarketRegime, error)
-}
-
-// PositionParams contains parameters for position calculation
-type PositionParams struct {
-    PortfolioValue float64
-    Signal         Signal
-    MarketRegime   *MarketRegime
-    CurrentVolatility float64
-    StockVolatility float64
-    PortfolioBeta  float64
-}
-
-// PositionResult contains the calculated position size
-type PositionResult struct {
-    Size       float64
-    Weight     float64
-    StopLoss   float64
-    TakeProfit float64
-    RiskScore  float64
-}
-
-// MarketRegime represents the current market regime
-type MarketRegime struct {
-    Trend      string    // "bull", "bear", "sideways"
-    Volatility string    // "low", "medium", "high"
-    Sentiment  float64   // -1.0 to 1.0
-    Timestamp  time.Time
-}
-
-// RiskMetrics contains various risk measurements
-type RiskMetrics struct {
-    PortfolioVolatility float64
-    PortfolioBeta       float64
-    SharpeRatio         float64
-    MaxDrawdown         float64
-    VaR                 float64  // Value at Risk (95%)
-    CVaR                float64  // Conditional VaR
-}
-
-// Order represents a trading order
-type Order struct {
-    ID        string
-    Symbol    string
-    Side      string    // "buy", "sell"
-    Type      string    // "market", "limit", "stop"
-    Quantity  float64
-    Price     float64   // 0 for market orders
-    FilledQty float64
-    AvgPrice  float64
-    Status    string    // "pending", "filled", "cancelled", "rejected"
-    CreatedAt time.Time
-    FilledAt  *time.Time
-}
-
-// Portfolio holds the current portfolio state
-type Portfolio struct {
-    Cash        float64
-    Positions   map[string]Position
-    TotalValue  float64
-    DailyReturn float64
-    UpdatedAt   time.Time
-}
-
-// Position represents a single position
-type Position struct {
-    Symbol        string
-    Quantity      float64
-    AvgCost       float64
-    CurrentPrice  float64
-    MarketValue   float64
-    UnrealizedPnL float64
-    RealizedPnL   float64
-    Weight        float64
+    Parameters() []Parameter
+    GenerateSignals(ctx, bars, portfolio) ([]Signal, error)
 }
 ```
 
-## Service Communication
+### 策略列表
 
-### Synchronous (HTTP/gRPC)
-- Strategy → Data: Fetch market data
-- Risk → Data: Historical volatility
-- Execution → Data: Price queries
-- Analysis → Data: Historical backtest data
+| 策略 | 文件 | 说明 |
+|------|------|------|
+| momentum | `plugins/momentum.go` | 动量策略：买强势股 |
+| mean_reversion | `plugins/mean_reversion.go` | 均值回归 |
+| multi_factor | `plugins/multi_factor.go` | 多因子评分（PE+ROE+动量）|
+| value_screening | `plugins/value_screen.go` | 价值筛选（PE/PB/ROE 过滤 + 动量排名）|
 
-### Asynchronous (Message Queue - Future)
-- Event-driven signals
-- Real-time price updates
-- Order fill notifications
+### 策略加载流程
+1. `plugins/` 包通过 `init()` 自动注册到 `strategy.GlobalRegistry`
+2. `analysis-service` 启动时 `import _ "pkg/strategy/plugins"` 触发注册
+3. 回测时 engine 先查本地 registry，fallback 到外部 strategy-service
 
-## Data Flow
+---
 
-### Signal Generation Flow
+## 回测引擎架构 (pkg/backtest/)
+
+### 核心组件
+- `Engine` — 主引擎，协调各组件
+- `Tracker` — 持仓追踪（T+1、佣金、印花税）
+- `Signal` → `Trade` — 信号转换为交易
+
+### 回测流程
 ```
-1. Strategy Service receives signal request
-2. Load strategy instance from registry
-3. Fetch stock universe from Data Service
-4. For each stock in universe:
-   a. Fetch OHLCV data (20 days + today)
-   b. Fetch fundamental data
-   c. Calculate factor values
-   d. Apply filters (market cap, status, etc.)
-   e. Calculate composite score
-   f. Generate Signal if score > threshold
-5. Apply risk adjustments via Risk Service
-6. Return ranked signals
-```
-
-### Backtest Flow
-```
-1. Analysis Service receives backtest request
-2. Initialize backtest engine with parameters
-3. Load strategy and historical data
-4. For each trading day:
-   a. Detect market regime
-   b. Generate signals for universe
-   c. Calculate positions via Risk Service
-   d. Simulate execution at close price
-   e. Update portfolio state
-   f. Record daily metrics
-5. Calculate final performance metrics
-6. Generate report
+每日循环:
+  1. 获取当日 K 线数据 (marketDataCache)
+  2. 获取信号 (getSignals → 本地 registry 或外部 service)
+  3. 处理信号 → 执行交易 (Tracker.ExecuteTrade)
+  4. 更新持仓 (T+1 规则)
+  5. 检查涨跌停 (涨停日禁买，跌停日禁卖)
+  6. 记录每日组合价值
 ```
 
-## Deployment Architecture
+### 佣金计算规则
+- 买入：value × 0.0003（最低 5 元）+ value × 0.00001（过户费）
+- 卖出：value × 0.0003 + value × 0.00001 + value × 0.001（印花税）
 
-### Development (Docker Compose)
+### T+1 规则
+- `QuantityYesterday` — 昨日持仓（可今日卖出）
+- `QuantityToday` — 今日买入（明日才可卖出）
+
+---
+
+## 前复权计算 (pkg/data/tushare.go)
+
 ```
-┌─────────────────────────────────────────────────┐
-│              Docker Network: quant-dev           │
-├─────────────────────────────────────────────────┤
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐  │
-│  │  Data   │ │Strategy │ │  Risk   │ │Analysis │  │
-│  │ Service │ │ Service │ │ Service │ │ Service │  │
-│  │  :8081  │ │  :8082  │ │  :8083  │ │  :8085  │  │
-│  └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘  │
-│       │           │           │           │        │
-│  ┌────▼───────────▼───────────▼───────────▼────┐  │
-│  │              Service Mesh / Reverse Proxy     │  │
-│  └────────────────────────┬────────────────────┘  │
-│                           │                      │
-│  ┌────────────────────────▼────────────────────┐  │
-│  │              PostgreSQL + TimescaleDB        │  │
-│  └────────────────────────┬────────────────────┘  │
-│                           │                      │
-│  ┌────────────────────────▼────────────────────┐  │
-│  │                   Redis                     │  │
-│  └─────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
+前复权收盘价 = 不复权收盘价 × (latest_adj_factor / adj_factor_at_date)
 ```
 
-### Production (Kubernetes)
+流程：
+1. 调用 `daily` API 获取不复权 K 线
+2. 调用 `adj_factor` API 获取复权因子历史
+3. 以最新复权因子为基准，向前回算
+
+---
+
+## 目录结构
+
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Kubernetes Cluster                           │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │
-│  │  Namespace   │  │  Namespace    │  │  Namespace    │               │
-│  │  data-svc    │  │  strategy-svc │  │  risk-svc    │               │
-│  ├──────────────┤  ├──────────────┤  ├──────────────┤               │
-│  │ Deployment   │  │ Deployment   │  │ Deployment   │               │
-│  │ HPA: 1-5     │  │ HPA: 1-3     │  │ HPA: 1-2     │               │
-│  │ Resources    │  │ Resources    │  │ Resources    │               │
-│  └──────────────┘  └──────────────┘  └──────────────┘               │
-│                                                                      │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                     Data Layer                               │   │
-│  │  ┌─────────────────┐  ┌─────────────────┐                     │   │
-│  │  │ TimescaleDB     │  │ Redis Cluster   │                     │   │
-│  │  │ (StatefulSet)   │  │ (Deployment)     │                     │   │
-│  │  │ Volume: 100Gi   │  │ Replicas: 3      │                     │   │
-│  │  └─────────────────┘  └─────────────────┘                     │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
+quant-trading/
+├── cmd/
+│   ├── analysis/        — 回测 UI 服务 (:8085)
+│   ├── data/           — 数据同步服务 (:8081)
+│   └── strategy/       — 外部策略服务 (:8082, 备用)
+├── pkg/
+│   ├── backtest/       — 回测引擎
+│   │   ├── engine.go    — 主引擎
+│   │   └── tracker.go   — 持仓/佣金追踪
+│   ├── data/
+│   │   └── tushare.go  — Tushare API 封装
+│   ├── domain/
+│   │   └── types.go    — 核心类型（OHLCV, Trade, Position, Signal 等）
+│   ├── strategy/
+│   │   ├── strategy.go — 策略接口定义
+│   │   ├── registry.go — 策略注册中心
+│   │   └── plugins/    — 内置策略实现
+│   └── storage/
+│       └── postgres.go  — PostgreSQL 操作
+├── docker-compose.yml
+└── config/
+    └── config.yaml
 ```
 
-## Technology Stack
+---
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| Language | Go 1.21+ | Primary language for all services |
-| Web Framework | Gin | HTTP API server |
-| Database | PostgreSQL + TimescaleDB | Time-series storage |
-| Cache | Redis | Data caching, session storage |
-| Logging | zerolog | Structured logging |
-| Tracing | OpenTelemetry | Distributed tracing |
-| Metrics | Prometheus | Metrics collection |
-| Container | Docker | Containerization |
-| Orchestration | Kubernetes | Production deployment |
-| Config | Viper | Configuration management |
+## 工作流程规范（写→审→测）
 
-## Security
+每个功能任务必须经过：
 
-### Network Policies
-- Services communicate only with required dependencies
-- Database accessible only from data service
-- External API access only from data service
+1. **Coding Agent** — 实现功能，提交 push
+2. **Review Agent** — 审查代码，修复 bug
+3. **Test Agent** — 单元测试，覆盖率 ≥ 80%
+4. **CEO 复核** — 确认符合高级需求
 
-### Secrets Management
-- All secrets via Kubernetes Secrets or Vault
-- Environment variable substitution in configs
-- No hardcoded credentials
-
-### Data Protection
-- Sensitive fields encrypted at rest
-- API authentication via JWT
-- Rate limiting on public endpoints
+详见: `~/.openclaw/workspace/PRINCIPLES.md`

@@ -163,6 +163,11 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.
 		c.File("./static/dashboard.html")
 	})
 
+	router.GET("/index.html", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.File("./static/index.html")
+	})
+
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
