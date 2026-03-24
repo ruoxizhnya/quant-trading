@@ -368,7 +368,11 @@ func saveStrategyHandler(c *gin.Context) {
 	}
 
 	filepath := dir + "/" + filename
-	if err := os.WriteFile(filepath, []byte(req.Code), 0644); err != nil {
+	if _, err := os.Stat(filepath); err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "strategy file already exists: " + filepath})
+		return
+	}
+	if err := os.WriteFile(filepath, []byte(req.Code), 0600); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write file: " + err.Error()})
 		return
 	}

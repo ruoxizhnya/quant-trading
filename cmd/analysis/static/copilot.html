@@ -271,7 +271,13 @@ async function sendMessage() {
 async function copyCode(btn, code) {
   try {
     // code was escaped for JS, need to unescape for clipboard
-    const unescaped = code.replace(/\\n/g, '\n').replace(/\\&amp;/g, '&').replace(/\\&lt;/g, '<').replace(/\\&gt;/g, '>').replace(/\\&quot;/g, '"');
+    const unescaped = code
+      .replace(/\\n/g, '\n')
+      .replace(/\\&amp;/g, '&')
+      .replace(/\\&lt;/g, '<')
+      .replace(/\\&gt;/g, '>')
+      .replace(/\\&quot;/g, '"')
+      .replace(/&#039;/g, "'");
     await navigator.clipboard.writeText(unescaped);
     btn.classList.add('copied');
     btn.textContent = '✅ 已复制';
@@ -287,7 +293,13 @@ async function copyCode(btn, code) {
 
 async function saveCode(btn, code, name) {
   try {
-    const unescaped = code.replace(/\\n/g, '\n').replace(/\\&amp;/g, '&').replace(/\\&lt;/g, '<').replace(/\\&gt;/g, '>').replace(/\\&quot;/g, '"');
+    const unescaped = code
+      .replace(/\\n/g, '\n')
+      .replace(/\\&amp;/g, '&')
+      .replace(/\\&lt;/g, '<')
+      .replace(/\\&gt;/g, '>')
+      .replace(/\\&quot;/g, '"')
+      .replace(/&#039;/g, "'");
     const resp = await fetch(API + '/api/copilot/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
