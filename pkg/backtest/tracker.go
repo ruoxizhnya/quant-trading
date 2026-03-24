@@ -124,9 +124,10 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 	commission := max(tradeValue*t.commissionRate, minCommission)
 	transferFee := tradeValue * transferFeeRate
 
-	// Stamp tax only applies to sell trades (A-share rule: 0.1%)
+	// Stamp tax applies to all sell trades: closing long (DirectionClose) and opening short (DirectionShort)
+	// A-share stamp tax: 0.1% charged on ALL sell transactions
 	stampTax := 0.0
-	if direction == domain.DirectionClose {
+	if direction == domain.DirectionClose || direction == domain.DirectionShort {
 		stampTax = tradeValue * stampTaxRate
 	}
 
