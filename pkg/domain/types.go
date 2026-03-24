@@ -28,6 +28,10 @@ type OHLCV struct {
 	Volume    float64   `json:"volume"`
 	Turnover  float64   `json:"turnover"`
 	TradeDays int       `json:"trade_days"`
+	// LimitUp indicates the stock hit the upper price limit today (涨停)
+	LimitUp bool `json:"limit_up"`
+	// LimitDown indicates the stock hit the lower price limit today (跌停)
+	LimitDown bool `json:"limit_down"`
 }
 
 // Stock represents a tradable security
@@ -146,14 +150,15 @@ type PortfolioValue struct {
 
 // Trade represents a single trade execution
 type Trade struct {
-	ID         string    `json:"id"`
-	Symbol     string    `json:"symbol"`
-	Direction  Direction `json:"direction"`
-	Quantity   float64   `json:"quantity"`
-	Price      float64   `json:"price"`
-	Commission float64   `json:"commission"`
-	StampTax   float64   `json:"stamp_tax"` // 0.1% on sell only (A-share)
-	Timestamp  time.Time `json:"timestamp"`
+	ID          string    `json:"id"`
+	Symbol      string    `json:"symbol"`
+	Direction   Direction `json:"direction"`
+	Quantity    float64   `json:"quantity"`
+	Price       float64   `json:"price"`
+	Commission  float64   `json:"commission"`
+	TransferFee float64   `json:"transfer_fee"` // 0.001% on both buy and sell (A-share)
+	StampTax    float64   `json:"stamp_tax"`    // 0.1% on sell only (A-share)
+	Timestamp   time.Time `json:"timestamp"`
 }
 
 // BacktestParams contains parameters for a backtest run

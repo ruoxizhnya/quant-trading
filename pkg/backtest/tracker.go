@@ -34,6 +34,8 @@ type Tracker struct {
 
 // stampTaxRate is the A-share stamp tax rate (0.1% on sell only)
 const stampTaxRate = 0.001
+const minCommission = 5.0   // minimum commission per trade in CNY
+const transferFeeRate = 0.00001 // A-share transfer fee (过户费): 0.001% on both buy and sell
 
 // NewTracker creates a new portfolio tracker.
 func NewTracker(initialCapital, commissionRate, slippageRate float64, logger zerolog.Logger) *Tracker {
@@ -118,29 +120,32 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 		}
 	}
 
-	commission := quantity * executionPrice * t.commissionRate
+	tradeValue := quantity * executionPrice
+	commission := max(tradeValue*t.commissionRate, minCommission)
+	transferFee := tradeValue * transferFeeRate
 
 	// Stamp tax only applies to sell trades (A-share rule: 0.1%)
 	stampTax := 0.0
 	if direction == domain.DirectionClose {
-		stampTax = quantity * executionPrice * stampTaxRate
+		stampTax = tradeValue * stampTaxRate
 	}
 
 	trade := &domain.Trade{
-		ID:         uuid.New().String(),
-		Symbol:     symbol,
+		ID:          uuid.New().String(),
+		Symbol:      symbol,
 		Direction:  direction,
 		Quantity:   quantity,
 		Price:      executionPrice,
 		Commission: commission,
+		TransferFee: transferFee,
 		StampTax:   stampTax,
 		Timestamp:  timestamp,
 	}
 
 	switch direction {
 	case domain.DirectionLong:
-		// Cost includes commission (stamp tax does not apply to buy)
-		cost := quantity*executionPrice + commission
+		// Cost includes commission + transfer fee (stamp tax does not apply to buy)
+		cost := tradeValue + commission + transferFee
 		if cost > t.cash {
 			return nil, fmt.Errorf("insufficient cash: required %.2f, available %.2f", cost, t.cash)
 		}
@@ -176,8 +181,8 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 		}
 
 	case domain.DirectionShort:
-		// Short selling: receive cash, owe shares
-		proceeds := quantity*executionPrice - commission
+		// Short selling: receive cash, owe shares (commission + transfer fee deducted)
+		proceeds := tradeValue - commission - transferFee
 		t.cash += proceeds
 
 		if existing, exists := t.positions[symbol]; exists {
@@ -235,13 +240,16 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 						Msg("T+1 partial fill: reducing sell quantity to sellable shares")
 				}
 
-				// Recalculate commission and stamp tax based on actualQty
-				actualCommission := actualQty * executionPrice * t.commissionRate
-				actualStampTax := actualQty * executionPrice * stampTaxRate
+				// Recalculate commission, transfer fee, and stamp tax based on actualQty
+				actualTradeValue := actualQty * executionPrice
+				actualCommission := max(actualTradeValue*t.commissionRate, minCommission)
+				actualTransferFee := actualTradeValue * transferFeeRate
+				actualStampTax := actualTradeValue * stampTaxRate
 
 				// Update trade record
 				trade.Quantity = actualQty
 				trade.Commission = actualCommission
+				trade.TransferFee = actualTransferFee
 				trade.StampTax = actualStampTax
 
 				// Update yesterday qty
@@ -250,7 +258,7 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 				// Closing long: apply stamp tax (0.1%) + commission, calculate PnL
 				pnl := (executionPrice - pos.AvgCost) * actualQty
 				pos.RealizedPnL += pnl - actualCommission - actualStampTax
-				t.cash += actualQty*executionPrice - actualCommission - actualStampTax
+				t.cash += actualQty*executionPrice - actualCommission - actualTransferFee - actualStampTax
 				pos.Quantity -= actualQty
 			} else {
 				// Closing short position — no T+1 restriction
@@ -258,9 +266,19 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 				if actualQty <= 0 {
 					return nil, fmt.Errorf("cannot close position: quantity is zero")
 				}
+				actualTradeValue := actualQty * executionPrice
+				actualCommission := max(actualTradeValue*t.commissionRate, minCommission)
+				actualTransferFee := actualTradeValue * transferFeeRate
+
+				// Update trade record with actual values
+				trade.Quantity = actualQty
+				trade.Commission = actualCommission
+				trade.TransferFee = actualTransferFee
+				// No stamp tax for short close (stamp tax only on sell of long positions)
+
 				pnl := (pos.AvgCost - executionPrice) * actualQty
-				pos.RealizedPnL += pnl - commission
-				t.cash += actualQty*executionPrice - commission
+				pos.RealizedPnL += pnl - actualCommission - actualTransferFee
+				t.cash += actualQty*executionPrice - actualCommission - actualTransferFee
 				pos.Quantity += actualQty
 			}
 
@@ -463,6 +481,13 @@ func abs(x float64) float64 {
 
 func min(a, b float64) float64 {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b float64) float64 {
+	if a > b {
 		return a
 	}
 	return b

@@ -23,6 +23,14 @@ type Config struct {
 	RiskFreeRate   float64 `mapstructure:"risk_free_rate"`
 }
 
+// Price limit constants for A-share stocks
+const (
+	priceLimitNormal   = 0.10  // ±10% for normal A-shares
+	priceLimitST       = 0.05  // ±5% for ST stocks
+	priceLimitNew      = 0.20  // ±20% for stocks listed < 60 trading days
+	newStockTradeDays  = 60    // threshold for new stock price limit
+)
+
 // Engine is the backtesting engine that simulates trading strategies.
 type Engine struct {
 	mu sync.RWMutex
@@ -263,7 +271,9 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 
 	// Prepare market data cache
 	marketDataCache := make(map[string][]domain.OHLCV)
-	pricesCache := make(map[string]float64) // Latest prices for each symbol
+	pricesCache := make(map[string]float64)         // Latest prices for each symbol
+	stockCache := make(map[string]domain.Stock)      // Stock info cache (Name, ListDate)
+	prevCloseCache := make(map[string]float64)      // Previous close per symbol (updated for limit-up)
 
 	// Run backtest for each trading day
 	for i, date := range tradingDays {
@@ -284,6 +294,13 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		// Step 1: Get market data for all stocks in pool
 		// We need data up to (and including) this date for signal generation
 		for _, symbol := range params.StockPool {
+			// Lazily fetch stock info if not cached (Name, ListDate for price limit detection)
+			if _, ok := stockCache[symbol]; !ok {
+				if stock, err := e.getStock(ctx, symbol); err == nil {
+					stockCache[symbol] = stock
+				}
+			}
+
 			ohlcvData, err := e.getOHLCV(ctx, symbol, params.StartDate, date)
 			if err != nil {
 				logger.Warn().
@@ -298,6 +315,54 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 			// Get latest close price
 			if len(ohlcvData) > 0 {
 				pricesCache[symbol] = ohlcvData[len(ohlcvData)-1].Close
+			}
+
+			// Step 1b: Detect and enforce price limits (涨跌停)
+			if len(ohlcvData) >= 2 {
+				prevClose := prevCloseCache[symbol]
+				if prevClose <= 0 {
+					// Fall back to second-to-last candle's close
+					prevClose = ohlcvData[len(ohlcvData)-2].Close
+				}
+
+				if prevClose > 0 {
+					// Determine limit rate based on stock type and listing age
+					limitRate := priceLimitNormal
+					stockName := ""
+					if s, ok := stockCache[symbol]; ok {
+						stockName = s.Name
+						if s.ListDate.IsZero() {
+							limitRate = priceLimitNormal
+						} else {
+							tradeDays := int(date.Sub(s.ListDate).Hours() / 24 / 7 * 5)
+							if tradeDays < newStockTradeDays {
+								limitRate = priceLimitNew
+							} else if hasSTPrefix(stockName) {
+								limitRate = priceLimitST
+							}
+						}
+					}
+
+					todayBar := ohlcvData[len(ohlcvData)-1]
+					upperLimit := prevClose * (1 + limitRate)
+					lowerLimit := prevClose * (1 - limitRate)
+
+					limitUp := todayBar.Close >= upperLimit
+					limitDown := todayBar.Close <= lowerLimit
+
+					// Update OHLCV record with limit flags
+					todayBar.LimitUp = limitUp
+					todayBar.LimitDown = limitDown
+					ohlcvData[len(ohlcvData)-1] = todayBar
+					marketDataCache[symbol] = ohlcvData
+
+					// Update pricesCache to the limit price for execution
+					if limitUp {
+						pricesCache[symbol] = upperLimit
+					} else if limitDown {
+						pricesCache[symbol] = lowerLimit
+					}
+				}
 			}
 		}
 
@@ -328,6 +393,26 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 			if signal.Date.Before(date) {
 				// Signal generated before this day, skip
 				continue
+			}
+
+			// Enforce price limit: reject buys on limit-up days, sells on limit-down days
+			if ohlcvData, ok := marketDataCache[signal.Symbol]; ok && len(ohlcvData) > 0 {
+				todayBar := ohlcvData[len(ohlcvData)-1]
+				if todayBar.LimitUp && (signal.Direction == domain.DirectionLong || signal.Direction == domain.DirectionShort) {
+					logger.Info().
+						Str("symbol", signal.Symbol).
+						Str("direction", string(signal.Direction)).
+						Time("date", date).
+						Msg("Trade blocked: stock hit limit-up (涨停), cannot buy")
+					continue
+				}
+				if todayBar.LimitDown && signal.Direction == domain.DirectionClose {
+					logger.Info().
+						Str("symbol", signal.Symbol).
+						Time("date", date).
+						Msg("Trade blocked: stock hit limit-down (跌停), cannot sell")
+					continue
+				}
 			}
 
 			// Calculate position size
@@ -426,6 +511,19 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 
 		// Step 7: Advance day for T+1 settlement (shift QuantityToday → QuantityYesterday)
 		state.Tracker.AdvanceDay(date)
+
+		// Step 8: Update prevCloseCache for price limit calculation on next trading day
+		// If a stock hit limit-up today, the "previous close" for tomorrow is the limit price
+		for _, symbol := range params.StockPool {
+			if ohlcvData, ok := marketDataCache[symbol]; ok && len(ohlcvData) > 0 {
+				todayBar := ohlcvData[len(ohlcvData)-1]
+				if todayBar.LimitUp {
+					prevCloseCache[symbol] = todayBar.Close
+				} else if todayBar.Close > 0 {
+					prevCloseCache[symbol] = todayBar.Close
+				}
+			}
+		}
 	}
 
 	// Generate final results
@@ -813,4 +911,42 @@ func (e *Engine) GetBacktestStatus(backtestID string) (string, error) {
 	}
 
 	return state.Status, nil
+}
+
+// getStock retrieves stock info (Name, ListDate) from the data service.
+func (e *Engine) getStock(ctx context.Context, symbol string) (domain.Stock, error) {
+	url := fmt.Sprintf("%s/api/v1/stocks/%s", e.dataServiceURL, symbol)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return domain.Stock{}, err
+	}
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return domain.Stock{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return domain.Stock{Symbol: symbol}, nil // Return minimal stock if not found
+	}
+	if resp.StatusCode != http.StatusOK {
+		return domain.Stock{}, fmt.Errorf("data service returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Stock domain.Stock `json:"stock"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return domain.Stock{}, err
+	}
+
+	return result.Stock, nil
+}
+
+// hasSTPrefix returns true if the stock name contains "ST" (indicating special treatment).
+func hasSTPrefix(name string) bool {
+	return len(name) >= 2 &&
+		(name[:2] == "ST" || name[:2] == "*ST" || name[:2] == "SST" || name[:2] == "S*ST")
 }
