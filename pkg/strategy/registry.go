@@ -1,207 +1,243 @@
-// Package strategy provides strategy management and implementation.
+// Package strategy provides strategy management and plugin architecture.
 package strategy
 
 import (
 	"fmt"
+	"plugin"
+	"reflect"
 	"sync"
-
-	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
-// StrategyFactory is a function that creates a new Strategy instance.
-type StrategyFactory func() domain.Strategy
-
-// Registry manages strategy registration and retrieval with hot-swap support.
+// Registry manages strategy registration and retrieval.
 type Registry struct {
-	mu        sync.RWMutex
-	factories map[string]StrategyFactory
-	instances map[string]domain.Strategy
-	logger    zerolog.Logger
+	strategies map[string]Strategy
+	mu         sync.RWMutex
 }
 
 // NewRegistry creates a new strategy registry.
-func NewRegistry(logger zerolog.Logger) *Registry {
+func NewRegistry() *Registry {
 	return &Registry{
-		factories: make(map[string]StrategyFactory),
-		instances: make(map[string]domain.Strategy),
-		logger:    logger.With().Str("component", "strategy_registry").Logger(),
+		strategies: make(map[string]Strategy),
 	}
 }
 
-// Register registers a strategy factory with the given name.
-// If a strategy with this name already exists, it will be replaced (hot-swap).
-func (r *Registry) Register(name string, factory StrategyFactory) {
+// Register registers a strategy.
+// Returns an error if a strategy with the same name is already registered.
+func (r *Registry) Register(s Strategy) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Check if replacing an existing strategy
-	if _, exists := r.factories[name]; exists {
-		r.logger.Info().Str("strategy", name).Msg("hot-swapping strategy")
-	} else {
-		r.logger.Info().Str("strategy", name).Msg("registering new strategy")
+	name := s.Name()
+	if name == "" {
+		return fmt.Errorf("strategy name cannot be empty")
 	}
 
-	r.factories[name] = factory
+	if _, exists := r.strategies[name]; exists {
+		return fmt.Errorf("strategy already registered: %s", name)
+	}
 
-	// Create a fresh instance
-	r.instances[name] = factory()
+	r.strategies[name] = s
+	return nil
 }
 
-// GetStrategy retrieves a strategy by name.
-// Returns an error if the strategy is not found.
-func (r *Registry) GetStrategy(name string) (domain.Strategy, error) {
+// Get retrieves a strategy by name.
+// Returns nil if the strategy is not found.
+func (r *Registry) Get(name string) (Strategy, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	instance, exists := r.instances[name]
+	s, exists := r.strategies[name]
 	if !exists {
 		return nil, fmt.Errorf("strategy not found: %s", name)
 	}
 
-	return instance, nil
+	return s, nil
 }
 
-// ListStrategies returns a list of all registered strategy names.
-func (r *Registry) ListStrategies() []string {
+// List returns a list of all registered strategy names.
+func (r *Registry) List() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	names := make([]string, 0, len(r.factories))
-	for name := range r.factories {
+	names := make([]string, 0, len(r.strategies))
+	for name := range r.strategies {
 		names = append(names, name)
 	}
 
 	return names
 }
 
-// ReloadStrategy reloads a specific strategy by recreating its instance.
-// This enables hot-swap of individual strategies without restarting the service.
-func (r *Registry) ReloadStrategy(name string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	factory, exists := r.factories[name]
-	if !exists {
-		return fmt.Errorf("strategy not registered: %s", name)
-	}
-
-	r.logger.Info().Str("strategy", name).Msg("reloading strategy")
-
-	// Cleanup old instance if exists
-	if instance, exists := r.instances[name]; exists {
-		instance.Cleanup()
-	}
-
-	// Create new instance
-	r.instances[name] = factory()
-
-	return nil
-}
-
-// ReloadAll reloads all registered strategies.
-func (r *Registry) ReloadAll() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.logger.Info().Msg("reloading all strategies")
-
-	for name, factory := range r.factories {
-		// Cleanup old instance if exists
-		if instance, exists := r.instances[name]; exists {
-			instance.Cleanup()
-		}
-
-		// Create new instance
-		r.instances[name] = factory()
-	}
-
-	return nil
-}
-
-// ConfigureStrategy configures a specific strategy with the given config.
-func (r *Registry) ConfigureStrategy(name string, config map[string]any) error {
+// ListWithInfo returns strategy names with their descriptions and parameters.
+func (r *Registry) ListWithInfo() []StrategyInfo {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	instance, exists := r.instances[name]
-	if !exists {
-		return fmt.Errorf("strategy not found: %s", name)
+	infos := make([]StrategyInfo, 0, len(r.strategies))
+	for _, s := range r.strategies {
+		infos = append(infos, StrategyInfo{
+			Name:        s.Name(),
+			Description: s.Description(),
+			Parameters:  s.Parameters(),
+		})
 	}
 
-	if err := instance.Configure(config); err != nil {
-		return fmt.Errorf("failed to configure strategy %s: %w", name, err)
-	}
-
-	return nil
+	return infos
 }
 
-// GetStrategyInfo returns basic information about a strategy.
-func (r *Registry) GetStrategyInfo(name string) (*StrategyInfo, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	instance, exists := r.instances[name]
-	if !exists {
-		return nil, fmt.Errorf("strategy not found: %s", name)
-	}
-
-	return &StrategyInfo{
-		Name:        instance.Name(),
-		Description: instance.Description(),
-	}, nil
-}
-
-// StrategyInfo contains basic information about a strategy.
+// StrategyInfo contains information about a strategy.
 type StrategyInfo struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Parameters  []Parameter `json:"parameters"`
 }
 
 // DefaultRegistry is the global strategy registry instance.
-var DefaultRegistry *Registry
+var DefaultRegistry = NewRegistry()
 
-// Init initializes the default registry.
-func Init(logger zerolog.Logger) {
-	DefaultRegistry = NewRegistry(logger)
+// GlobalRegister registers a strategy with the default registry.
+func GlobalRegister(s Strategy) error {
+	return DefaultRegistry.Register(s)
 }
 
-// Register registers a strategy with the default registry.
-func Register(name string, factory StrategyFactory) {
-	if DefaultRegistry == nil {
-		panic("registry not initialized, call Init first")
-	}
-	DefaultRegistry.Register(name, factory)
+// GlobalGet retrieves a strategy from the default registry.
+func GlobalGet(name string) (Strategy, error) {
+	return DefaultRegistry.Get(name)
 }
 
-// GetStrategy retrieves a strategy from the default registry.
-func GetStrategy(name string) (domain.Strategy, error) {
-	if DefaultRegistry == nil {
-		return nil, fmt.Errorf("registry not initialized")
-	}
-	return DefaultRegistry.GetStrategy(name)
+// GlobalList returns all registered strategy names from the default registry.
+func GlobalList() []string {
+	return DefaultRegistry.List()
 }
 
-// ListStrategies returns all registered strategies from the default registry.
-func ListStrategies() []string {
-	if DefaultRegistry == nil {
-		return nil
-	}
-	return DefaultRegistry.ListStrategies()
+// GlobalListWithInfo returns all registered strategies with info from the default registry.
+func GlobalListWithInfo() []StrategyInfo {
+	return DefaultRegistry.ListWithInfo()
 }
 
-// ReloadAllStrategies reloads all strategies in the default registry.
-func ReloadAllStrategies() error {
-	if DefaultRegistry == nil {
-		return fmt.Errorf("registry not initialized")
+// LoadPlugins loads strategies from dynamically linked plugin files.
+// This enables adding new strategies without rebuilding the main binary.
+func LoadPlugins(pluginPaths []string) error {
+	for _, path := range pluginPaths {
+		plug, err := plugin.Open(path)
+		if err != nil {
+			return fmt.Errorf("failed to open plugin %s: %w", path, err)
+		}
+
+		symStrategy, err := plug.Lookup("Strategy")
+		if err != nil {
+			return fmt.Errorf("plugin %s does not export Strategy symbol: %w", path, err)
+		}
+
+		strategy, ok := symStrategy.(Strategy)
+		if !ok {
+			return fmt.Errorf("plugin %s Strategy symbol does not implement Strategy interface", path)
+		}
+
+		if err := GlobalRegister(strategy); err != nil {
+			return fmt.Errorf("failed to register plugin strategy %s: %w", path, err)
+		}
 	}
-	return DefaultRegistry.ReloadAll()
+
+	return nil
 }
 
-// GetStrategyInfo returns basic information about a strategy from the default registry.
-func GetStrategyInfo(name string) (*StrategyInfo, error) {
-	if DefaultRegistry == nil {
-		return nil, fmt.Errorf("registry not initialized")
+// AutoRegister registers all built-in strategies.
+// This is called at startup to register hardcoded strategies.
+func AutoRegister() error {
+	// Register built-in strategies here
+	// Import each plugin to trigger init() registration
+
+	// For now, strategies register themselves via init() in their respective files
+	// This function can be called to ensure all strategies are registered
+	return nil
+}
+
+// RegisterByReflection registers all Strategy implementations found in the given slice.
+// This is useful for registering strategies defined in the same binary.
+func RegisterByReflection(strategies []Strategy) error {
+	for _, s := range strategies {
+		if err := GlobalRegister(s); err != nil {
+			return err
+		}
 	}
-	return DefaultRegistry.GetStrategyInfo(name)
+	return nil
+}
+
+// strategyPlugin is a helper to make a strategy available for plugin loading.
+type strategyPlugin struct {
+	strategy Strategy
+}
+
+// NewPlugin creates a plugin symbol for dynamic loading.
+// Usage in a plugin .go file:
+//
+//	var Strategy = strategy.NewPlugin(&MyStrategy{})
+func NewPlugin(s Strategy) Strategy {
+	return s
+}
+
+// Type checking at compile time
+var _ Strategy = (*baseStrategy)(nil)
+
+type baseStrategy struct {
+	name        string
+	description string
+	parameters  []Parameter
+}
+
+func (b *baseStrategy) Name() string            { return b.name }
+func (b *baseStrategy) Description() string     { return b.description }
+func (b *baseStrategy) Parameters() []Parameter { return b.parameters }
+
+// paramHelper returns reflect.Value for a parameter, handling type conversions.
+func paramHelper(params map[string]any, name string, defaultVal any) any {
+	if val, ok := params[name]; ok {
+		return val
+	}
+	return defaultVal
+}
+
+// getParamInt safely extracts an int from params map.
+func getParamInt(params map[string]any, name string, defaultVal int) int {
+	if val, ok := params[name]; ok {
+		switch v := val.(type) {
+		case float64:
+			return int(v)
+		case int:
+			return v
+		case int64:
+			return int(v)
+		}
+	}
+	return defaultVal
+}
+
+// getParamFloat safely extracts a float64 from params map.
+func getParamFloat(params map[string]any, name string, defaultVal float64) float64 {
+	if val, ok := params[name]; ok {
+		switch v := val.(type) {
+		case float64:
+			return v
+		case int:
+			return float64(v)
+		case int64:
+			return float64(v)
+		}
+	}
+	return defaultVal
+}
+
+// getParamString safely extracts a string from params map.
+func getParamString(params map[string]any, name string, defaultVal string) string {
+	if val, ok := params[name]; ok {
+		if v, ok := val.(string); ok {
+			return v
+		}
+	}
+	return defaultVal
+}
+
+func init() {
+	// Auto-register is called at startup
+	// Individual strategy packages call GlobalRegister in their init()
 }

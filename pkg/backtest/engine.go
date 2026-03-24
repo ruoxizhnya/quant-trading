@@ -449,32 +449,39 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 				state.targetPositions[signal.Symbol] = tp
 			}
 
-			// Net pending qty against new target
-			// If we have pending buy qty, reduce the new target accordingly
+			// Compute effective target: reduce by what we already own (ActualQty).
+			// PendingQty represents unfilled shares from a PRIOR signal — it should NOT
+			// reduce a NEW signal's target, as each day's signal is an independent decision.
+			// e.g., Day1 target=1000, fill=300, pending=700. Day2 target=2000.
+			// Correct: buy 2000-300=1700 (not 2000-700=1300, which would leave us 700 short
+			// of the new target and compound the shortfall across days).
 			effectiveTarget := targetQty
-			if tp.PendingQty > 0 {
-				if signal.Direction == domain.DirectionLong {
-					effectiveTarget = targetQty - tp.PendingQty
-					if effectiveTarget <= 0 {
-						logger.Info().
-							Str("symbol", signal.Symbol).
-							Float64("pending_qty", tp.PendingQty).
-							Float64("new_target", targetQty).
-							Time("date", date).
-							Msg("Signal skipped: pending buy qty covers new target")
-						continue
-					}
+			if tp.PendingQty > 0 && (signal.Direction == domain.DirectionLong || signal.Direction == domain.DirectionShort) {
+				// Reduce new target by what we already own (ActualQty), floor at 0
+				if tp.ActualQty >= targetQty {
+					effectiveTarget = 0
+				} else {
+					effectiveTarget = targetQty - tp.ActualQty
+				}
+				if effectiveTarget <= 0 {
 					logger.Info().
 						Str("symbol", signal.Symbol).
+						Float64("actual_qty", tp.ActualQty).
+						Float64("pending_qty", tp.PendingQty).
+						Float64("new_target", targetQty).
+						Time("date", date).
+						Msg("Signal skipped: already at or above target")
+					continue
+				}
+				if effectiveTarget < targetQty {
+					logger.Info().
+						Str("symbol", signal.Symbol).
+						Float64("actual_qty", tp.ActualQty).
 						Float64("pending_qty", tp.PendingQty).
 						Float64("new_target", targetQty).
 						Float64("effective_target", effectiveTarget).
 						Time("date", date).
-						Msg("Adjusted target: netting pending qty")
-				} else if signal.Direction == domain.DirectionClose && tp.PendingQty > 0 {
-					// Closing with pending buy: net against the pending (partial fill scenario)
-					// Reduce the close qty by the pending buy qty
-					effectiveTarget = targetQty
+						Msg("Adjusted target: netting actual owned qty")
 				}
 			}
 
@@ -535,8 +542,18 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 							Str("symbol", signal.Symbol).
 							Err(err).
 							Msg("Failed to close position")
+						// Don't modify tp on failure — leave it for retry or manual intervention
 						continue
 					}
+					// Close succeeded: position is deleted from t.positions.
+					// Clear tp fields and delete from state.targetPositions.
+					tp.PendingQty = 0
+					tp.TargetQty = 0
+					tp.ActualQty = 0
+					tp.LastUpdated = date
+					trade.PendingQty = 0
+					delete(state.targetPositions, signal.Symbol)
+					continue
 
 				case domain.DirectionHold:
 					// No action needed
@@ -1044,8 +1061,12 @@ func (e *Engine) getStock(ctx context.Context, symbol string) (domain.Stock, err
 	return result.Stock, nil
 }
 
-// hasSTPrefix returns true if the stock name contains "ST" (indicating special treatment).
+// hasSTPrefix returns true if the stock name starts with an ST prefix (indicating special treatment).
+// Handles edge cases: names shorter than 2 chars cannot be ST stocks.
 func hasSTPrefix(name string) bool {
-	return len(name) >= 2 &&
-		(name[:2] == "ST" || name[:2] == "*ST" || name[:2] == "SST" || name[:2] == "S*ST")
+	if len(name) < 2 {
+		return false
+	}
+	prefix := name[:2]
+	return prefix == "ST" || prefix == "*ST" || prefix == "SST" || prefix == "S*ST"
 }
