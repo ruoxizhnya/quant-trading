@@ -37,7 +37,7 @@ COPY --from=builder /app/analysis-service /app/analysis-service
 
 # Copy config files
 COPY config /app/config
-COPY cmd/analysis/static /app/static
+COPY cmd/analysis/static /app/cmd/analysis/static
 
 EXPOSE 8081 8082 8083 8085
 

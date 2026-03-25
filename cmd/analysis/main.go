@@ -429,42 +429,42 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.
 	// Serve UI
 	router.GET("/", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./static/index.html")
+		c.File("./cmd/analysis/static/index.html")
 	})
 
 	router.GET("/screen", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./static/screen.html")
+		c.File("./cmd/analysis/static/screen.html")
 	})
 
 	router.GET("/screen.html", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./static/screen.html")
+		c.File("./cmd/analysis/static/screen.html")
 	})
 
 	router.GET("/dashboard", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./static/dashboard.html")
+		c.File("./cmd/analysis/static/dashboard.html")
 	})
 
 	router.GET("/dashboard.html", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./static/dashboard.html")
+		c.File("./cmd/analysis/static/dashboard.html")
 	})
 
 	router.GET("/copilot", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./static/copilot.html")
+		c.File("./cmd/analysis/static/copilot.html")
 	})
 
 	router.GET("/copilot.html", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./static/copilot.html")
+		c.File("./cmd/analysis/static/copilot.html")
 	})
 
 	router.GET("/index.html", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./static/index.html")
+		c.File("./cmd/analysis/static/index.html")
 	})
 
 	// Health check

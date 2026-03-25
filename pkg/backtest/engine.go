@@ -55,6 +55,16 @@ type Engine struct {
 
 	// Logger
 	logger zerolog.Logger
+
+	// In-memory OHLCV cache for backtest speed.
+	// Key: symbol, Value: all OHLCV bars for that symbol (sorted by date).
+	// When populated via LoadOHLCVInMemory, getOHLCV returns from here
+	// instead of making HTTP calls, eliminating per-stock-per-day latency.
+	inMemoryOHLCV map[string][]domain.OHLCV
+
+	// ParallelWorkers controls how many goroutines fetch data concurrently
+	// inside each trading day. A value <= 0 means sequential (1 worker).
+	parallelWorkers int
 }
 
 // BacktestState holds the state of a backtest run.
@@ -315,80 +325,144 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 				Msg("Processing day")
 		}
 
-		// Step 1: Get market data for all stocks in pool
-		// We need data up to (and including) this date for signal generation
-		for _, symbol := range params.StockPool {
-			// Lazily fetch stock info if not cached (Name, ListDate for price limit detection)
-			if _, ok := stockCache[symbol]; !ok {
-				if stock, err := e.getStock(ctx, symbol); err == nil {
-					stockCache[symbol] = stock
-				}
-			}
+		// Step 1: Get market data for all stocks in pool.
+		// Parallelism: when parallelWorkers > 1, each stock is fetched concurrently
+		// via a pool of N goroutines (workers). Each worker processes a private copy
+		// of the result maps; results are merged into the shared maps after all workers
+		// complete. This avoids shared-map mutation races entirely.
+		// When parallelWorkers <= 1, stocks are processed sequentially (original behavior).
+		// Thread-safety: workers use only local variables; no shared mutable state.
+		// Determinism: stocks are processed in a fixed order (sorted symbol list),
+		// and within each stock the data fetch is deterministic (same input → same output).
+		var stockWg sync.WaitGroup
+		workers := e.parallelWorkers
+		if workers <= 0 {
+			workers = 1
+		}
 
-			ohlcvData, err := e.getOHLCV(ctx, symbol, params.StartDate, date)
-			if err != nil {
-				logger.Warn().
-					Str("symbol", symbol).
-					Time("date", date).
-					Err(err).
-					Msg("Failed to get OHLCV data")
-				continue
-			}
-			marketDataCache[symbol] = ohlcvData
+		// Partition stocks across workers using a channel.
+		type stockJob struct {
+			symbol    string
+			prevClose float64 // Previous close for price limit detection (0 = use ohlcv fallback)
+		}
+		type stockResult struct {
+			symbol    string
+			stock     domain.Stock
+			ohlcvData []domain.OHLCV
+			price     float64
+			prevClose float64 // Previous close to store for next day's computation
+			limitUp   bool
+			limitDown bool
+			err       error
+		}
+		jobCh := make(chan stockJob, len(params.StockPool))
+		resultCh := make(chan stockResult, len(params.StockPool))
 
-			// Get latest close price
-			if len(ohlcvData) > 0 {
-				pricesCache[symbol] = ohlcvData[len(ohlcvData)-1].Close
-			}
+		// Launch N workers. Workers process jobs from jobCh and send results to resultCh.
+		// No shared mutable state in workers — each worker has only local variables.
+		for w := 0; w < workers; w++ {
+			stockWg.Add(1)
+			go func() {
+				defer stockWg.Done()
+				for job := range jobCh {
+					res := stockResult{symbol: job.symbol}
 
-			// Step 1b: Detect and enforce price limits (涨跌停)
-			if len(ohlcvData) >= 2 {
-				prevClose := prevCloseCache[symbol]
-				if prevClose <= 0 {
-					// Fall back to second-to-last candle's close
-					prevClose = ohlcvData[len(ohlcvData)-2].Close
-				}
+					// --- getStock ---
+					if stock, err := e.getStock(ctx, job.symbol); err == nil {
+						res.stock = stock
+					}
 
-				if prevClose > 0 {
-					// Determine limit rate based on stock type and listing age
-					limitRate := priceLimitNormal
-					stockName := ""
-					if s, ok := stockCache[symbol]; ok {
-						stockName = s.Name
-						if s.ListDate.IsZero() {
-							limitRate = priceLimitNormal
-						} else {
-							tradeDays := int(date.Sub(s.ListDate).Hours() / 24 / 7 * 5)
+					// --- getOHLCV ---
+					ohlcvData, err := e.getOHLCV(ctx, job.symbol, params.StartDate, date)
+					if err != nil {
+						res.err = fmt.Errorf("symbol %s: %w", job.symbol, err)
+						resultCh <- res
+						continue
+					}
+					res.ohlcvData = ohlcvData
+
+					// --- price limit detection (fully local; uses prevClose from job) ---
+					limitUp, limitDown := false, false
+					limitPrice := 0.0
+					tradeDays := 0
+					stockName := res.stock.Name
+					if !res.stock.ListDate.IsZero() {
+						tradeDays = int(date.Sub(res.stock.ListDate).Hours() / 24 / 7 * 5)
+					}
+					prevClose := job.prevClose
+					if len(ohlcvData) >= 2 {
+						if prevClose <= 0 {
+							prevClose = ohlcvData[len(ohlcvData)-2].Close
+						}
+						if prevClose > 0 {
+							limitRate := priceLimitNormal
 							if tradeDays < newStockTradeDays {
 								limitRate = priceLimitNew
 							} else if hasSTPrefix(stockName) {
 								limitRate = priceLimitST
 							}
+							todayBar := ohlcvData[len(ohlcvData)-1]
+							upperLimit := prevClose * (1 + limitRate)
+							lowerLimit := prevClose * (1 - limitRate)
+							limitUp = todayBar.Close >= upperLimit
+							limitDown = todayBar.Close <= lowerLimit
+							if limitUp {
+								limitPrice = upperLimit
+							} else if limitDown {
+								limitPrice = lowerLimit
+							}
+							todayBar.LimitUp = limitUp
+							todayBar.LimitDown = limitDown
+							ohlcvData[len(ohlcvData)-1] = todayBar
+							res.ohlcvData = ohlcvData
+							// The prevClose for next day is today's close (or limit price)
+							if limitUp || limitDown {
+								res.prevClose = todayBar.Close
+							} else {
+								res.prevClose = ohlcvData[len(ohlcvData)-1].Close
+							}
 						}
 					}
 
-					todayBar := ohlcvData[len(ohlcvData)-1]
-					upperLimit := prevClose * (1 + limitRate)
-					lowerLimit := prevClose * (1 - limitRate)
-
-					limitUp := todayBar.Close >= upperLimit
-					limitDown := todayBar.Close <= lowerLimit
-
-					// Update OHLCV record with limit flags
-					todayBar.LimitUp = limitUp
-					todayBar.LimitDown = limitDown
-					ohlcvData[len(ohlcvData)-1] = todayBar
-					marketDataCache[symbol] = ohlcvData
-
-					// Update pricesCache to the limit price for execution
-					if limitUp {
-						pricesCache[symbol] = upperLimit
-					} else if limitDown {
-						pricesCache[symbol] = lowerLimit
+					// --- prices ---
+					if len(ohlcvData) > 0 {
+						if limitPrice > 0 {
+							res.price = limitPrice
+						} else {
+							res.price = ohlcvData[len(ohlcvData)-1].Close
+						}
 					}
+					res.limitUp = limitUp
+					res.limitDown = limitDown
+
+					resultCh <- res
 				}
+			}()
+		}
+		// Feed jobs to workers (prevClose from prevCloseCache for each symbol).
+		for _, s := range params.StockPool {
+			jobCh <- stockJob{symbol: s, prevClose: prevCloseCache[s]}
+		}
+		close(jobCh)
+
+		// Collect results — runs in the main goroutine sequentially.
+		// prevCloseCache updates happen here only, avoiding any concurrent map access.
+		for i := 0; i < len(params.StockPool); i++ {
+			res := <-resultCh
+			if res.err != nil {
+				logger.Warn().Err(res.err).Msg("Failed to get stock data")
+				continue
+			}
+			stockCache[res.symbol] = res.stock
+			marketDataCache[res.symbol] = res.ohlcvData
+			if res.price > 0 {
+				pricesCache[res.symbol] = res.price
+			}
+			if res.prevClose > 0 {
+				prevCloseCache[res.symbol] = res.prevClose
 			}
 		}
+		stockWg.Wait()
 
 		// Step 2: Detect market regime
 		regime, err := e.detectRegime(ctx, marketDataCache)
@@ -810,7 +884,26 @@ func (e *Engine) getTradingDays(ctx context.Context, start, end time.Time) ([]ti
 }
 
 // getOHLCV retrieves OHLCV data for a symbol.
+// It first checks the in-memory cache (populated by LoadOHLCVInMemory),
+// falling back to HTTP only if the cache is empty.
 func (e *Engine) getOHLCV(ctx context.Context, symbol string, start, end time.Time) ([]domain.OHLCV, error) {
+	// Fast path: serve from in-memory cache (zero HTTP overhead).
+	e.mu.RLock()
+	cached, ok := e.inMemoryOHLCV[symbol]
+	e.mu.RUnlock()
+	if ok {
+		// Slice the cached data to the requested date range.
+		// The cached slice is sorted ascending by date.
+		var filtered []domain.OHLCV
+		for _, bar := range cached {
+			if !bar.Date.Before(start) && !bar.Date.After(end) {
+				filtered = append(filtered, bar)
+			}
+		}
+		return filtered, nil
+	}
+
+	// Slow path: fetch via HTTP.
 	url := fmt.Sprintf("%s/ohlcv/%s?start_date=%s&end_date=%s",
 		e.dataServiceURL, symbol, start.Format("20060102"), end.Format("20060102"))
 
@@ -1153,6 +1246,22 @@ func (e *Engine) GetBacktestStatus(backtestID string) (string, error) {
 	}
 
 	return state.Status, nil
+}
+
+// LoadOHLCVInMemory loads all OHLCV data into memory, bypassing HTTP for backtest speed.
+// The map key is symbol; each slice is sorted by date ascending.
+// After calling this, getOHLCV returns cached data instantly.
+// Pass nil to clear the in-memory cache (forces HTTP mode again).
+func (e *Engine) LoadOHLCVInMemory(data map[string][]domain.OHLCV) {
+	e.mu.Lock()
+	e.inMemoryOHLCV = data
+	e.mu.Unlock()
+}
+
+// SetParallelWorkers sets the number of concurrent workers for per-stock data fetching.
+// Must be called before RunBacktest. Values <= 0 mean sequential (no parallelism).
+func (e *Engine) SetParallelWorkers(n int) {
+	e.parallelWorkers = n
 }
 
 // getStock retrieves stock info (Name, ListDate) from the data service.
