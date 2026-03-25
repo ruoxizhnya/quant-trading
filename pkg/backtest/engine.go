@@ -795,16 +795,18 @@ func (e *Engine) checkCalendarExists(ctx context.Context, start, end time.Time) 
 	return len(result.TradingDays) > 0, nil
 }
 
-// warmCache pre-fetches OHLCV data for the stock universe into Redis via the data-service.
-// This is called once before the backtest loop to ensure all data is cached,
-// eliminating per-symbol DB round-trips during simulation.
+// warmCache pre-fetches all OHLCV data for the stock universe into the engine's
+// in-memory cache (e.inMemoryOHLCV) in a single bulk call. After this completes,
+// all getOHLCV calls during the backtest run are served from memory — zero HTTP overhead.
+//
+// This replaces the previous approach of warming Redis only, which the engine did not
+// directly read from.
 func (e *Engine) warmCache(ctx context.Context, symbols []string, start, end time.Time) error {
 	if len(symbols) == 0 {
 		return nil
 	}
 
-	url := fmt.Sprintf("%s/api/v1/cache/warm", e.dataServiceURL)
-
+	url := fmt.Sprintf("%s/api/v1/ohlcv/bulk", e.dataServiceURL)
 	startStr := start.Format("20060102")
 	endStr := end.Format("20060102")
 
@@ -815,23 +817,47 @@ func (e *Engine) warmCache(ctx context.Context, symbols []string, start, end tim
 	}
 	jsonData, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("failed to marshal warm request: %w", err)
+		return fmt.Errorf("failed to marshal bulk request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonData))
 	if err != nil {
-		return fmt.Errorf("failed to create warm request: %w", err)
+		return fmt.Errorf("failed to create bulk request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("warm request failed: %w", err)
+		return fmt.Errorf("bulk OHLCV request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("warm endpoint returned status %d", resp.StatusCode)
+		return fmt.Errorf("bulk endpoint returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Results []struct {
+			Symbol string          `json:"symbol"`
+			OHLCV  []domain.OHLCV `json:"ohlcv"`
+			Error  string          `json:"error,omitempty"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("failed to decode bulk response: %w", err)
+	}
+
+	// Populate in-memory cache from bulk result.
+	// Subsequent getOHLCV calls will hit this map directly (zero HTTP).
+	for _, r := range result.Results {
+		if r.Error != "" {
+			return fmt.Errorf("bulk fetch failed for %s: %s", r.Symbol, r.Error)
+		}
+		// Sort by date ascending for consistent iteration.
+		sort.Slice(r.OHLCV, func(i, j int) bool {
+			return r.OHLCV[i].Date.Before(r.OHLCV[j].Date)
+		})
+		e.inMemoryOHLCV[r.Symbol] = r.OHLCV
 	}
 
 	return nil

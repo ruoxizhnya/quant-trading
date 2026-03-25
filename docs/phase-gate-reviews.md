@@ -46,6 +46,23 @@
 | Dashboard HTML is minimal stub (needs UI work) | Frontend Dev | Sprint 2 |
 | vnpy drift comparison (requires vnpy environment) | Backend + PM | Sprint 3 |
 
+### 🔴 Critical: Speed Architecture Issue (Discovered Sprint 2)
+
+**Finding (QA, 2026-03-25 02:14):**
+- Benchmark shows 960ms for 5-stock/1yr — but artificially fast
+- `LoadOHLCVInMemory()` only called in benchmark, NOT in production
+- Production: `warmCache` warms Redis → `getOHLCV` still makes **HTTP calls** → slow path
+- 500 stocks × 5 years: **80-120 seconds** (in-memory) or **5-10+ minutes** (HTTP)
+
+**Root cause:** `warmCache` populates Redis but NOT `e.inMemoryOHLCV` map.
+
+**Required fixes (P0 first):**
+1. `warmCache` should call `LoadOHLCVInMemory()` directly — eliminates HTTP data bottleneck
+2. Batch regime/stoploss calls (1,260 serial → batched)
+3. Vectorized per-day processing
+
+**5s target NOT achievable with current architecture.**
+
 ### 📋 Phase 1 Exit Criteria Status
 
 | Criterion | Status | Notes |
@@ -54,10 +71,12 @@
 | 涨跌停 correctness (unit tests) | ✅ DONE | 10 tests passing |
 | Determinism (fixed seed) | ✅ DONE | Config.Seed enforced |
 | Redis caching (infrastructure) | ✅ DONE | Build fixed, warming implemented |
-| Speed: ≤5s for 5yr/500stock | ⏳ DEFER | Requires full dataset + Redis tuning (Sprint 2/3) |
+| Speed: ≤5s for 5yr/500stock | 🔴 BLOCKED | Architecture issue found — needs warmCache fix |
 | vnpy drift <5% | ⏳ DEFER | Requires vnpy setup (Sprint 3) |
 
-**Verdict: Sprint 1 APPROVED for continuation to Sprint 2** — build/test issues resolved, core accuracy deliverables complete. Speed and vnpy comparison deferred to Sprint 2/3.
+**Verdict: Sprint 1 APPROVED for continuation to Sprint 2** — build/test issues resolved, core accuracy deliverables complete. Speed issue requires architectural fix before Phase 1 exit.
+
+**Sprint 2 standing: PAUSED** — speed architecture fix is P0 blocker.
 
 ---
 

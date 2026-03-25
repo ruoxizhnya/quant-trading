@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -206,6 +207,7 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 
 	// OHLCV endpoints
 	r.GET("/ohlcv/:symbol", getOHLCVHandler(dc))
+	r.POST("/api/v1/ohlcv/bulk", bulkOHLCVHandler(dc))
 
 	// Fundamental endpoints
 	r.GET("/fundamental/:symbol", getFundamentalHandler(store))
@@ -326,6 +328,56 @@ func getOHLCVHandler(dc *data.DataCache) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{"ohlcv": ohlcv})
+	}
+}
+
+func bulkOHLCVHandler(dc *data.DataCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+
+		var req struct {
+			Symbols   []string `json:"symbols"`
+			StartDate string   `json:"start_date"`
+			EndDate   string   `json:"end_date"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+			return
+		}
+		if len(req.Symbols) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "symbols is required"})
+			return
+		}
+
+		// Fetch all symbols in parallel via DataCache (Redis → PostgreSQL fallback)
+		type result struct {
+			Symbol string          `json:"symbol"`
+			OHLCV  []domain.OHLCV `json:"ohlcv"`
+			Error  string          `json:"error,omitempty"`
+		}
+		results := make([]result, len(req.Symbols))
+
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		for i, symbol := range req.Symbols {
+			wg.Add(1)
+			go func(idx int, sym string) {
+				defer wg.Done()
+				ohlcv, err := dc.GetOHLCV(ctx, sym, req.StartDate, req.EndDate)
+				r := result{Symbol: sym}
+				if err != nil {
+					r.Error = err.Error()
+				} else {
+					r.OHLCV = ohlcv
+				}
+				mu.Lock()
+				results[idx] = r
+				mu.Unlock()
+			}(i, symbol)
+		}
+		wg.Wait()
+
+		c.JSON(http.StatusOK, gin.H{"results": results})
 	}
 }
 
