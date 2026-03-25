@@ -148,6 +148,16 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			cash_ratio DOUBLE PRECISION,
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		// Migration 005: docs/migrations/005_add_index_constituents_table.sql
+		`CREATE TABLE IF NOT EXISTS index_constituents (
+			id SERIAL PRIMARY KEY,
+			index_code VARCHAR(20) NOT NULL,
+			symbol VARCHAR(20) NOT NULL,
+			in_date DATE,
+			out_date DATE,
+			weight DOUBLE PRECISION,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -177,6 +187,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_trading_calendar_is_trading ON trading_calendar(is_trading_day)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_dividends_symbol_ann ON dividends(symbol, ann_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_dividends_pay_date ON dividends(pay_date)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_symbol_index ON index_constituents(symbol, index_code)`,
+		`CREATE INDEX IF NOT EXISTS idx_ic_index_code ON index_constituents(index_code)`,
+		`CREATE INDEX IF NOT EXISTS idx_ic_in_date ON index_constituents(in_date)`,
 	}
 
 	for _, idx := range indexes {
@@ -1004,4 +1017,63 @@ func (s *PostgresStore) SaveDividendBatch(ctx context.Context, records []*domain
 
 	s.logger.Info().Int("count", len(records)).Msg("Batch dividends saved")
 	return nil
+}
+
+// SaveIndexConstituentBatch saves multiple index constituent records in a batch.
+// Uses ON CONFLICT to update existing entries (symbol, index_code).
+func (s *PostgresStore) SaveIndexConstituentBatch(ctx context.Context, records []*domain.IndexConstituent) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	for _, c := range records {
+		batch.Queue(`
+			INSERT INTO index_constituents (index_code, symbol, in_date, out_date, weight)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (symbol, index_code) DO UPDATE SET
+				in_date = EXCLUDED.in_date,
+				out_date = EXCLUDED.out_date,
+				weight = EXCLUDED.weight
+		`, c.IndexCode, c.Symbol, c.InDate, c.OutDate, c.Weight)
+	}
+
+	results := s.pool.SendBatch(ctx, batch)
+	defer results.Close()
+
+	for i := 0; i < len(records); i++ {
+		if _, err := results.Exec(); err != nil {
+			return fmt.Errorf("batch index constituent insert failed at index %d: %w", i, err)
+		}
+	}
+
+	s.logger.Info().Int("count", len(records)).Msg("Batch index constituents saved")
+	return nil
+}
+
+// GetIndexConstituents returns all current constituents for a given index.
+// A constituent is "current" if out_date is NULL or in the future.
+func (s *PostgresStore) GetIndexConstituents(ctx context.Context, indexCode string) ([]domain.IndexConstituent, error) {
+	query := `
+		SELECT id, index_code, symbol, in_date, out_date, weight
+		FROM index_constituents
+		WHERE index_code = $1
+		ORDER BY symbol
+	`
+	rows, err := s.pool.Query(ctx, query, indexCode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query index constituents: %w", err)
+	}
+	defer rows.Close()
+
+	var results []domain.IndexConstituent
+	for rows.Next() {
+		var c domain.IndexConstituent
+		if err := rows.Scan(&c.ID, &c.IndexCode, &c.Symbol, &c.InDate, &c.OutDate, &c.Weight); err != nil {
+			return nil, fmt.Errorf("failed to scan index constituent row: %w", err)
+		}
+		results = append(results, c)
+	}
+
+	return results, rows.Err()
 }

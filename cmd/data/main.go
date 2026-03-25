@@ -217,7 +217,8 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 	r.GET("/fundamental/:symbol", getFundamentalHandler(store))
 
 	// Index endpoints
-	r.GET("/index/:code/constituents", getIndexConstituentsHandler(tc))
+	r.GET("/index/:code/constituents", getIndexConstituentsHandler(tc, store))
+	r.POST("/sync/index-constituents/:index_code", syncIndexConstituentsHandler(tc))
 
 	// Trading calendar
 	r.GET("/api/v1/trading/calendar", getTradingCalendarHandler(store))
@@ -489,19 +490,53 @@ func getFundamentalHandler(store *storage.PostgresStore) gin.HandlerFunc {
 	}
 }
 
-func getIndexConstituentsHandler(tc *data.TushareClient) gin.HandlerFunc {
+func getIndexConstituentsHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		indexCode := c.Param("code")
 		date := c.Query("date")
 
-		constituents, err := tc.FetchIndexConstituents(ctx, indexCode, date)
+		// Validate supported indexes
+		if indexCode != "000300.SH" && indexCode != "000500.SH" && indexCode != "000852.SH" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported index code, supported: 000300.SH (CSI 300), 000500.SH (CSI 500), 000852.SH (CSI 800)"})
+			return
+		}
+
+		constituents, err := tc.GetIndexConstituents(ctx, indexCode, date)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"constituents": constituents})
+		c.JSON(http.StatusOK, gin.H{"index_code": indexCode, "constituents": constituents})
+	}
+}
+
+// syncIndexConstituentsHandler fetches index constituents from Tushare and saves to DB.
+// POST /sync/index-constituents/:index_code
+func syncIndexConstituentsHandler(tc *data.TushareClient) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		indexCode := c.Param("index_code")
+
+		// Validate supported indexes
+		if indexCode != "000300.SH" && indexCode != "000500.SH" && indexCode != "000852.SH" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported index code, supported: 000300.SH (CSI 300), 000500.SH (CSI 500), 000852.SH (CSI 800)"})
+			return
+		}
+
+		// Fetch latest constituents (no specific date = latest)
+		constituents, err := tc.FetchIndexConstituents(ctx, indexCode, "")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":     "index constituents synced successfully",
+			"index_code":  indexCode,
+			"count":       len(constituents),
+		})
 	}
 }
 

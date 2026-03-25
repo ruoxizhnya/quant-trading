@@ -460,8 +460,8 @@ func (c *TushareClient) fieldFloatPtr(item []any, idx int) *float64 {
 	return &v
 }
 
-// FetchIndexConstituents retrieves index constituents from tushare.
-func (c *TushareClient) FetchIndexConstituents(ctx context.Context, indexCode string, date string) ([]string, error) {
+// FetchIndexConstituents retrieves index constituents from tushare and saves them to DB.
+func (c *TushareClient) FetchIndexConstituents(ctx context.Context, indexCode string, date string) ([]domain.IndexConstituent, error) {
 	params := map[string]interface{}{
 		"index_code": indexCode,
 	}
@@ -474,19 +474,78 @@ func (c *TushareClient) FetchIndexConstituents(ctx context.Context, indexCode st
 		return nil, err
 	}
 
-	var constituents []string
-	for _, item := range resp.Data.Items {
-		if len(item) < 2 {
-			continue
-		}
-		conCode := c.fieldStr(item, 1)
-		if conCode != "" {
-			constituents = append(constituents, conCode)
-		}
+	constituents := c.normalizeIndexConstituents(resp, indexCode)
+	if len(constituents) == 0 {
+		return nil, nil
 	}
 
-	c.logger.Info().Str("index", indexCode).Int("count", len(constituents)).Msg("Index constituents fetched")
+	// Save to database
+	ptrs := make([]*domain.IndexConstituent, len(constituents))
+	for i := range constituents {
+		ptrs[i] = &constituents[i]
+	}
+	if err := c.store.SaveIndexConstituentBatch(ctx, ptrs); err != nil {
+		c.logger.Warn().Err(err).Msg("Failed to batch save index constituents")
+	}
+
+	c.logger.Info().Str("index", indexCode).Int("count", len(constituents)).Msg("Index constituents fetched and saved")
 	return constituents, nil
+}
+
+// normalizeIndexConstituents converts tushare index_weight response to domain.IndexConstituent.
+// index_weight fields: index_code, con_code, in_date, out_date
+func (c *TushareClient) normalizeIndexConstituents(resp *TushareResponse, indexCode string) []domain.IndexConstituent {
+	var constituents []domain.IndexConstituent
+	for _, item := range resp.Data.Items {
+		if len(item) < 4 {
+			continue
+		}
+
+		conCode := c.fieldStr(item, 1)
+		if conCode == "" {
+			continue
+		}
+
+		inDateStr := c.fieldStr(item, 2)
+		outDateStr := c.fieldStr(item, 3)
+
+		var inDate, outDate time.Time
+		if inDateStr != "" {
+			if t, err := time.Parse("20060102", inDateStr); err == nil {
+				inDate = t
+			}
+		}
+		if outDateStr != "" {
+			if t, err := time.Parse("20060102", outDateStr); err == nil {
+				outDate = t
+			}
+		}
+
+		constituents = append(constituents, domain.IndexConstituent{
+			IndexCode: indexCode,
+			Symbol:    conCode,
+			InDate:    inDate,
+			OutDate:   outDate,
+			Weight:    0, // index_weight API does not return weight field
+		})
+	}
+	return constituents
+}
+
+// GetIndexConstituents returns the current constituents of an index from DB.
+// If not found in DB, fetches from Tushare and saves.
+func (c *TushareClient) GetIndexConstituents(ctx context.Context, indexCode string, date string) ([]domain.IndexConstituent, error) {
+	// Try DB first
+	constituents, err := c.store.GetIndexConstituents(ctx, indexCode)
+	if err != nil {
+		c.logger.Warn().Err(err).Msg("Failed to get index constituents from DB, falling back to Tushare")
+	}
+	if len(constituents) > 0 {
+		return constituents, nil
+	}
+
+	// Fetch from Tushare
+	return c.FetchIndexConstituents(ctx, indexCode, date)
 }
 
 // Helper methods

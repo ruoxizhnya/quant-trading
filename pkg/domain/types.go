@@ -45,6 +45,16 @@ type Stock struct {
 	Status    string    `json:"status"` // active, suspended, delisted
 }
 
+// IndexConstituent represents a constituent stock of an index.
+type IndexConstituent struct {
+	ID         int64     `json:"id"`
+	IndexCode  string    `json:"index_code"`  // e.g. "000300.SH" (CSI 300), "000500.SH" (CSI 500), "000852.SH" (CSI 800)
+	Symbol     string    `json:"symbol"`      // stock ts_code, e.g. "000001.SZ"
+	InDate     time.Time `json:"in_date"`     // date when stock entered index
+	OutDate    time.Time `json:"out_date"`    // date when stock exited index (zero if still in)
+	Weight     float64   `json:"weight"`      // weight in index (if available from index_weight API)
+}
+
 // Dividend represents a dividend event for a stock.
 type Dividend struct {
 	ID        int64     `json:"id"`
