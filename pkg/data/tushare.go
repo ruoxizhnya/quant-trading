@@ -587,3 +587,76 @@ func (c *TushareClient) normalizeTradingCalendar(resp *TushareResponse, exchange
 	c.logger.Info().Int("count", len(entries)).Str("exchange", exchange).Msg("Trading calendar normalized")
 	return entries, nil
 }
+
+// FetchDividends retrieves dividend data from tushare dividend API.
+// startDate, endDate: format "YYYYMMDD" (optional — pass "" to fetch all available).
+func (c *TushareClient) FetchDividends(ctx context.Context, symbol string, startDate, endDate string) ([]domain.Dividend, error) {
+	params := map[string]interface{}{
+		"ts_code": symbol,
+	}
+	if startDate != "" {
+		params["ann_date"] = formatDate(startDate)
+	}
+	if endDate != "" {
+		params["end_date"] = formatDate(endDate)
+	}
+
+	resp, err := c.call(ctx, "dividend", params, "ts_code,ann_date,rec_date,pay_date,div_amnt,stk_div,stk_ratio,cash_ratio")
+	if err != nil {
+		return nil, err
+	}
+
+	records := c.normalizeDividends(resp)
+	if len(records) == 0 {
+		return nil, nil
+	}
+
+	// Save to database
+	ptrs := make([]*domain.Dividend, len(records))
+	for i := range records {
+		ptrs[i] = &records[i]
+	}
+	if err := c.store.SaveDividendBatch(ctx, ptrs); err != nil {
+		c.logger.Warn().Err(err).Msg("Failed to batch save dividends")
+	}
+
+	c.logger.Info().Str("symbol", symbol).Int("count", len(records)).Msg("Dividends fetched and saved")
+	return records, nil
+}
+
+// normalizeDividends converts tushare dividend API response to domain.Dividend.
+// dividend API fields: ts_code, ann_date, rec_date, pay_date, div_amnt, stk_div, stk_ratio, cash_ratio
+func (c *TushareClient) normalizeDividends(resp *TushareResponse) []domain.Dividend {
+	var records []domain.Dividend
+	for _, item := range resp.Data.Items {
+		if len(item) < 8 {
+			continue
+		}
+
+		tsCode := c.fieldStr(item, 0)
+		if tsCode == "" {
+			continue
+		}
+
+		annDateStr := c.fieldStr(item, 1)
+		recDateStr := c.fieldStr(item, 2)
+		payDateStr := c.fieldStr(item, 3)
+
+		annDate, _ := time.Parse("20060102", annDateStr)
+		recDate, _ := time.Parse("20060102", recDateStr)
+		payDate, _ := time.Parse("20060102", payDateStr)
+
+		record := domain.Dividend{
+			Symbol:    tsCode,
+			AnnDate:   annDate,
+			RecDate:   recDate,
+			PayDate:   payDate,
+			DivAmt:    c.fieldFloat(item, 4),  // div_amnt — cash dividend per share
+			StkDiv:    c.fieldFloat(item, 5),  // stk_div — stock dividend per share
+			StkRatio:  c.fieldFloat(item, 6),  // stk_ratio — stock split ratio
+			CashRatio: c.fieldFloat(item, 7),  // cash_ratio — cash dividend ratio
+		}
+		records = append(records, record)
+	}
+	return records
+}

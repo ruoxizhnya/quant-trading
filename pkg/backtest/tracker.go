@@ -312,6 +312,34 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 	return trade, nil
 }
 
+// ProcessDividend credits cash when a dividend is paid for a held position.
+// divAmt is the cash dividend per share (e.g. 0.10 means 0.10 CNY per share).
+// The credit is: position.Quantity * dividend.DivAmt
+// For long positions only; short positions are liabilities (no dividend paid to holder).
+func (t *Tracker) ProcessDividend(symbol string, dividend domain.Dividend) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	pos, exists := t.positions[symbol]
+	if !exists || pos.Quantity <= 0 {
+		// No long position — no dividend credited
+		return nil
+	}
+
+	dividendCredit := pos.Quantity * dividend.DivAmt
+	t.cash += dividendCredit
+
+	t.logger.Info().
+		Str("symbol", symbol).
+		Float64("quantity", pos.Quantity).
+		Float64("div_amt", dividend.DivAmt).
+		Float64("credit", dividendCredit).
+		Time("pay_date", dividend.PayDate).
+		Msg("Dividend credited to cash")
+
+	return nil
+}
+
 // AdvanceDay shifts QuantityToday → QuantityYesterday at the end of each trading day.
 // This implements T+1 settlement: shares bought today become sellable tomorrow.
 func (t *Tracker) AdvanceDay(date time.Time) {

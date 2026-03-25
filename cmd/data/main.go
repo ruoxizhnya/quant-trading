@@ -229,6 +229,7 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 	r.POST("/sync/ohlcv/all", syncAllOHLCVHandler(tc, store))
 	r.POST("/sync/fundamental", syncFundamentalHandler(tc))
 	r.POST("/sync/fundamentals", syncFundamentalsHandler(tc, store))
+	r.POST("/sync/dividends", syncDividendsHandler(tc, store))
 
 	// Cache warming (called by backtest engine before a run)
 	r.POST("/api/v1/cache/warm", warmCacheHandler(dc))
@@ -1093,6 +1094,86 @@ func warmCacheHandler(dc *data.DataCache) gin.HandlerFunc {
 			"symbols":    len(req.Symbols),
 			"start_date": req.StartDate,
 			"end_date":   req.EndDate,
+		})
+	}
+}
+
+// ---- Dividend Sync Handlers ----
+
+type syncDividendsRequest struct {
+	Symbols   []string `json:"symbols"`
+	StartDate string   `json:"start_date"` // YYYYMMDD
+	EndDate   string   `json:"end_date"`   // YYYYMMDD
+}
+
+// syncDividendsHandler syncs dividend data from Tushare for the given symbols (or all stocks if not specified).
+// POST /sync/dividends
+func syncDividendsHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		var req syncDividendsRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			// If no body, use empty request (sync all stocks)
+			req = syncDividendsRequest{}
+		}
+
+		var symbols []string
+		if len(req.Symbols) > 0 {
+			symbols = req.Symbols
+		} else {
+			// Fetch all stocks from DB
+			allStocks, err := store.GetAllStocks(ctx)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks from DB: " + err.Error()})
+				return
+			}
+			for _, s := range allStocks {
+				symbols = append(symbols, s.Symbol)
+			}
+			logging.Logger.Info().Int("count", len(symbols)).Msg("No symbols provided, fetched all from DB for dividend sync")
+		}
+
+		if len(symbols) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no stocks found in DB. Run POST /sync/stocks first."})
+			return
+		}
+
+		totalRecords := 0
+		totalSynced := 0
+		totalFailed := 0
+
+		// Process in batches of 10 to respect Tushare rate limits (~200 req/min)
+		batchSize := 10
+		for i := 0; i < len(symbols); i += batchSize {
+			end := i + batchSize
+			if end > len(symbols) {
+				end = len(symbols)
+			}
+			batch := symbols[i:end]
+
+			for _, symbol := range batch {
+				records, err := tc.FetchDividends(ctx, symbol, req.StartDate, req.EndDate)
+				if err != nil {
+					totalFailed++
+					logging.Logger.Warn().Err(err).Str("symbol", symbol).Msg("Failed to sync dividends")
+					continue
+				}
+				totalSynced++
+				totalRecords += len(records)
+			}
+
+			logging.Logger.Info().
+				Int("batch", (i/batchSize)+1).
+				Int("progress", end).
+				Int("total", len(symbols)).
+				Msg("Dividend sync batch complete")
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":         "Dividends synced successfully",
+			"stocks_synced":   totalSynced,
+			"records_saved":   totalRecords,
+			"failed_stocks":   totalFailed,
 		})
 	}
 }

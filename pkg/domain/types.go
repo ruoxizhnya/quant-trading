@@ -45,6 +45,19 @@ type Stock struct {
 	Status    string    `json:"status"` // active, suspended, delisted
 }
 
+// Dividend represents a dividend event for a stock.
+type Dividend struct {
+	ID        int64     `json:"id"`
+	Symbol    string    `json:"symbol"`
+	AnnDate   time.Time `json:"ann_date"`    // announcement date
+	RecDate   time.Time `json:"rec_date"`    // record date (shareholders as of this date receive dividend)
+	PayDate   time.Time `json:"pay_date"`    // payment date / ex-dividend date
+	DivAmt    float64   `json:"div_amt"`     // cash dividend amount per share
+	StkDiv    float64   `json:"stk_div"`     // stock dividend per share (bonus shares)
+	StkRatio  float64   `json:"stk_ratio"`   // stock split ratio
+	CashRatio float64   `json:"cash_ratio"`  // cash dividend ratio
+}
+
 // Fundamental represents fundamental financial data
 type Fundamental struct {
 	Symbol        string    `json:"symbol"`

@@ -135,6 +135,19 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			exchange VARCHAR(10) DEFAULT 'SSE',
 			is_trading_day BOOLEAN DEFAULT TRUE
 		)`,
+		// Migration 004: docs/migrations/004_add_dividends_table.sql
+		`CREATE TABLE IF NOT EXISTS dividends (
+			id SERIAL PRIMARY KEY,
+			symbol VARCHAR(20) NOT NULL,
+			ann_date DATE NOT NULL,
+			rec_date DATE,
+			pay_date DATE,
+			div_amt DOUBLE PRECISION,
+			stk_div DOUBLE PRECISION,
+			stk_ratio DOUBLE PRECISION,
+			cash_ratio DOUBLE PRECISION,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -162,6 +175,8 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_stocks_exchange ON stocks(exchange)`,
 		`CREATE INDEX IF NOT EXISTS idx_trading_calendar_exchange ON trading_calendar(exchange)`,
 		`CREATE INDEX IF NOT EXISTS idx_trading_calendar_is_trading ON trading_calendar(is_trading_day)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_dividends_symbol_ann ON dividends(symbol, ann_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_dividends_pay_date ON dividends(pay_date)`,
 	}
 
 	for _, idx := range indexes {
@@ -955,4 +970,38 @@ func (s *PostgresStore) IsTradingDay(ctx context.Context, date time.Time) (bool,
 		return false, fmt.Errorf("failed to check trading day: %w", err)
 	}
 	return isTrading, nil
+}
+
+// SaveDividendBatch saves multiple dividend records in a batch.
+func (s *PostgresStore) SaveDividendBatch(ctx context.Context, records []*domain.Dividend) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	for _, d := range records {
+		batch.Queue(`
+			INSERT INTO dividends (symbol, ann_date, rec_date, pay_date, div_amt, stk_div, stk_ratio, cash_ratio)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (symbol, ann_date) DO UPDATE SET
+				rec_date = EXCLUDED.rec_date,
+				pay_date = EXCLUDED.pay_date,
+				div_amt = EXCLUDED.div_amt,
+				stk_div = EXCLUDED.stk_div,
+				stk_ratio = EXCLUDED.stk_ratio,
+				cash_ratio = EXCLUDED.cash_ratio
+		`, d.Symbol, d.AnnDate, d.RecDate, d.PayDate, d.DivAmt, d.StkDiv, d.StkRatio, d.CashRatio)
+	}
+
+	results := s.pool.SendBatch(ctx, batch)
+	defer results.Close()
+
+	for i := 0; i < len(records); i++ {
+		if _, err := results.Exec(); err != nil {
+			return fmt.Errorf("batch dividend insert failed at index %d: %w", i, err)
+		}
+	}
+
+	s.logger.Info().Int("count", len(records)).Msg("Batch dividends saved")
+	return nil
 }
