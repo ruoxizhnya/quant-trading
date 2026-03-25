@@ -5,7 +5,7 @@
 > **Last Updated:** 2026-03-24
 > **Owner:** 龙少 (Longshao) — AI Assistant
 >
-> **Changelog v1.1:** Self-review + architect review fixes — upgraded 涨跌停 to P0, added split/rights issue to data table, fixed multi_factor/factor_cache contradiction, added human oversight to AI Evolution, expanded 技术前提, added overfitting risk, added Phase Plan, added strategy config migration to Decision 5, added cross-references for AI Evolution prerequisites.
+> **Changelog v1.2:** Team review fixes — marked multi_factor as experimental (depends on Factor Cache P1, not yet built); moved Redis caching to Phase 1 (required for 5s backtest target); moved Walk-forward validation to Phase 2 (Phase 3 prerequisite); elevated Strategy Copilot to P1 (Phase 2 core deliverable); added Phase 1/2 explicit exit criteria; added Phase Gate review process.
 
 ---
 
@@ -334,7 +334,8 @@ type Position struct {
 | Strategy registry | `GlobalRegistry` maps name → Strategy instance; auto-discovery via `init()` | P0 | ✅ Done | — |
 | Momentum strategy | 20-day price momentum; buy strength, sell weakness | P0 | ✅ Done | — |
 | Value Momentum strategy | PE + PB + ROE + 20-day momentum composite | P0 | ✅ Done | — |
-| Multi-factor strategy | Configurable weighted factors via YAML | P0 | ✅ Done | Factor definitions |
+| Multi-factor strategy | Configurable weighted factors via YAML ⚠️ | P0 | ⚠️ Experimental | Factor definitions |
+> ⚠️ **Note:** Multi-factor strategy is **experimental** — it requires Factor Cache (P1, planned Phase 2) for production-scale multi-factor evaluation. Currently recomputes z-scores on every backtest, making it slow for large universes. Do not rely on it for production decisions until Factor Cache is built.
 | Mean reversion strategy | Bollinger bands + RSI threshold signals | P1 | ⬜ Planned | — |
 | Risk parity strategy | Equal risk contribution across positions | P2 | ⬜ Planned | Risk service |
 | Hot-swap strategy loading | Load/reload strategies at runtime without service restart | P1 | ⬜ Planned | Plugin system, strategy service |
@@ -389,7 +390,7 @@ type Position struct {
 | Stock screener (screen.html) | Filter by factors; rank and export | P1 | ✅ Done | Data service `/screen` |
 | Strategy selector UI | Dropdown + config panel for available strategies | P1 | ⬜ Planned | Strategy registry API |
 | Backtest comparison UI | Compare two or more backtest runs side by side | P1 | ⬜ Planned | Backtest runs storage |
-| Strategy Copilot | Chat interface with 龙少 for strategy creation | P2 | ⬜ Planned | AI integration, code generation |
+| Strategy Copilot | Chat interface with 龙少 for strategy creation | P1 | ⬜ Planned | AI integration, code generation |
 | Visual strategy editor | Drag-drop factor builder | P3 | ⬜ Planned | Strategy Copilot |
 | Real-time paper trading UI | Live positions, orders, P&L update throughout trading day | P3 | ⬜ Planned | Execution service |
 
@@ -423,9 +424,16 @@ The phases below define the build order. All P0 items must be fully done (not "i
 | Data | Trading calendar sync ✅/🔄, T+1 settlement enforcement 🔄, 涨跌停 detection 🔄 |
 | Execution | T+1 position buckets 🔄 |
 | UI | Dashboard 🔄 |
-| Infrastructure | Background backtest worker (P1, can overlap) |
+| Infrastructure | Redis caching 🔄 (P0 — required for 5s backtest target) |
 
-**Exit criteria:** A 5-year, 500-stock backtest produces results within 5 seconds and matches vnpy's output within 5% drift.
+**Exit criteria — all must pass before Phase 2:**
+1. **Accuracy:** 5-year, 500-stock backtest matches vnpy output within 5% drift on same universe, same rebalancing dates, same T+1 handling
+2. **Speed:** 5-year, 500-stock backtest completes in ≤ 5 seconds (requires Redis caching)
+3. **T+1 correctness:** Unit tests prove same-day sell blocked; next-day sell succeeds
+4. **涨跌停 correctness:** Unit tests prove limit-up blocks buys, limit-down blocks sells; ST stocks ±5% limits enforced
+5. **Determinism:** Same seed → same results (fixed random seed enforced in backtest engine)
+
+**Phase Gate Review:** Before advancing to Phase 2, run the full Phase 1 acceptance test suite (see `docs/TEST.md`). All tests must pass. Record results in `docs/phase-gate-reviews.md`.
 
 ### Phase 2 — Reliability & Copilot
 **Goal:** Make the system robust enough for daily use and introduce AI assistance.
@@ -435,11 +443,16 @@ The phases below define the build order. All P0 items must be fully done (not "i
 | Data | Dividend data sync, split/rights issue, index constituents, factor cache |
 | Strategy | Mean reversion strategy, hot-swap loading, strategy DB config |
 | Execution | Limit order support, partial fill modeling, target/actual position separation |
-| Analytics | Factor attribution, IC analysis, strategy comparison UI |
+| Analytics | Factor attribution, IC analysis, strategy comparison UI, walk-forward validation |
 | UI | Strategy selector UI, backtest comparison UI, Strategy Copilot |
-| Infrastructure | Redis caching, background backtest worker |
+| Infrastructure | Redis caching ✅ (carried from Phase 1), background backtest worker |
 
-**Exit criteria:** User can describe a strategy in Chinese, get working code from AI Copilot, and run it through backtest — all in one session.
+**Exit criteria — all must pass before Phase 3:**
+1. **Factor Cache:** Multi-factor backtest (100 stocks, 3 years) completes in ≤ 30 seconds (via pre-computed factor scores)
+2. **Strategy Copilot:** End-to-end test: user submits Chinese description → receives compilable Go code → backtest runs → results displayed — all in one session; ≥ 30% acceptance rate
+3. **Walk-forward validation:** Framework operational; all Phase 3 candidate strategies must pass train/validate split before entering paper trading
+4. **Background worker:** `POST /backtest` returns `job_id` immediately; worker runs async; client can poll `/backtest/:id`
+5. **Strategy DB config:** `strategies` table with JSONB column operational; YAML import/export functional
 
 ### Phase 3 — AI Evolution (Future)
 **Goal:** System discovers and evaluates strategies autonomously.
@@ -447,11 +460,11 @@ The phases below define the build order. All P0 items must be fully done (not "i
 | Category | Deliverables |
 |----------|-------------|
 | AI | Strategy Generator (LLM), Backtest Runner (parallel), Strategy Selector (ranking + monitoring) |
-| Analytics | Factor decay analysis, walk-forward validation |
+| Analytics | Factor decay analysis |
 | UI | Strategy Copilot v2, visual strategy editor |
 | Execution | Real broker integration (Futu/Tiger) |
 
-**Prerequisites to start Phase 3:** All Phase 1 P0 items complete; Strategy Copilot mature; strategy DB config in place; background backtest worker operational; walk-forward validation framework implemented.
+**Prerequisites to start Phase 3:** All Phase 1 P0 items complete; all Phase 2 exit criteria passed (see Phase 2 gate); Phase 2 acceptance test suite recorded in `docs/phase-gate-reviews.md`.
 
 ### Phase 4 — Scale & Production
 **Goal:** Make the system institutional-grade.

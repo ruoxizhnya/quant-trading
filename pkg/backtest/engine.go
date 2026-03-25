@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -22,6 +24,7 @@ type Config struct {
 	CommissionRate float64 `mapstructure:"commission_rate"`
 	SlippageRate   float64 `mapstructure:"slippage_rate"`
 	RiskFreeRate   float64 `mapstructure:"risk_free_rate"`
+	Seed           int64   `mapstructure:"seed"` // Random seed for determinism; 0 = use time-based seed
 }
 
 // Price limit constants for A-share stocks
@@ -134,6 +137,13 @@ func NewEngine(v *viper.Viper, logger zerolog.Logger) (*Engine, error) {
 	}
 	if config.RiskFreeRate == 0 {
 		config.RiskFreeRate = 0.03
+	}
+
+	// Initialize random seed for deterministic backtests.
+	// If Seed is 0, math/rand is not used (no shuffle operations currently exist).
+	// Document the seed value used in test fixtures for reproducibility.
+	if config.Seed != 0 {
+		rand.Seed(config.Seed)
 	}
 
 	return &Engine{
@@ -259,6 +269,17 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		Logger()
 
 	logger.Info().Msg("Starting backtest")
+
+	// Warm the cache before running the backtest — pre-fetch all symbols into Redis
+	// so the backtest loop hits Redis instead of PostgreSQL on every getOHLCV call.
+	warmCtx, warmCancel := context.WithTimeout(ctx, 2*time.Minute)
+	if err := e.warmCache(warmCtx, params.StockPool, params.StartDate, params.EndDate); err != nil {
+		warmCancel()
+		logger.Warn().Err(err).Msg("Cache warm-up failed — continuing without pre-cached data")
+	} else {
+		warmCancel()
+		logger.Info().Msg("Cache warm-up completed")
+	}
 
 	// Get trading days
 	tradingDays, err := e.getTradingDays(ctx, params.StartDate, params.EndDate)
@@ -700,6 +721,48 @@ func (e *Engine) checkCalendarExists(ctx context.Context, start, end time.Time) 
 	return len(result.TradingDays) > 0, nil
 }
 
+// warmCache pre-fetches OHLCV data for the stock universe into Redis via the data-service.
+// This is called once before the backtest loop to ensure all data is cached,
+// eliminating per-symbol DB round-trips during simulation.
+func (e *Engine) warmCache(ctx context.Context, symbols []string, start, end time.Time) error {
+	if len(symbols) == 0 {
+		return nil
+	}
+
+	url := fmt.Sprintf("%s/api/v1/cache/warm", e.dataServiceURL)
+
+	startStr := start.Format("20060102")
+	endStr := end.Format("20060102")
+
+	body := map[string]any{
+		"symbols":    symbols,
+		"start_date": startStr,
+		"end_date":   endStr,
+	}
+	jsonData, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal warm request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create warm request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("warm request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("warm endpoint returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
 // getTradingDays retrieves trading days from data service.
 func (e *Engine) getTradingDays(ctx context.Context, start, end time.Time) ([]time.Time, error) {
 	url := fmt.Sprintf("%s/api/v1/trading/calendar?start=%s&end=%s",
@@ -736,6 +799,13 @@ func (e *Engine) getTradingDays(ctx context.Context, start, end time.Time) ([]ti
 		days = append(days, t)
 	}
 
+	// Sort deterministically: ascending by date.
+	// This ensures the backtest loop processes days in a fixed order,
+	// regardless of the order returned by the data service.
+	sort.Slice(days, func(i, j int) bool {
+		return days[i].Before(days[j])
+	})
+
 	return days, nil
 }
 
@@ -765,6 +835,15 @@ func (e *Engine) getOHLCV(ctx context.Context, symbol string, start, end time.Ti
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
+
+	// Sort OHLCV data deterministically: by symbol, then by date.
+	// This ensures consistent ordering regardless of data service response order.
+	sort.Slice(result.OHLCV, func(i, j int) bool {
+		if result.OHLCV[i].Symbol != result.OHLCV[j].Symbol {
+			return result.OHLCV[i].Symbol < result.OHLCV[j].Symbol
+		}
+		return result.OHLCV[i].Date.Before(result.OHLCV[j].Date)
+	})
 
 	return result.OHLCV, nil
 }

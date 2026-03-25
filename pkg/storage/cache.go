@@ -164,6 +164,25 @@ func (c *Cache) Ping(ctx context.Context) error {
 	return c.client.Ping(ctx).Err()
 }
 
+// Get retrieves raw bytes from Redis. Returns nil slice on cache miss.
+func (c *Cache) Get(ctx context.Context, key string) ([]byte, error) {
+	data, err := c.client.Get(ctx, key).Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	return data, err
+}
+
+// SetEX stores a value with expiration (SETEX semantics).
+func (c *Cache) SetEX(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	return c.client.SetEx(ctx, key, value, ttl).Err()
+}
+
+// RedisClient returns the underlying redis client for advanced use.
+func (c *Cache) RedisClient() *redis.Client {
+	return c.client
+}
+
 func (c *Cache) ohlcvKey(symbol string, start, end time.Time) string {
 	return fmt.Sprintf("%s%s:%s:%s", keyPrefixOHLCV, symbol, start.Format("20060102"), end.Format("20060102"))
 }

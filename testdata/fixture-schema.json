@@ -1,0 +1,173 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Backtest Golden Fixture",
+  "description": "Schema for golden fixture datasets used in backtest regression testing. Every fixture must conform to this structure.",
+  "type": "object",
+  "required": ["metadata", "ohlcv"],
+
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "description": "Describes the fixture and its characteristics",
+      "required": ["name", "version", "symbols", "trading_days", "start_date", "end_date"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique fixture identifier, e.g. 'momentum-5stock-1yr'"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this fixture tests"
+        },
+        "version": {
+          "type": "string",
+          "description": "Semantic version of the fixture data"
+        },
+        "generated": {
+          "type": "string",
+          "format": "date",
+          "description": "Date the fixture was generated (YYYY-MM-DD)"
+        },
+        "initial_capital": {
+          "type": "number",
+          "description": "Initial capital used for the backtest (CNY)"
+        },
+        "commission_rate": {
+          "type": "number",
+          "description": "Commission rate applied (e.g. 0.0003 = 0.03%)"
+        },
+        "slippage_rate": {
+          "type": "number",
+          "description": "Slippage rate applied (e.g. 0.0001 = 0.01%)"
+        },
+        "symbols": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of stock symbols in this fixture"
+        },
+        "trading_days": {
+          "type": "integer",
+          "description": "Total number of trading days covered"
+        },
+        "start_date": {
+          "type": "string",
+          "format": "date",
+          "description": "First trading day (YYYY-MM-DD)"
+        },
+        "end_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Last trading day (YYYY-MM-DD)"
+        },
+        "limit_up_events": {
+          "type": "object",
+          "description": "Map of symbol -> date where a limit-up (涨停) day occurs",
+          "additionalProperties": { "type": "string" }
+        },
+        "limit_down_events": {
+          "type": "object",
+          "description": "Map of symbol -> date where a limit-down (跌停) day occurs",
+          "additionalProperties": { "type": "string" }
+        },
+        "t1_edge_case_note": {
+          "type": "string",
+          "description": "Description of any T+1 edge case(s) encoded in this fixture"
+        }
+      }
+    },
+
+    "expected_output": {
+      "type": "object",
+      "description": "Known-good backtest metrics for this dataset. Used for regression assertions.",
+      "properties": {
+        "total_return": { "type": "number" },
+        "sharpe": { "type": "number" },
+        "max_drawdown": { "type": "number" },
+        "win_rate": { "type": "number" },
+        "annual_return": { "type": "number" },
+        "sortino_ratio": { "type": "number" },
+        "calmar_ratio": { "type": "number" },
+        "total_trades": { "type": "integer" },
+        "win_trades": { "type": "integer" },
+        "lose_trades": { "type": "integer" }
+      }
+    },
+
+    "signals": {
+      "type": "array",
+      "description": "Optional pre-defined trading signals for deterministic replay",
+      "items": {
+        "type": "object",
+        "required": ["symbol", "date", "direction"],
+        "properties": {
+          "symbol": { "type": "string" },
+          "date": { "type": "string", "format": "date" },
+          "direction": { "type": "string", "enum": ["long", "short", "close", "hold"] },
+          "strength": { "type": "number" }
+        }
+      }
+    },
+
+    "ohlcv": {
+      "type": "array",
+      "description": "Daily OHLCV bars for all symbols",
+      "items": {
+        "type": "object",
+        "required": ["trade_date", "symbol", "open", "high", "low", "close", "volume", "prev_close"],
+        "properties": {
+          "trade_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Trading date (YYYY-MM-DD)"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Stock symbol, e.g. '600000.SH'"
+          },
+          "open": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Opening price"
+          },
+          "high": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Highest price of the day"
+          },
+          "low": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Lowest price of the day"
+          },
+          "close": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Closing price"
+          },
+          "volume": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Trading volume (shares)"
+          },
+          "turnover": {
+            "type": "number",
+            "description": "Trading turnover (CNY), optional"
+          },
+          "prev_close": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Previous day's closing price (for limit detection)"
+          },
+          "limit_up": {
+            "type": "boolean",
+            "description": "True if this day hit the upper price limit (涨停)"
+          },
+          "limit_down": {
+            "type": "boolean",
+            "description": "True if this day hit the lower price limit (跌停)"
+          }
+        }
+      }
+    }
+  }
+}

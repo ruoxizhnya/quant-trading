@@ -63,6 +63,9 @@ func main() {
 	}
 	defer cache.Close()
 
+	// Initialize data cache (cache-aside layer wrapping Redis + PostgreSQL)
+	dataCache := data.NewDataCache(cache, store)
+
 	// Initialize Tushare client
 	tushareToken := viper.GetString("tushare.token")
 	if tushareToken == "" {
@@ -86,7 +89,7 @@ func main() {
 	router.Use(requestLogger())
 
 	// Register routes
-	registerRoutes(router, store, cache, tushareClient)
+	registerRoutes(router, store, cache, tushareClient, dataCache)
 
 	// Create HTTP server
 	addr := fmt.Sprintf("%s:%d",
@@ -193,7 +196,7 @@ func requestLogger() gin.HandlerFunc {
 	}
 }
 
-func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.Cache, tc *data.TushareClient) {
+func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.Cache, tc *data.TushareClient, dc *data.DataCache) {
 	// Health check
 	r.GET("/health", healthHandler(store, cache))
 
@@ -202,7 +205,7 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 	r.GET("/stocks/:symbol", getStockHandler(store, cache))
 
 	// OHLCV endpoints
-	r.GET("/ohlcv/:symbol", getOHLCVHandler(store, cache))
+	r.GET("/ohlcv/:symbol", getOHLCVHandler(dc))
 
 	// Fundamental endpoints
 	r.GET("/fundamental/:symbol", getFundamentalHandler(store))
@@ -220,6 +223,9 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 	r.POST("/sync/ohlcv/all", syncAllOHLCVHandler(tc, store))
 	r.POST("/sync/fundamental", syncFundamentalHandler(tc))
 	r.POST("/sync/fundamentals", syncFundamentalsHandler(tc, store))
+
+	// Cache warming (called by backtest engine before a run)
+	r.POST("/api/v1/cache/warm", warmCacheHandler(dc))
 
 	// Fundamental data endpoints (stock_fundamentals table)
 	r.GET("/fundamentals/:symbol", getFundamentalsHandler(store))
@@ -300,42 +306,26 @@ func getStockHandler(store *storage.PostgresStore, cache *storage.Cache) gin.Han
 	}
 }
 
-func getOHLCVHandler(store *storage.PostgresStore, cache *storage.Cache) gin.HandlerFunc {
+func getOHLCVHandler(dc *data.DataCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		symbol := c.Param("symbol")
 		startDateStr := c.Query("start_date")
 		endDateStr := c.Query("end_date")
 
-		startDate, err := time.Parse("20060102", startDateStr)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
-			return
-		}
-		endDate, err := time.Parse("20060102", endDateStr)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+		if startDateStr == "" || endDateStr == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date query params required (YYYYMMDD)"})
 			return
 		}
 
-		// Check cache first
-		if cached, err := cache.GetCachedOHLCV(ctx, symbol, startDate, endDate); err == nil && cached != nil {
-			c.JSON(http.StatusOK, gin.H{"ohlcv": cached, "source": "cache"})
-			return
-		}
-
-		ohlcv, err := store.GetOHLCV(ctx, symbol, startDate, endDate)
+		// Use DataCache for cache-aside access — same key format as cache warm endpoint
+		ohlcv, err := dc.GetOHLCV(ctx, symbol, startDateStr, endDateStr)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		// Cache the result
-		if len(ohlcv) > 0 {
-			cache.CacheOHLCV(ctx, symbol, startDate, endDate, ohlcv)
-		}
-
-		c.JSON(http.StatusOK, gin.H{"ohlcv": ohlcv, "source": "database"})
+		c.JSON(http.StatusOK, gin.H{"ohlcv": ohlcv})
 	}
 }
 
@@ -930,6 +920,51 @@ func syncCalendarHandler(tc *data.TushareClient, store *storage.PostgresStore) g
 			"end_date":         endFormatted,
 			"exchanges_synced": exchanges,
 			"by_exchange":      exchangeResults,
+		})
+	}
+}
+
+// warmCacheRequest is the POST body for the cache warm endpoint.
+type warmCacheRequest struct {
+	Symbols   []string `json:"symbols"`
+	StartDate string   `json:"start_date"` // YYYYMMDD
+	EndDate   string   `json:"end_date"`   // YYYYMMDD
+}
+
+// warmCacheHandler pre-fetches OHLCV data for the given stock universe into Redis.
+// This is called by the backtest engine before running a backtest to ensure
+// all required data is cached and the backtest loop hits Redis instead of PostgreSQL.
+func warmCacheHandler(dc *data.DataCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req warmCacheRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if len(req.Symbols) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "symbols array is required"})
+			return
+		}
+		if req.StartDate == "" || req.EndDate == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date are required (YYYYMMDD)"})
+			return
+		}
+
+		ctx := c.Request.Context()
+		if err := dc.WarmCache(ctx, req.Symbols, req.StartDate, req.EndDate); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				c.JSON(http.StatusGatewayTimeout, gin.H{"error": "cache warm-up timed out"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":    "cache warmed successfully",
+			"symbols":    len(req.Symbols),
+			"start_date": req.StartDate,
+			"end_date":   req.EndDate,
 		})
 	}
 }

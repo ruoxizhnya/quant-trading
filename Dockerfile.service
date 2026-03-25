@@ -26,8 +26,8 @@ FROM alpine:3.19
 
 WORKDIR /app
 
-# Install CA certs for HTTPS calls
-RUN apk add --no-cache ca-certificates
+# Install CA certs for HTTPS calls and curl for health checks
+RUN apk add --no-cache ca-certificates curl
 
 # Copy binaries from builder
 COPY --from=builder /app/data-service /app/data-service

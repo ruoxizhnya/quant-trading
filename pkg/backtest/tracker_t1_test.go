@@ -162,6 +162,69 @@ func TestT1Settlement_PartialFill(t *testing.T) {
 	assert.Equal(t, 100.0, trade.Quantity) // Only 100 were sellable
 }
 
+// TestT1Settlement_YesterdayDepletedFirst tests the case where a position has
+// both QuantityYesterday (sellable) and QuantityToday (locked) shares.
+// When selling, QuantityYesterday should be depleted first.
+// Scenario: YD=300, TD=200, sell 100 → YD becomes 200, TD unchanged.
+func TestT1Settlement_YesterdayDepletedFirst(t *testing.T) {
+	logger := zerolog.New(nil)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+
+	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
+	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
+	day3 := time.Date(2024, 1, 4, 15, 0, 0, 0, time.Local)
+
+	// Day 1: Buy 300 shares
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 300, 10.0, day1)
+	require.NoError(t, err)
+
+	// Advance to Day 2
+	tracker.AdvanceDay(day2)
+
+	// Verify: YD=300, TD=0
+	pos, _ := tracker.GetPosition("600000.SH")
+	assert.Equal(t, 300.0, pos.QuantityYesterday)
+	assert.Equal(t, 0.0, pos.QuantityToday)
+
+	// Day 2: Buy 200 more shares (now holding 500 total: YD=300, TD=200)
+	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 200, 11.0, day2)
+	require.NoError(t, err)
+
+	pos, _ = tracker.GetPosition("600000.SH")
+	assert.Equal(t, 500.0, pos.Quantity)     // Total: 300 yesterday + 200 today
+	assert.Equal(t, 300.0, pos.QuantityYesterday) // 300 sellable
+	assert.Equal(t, 200.0, pos.QuantityToday)     // 200 locked
+
+	// Day 2: Sell 100 shares — should deplete from YD first (YD=200, TD=200)
+	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 11.5, day2)
+	require.NoError(t, err)
+	assert.Equal(t, 100.0, trade.Quantity)
+
+	pos, _ = tracker.GetPosition("600000.SH")
+	assert.Equal(t, 200.0, pos.QuantityYesterday, "YD should be depleted first: 300-100=200")
+	assert.Equal(t, 200.0, pos.QuantityToday, "TD should remain unchanged: 200")
+	assert.Equal(t, 400.0, pos.Quantity, "Remaining total: 200+200=400")
+
+	// Advance to Day 3
+	tracker.AdvanceDay(day3)
+
+	// Day 3: Sell remaining 200 from yesterday — should succeed (YD rolls over from Day 2's YD+TD)
+	pos, _ = tracker.GetPosition("600000.SH")
+	// After advance: YD = 200(yesterday's) + 200(today's, which was TD) = 400, TD = 0
+	assert.Equal(t, 400.0, pos.QuantityYesterday, "After advance: YD should carry over TD")
+	assert.Equal(t, 0.0, pos.QuantityToday)
+
+	trade, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 200, 12.0, day3)
+	require.NoError(t, err)
+	assert.Equal(t, 200.0, trade.Quantity)
+
+	// Position should still have 200 shares remaining (the TD from Day 2)
+	pos, _ = tracker.GetPosition("600000.SH")
+	assert.Equal(t, 200.0, pos.QuantityYesterday, "YD should be 400-200=200 after sell")
+	assert.Equal(t, 0.0, pos.QuantityToday)
+	assert.Equal(t, 200.0, pos.Quantity, "Remaining: 200 (today's shares now sellable tomorrow)")
+}
+
 func TestT1Settlement_ShortPosition_NoT1Restriction(t *testing.T) {
 	logger := zerolog.New(nil)
 	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)

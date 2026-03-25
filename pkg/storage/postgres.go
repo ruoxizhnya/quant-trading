@@ -467,6 +467,36 @@ func (s *PostgresStore) GetFundamental(ctx context.Context, symbol string, date 
 	return &f, nil
 }
 
+// GetFundamentals retrieves all fundamental records for a symbol on or before the given date.
+// Returns an empty slice if no records found.
+func (s *PostgresStore) GetFundamentals(ctx context.Context, symbol string, date time.Time) ([]domain.Fundamental, error) {
+	query := `
+		SELECT symbol, trade_date, pe, pb, ps, roe, roa, debt_to_equity,
+			gross_margin, net_margin, revenue, net_profit, total_assets, total_liab
+		FROM fundamentals
+		WHERE symbol = $1 AND trade_date <= $2
+		ORDER BY trade_date DESC
+	`
+	rows, err := s.pool.Query(ctx, query, symbol, date)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query fundamentals: %w", err)
+	}
+	defer rows.Close()
+
+	var records []domain.Fundamental
+	for rows.Next() {
+		var f domain.Fundamental
+		if err := rows.Scan(
+			&f.Symbol, &f.Date, &f.PE, &f.PB, &f.PS, &f.ROE, &f.ROA, &f.DebtToEquity,
+			&f.GrossMargin, &f.NetMargin, &f.Revenue, &f.NetProfit, &f.TotalAssets, &f.TotalLiab,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan fundamental row: %w", err)
+		}
+		records = append(records, f)
+	}
+	return records, rows.Err()
+}
+
 // SaveFundamentalData saves or updates fundamental data from Tushare financial_data API.
 func (s *PostgresStore) SaveFundamentalData(ctx context.Context, f *domain.FundamentalData) error {
 	query := `

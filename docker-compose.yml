@@ -24,7 +24,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -41,6 +41,12 @@ services:
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,8 +64,16 @@ services:
       REDIS_URL: redis://redis:6379
       DATA_SERVICE_URL: http://data-service:8081
       LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8082/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       redis:
+        condition: service_healthy
+      data-service:
         condition: service_healthy
 
   risk-service:
@@ -73,8 +87,16 @@ services:
       REDIS_URL: redis://redis:6379
       DATA_SERVICE_URL: http://data-service:8081
       LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       redis:
+        condition: service_healthy
+      data-service:
         condition: service_healthy
 
   execution-service:
@@ -87,6 +109,12 @@ services:
     environment:
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8084/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       redis:
         condition: service_healthy
@@ -107,10 +135,18 @@ services:
       AI_API_KEY: ${AI_API_KEY:-}
       AI_API_URL: ${AI_API_URL:-https://api.openai.com/v1/chat/completions}
       LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8085/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      data-service:
         condition: service_healthy
 
 volumes:
