@@ -192,26 +192,18 @@ Must be decided before Phase 3 begins. See Phase 2 exit criteria.
 ## ADR-008: Synchronous vs. Async Inter-Service Communication
 
 **Date:** 2026-03-24
-**Status:** **OPEN — needs decision before Phase 3**
+**Status:** **PARTIAL — resolved for OHLCV, OPEN for regime/risk calls**
 
 ### Context
-Currently all inter-service communication is synchronous HTTP blocking:
-- `analysis-service → data-service` (per query)
-- `analysis-service → risk-service` (per signal adjustment)
+All inter-service communication is synchronous HTTP blocking.
 
-For Phase 1 single-user this is acceptable. For Phase 3 with parallel backtests, this becomes a bottleneck.
+### Decision (OHLCV path — RESOLVED, 2026-03-25)
+**Bulk endpoint + in-memory cache** — `POST /api/v1/ohlcv/bulk` returns all OHLCV for the universe in one call. Engine stores result in `e.inMemoryOHLCV`. Subsequent `getOHLCV` calls are zero-HTTP. Eliminates the per-symbol HTTP round-trip bottleneck.
 
-### Options
+**Regime/risk path — still synchronous** — regime detection makes per-day HTTP calls (252 calls for 5yr backtest). This is a remaining bottleneck.
 
-**Option A — Keep synchronous for Phase 1/2, migrate to async in Phase 3**
-Add circuit breakers and timeout budgets now; migrate to async messaging (Redis pub/sub or channels) in Phase 3.
-
-**Option B — Async from the start**
-Use Go channels within the service boundary; Redis pub/sub across service boundaries. More complex but future-proof.
-
-### Consequences
-- Synchronous: simpler, easier debugging, harder to scale
-- Async: more complex, better performance at scale, better fault isolation
+### Recommendation for Regime Path
+**Keep synchronous for Phase 1/2** — regime detection overhead is not the primary bottleneck (OHLCV was). Revisit when Phase 3 parallel backtests are needed.
 
 ---
 

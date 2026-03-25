@@ -71,7 +71,7 @@
 | 涨跌停 correctness (unit tests) | ✅ DONE | 10 tests passing |
 | Determinism (fixed seed) | ✅ DONE | Config.Seed enforced |
 | Redis caching (infrastructure) | ✅ DONE | Build fixed, warming implemented |
-| Speed: ≤5s for 5yr/500stock | 🔴 BLOCKED | Architecture issue found — needs warmCache fix |
+| Speed: ≤5s for 5yr/500stock | 🔄 IN PROGRESS | Fix committed: warmCache now populates inMemoryOHLCV via bulk endpoint. Real benchmark needed. |
 | vnpy drift <5% | ⏳ DEFER | Requires vnpy setup (Sprint 3) |
 
 **Verdict: Sprint 1 APPROVED for continuation to Sprint 2** — build/test issues resolved, core accuracy deliverables complete. Speed issue requires architectural fix before Phase 1 exit.
