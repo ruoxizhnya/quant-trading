@@ -59,6 +59,11 @@ func (s *PostgresStore) Close() {
 	s.logger.Info().Msg("PostgreSQL connection pool closed")
 }
 
+// DB returns the underlying pgxpool.Pool for direct queries.
+func (s *PostgresStore) DB() *pgxpool.Pool {
+	return s.pool
+}
+
 // migrate creates tables and hypertables.
 func (s *PostgresStore) migrate(ctx context.Context) error {
 	migrations := []string{

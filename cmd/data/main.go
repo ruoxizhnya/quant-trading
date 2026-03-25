@@ -204,6 +204,10 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 	// Stock endpoints
 	r.GET("/stocks", listStocksHandler(store, cache))
 	r.GET("/stocks/:symbol", getStockHandler(store, cache))
+	r.GET("/stocks/count", stocksCountHandler(store))
+
+	// Market index endpoint (returns sh300, sse, cyb — real-time data via Tushare or empty if unavailable)
+	r.GET("/market/index", marketIndexHandler(store))
 
 	// OHLCV endpoints
 	r.GET("/ohlcv/:symbol", getOHLCVHandler(dc))
@@ -305,6 +309,78 @@ func getStockHandler(store *storage.PostgresStore, cache *storage.Cache) gin.Han
 		cache.CacheStock(ctx, stock)
 
 		c.JSON(http.StatusOK, gin.H{"stock": stock, "source": "database"})
+	}
+}
+
+func stocksCountHandler(store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+
+		var count int
+		err := store.DB().QueryRow(ctx, "SELECT COUNT(*) FROM stocks").Scan(&count)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count stocks: " + err.Error()})
+			return
+		}
+
+		var latestDate *string
+		store.DB().QueryRow(ctx, "SELECT MAX(trade_date) FROM ohlcv_daily_qfq").Scan(&latestDate)
+
+		resp := gin.H{"count": count}
+		if latestDate != nil {
+			resp["latest_date"] = *latestDate
+		}
+		c.JSON(http.StatusOK, resp)
+	}
+}
+
+func marketIndexHandler(store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		// Return available index data from database.
+		// sh300=000300.SH, sse=000001.SH, cyb=399006.SZ
+		type indexData struct {
+			Code   string  `json:"code"`
+			Name   string  `json:"name"`
+			Close  float64 `json:"close"`
+			Change float64 `json:"change"`
+			Pct    float64 `json:"pct"`
+		}
+
+		// Try to get latest close for each index from ohlcv data
+		indices := []string{"000300.SH", "000001.SH", "399006.SZ"}
+		codeToName := map[string]string{
+			"000300.SH": "沪深300",
+			"000001.SH": "上证指数",
+			"399006.SZ": "创业板指",
+		}
+
+		result := make([]indexData, 0, len(indices))
+		for _, code := range indices {
+			var close *float64
+			var change, pct float64
+			row := store.DB().QueryRow(ctx,
+				`SELECT close FROM ohlcv_daily_qfq WHERE symbol=$1 ORDER BY trade_date DESC LIMIT 1`, code)
+			if err := row.Scan(&close); err == nil && close != nil {
+				// Get previous close for change/pct
+				var prevClose *float64
+				store.DB().QueryRow(ctx,
+					`SELECT close FROM ohlcv_daily_qfq WHERE symbol=$1 ORDER BY trade_date DESC LIMIT 1 OFFSET 1`, code).Scan(&prevClose)
+				if prevClose != nil && *prevClose > 0 {
+					change = *close - *prevClose
+					pct = (change / *prevClose) * 100
+				}
+				result = append(result, indexData{
+					Code:   code,
+					Name:   codeToName[code],
+					Close:  *close,
+					Change: change,
+					Pct:    pct,
+				})
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{"indices": result})
 	}
 }
 

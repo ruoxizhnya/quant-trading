@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -146,52 +147,96 @@ func (dc *DataCache) SetFundamentals(ctx context.Context, symbol, date string, r
 // It fetches OHLCV from PostgreSQL and writes each symbol's range to Redis
 // using the same key format as GetOHLCV/SetOHLCV.
 func (dc *DataCache) WarmCache(ctx context.Context, symbols []string, start, end string) error {
+	return dc.WarmCacheWithWorkers(ctx, symbols, start, end, 8)
+}
+
+// WarmCacheWithWorkers pre-fetches OHLCV data in parallel using `workers` goroutines.
+// This significantly speeds up cache warm-up for large universes (500+ symbols).
+func (dc *DataCache) WarmCacheWithWorkers(ctx context.Context, symbols []string, start, end string, workers int) error {
 	if len(symbols) == 0 {
 		return nil
+	}
+
+	if workers <= 0 {
+		workers = 1
 	}
 
 	dc.logger.Info().
 		Int("symbols", len(symbols)).
 		Str("start", start).
 		Str("end", end).
-		Msg("Cache warm-up started")
+		Int("workers", workers).
+		Msg("Cache warm-up started (parallel)")
 
 	startDate := parseDate(start)
 	endDate := parseDate(end)
-	warmed := 0
-	failed := 0
 
-	for i, symbol := range symbols {
-		select {
-		case <-ctx.Done():
-			dc.logger.Info().Int("warmed", warmed).Int("failed", failed).Msg("Cache warm-up cancelled")
-			return ctx.Err()
-		default:
-		}
-
-		if i%50 == 0 && i > 0 {
-			dc.logger.Info().Int("progress", i).Int("total", len(symbols)).Msg("Cache warm-up in progress")
-		}
-
-		bars, err := dc.store.GetOHLCV(ctx, symbol, startDate, endDate)
-		if err != nil || len(bars) == 0 {
-			failed++
-			continue
-		}
-
-		if err := dc.SetOHLCV(ctx, symbol, start, end, bars); err != nil {
-			failed++
-			dc.logger.Warn().Err(err).Str("symbol", symbol).Msg("Cache warm-up: set failed")
-			continue
-		}
-		warmed++
+	type result struct {
+		symbol string
+		bars   []domain.OHLCV
+		err    error
 	}
+
+	symbolChan := make(chan string, len(symbols))
+	resultChan := make(chan result, len(symbols))
+
+	// Launch workers
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for sym := range symbolChan {
+				bars, err := dc.store.GetOHLCV(ctx, sym, startDate, endDate)
+				if err != nil || len(bars) == 0 {
+					resultChan <- result{symbol: sym, err: err}
+					continue
+				}
+				resultChan <- result{symbol: sym, bars: bars}
+			}
+		}()
+	}
+
+	// Feed symbols
+	go func() {
+		for _, sym := range symbols {
+			symbolChan <- sym
+		}
+		close(symbolChan)
+	}()
+
+	// Collect results and write to Redis
+	var warmed, failed int
+	warmedChan := make(chan int)
+	failedChan := make(chan int)
+	go func() {
+		w, f := 0, 0
+		for r := range resultChan {
+			if r.err != nil || len(r.bars) == 0 {
+				f++
+				continue
+			}
+			if err := dc.SetOHLCV(ctx, r.symbol, start, end, r.bars); err != nil {
+				dc.logger.Warn().Err(err).Str("symbol", r.symbol).Msg("Cache warm-up: set failed")
+				f++
+				continue
+			}
+			w++
+		}
+		warmedChan <- w
+		failedChan <- f
+	}()
+
+	wg.Wait()
+	close(resultChan)
+	warmed = <-warmedChan
+	failed = <-failedChan
 
 	dc.logger.Info().
 		Int("symbols", len(symbols)).
 		Int("warmed", warmed).
 		Int("failed", failed).
-		Msg("Cache warm-up completed")
+		Msg("Cache warm-up completed (parallel)")
 
 	return nil
 }

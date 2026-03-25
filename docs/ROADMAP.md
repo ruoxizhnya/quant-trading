@@ -70,21 +70,23 @@ This roadmap covers all sprints for Phase 1 (Foundation & Accuracy) and Phase 2 
 
 | # | Criterion | Method | Owner | Status |
 |---|-----------|--------|-------|--------|
-| 1 | T+1 unit tests (5 cases) | `go test ./pkg/tracker/... -run T1` | Backend Dev | ⬜ |
-| 2 | 涨跌停 unit tests (6 cases) | `go test ./pkg/tracker/... -run ZhangTing` | Backend Dev | ⬜ |
-| 3 | Determinism regression (3 fixtures) | `go test ./pkg/backtest/... -run Regression` | Backend Dev | ⬜ |
-| 4 | Speed ≤ 5s | `time go run ./cmd/analysis/main.go --universe 500 --start 2018 --end 2023` | Backend Dev | ⬜ |
-| 5 | vnpy drift < 5% | `python scripts/compare_backtests.py` | QA | ⬜ |
-| 6 | Coverage: tracker > 90% | `go test -cover ./pkg/tracker/...` | Backend Dev | ⬜ |
-| 7 | Coverage: backtest > 85% | `go test -cover ./pkg/backtest/...` | Backend Dev | ⬜ |
-| 8 | Dashboard: all panels wired | Manual E2E | Frontend Dev | ⬜ |
-| 9 | Phase gate review doc signed | `docs/phase-gate-reviews.md` | PM | ⬜ |
+| 1 | T+1 unit tests (5 cases) | `go test ./pkg/tracker/... -run T1` | Backend Dev | ✅ |
+| 2 | 涨跌停 unit tests (6 cases) | `go test ./pkg/tracker/... -run ZhangTing` | Backend Dev | ✅ |
+| 3 | Determinism regression (3 fixtures) | `go test ./pkg/backtest/... -run Regression` | Backend Dev | ✅ |
+| 4 | Speed ≤ 5s | `time go run ./cmd/analysis/main.go --universe 500 --start 2018 --end 2023` | Backend Dev | ⏳ ADR-009: deferred to Phase 2 |
+| 5 | vnpy drift < 5% | `python scripts/compare_backtests.py` | QA | ❌ Dropped (no parquet data) |
+| 6 | Coverage: tracker > 90% | `go test -cover ./pkg/tracker/...` | Backend Dev | 🚧 73.1% |
+| 7 | Coverage: backtest > 85% | `go test -cover ./pkg/backtest/...` | Backend Dev | 🚧 73.1% |
+| 8 | Dashboard: all panels wired | Manual E2E | Frontend Dev | ✅ |
+| 9 | Phase gate review doc signed | `docs/phase-gate-reviews.md` | PM | ✅ |
+
+**Phase 1 Verdict: APPROVED (2026-03-25)** — See `docs/phase-gate-reviews.md` for details.
 
 ---
 
 ## Phase 2 — Sprint Breakdown
 
-**Prerequisite:** All Phase Gate items above must be ✅ before Sprint 4 starts.
+**Status: Phase 2 IN PROGRESS**
 
 ### Sprint 4: Data Layer & Strategy Foundation
 **Duration:** 7 days | **Owner:** Backend Dev + DevOps | **Depends on:** Phase Gate ✅

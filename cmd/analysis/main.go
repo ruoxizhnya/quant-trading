@@ -524,6 +524,38 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.
 		c.JSON(resp.StatusCode, result)
 	})
 
+	// Proxy: stocks/count → data-service
+	router.GET("/stocks/count", func(c *gin.Context) {
+		resp, err := http.Get("http://data-service:8081/stocks/count")
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "data service unavailable"})
+			return
+		}
+		defer resp.Body.Close()
+		var result map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "invalid response from data service"})
+			return
+		}
+		c.JSON(resp.StatusCode, result)
+	})
+
+	// Proxy: market/index → data-service
+	router.GET("/market/index", func(c *gin.Context) {
+		resp, err := http.Get("http://data-service:8081/market/index")
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "data service unavailable"})
+			return
+		}
+		defer resp.Body.Close()
+		var result map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "invalid response from data service"})
+			return
+		}
+		c.JSON(resp.StatusCode, result)
+	})
+
 	// Strategy list endpoint
 	router.GET("/api/strategies", func(c *gin.Context) {
 		strategies := strategy.DefaultRegistry.ListWithInfo()
