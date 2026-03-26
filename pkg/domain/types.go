@@ -334,6 +334,43 @@ type TargetPosition struct {
 	LastUpdated time.Time `json:"last_updated"`
 }
 
+// WalkForwardParams defines the walk-forward validation configuration
+type WalkForwardParams struct {
+	TrainDays    int // number of trading days for training period (e.g., 250)
+	TestDays     int // number of trading days for test period (e.g., 60)
+	StepDays     int // step size in trading days (e.g., 60)
+	MinTrainDays int // minimum training days required (default: 125)
+}
+
+// WalkForwardResult holds the result of a single train/test window
+type WalkForwardResult struct {
+	WindowIndex     int              `json:"window_index"`
+	TrainStart      string           `json:"train_start"`
+	TrainEnd        string           `json:"train_end"`
+	TestStart       string           `json:"test_start"`
+	TestEnd         string           `json:"test_end"`
+	TrainResult     *BacktestResult  `json:"train_result,omitempty"`
+	TestResult      *BacktestResult  `json:"test_result,omitempty"`
+	TrainSharpe     float64          `json:"train_sharpe"`
+	TestSharpe      float64          `json:"test_sharpe"`
+	TestReturn      float64          `json:"test_return"`
+	TestMaxDrawdown float64          `json:"test_max_drawdown"`
+	OOSvsTrain      float64          `json:"oos_vs_train"` // test_sharpe / train_sharpe (degradation ratio)
+}
+
+// WalkForwardReport is the full walk-forward validation report
+type WalkForwardReport struct {
+	StrategyID     string               `json:"strategy_id"`
+	Universe       string               `json:"universe"`
+	Windows        []*WalkForwardResult `json:"windows"`
+	AvgTestSharpe  float64              `json:"avg_test_sharpe"`
+	AvgTestReturn  float64              `json:"avg_test_return"`
+	AvgTestMaxDD   float64              `json:"avg_test_max_drawdown"`
+	AvgDegradation float64              `json:"avg_degradation"` // avg(OOSvsTrain)
+	PassRate       float64              `json:"pass_rate"`       // fraction of windows where test_sharpe > 0
+	OverallPass    bool                 `json:"overall_pass"`    // pass if avg_test_sharpe > 0.5 AND avg_degradation < 0.7
+}
+
 // BacktestParams contains parameters for a backtest run
 type BacktestParams struct {
 	StrategyName   string    `json:"strategy_name"`
@@ -423,4 +460,17 @@ type TushareConfig struct {
 	Token     string `json:"token"`
 	BaseURL   string `json:"base_url"`
 	MaxRetries int   `json:"max_retries"`
+}
+
+// StrategyConfig represents a stored strategy configuration.
+type StrategyConfig struct {
+	ID           int64     `json:"id"`
+	StrategyID   string    `json:"strategy_id"`    // unique slug, e.g. "my-momentum-v1"
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	StrategyType string    `json:"strategy_type"` // "momentum", "value", "quality", "composite"
+	Params       string    `json:"params"`         // JSON string of params schema
+	IsActive     bool      `json:"is_active"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }

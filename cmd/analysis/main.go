@@ -19,10 +19,47 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	_ "github.com/ruoxizhnya/quant-trading/pkg/strategy/plugins"
 )
+
+// strategyEngineAdapter adapts *backtest.Engine to strategy.BacktestRunner.
+type strategyEngineAdapter struct {
+	engine *backtest.Engine
+}
+
+func (a *strategyEngineAdapter) RunBacktest(
+	ctx context.Context,
+	strategyName string,
+	stockPool []string,
+	startDate, endDate string,
+) (*domain.BacktestResult, error) {
+	req := backtest.BacktestRequest{
+		Strategy:  strategyName,
+		StockPool: stockPool,
+		StartDate: startDate,
+		EndDate:   endDate,
+	}
+	resp, err := a.engine.RunBacktest(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &domain.BacktestResult{
+		TotalReturn:    resp.TotalReturn,
+		AnnualReturn:   resp.AnnualReturn,
+		SharpeRatio:    resp.SharpeRatio,
+		SortinoRatio:   resp.SortinoRatio,
+		MaxDrawdown:    resp.MaxDrawdown,
+		WinRate:        resp.WinRate,
+		TotalTrades:    resp.TotalTrades,
+		WinTrades:      resp.WinTrades,
+		LoseTrades:     resp.LoseTrades,
+		AvgHoldingDays: resp.AvgHoldingDays,
+		CalmarRatio:    resp.CalmarRatio,
+	}, nil
+}
 
 func main() {
 	// Initialize logger
@@ -67,6 +104,21 @@ func main() {
 	jobService := backtest.NewJobService(store, engine)
 	logger.Info().Msg("Job service initialized")
 
+	// Initialize Strategy Copilot service
+	copilotService := strategy.NewCopilotService()
+	logger.Info().Bool("ai_configured", copilotService.IsConfigured()).Msg("Copilot service initialized")
+
+	// Wrap engine in BacktestRunner adapter for copilot
+	copilotRunner := &strategyEngineAdapter{engine: engine}
+
+	// Initialize StrategyDB and seed built-in strategies
+	strategyDB := strategy.NewStrategyDB(store)
+	if err := store.SeedStrategies(context.Background()); err != nil {
+		logger.Warn().Err(err).Msg("failed to seed built-in strategies")
+	} else {
+		logger.Info().Msg("strategy DB seeded")
+	}
+
 	// Setup Gin router
 	if v.GetString("logging.format") == "json" {
 		gin.SetMode(gin.ReleaseMode)
@@ -76,7 +128,7 @@ func main() {
 	router.Use(requestLogger(logger))
 
 	// Register routes
-	registerRoutes(router, engine, jobService, logger)
+	registerRoutes(router, engine, jobService, strategyDB, copilotService, copilotRunner, logger)
 
 	// Get server config
 	host := v.GetString("server.host")
@@ -438,7 +490,7 @@ func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 }
 
 // registerRoutes registers all HTTP routes.
-func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, logger zerolog.Logger) {
+func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, logger zerolog.Logger) {
 	// Serve UI
 	router.GET("/", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
@@ -569,10 +621,131 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 		c.JSON(resp.StatusCode, result)
 	})
 
-	// Strategy list endpoint
+	// Strategy list endpoint (merged DB + registry)
 	router.GET("/api/strategies", func(c *gin.Context) {
-		strategies := strategy.DefaultRegistry.ListWithInfo()
-		c.JSON(http.StatusOK, gin.H{"strategies": strategies})
+		strategyType := c.Query("type")
+		activeOnly := c.Query("active") == "true"
+		if strategyType != "" || activeOnly {
+			// Filtered list from DB
+			configs, err := strategyDB.List(c.Request.Context(), strategyType, activeOnly)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"strategies": configs})
+			return
+		}
+		// Full merged list
+		infos, err := strategyDB.ListWithDB(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"strategies": infos})
+	})
+
+	// POST /api/strategies — create/update a strategy config
+	router.POST("/api/strategies", func(c *gin.Context) {
+		var req struct {
+			StrategyID   string `json:"strategy_id" binding:"required"`
+			Name         string `json:"name" binding:"required"`
+			Description  string `json:"description"`
+			StrategyType string `json:"strategy_type" binding:"required"`
+			Params       any    `json:"params"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		paramsJSON := "{}"
+		if req.Params != nil {
+			bytes, _ := json.Marshal(req.Params)
+			paramsJSON = string(bytes)
+		}
+		cfg := &domain.StrategyConfig{
+			StrategyID:   req.StrategyID,
+			Name:         req.Name,
+			Description:  req.Description,
+			StrategyType: req.StrategyType,
+			Params:       paramsJSON,
+			IsActive:     true,
+		}
+		if err := strategyDB.Create(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "strategy saved", "strategy_id": req.StrategyID})
+	})
+
+	// GET /api/strategies/:id — get strategy details
+	router.GET("/api/strategies/:id", func(c *gin.Context) {
+		id := c.Param("id")
+		cfg, err := strategyDB.Get(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if cfg == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "strategy not found"})
+			return
+		}
+		c.JSON(http.StatusOK, cfg)
+	})
+
+	// PUT /api/strategies/:id — update strategy config
+	router.PUT("/api/strategies/:id", func(c *gin.Context) {
+		id := c.Param("id")
+		var req struct {
+			Name         string `json:"name"`
+			Description  string `json:"description"`
+			StrategyType string `json:"strategy_type"`
+			Params       any    `json:"params"`
+			IsActive     *bool  `json:"is_active"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		cfg, err := strategyDB.Get(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if cfg == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "strategy not found"})
+			return
+		}
+		if req.Name != "" {
+			cfg.Name = req.Name
+		}
+		if req.Description != "" {
+			cfg.Description = req.Description
+		}
+		if req.StrategyType != "" {
+			cfg.StrategyType = req.StrategyType
+		}
+		if req.Params != nil {
+			bytes, _ := json.Marshal(req.Params)
+			cfg.Params = string(bytes)
+		}
+		if req.IsActive != nil {
+			cfg.IsActive = *req.IsActive
+		}
+		if err := strategyDB.Create(c.Request.Context(), cfg); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "strategy updated", "strategy_id": id})
+	})
+
+	// DELETE /api/strategies/:id — soft delete
+	router.DELETE("/api/strategies/:id", func(c *gin.Context) {
+		id := c.Param("id")
+		if err := strategyDB.Delete(c.Request.Context(), id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "strategy deleted", "strategy_id": id})
 	})
 
 	// Backtest endpoints
@@ -718,10 +891,79 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 		})
 	})
 
-	// ── Strategy Copilot ──────────────────────────────────────
+	// ── Strategy Copilot (async job-based) ─────────────────────
 	copilot := router.Group("/api/copilot")
 	{
-		copilot.POST("/generate", generateStrategyHandler)
+		// POST /api/copilot/generate — start generation job, return job_id immediately
+		copilot.POST("/generate", func(c *gin.Context) {
+			if !copilotService.IsConfigured() {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI not configured (set AI_API_KEY and AI_API_URL)"})
+				return
+			}
+			var req strategy.GenerateParams
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+				return
+			}
+			result := copilotService.Generate(c.Request.Context(), req, copilotRunner)
+			c.JSON(http.StatusAccepted, gin.H{
+				"job_id": result.JobID,
+				"status": result.Status,
+			})
+		})
+
+		// GET /api/copilot/generate/:job_id — poll for job result
+		copilot.GET("/generate/:job_id", func(c *gin.Context) {
+			jobID := c.Param("job_id")
+			result := copilotService.GetJob(jobID)
+			if result == nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+				return
+			}
+			result.Lock()
+			status := result.Status
+			code := result.Code
+			buildErr := result.BuildErr
+			btResult := result.BacktestResult
+			btErr := result.BacktestErr
+			strategyName := result.StrategyName
+			result.Unlock()
+
+			resp := gin.H{
+				"job_id": jobID,
+				"status": status,
+			}
+			if code != "" {
+				resp["generated_code"] = code
+			}
+			if buildErr != "" {
+				resp["build_error"] = buildErr
+			}
+			if strategyName != "" {
+				resp["strategy_name"] = strategyName
+			}
+			if btErr != "" {
+				resp["backtest_error"] = btErr
+			}
+			if btResult != nil {
+				resp["backtest_result"] = btResult
+			}
+			c.JSON(http.StatusOK, resp)
+		})
+
+		// GET /api/copilot/stats — return acceptance-rate statistics
+		copilot.GET("/stats", func(c *gin.Context) {
+			generated, buildable, backtested := copilotService.Stats()
+			rate := copilotService.AcceptanceRate()
+			c.JSON(http.StatusOK, gin.H{
+				"generated":       generated,
+				"buildable":       buildable,
+				"backtest_valid":  backtested,
+				"acceptance_rate": rate,
+			})
+		})
+
+		// Legacy synchronous endpoints
 		copilot.POST("/save", saveStrategyHandler)
 	}
 }

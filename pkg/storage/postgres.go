@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -201,6 +202,33 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			top_ic DOUBLE PRECISION,
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		// Migration 010: walk_forward_reports table
+		`CREATE TABLE IF NOT EXISTS walk_forward_reports (
+			id SERIAL PRIMARY KEY,
+			strategy_id VARCHAR(50) NOT NULL,
+			universe VARCHAR(100),
+			report_date DATE NOT NULL,
+			avg_test_sharpe DOUBLE PRECISION,
+			avg_test_return DOUBLE PRECISION,
+			avg_test_max_dd DOUBLE PRECISION,
+			avg_degradation DOUBLE PRECISION,
+			pass_rate DOUBLE PRECISION,
+			overall_pass BOOLEAN,
+			windows_json JSONB NOT NULL,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		// Migration 011: strategies table (Sprint 6.2)
+		`CREATE TABLE IF NOT EXISTS strategies (
+			id SERIAL PRIMARY KEY,
+			strategy_id VARCHAR(50) UNIQUE NOT NULL,
+			name VARCHAR(100) NOT NULL,
+			description TEXT,
+			strategy_type VARCHAR(30) NOT NULL,
+			params JSONB NOT NULL DEFAULT '{}',
+			is_active BOOLEAN NOT NULL DEFAULT TRUE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -245,6 +273,10 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_pk ON ic_analysis(factor_name, trade_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_ic_trade_date ON ic_analysis(trade_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_ic_factor ON ic_analysis(factor_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_wfr_strategy ON walk_forward_reports(strategy_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_wfr_report_date ON walk_forward_reports(report_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_strategies_type ON strategies(strategy_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_strategies_active ON strategies(is_active)`,
 	}
 
 	for _, idx := range indexes {
@@ -1408,6 +1440,163 @@ func (s *PostgresStore) GetSplitsInRange(ctx context.Context, startDate, endDate
 	return results, rows.Err()
 }
 
+// ── Strategy config CRUD (Sprint 6.2) ──────────────────────────────────────────
+
+// SaveStrategyConfig upserts a strategy config.
+func (s *PostgresStore) SaveStrategyConfig(ctx context.Context, cfg *domain.StrategyConfig) error {
+	query := `
+		INSERT INTO strategies (strategy_id, name, description, strategy_type, params, is_active, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW())
+		ON CONFLICT (strategy_id) DO UPDATE SET
+			name = EXCLUDED.name,
+			description = EXCLUDED.description,
+			strategy_type = EXCLUDED.strategy_type,
+			params = EXCLUDED.params,
+			is_active = EXCLUDED.is_active,
+			updated_at = NOW()
+	`
+	_, err := s.pool.Exec(ctx, query,
+		cfg.StrategyID, cfg.Name, cfg.Description, cfg.StrategyType, cfg.Params, cfg.IsActive,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save strategy config: %w", err)
+	}
+	return nil
+}
+
+// GetStrategyConfig retrieves a strategy config by strategy_id.
+func (s *PostgresStore) GetStrategyConfig(ctx context.Context, strategyID string) (*domain.StrategyConfig, error) {
+	query := `
+		SELECT id, strategy_id, name, description, strategy_type, params, is_active, created_at, updated_at
+		FROM strategies WHERE strategy_id = $1
+	`
+	var cfg domain.StrategyConfig
+	err := s.pool.QueryRow(ctx, query, strategyID).Scan(
+		&cfg.ID, &cfg.StrategyID, &cfg.Name, &cfg.Description,
+		&cfg.StrategyType, &cfg.Params, &cfg.IsActive, &cfg.CreatedAt, &cfg.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get strategy config: %w", err)
+	}
+	return &cfg, nil
+}
+
+// ListStrategyConfigs returns all strategy configs, optionally filtered.
+func (s *PostgresStore) ListStrategyConfigs(ctx context.Context, strategyType string, activeOnly bool) ([]*domain.StrategyConfig, error) {
+	var query string
+	var args []interface{}
+
+	if strategyType != "" && activeOnly {
+		query = `
+			SELECT id, strategy_id, name, description, strategy_type, params, is_active, created_at, updated_at
+			FROM strategies WHERE strategy_type = $1 AND is_active = TRUE
+			ORDER BY strategy_id ASC
+		`
+		args = []interface{}{strategyType}
+	} else if strategyType != "" {
+		query = `
+			SELECT id, strategy_id, name, description, strategy_type, params, is_active, created_at, updated_at
+			FROM strategies WHERE strategy_type = $1
+			ORDER BY strategy_id ASC
+		`
+		args = []interface{}{strategyType}
+	} else if activeOnly {
+		query = `
+			SELECT id, strategy_id, name, description, strategy_type, params, is_active, created_at, updated_at
+			FROM strategies WHERE is_active = TRUE
+			ORDER BY strategy_id ASC
+		`
+	} else {
+		query = `
+			SELECT id, strategy_id, name, description, strategy_type, params, is_active, created_at, updated_at
+			FROM strategies ORDER BY strategy_id ASC
+		`
+	}
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list strategy configs: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*domain.StrategyConfig
+	for rows.Next() {
+		var cfg domain.StrategyConfig
+		if err := rows.Scan(
+			&cfg.ID, &cfg.StrategyID, &cfg.Name, &cfg.Description,
+			&cfg.StrategyType, &cfg.Params, &cfg.IsActive, &cfg.CreatedAt, &cfg.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan strategy config row: %w", err)
+		}
+		results = append(results, &cfg)
+	}
+	return results, rows.Err()
+}
+
+// DeleteStrategyConfig soft-deletes a strategy (sets is_active=false).
+func (s *PostgresStore) DeleteStrategyConfig(ctx context.Context, strategyID string) error {
+	query := `UPDATE strategies SET is_active = FALSE, updated_at = NOW() WHERE strategy_id = $1`
+	result, err := s.pool.Exec(ctx, query, strategyID)
+	if err != nil {
+		return fmt.Errorf("failed to delete strategy config: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("strategy not found: %s", strategyID)
+	}
+	return nil
+}
+
+// ── Seed built-in strategies (called once on startup) ───────────────────────────
+
+// SeedStrategies seeds the 3 built-in strategies if they don't exist.
+func (s *PostgresStore) SeedStrategies(ctx context.Context) error {
+	builtins := []struct {
+		strategyID, name, desc, strategyType, params string
+	}{
+		{
+			strategyID:   "momentum",
+			name:         "Momentum Strategy",
+			desc:         "Classic momentum strategy using 20-day lookback period",
+			strategyType: "momentum",
+			params:       `{"lookback_days": 20, "long_threshold": 0.0, "short_threshold": 0.0}`,
+		},
+		{
+			strategyID:   "value",
+			name:         "Value Strategy",
+			desc:         "Value factor strategy using EP (earnings price ratio)",
+			strategyType: "value",
+			params:       `{"factor": "ep"}`,
+		},
+		{
+			strategyID:   "quality",
+			name:         "Quality Strategy",
+			desc:         "Quality factor strategy using ROE (return on equity)",
+			strategyType: "quality",
+			params:       `{"min_roe": 0.0}`,
+		},
+	}
+
+	for _, b := range builtins {
+		cfg := &domain.StrategyConfig{
+			StrategyID:   b.strategyID,
+			Name:         b.name,
+			Description:  b.desc,
+			StrategyType: b.strategyType,
+			Params:       b.params,
+			IsActive:     true,
+		}
+		if err := s.SaveStrategyConfig(ctx, cfg); err != nil {
+			return fmt.Errorf("failed to seed strategy %s: %w", b.strategyID, err)
+		}
+	}
+
+	s.logger.Info().Msg("built-in strategies seeded")
+	return nil
+}
+
 // --- Backtest job storage (implements backtest.JobStore via map[string]any) ---
 
 // CreateBacktestJob inserts a new backtest job.
@@ -1567,4 +1756,146 @@ func (s *PostgresStore) DeleteBacktestJob(ctx context.Context, jobID string) err
 		return fmt.Errorf("job not found or not pending")
 	}
 	return nil
+}
+
+// SaveWalkForwardReport saves a walk-forward validation report to the database.
+func (s *PostgresStore) SaveWalkForwardReport(ctx context.Context, report *domain.WalkForwardReport) error {
+	windowsJSON, err := json.Marshal(report.Windows)
+	if err != nil {
+		return fmt.Errorf("failed to marshal windows: %w", err)
+	}
+
+	reportDate := time.Now()
+	query := `
+		INSERT INTO walk_forward_reports (
+			strategy_id, universe, report_date,
+			avg_test_sharpe, avg_test_return, avg_test_max_dd,
+			avg_degradation, pass_rate, overall_pass, windows_json
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`
+	_, err = s.pool.Exec(ctx, query,
+		report.StrategyID, report.Universe, reportDate,
+		report.AvgTestSharpe, report.AvgTestReturn, report.AvgTestMaxDD,
+		report.AvgDegradation, report.PassRate, report.OverallPass, windowsJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save walk-forward report: %w", err)
+	}
+	s.logger.Info().
+		Str("strategy_id", report.StrategyID).
+		Bool("overall_pass", report.OverallPass).
+		Float64("avg_test_sharpe", report.AvgTestSharpe).
+		Int("windows", len(report.Windows)).
+		Msg("Walk-forward report saved")
+	return nil
+}
+
+// GetWalkForwardReports retrieves walk-forward reports for a strategy.
+func (s *PostgresStore) GetWalkForwardReports(ctx context.Context, strategyID string, limit int) ([]*domain.WalkForwardReport, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	query := `
+		SELECT strategy_id, universe, report_date,
+			avg_test_sharpe, avg_test_return, avg_test_max_dd,
+			avg_degradation, pass_rate, overall_pass, windows_json
+		FROM walk_forward_reports
+		WHERE strategy_id = $1
+		ORDER BY report_date DESC
+		LIMIT $2
+	`
+	rows, err := s.pool.Query(ctx, query, strategyID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query walk-forward reports: %w", err)
+	}
+	defer rows.Close()
+
+	var reports []*domain.WalkForwardReport
+	for rows.Next() {
+		var r domain.WalkForwardReport
+		var windowsJSON []byte
+		var reportDate time.Time
+		if err := rows.Scan(
+			&r.StrategyID, &r.Universe, &reportDate,
+			&r.AvgTestSharpe, &r.AvgTestReturn, &r.AvgTestMaxDD,
+			&r.AvgDegradation, &r.PassRate, &r.OverallPass, &windowsJSON,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan walk-forward report row: %w", err)
+		}
+		if err := json.Unmarshal(windowsJSON, &r.Windows); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal windows JSON: %w", err)
+		}
+		reports = append(reports, &r)
+	}
+	return reports, rows.Err()
+}
+
+// GetLatestWalkForwardReport retrieves the most recent walk-forward report for a strategy.
+func (s *PostgresStore) GetLatestWalkForwardReport(ctx context.Context, strategyID string) (*domain.WalkForwardReport, error) {
+	query := `
+		SELECT strategy_id, universe, report_date,
+			avg_test_sharpe, avg_test_return, avg_test_max_dd,
+			avg_degradation, pass_rate, overall_pass, windows_json
+		FROM walk_forward_reports
+		WHERE strategy_id = $1
+		ORDER BY report_date DESC
+		LIMIT 1
+	`
+	var r domain.WalkForwardReport
+	var windowsJSON []byte
+	var reportDate time.Time
+	err := s.pool.QueryRow(ctx, query, strategyID).Scan(
+		&r.StrategyID, &r.Universe, &reportDate,
+		&r.AvgTestSharpe, &r.AvgTestReturn, &r.AvgTestMaxDD,
+		&r.AvgDegradation, &r.PassRate, &r.OverallPass, &windowsJSON,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get latest walk-forward report: %w", err)
+	}
+	if err := json.Unmarshal(windowsJSON, &r.Windows); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal windows JSON: %w", err)
+	}
+	return &r, nil
+}
+
+// ListAllWalkForwardReports returns all walk-forward reports, newest first.
+func (s *PostgresStore) ListAllWalkForwardReports(ctx context.Context, limit int) ([]*domain.WalkForwardReport, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `
+		SELECT strategy_id, universe, report_date,
+			avg_test_sharpe, avg_test_return, avg_test_max_dd,
+			avg_degradation, pass_rate, overall_pass, windows_json
+		FROM walk_forward_reports
+		ORDER BY report_date DESC
+		LIMIT $1
+	`
+	rows, err := s.pool.Query(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list walk-forward reports: %w", err)
+	}
+	defer rows.Close()
+
+	var reports []*domain.WalkForwardReport
+	for rows.Next() {
+		var r domain.WalkForwardReport
+		var windowsJSON []byte
+		var reportDate time.Time
+		if err := rows.Scan(
+			&r.StrategyID, &r.Universe, &reportDate,
+			&r.AvgTestSharpe, &r.AvgTestReturn, &r.AvgTestMaxDD,
+			&r.AvgDegradation, &r.PassRate, &r.OverallPass, &windowsJSON,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan walk-forward report row: %w", err)
+		}
+		if err := json.Unmarshal(windowsJSON, &r.Windows); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal windows JSON: %w", err)
+		}
+		reports = append(reports, &r)
+	}
+	return reports, rows.Err()
 }

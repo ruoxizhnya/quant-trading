@@ -2,7 +2,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -253,6 +255,11 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 	r.GET("/fundamentals/:symbol", getFundamentalsHandler(store))
 	r.GET("/fundamentals/:symbol/history", getFundamentalsHistoryHandler(store))
 	r.POST("/screen", screenStocksHandler(store))
+
+	// Walk-forward validation endpoints
+	r.POST("/api/walkforward", runWalkForwardHandler(store))
+	r.GET("/api/walkforward/:strategy_id", getWalkForwardReportHandler(store))
+	r.GET("/api/walkforward", listWalkForwardReportsHandler(store))
 }
 
 // Handlers
@@ -1609,5 +1616,279 @@ func syncFactorICHandler(fa *data.FactorAttributor) gin.HandlerFunc {
 			"computed":     computed,
 			"failed":       failed,
 		})
+	}
+}
+
+// ---- Walk-Forward Validation (via HTTP to analysis service) ----
+
+type walkForwardRequest struct {
+	StrategyID string `json:"strategy_id" binding:"required"`
+	Universe   string `json:"universe" binding:"required"`
+	StartDate  string `json:"start_date" binding:"required"`
+	EndDate    string `json:"end_date" binding:"required"`
+	TrainDays  int    `json:"train_days"`
+	TestDays   int    `json:"test_days"`
+	StepDays   int    `json:"step_days"`
+}
+
+const analysisServiceURL = "http://localhost:8085"
+
+// runWalkForwardHandler runs walk-forward validation asynchronously via HTTP.
+// POST /api/walkforward
+func runWalkForwardHandler(store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req walkForwardRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+			return
+		}
+
+		// Default walk-forward params
+		trainDays := req.TrainDays
+		if trainDays <= 0 {
+			trainDays = 250
+		}
+		testDays := req.TestDays
+		if testDays <= 0 {
+			testDays = 60
+		}
+		stepDays := req.StepDays
+		if stepDays <= 0 {
+			stepDays = 60
+		}
+
+		params := domain.WalkForwardParams{
+			TrainDays:    trainDays,
+			TestDays:     testDays,
+			StepDays:     stepDays,
+			MinTrainDays: trainDays / 2,
+		}
+
+		// Return accepted immediately — run in background
+		runID := fmt.Sprintf("wf-%d", time.Now().UnixNano())
+		c.JSON(http.StatusAccepted, gin.H{
+			"message":  "walk-forward validation started",
+			"run_id":   runID,
+			"strategy": req.StrategyID,
+		})
+
+		go func() {
+			bgCtx := context.Background()
+
+			// Get trading days from store
+			startDate, _ := time.Parse("2006-01-02", req.StartDate)
+			endDate, _ := time.Parse("2006-01-02", req.EndDate)
+			tradingDays, err := store.GetTradingDates(bgCtx, startDate, endDate)
+			if err != nil || len(tradingDays) < trainDays+testDays {
+				logging.Logger.Error().Err(err).Msg("Walk-forward: insufficient trading days")
+				return
+			}
+
+			// Build walk-forward windows
+			windows := buildWFWIindows(tradingDays, params)
+			if len(windows) == 0 {
+				logging.Logger.Error().Msg("Walk-forward: no windows generated")
+				return
+			}
+
+			var allResults []*domain.WalkForwardResult
+			var totalTestSharpe, totalTestReturn, totalTestMaxDD, totalDegradation float64
+			positiveSharpeCount := 0
+
+			httpClient := &http.Client{Timeout: 120 * time.Second}
+
+			for i, win := range windows {
+				logging.Logger.Info().
+					Int("window", i+1).
+					Str("train", win.trainStart.Format("2006-01-02")+" to "+win.trainEnd.Format("2006-01-02")).
+					Str("test", win.testStart.Format("2006-01-02")+" to "+win.testEnd.Format("2006-01-02")).
+					Msg("Walk-forward: running window")
+
+				// Run train backtest via HTTP to analysis service
+				trainResp, err := runBacktestHTTP(httpClient, req.StrategyID, req.Universe, win.trainStart, win.trainEnd)
+				if err != nil {
+					logging.Logger.Warn().Err(err).Int("window", i+1).Msg("Train backtest failed")
+					continue
+				}
+
+				// Run test backtest via HTTP
+				testResp, err := runBacktestHTTP(httpClient, req.StrategyID, req.Universe, win.testStart, win.testEnd)
+				if err != nil {
+					logging.Logger.Warn().Err(err).Int("window", i+1).Msg("Test backtest failed")
+					continue
+				}
+
+				testSharpe := testResp.SharpeRatio
+				trainSharpe := trainResp.SharpeRatio
+				oosVsTrain := 0.0
+				if trainSharpe > 0 {
+					oosVsTrain = testSharpe / trainSharpe
+				}
+
+				result := &domain.WalkForwardResult{
+					WindowIndex:     i + 1,
+					TrainStart:      win.trainStart.Format("2006-01-02"),
+					TrainEnd:        win.trainEnd.Format("2006-01-02"),
+					TestStart:       win.testStart.Format("2006-01-02"),
+					TestEnd:         win.testEnd.Format("2006-01-02"),
+					TrainSharpe:     trainSharpe,
+					TestSharpe:      testSharpe,
+					TestReturn:      testResp.AnnualReturn,
+					TestMaxDrawdown: testResp.MaxDrawdown,
+					OOSvsTrain:      oosVsTrain,
+				}
+				allResults = append(allResults, result)
+
+				totalTestSharpe += testSharpe
+				totalTestReturn += testResp.AnnualReturn
+				totalTestMaxDD += testResp.MaxDrawdown
+				totalDegradation += oosVsTrain
+				if testSharpe > 0 {
+					positiveSharpeCount++
+				}
+			}
+
+			if len(allResults) == 0 {
+				logging.Logger.Error().Msg("Walk-forward: all windows failed")
+				return
+			}
+
+			n := float64(len(allResults))
+			avgTestSharpe := totalTestSharpe / n
+			avgTestReturn := totalTestReturn / n
+			avgTestMaxDD := totalTestMaxDD / n
+			avgDegradation := totalDegradation / n
+			passRate := float64(positiveSharpeCount) / n
+			overallPass := avgTestSharpe > 0.5 && avgDegradation < 0.7
+
+			report := &domain.WalkForwardReport{
+				StrategyID:     req.StrategyID,
+				Universe:       req.Universe,
+				Windows:        allResults,
+				AvgTestSharpe:  avgTestSharpe,
+				AvgTestReturn:  avgTestReturn,
+				AvgTestMaxDD:   avgTestMaxDD,
+				AvgDegradation: avgDegradation,
+				PassRate:       passRate,
+				OverallPass:    overallPass,
+			}
+
+			// Save to DB
+			if err := store.SaveWalkForwardReport(bgCtx, report); err != nil {
+				logging.Logger.Warn().Err(err).Msg("Failed to save walk-forward report")
+			}
+
+			logging.Logger.Info().
+				Str("strategy", req.StrategyID).
+				Bool("overall_pass", overallPass).
+				Float64("avg_test_sharpe", avgTestSharpe).
+				Int("windows", len(allResults)).
+				Msg("Walk-forward validation completed")
+		}()
+	}
+}
+
+// wfWindow represents a single walk-forward window.
+type wfWindow struct {
+	trainStart, trainEnd time.Time
+	testStart, testEnd   time.Time
+}
+
+// buildWFWIindows generates walk-forward windows from trading days.
+func buildWFWIindows(days []time.Time, params domain.WalkForwardParams) []wfWindow {
+	var windows []wfWindow
+	for startIdx := 0; startIdx+params.TrainDays+params.TestDays <= len(days); startIdx += params.StepDays {
+		trainEndIdx := startIdx + params.TrainDays - 1
+		testEndIdx := trainEndIdx + params.TestDays
+		if testEndIdx >= len(days) {
+			testEndIdx = len(days) - 1
+			if testEndIdx-trainEndIdx < params.TestDays/2 {
+				continue
+			}
+		}
+		window := wfWindow{
+			trainStart: days[startIdx],
+			trainEnd:   days[trainEndIdx],
+			testStart:  days[trainEndIdx+1],
+			testEnd:    days[testEndIdx],
+		}
+		if trainEndIdx-startIdx+1 < params.MinTrainDays {
+			continue
+		}
+		windows = append(windows, window)
+	}
+	return windows
+}
+
+type backtestHTTPResponse struct {
+	SharpeRatio   float64 `json:"sharpe_ratio"`
+	AnnualReturn  float64 `json:"annual_return"`
+	MaxDrawdown   float64 `json:"max_drawdown"`
+	TotalReturn   float64 `json:"total_return"`
+}
+
+// runBacktestHTTP calls the analysis service backtest endpoint.
+func runBacktestHTTP(client *http.Client, strategyID, universe string, start, end time.Time) (*backtestHTTPResponse, error) {
+	body := map[string]any{
+		"strategy":  strategyID,
+		"stock_pool": []string{universe},
+		"start_date": start.Format("2006-01-02"),
+		"end_date":   end.Format("2006-01-02"),
+	}
+	jsonData, _ := json.Marshal(body)
+	url := analysisServiceURL + "/api/backtest"
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(jsonData))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("analysis service returned status %d", resp.StatusCode)
+	}
+	var result struct {
+		Result backtestHTTPResponse `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result.Result, nil
+}
+
+// getWalkForwardReportHandler returns the latest walk-forward report for a strategy.
+// GET /api/walkforward/:strategy_id
+func getWalkForwardReportHandler(store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		strategyID := c.Param("strategy_id")
+
+		report, err := store.GetLatestWalkForwardReport(ctx, strategyID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if report == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no walk-forward report found"})
+			return
+		}
+		c.JSON(http.StatusOK, report)
+	}
+}
+
+// listWalkForwardReportsHandler returns all walk-forward reports.
+// GET /api/walkforward
+func listWalkForwardReportsHandler(store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		reports, err := store.ListAllWalkForwardReports(ctx, 50)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"reports": reports, "count": len(reports)})
 	}
 }
