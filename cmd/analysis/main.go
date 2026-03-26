@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	_ "github.com/ruoxizhnya/quant-trading/pkg/strategy/plugins"
 )
 
@@ -54,6 +55,18 @@ func main() {
 		logger.Fatal().Err(err).Msg("Failed to initialize backtest engine")
 	}
 
+	// Initialize Postgres store and job service
+	dbURL := v.GetString("database.url")
+	if dbURL == "" {
+		logger.Fatal().Msg("database.url not configured")
+	}
+	store, err := storage.NewPostgresStore(context.Background(), dbURL)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to initialize postgres store")
+	}
+	jobService := backtest.NewJobService(store, engine)
+	logger.Info().Msg("Job service initialized")
+
 	// Setup Gin router
 	if v.GetString("logging.format") == "json" {
 		gin.SetMode(gin.ReleaseMode)
@@ -63,7 +76,7 @@ func main() {
 	router.Use(requestLogger(logger))
 
 	// Register routes
-	registerRoutes(router, engine, logger)
+	registerRoutes(router, engine, jobService, logger)
 
 	// Get server config
 	host := v.GetString("server.host")
@@ -425,7 +438,7 @@ func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 }
 
 // registerRoutes registers all HTTP routes.
-func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.Logger) {
+func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, logger zerolog.Logger) {
 	// Serve UI
 	router.GET("/", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
@@ -565,44 +578,59 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.
 	// Backtest endpoints
 	api := router.Group("/backtest")
 	{
-		// Run a backtest
+		// Run a backtest — async via job service
 		api.POST("", func(c *gin.Context) {
-			var req backtest.BacktestRequest
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error":   "invalid request body",
-					"details": err.Error(),
-				})
+			var jobReq backtest.CreateJobRequest
+			if err := c.ShouldBindJSON(&jobReq); err != nil {
+				// Fallback: try old synchronous format
+				var req backtest.BacktestRequest
+				if err2 := c.ShouldBindJSON(&req); err2 == nil {
+					ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Minute)
+					defer cancel()
+					result, err := engine.RunBacktest(ctx, req)
+					if err != nil {
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "backtest failed", "details": err.Error()})
+						return
+					}
+					c.JSON(http.StatusOK, result)
+					return
+				}
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
 				return
 			}
 
 			logger.Info().
-				Str("strategy", req.Strategy).
-				Str("start_date", req.StartDate).
-				Str("end_date", req.EndDate).
-				Int("stock_count", len(req.StockPool)).
-				Msg("Starting backtest")
+				Str("strategy", jobReq.StrategyID).
+				Str("start_date", jobReq.StartDate).
+				Str("end_date", jobReq.EndDate).
+				Str("universe", jobReq.Universe).
+				Msg("Creating backtest job")
 
-			ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Minute)
-			defer cancel()
-
-			result, err := engine.RunBacktest(ctx, req)
+			job, err := jobService.CreateJob(c.Request.Context(), jobReq)
 			if err != nil {
-				logger.Error().Err(err).Msg("Backtest failed")
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error":   "backtest failed",
-					"details": err.Error(),
-				})
+				logger.Error().Err(err).Msg("Failed to create job")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create job", "details": err.Error()})
 				return
 			}
 
-			logger.Info().
-				Str("backtest_id", result.ID).
-				Float64("total_return", result.TotalReturn).
-				Float64("sharpe_ratio", result.SharpeRatio).
-				Msg("Backtest completed")
+			c.JSON(http.StatusAccepted, gin.H{"job_id": job.ID, "status": job.Status})
+		})
 
-			c.JSON(http.StatusOK, result)
+		// Get backtest job status and result
+		api.GET("/:id", func(c *gin.Context) {
+			jobID := c.Param("id")
+
+			job, err := jobService.GetJob(c.Request.Context(), jobID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if job == nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+				return
+			}
+
+			c.JSON(http.StatusOK, job)
 		})
 
 		// Get backtest report

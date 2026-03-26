@@ -180,6 +180,27 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			currency VARCHAR(10) DEFAULT 'CNY',
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		// Migration 009: factor_returns table
+		`CREATE TABLE IF NOT EXISTS factor_returns (
+			id SERIAL PRIMARY KEY,
+			factor_name VARCHAR(20) NOT NULL,
+			trade_date DATE NOT NULL,
+			quintile INTEGER NOT NULL CHECK (quintile BETWEEN 1 AND 5),
+			avg_return DOUBLE PRECISION,
+			cumulative_return DOUBLE PRECISION,
+			top_minus_bot DOUBLE PRECISION,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		// Migration 010: ic_analysis table
+		`CREATE TABLE IF NOT EXISTS ic_analysis (
+			id SERIAL PRIMARY KEY,
+			factor_name VARCHAR(20) NOT NULL,
+			trade_date DATE NOT NULL,
+			ic DOUBLE PRECISION,
+			p_value DOUBLE PRECISION,
+			top_ic DOUBLE PRECISION,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -218,6 +239,12 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_splits_symbol_trade ON splits(symbol, trade_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_splits_trade_date ON splits(trade_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_splits_symbol ON splits(symbol)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_fr_pk ON factor_returns(factor_name, trade_date, quintile)`,
+		`CREATE INDEX IF NOT EXISTS idx_fr_trade_date ON factor_returns(trade_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_fr_factor ON factor_returns(factor_name)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_pk ON ic_analysis(factor_name, trade_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_ic_trade_date ON ic_analysis(trade_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_ic_factor ON ic_analysis(factor_name)`,
 	}
 
 	for _, idx := range indexes {
@@ -1178,6 +1205,120 @@ func (s *PostgresStore) GetFactorCacheRange(ctx context.Context, factor domain.F
 			return nil, fmt.Errorf("failed to scan factor cache row: %w", err)
 		}
 		results = append(results, &e)
+	}
+
+	return results, rows.Err()
+}
+
+// SaveFactorReturnBatch saves multiple factor return records in a batch.
+func (s *PostgresStore) SaveFactorReturnBatch(ctx context.Context, records []*domain.FactorReturn) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	for _, r := range records {
+		batch.Queue(`
+			INSERT INTO factor_returns (factor_name, trade_date, quintile, avg_return, cumulative_return, top_minus_bot)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (factor_name, trade_date, quintile) DO UPDATE SET
+				avg_return = EXCLUDED.avg_return,
+				cumulative_return = EXCLUDED.cumulative_return,
+				top_minus_bot = EXCLUDED.top_minus_bot
+		`, r.FactorName, r.TradeDate, r.Quintile, r.AvgReturn, r.CumulativeReturn, r.TopMinusBot)
+	}
+
+	results := s.pool.SendBatch(ctx, batch)
+	defer results.Close()
+
+	for i := 0; i < len(records); i++ {
+		if _, err := results.Exec(); err != nil {
+			return fmt.Errorf("batch factor_returns insert failed at index %d: %w", i, err)
+		}
+	}
+
+	s.logger.Info().Int("count", len(records)).Msg("Batch factor_returns saved")
+	return nil
+}
+
+// GetFactorReturns retrieves factor returns for a factor within a date range.
+func (s *PostgresStore) GetFactorReturns(ctx context.Context, factor domain.FactorType, startDate, endDate time.Time) ([]*domain.FactorReturn, error) {
+	query := `
+		SELECT id, factor_name, trade_date, quintile, avg_return, cumulative_return, top_minus_bot
+		FROM factor_returns
+		WHERE factor_name = $1 AND trade_date >= $2 AND trade_date <= $3
+		ORDER BY trade_date ASC, quintile ASC
+	`
+	rows, err := s.pool.Query(ctx, query, factor, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query factor_returns: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*domain.FactorReturn
+	for rows.Next() {
+		var r domain.FactorReturn
+		if err := rows.Scan(&r.ID, &r.FactorName, &r.TradeDate, &r.Quintile, &r.AvgReturn, &r.CumulativeReturn, &r.TopMinusBot); err != nil {
+			return nil, fmt.Errorf("failed to scan factor_return row: %w", err)
+		}
+		results = append(results, &r)
+	}
+
+	return results, rows.Err()
+}
+
+// SaveICEntryBatch saves multiple IC analysis records in a batch.
+func (s *PostgresStore) SaveICEntryBatch(ctx context.Context, records []*domain.ICEntry) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	for _, r := range records {
+		batch.Queue(`
+			INSERT INTO ic_analysis (factor_name, trade_date, ic, p_value, top_ic)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (factor_name, trade_date) DO UPDATE SET
+				ic = EXCLUDED.ic,
+				p_value = EXCLUDED.p_value,
+				top_ic = EXCLUDED.top_ic
+		`, r.FactorName, r.TradeDate, r.IC, r.PValue, r.TopIC)
+	}
+
+	results := s.pool.SendBatch(ctx, batch)
+	defer results.Close()
+
+	for i := 0; i < len(records); i++ {
+		if _, err := results.Exec(); err != nil {
+			return fmt.Errorf("batch ic_analysis insert failed at index %d: %w", i, err)
+		}
+	}
+
+	s.logger.Info().Int("count", len(records)).Msg("Batch ic_analysis saved")
+	return nil
+}
+
+// GetICEntries retrieves IC entries for a factor within a date range.
+func (s *PostgresStore) GetICEntries(ctx context.Context, factor domain.FactorType, startDate, endDate time.Time) ([]*domain.ICEntry, error) {
+	query := `
+		SELECT id, factor_name, trade_date, ic, p_value, top_ic
+		FROM ic_analysis
+		WHERE factor_name = $1 AND trade_date >= $2 AND trade_date <= $3
+		ORDER BY trade_date ASC
+	`
+	rows, err := s.pool.Query(ctx, query, factor, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query ic_analysis: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*domain.ICEntry
+	for rows.Next() {
+		var r domain.ICEntry
+		if err := rows.Scan(&r.ID, &r.FactorName, &r.TradeDate, &r.IC, &r.PValue, &r.TopIC); err != nil {
+			return nil, fmt.Errorf("failed to scan ic_entry row: %w", err)
+		}
+		results = append(results, &r)
 	}
 
 	return results, rows.Err()

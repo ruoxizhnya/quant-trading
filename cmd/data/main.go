@@ -242,6 +242,13 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 	r.POST("/sync/factors/:factor_name", syncFactorHandler(factorComputer))
 	r.POST("/sync/factors/all", syncAllFactorsHandler(factorComputer))
 
+	// Factor attribution & IC endpoints
+	factorAttributor := data.NewFactorAttributor(store)
+	r.GET("/api/factors/attribution/:factor_name", getFactorAttributionHandler(factorAttributor))
+	r.GET("/api/factors/ic/:factor_name", getICHandler(factorAttributor))
+	r.POST("/api/sync/factor-attribution/:factor_name", syncFactorAttributionHandler(factorAttributor))
+	r.POST("/api/sync/factor-ic/:factor_name", syncFactorICHandler(factorAttributor))
+
 	// Fundamental data endpoints (stock_fundamentals table)
 	r.GET("/fundamentals/:symbol", getFundamentalsHandler(store))
 	r.GET("/fundamentals/:symbol/history", getFundamentalsHistoryHandler(store))
@@ -1413,6 +1420,194 @@ func syncAllFactorsHandler(fc *data.FactorComputer) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "all factors computed and cached",
 			"date":    req.Date,
+		})
+	}
+}
+
+// ---- Factor Attribution & IC Handlers ----
+
+// getFactorAttributionHandler returns factor quintile returns for a date range.
+// GET /api/factors/attribution/:factor_name?start_date=YYYYMMDD&end_date=YYYYMMDD
+func getFactorAttributionHandler(fa *data.FactorAttributor) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		factorName := domain.FactorType(c.Param("factor_name"))
+		startDateStr := c.Query("start_date")
+		endDateStr := c.Query("end_date")
+
+		if startDateStr == "" || endDateStr == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date query params required (YYYYMMDD)"})
+			return
+		}
+
+		startDate, err := time.Parse("20060102", startDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
+			return
+		}
+		endDate, err := time.Parse("20060102", endDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+			return
+		}
+
+		returns, err := fa.GetFactorReturnsTimeSeries(ctx, factorName, startDate, endDate)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"factor": factorName, "returns": returns})
+	}
+}
+
+// getICHandler returns IC series for a factor over a date range.
+// GET /api/factors/ic/:factor_name?start_date=YYYYMMDD&end_date=YYYYMMDD
+func getICHandler(fa *data.FactorAttributor) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		factorName := domain.FactorType(c.Param("factor_name"))
+		startDateStr := c.Query("start_date")
+		endDateStr := c.Query("end_date")
+
+		if startDateStr == "" || endDateStr == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date query params required (YYYYMMDD)"})
+			return
+		}
+
+		startDate, err := time.Parse("20060102", startDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
+			return
+		}
+		endDate, err := time.Parse("20060102", endDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+			return
+		}
+
+		icEntries, err := fa.GetICTimeSeries(ctx, factorName, startDate, endDate)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"factor": factorName, "ic_series": icEntries})
+	}
+}
+
+type syncAttributionRequest struct {
+	StartDate string `json:"start_date"` // YYYYMMDD
+	EndDate   string `json:"end_date"`   // YYYYMMDD
+}
+
+// syncFactorAttributionHandler computes factor attribution over a date range.
+// POST /api/sync/factor-attribution/:factor_name
+func syncFactorAttributionHandler(fa *data.FactorAttributor) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		factorName := domain.FactorType(c.Param("factor_name"))
+
+		var req syncAttributionRequest
+		if err := c.ShouldBindJSON(&req); err != nil || req.StartDate == "" || req.EndDate == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date fields required (YYYYMMDD)"})
+			return
+		}
+
+		startDate, err := time.Parse("20060102", req.StartDate)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
+			return
+		}
+		endDate, err := time.Parse("20060102", req.EndDate)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+			return
+		}
+
+		tradingDays, err := fa.GetTradingDaysForRange(ctx, startDate, endDate)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		var computed, failed int
+		for _, day := range tradingDays {
+			if err := fa.ComputeFactorReturns(ctx, factorName, day); err != nil {
+				failed++
+				logging.Logger.Warn().Err(err).Time("date", day).Str("factor", string(factorName)).Msg("Factor attribution failed for date")
+				continue
+			}
+			computed++
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":      "attribution computed",
+			"factor_name":  factorName,
+			"computed":     computed,
+			"failed":       failed,
+		})
+	}
+}
+
+type syncICRequest struct {
+	StartDate   string `json:"start_date"`   // YYYYMMDD
+	EndDate     string `json:"end_date"`     // YYYYMMDD
+	ForwardDays int    `json:"forward_days"` // default 20
+}
+
+// syncFactorICHandler computes IC for a factor over a date range.
+// POST /api/sync/factor-ic/:factor_name
+func syncFactorICHandler(fa *data.FactorAttributor) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		factorName := domain.FactorType(c.Param("factor_name"))
+
+		var req syncICRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if req.StartDate == "" || req.EndDate == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date fields required (YYYYMMDD)"})
+			return
+		}
+		if req.ForwardDays <= 0 {
+			req.ForwardDays = 20
+		}
+
+		startDate, err := time.Parse("20060102", req.StartDate)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
+			return
+		}
+		endDate, err := time.Parse("20060102", req.EndDate)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+			return
+		}
+
+		tradingDays, err := fa.GetTradingDaysForRange(ctx, startDate, endDate)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		var computed, failed int
+		for _, day := range tradingDays {
+			if _, err := fa.ComputeIC(ctx, factorName, day, req.ForwardDays); err != nil {
+				failed++
+				logging.Logger.Warn().Err(err).Time("date", day).Str("factor", string(factorName)).Msg("IC computation failed for date")
+				continue
+			}
+			computed++
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":      "IC computed",
+			"factor_name":  factorName,
+			"computed":     computed,
+			"failed":       failed,
 		})
 	}
 }

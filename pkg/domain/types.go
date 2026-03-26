@@ -150,6 +150,27 @@ type FactorCacheEntry struct {
 	Percentile float64    `json:"percentile"` // percentile rank [0, 100]
 }
 
+// FactorReturn records the return of a factor quintile portfolio over a period
+type FactorReturn struct {
+	ID               int64      `json:"id"`
+	FactorName       FactorType `json:"factor_name"`
+	TradeDate        time.Time  `json:"trade_date"`
+	Quintile         int        `json:"quintile"`         // 1 (bottom) to 5 (top)
+	AvgReturn        float64    `json:"avg_return"`        // equal-weight avg return of the quintile
+	CumulativeReturn float64    `json:"cumulative_return"` // cumulative return over forward period
+	TopMinusBot      float64    `json:"top_minus_bot"`     // spread: quintile 5 minus quintile 1
+}
+
+// ICEntry records the rank correlation between factor z-score and next-period return
+type ICEntry struct {
+	ID         int64      `json:"id"`
+	FactorName FactorType `json:"factor_name"`
+	TradeDate  time.Time  `json:"trade_date"`
+	IC         float64    `json:"ic"`         // Spearman rank IC
+	PValue     float64    `json:"p_value"`    // approximate p-value
+	TopIC      float64    `json:"top_ic"`     // top quintile IC (avg IC when stock is in top quintile)
+}
+
 // ScreenFilters defines filter criteria for stock screening.
 type ScreenFilters struct {
 	PE_min           *float64 `json:"pe_min"`
