@@ -65,6 +65,11 @@ type Engine struct {
 	// ParallelWorkers controls how many goroutines fetch data concurrently
 	// inside each trading day. A value <= 0 means sequential (1 worker).
 	parallelWorkers int
+
+	// factorCache holds pre-computed factor z-scores loaded from the factor_cache table.
+	// Structure: factorName -> tradeDate -> symbol -> zScore
+	// Populated via LoadFactorCache before a backtest run.
+	factorCache map[domain.FactorType]map[time.Time]map[string]float64
 }
 
 // BacktestState holds the state of a backtest run.
@@ -1282,6 +1287,65 @@ func (e *Engine) LoadOHLCVInMemory(data map[string][]domain.OHLCV) {
 	e.mu.Lock()
 	e.inMemoryOHLCV = data
 	e.mu.Unlock()
+}
+
+// LoadFactorCache loads pre-computed factor z-scores into memory for the given factor and date range.
+// The factor cache is stored as: factorName -> tradeDate -> symbol -> zScore
+// This is called before a backtest run to enable fast factor-based stock ranking.
+// Pass nil to clear the cache.
+func (e *Engine) LoadFactorCache(factor domain.FactorType, startDate, endDate time.Time, entries []*domain.FactorCacheEntry) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.factorCache == nil {
+		e.factorCache = make(map[domain.FactorType]map[time.Time]map[string]float64)
+	}
+
+	// Initialize nested maps
+	if e.factorCache[factor] == nil {
+		e.factorCache[factor] = make(map[time.Time]map[string]float64)
+	}
+
+	// Group entries by trade date
+	for _, entry := range entries {
+		if entry.FactorName != factor {
+			continue
+		}
+		dateKey := entry.TradeDate.Truncate(24 * time.Hour)
+		if e.factorCache[factor][dateKey] == nil {
+			e.factorCache[factor][dateKey] = make(map[string]float64)
+		}
+		e.factorCache[factor][dateKey][entry.Symbol] = entry.ZScore
+	}
+
+	e.logger.Info().
+		Str("factor", string(factor)).
+		Time("start_date", startDate).
+		Time("end_date", endDate).
+		Int("entries_loaded", len(entries)).
+		Msg("Factor cache loaded into memory")
+}
+
+// GetFactorZScore returns the z-score for a given factor, date, and symbol from the in-memory cache.
+// Returns 0 and false if the entry is not found.
+func (e *Engine) GetFactorZScore(factor domain.FactorType, date time.Time, symbol string) (float64, bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if e.factorCache == nil {
+		return 0, false
+	}
+	dateKey := date.Truncate(24 * time.Hour)
+	dateMap, ok := e.factorCache[factor]
+	if !ok {
+		return 0, false
+	}
+	symbolMap, ok := dateMap[dateKey]
+	if !ok {
+		return 0, false
+	}
+	zScore, ok := symbolMap[symbol]
+	return zScore, ok
 }
 
 // SetParallelWorkers sets the number of concurrent workers for per-stock data fetching.

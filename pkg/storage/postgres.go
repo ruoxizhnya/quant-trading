@@ -158,6 +158,17 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			weight DOUBLE PRECISION,
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		// Migration 006: docs/migrations/006_add_factor_cache_table.sql
+		`CREATE TABLE IF NOT EXISTS factor_cache (
+			id SERIAL PRIMARY KEY,
+			symbol VARCHAR(20) NOT NULL,
+			trade_date DATE NOT NULL,
+			factor_name VARCHAR(20) NOT NULL,
+			raw_value DOUBLE PRECISION,
+			z_score DOUBLE PRECISION,
+			percentile DOUBLE PRECISION,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -190,6 +201,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ic_symbol_index ON index_constituents(symbol, index_code)`,
 		`CREATE INDEX IF NOT EXISTS idx_ic_index_code ON index_constituents(index_code)`,
 		`CREATE INDEX IF NOT EXISTS idx_ic_in_date ON index_constituents(in_date)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_fc_pk ON factor_cache(symbol, trade_date, factor_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_fc_trade_date ON factor_cache(trade_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_fc_factor_name ON factor_cache(factor_name)`,
 	}
 
 	for _, idx := range indexes {
@@ -1073,6 +1087,83 @@ func (s *PostgresStore) GetIndexConstituents(ctx context.Context, indexCode stri
 			return nil, fmt.Errorf("failed to scan index constituent row: %w", err)
 		}
 		results = append(results, c)
+	}
+
+	return results, rows.Err()
+}
+
+// SaveFactorCacheBatch saves multiple factor cache entries in a batch.
+func (s *PostgresStore) SaveFactorCacheBatch(ctx context.Context, entries []*domain.FactorCacheEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	for _, e := range entries {
+		batch.Queue(`
+			INSERT INTO factor_cache (symbol, trade_date, factor_name, raw_value, z_score, percentile)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (symbol, trade_date, factor_name) DO UPDATE SET
+				raw_value = EXCLUDED.raw_value,
+				z_score = EXCLUDED.z_score,
+				percentile = EXCLUDED.percentile
+		`, e.Symbol, e.TradeDate, e.FactorName, e.RawValue, e.ZScore, e.Percentile)
+	}
+
+	results := s.pool.SendBatch(ctx, batch)
+	defer results.Close()
+
+	for i := 0; i < len(entries); i++ {
+		if _, err := results.Exec(); err != nil {
+			return fmt.Errorf("batch factor_cache insert failed at index %d: %w", i, err)
+		}
+	}
+
+	s.logger.Info().Int("count", len(entries)).Msg("Batch factor_cache saved")
+	return nil
+}
+
+// GetFactorCache retrieves a single factor cache entry.
+func (s *PostgresStore) GetFactorCache(ctx context.Context, symbol string, date time.Time, factor domain.FactorType) (*domain.FactorCacheEntry, error) {
+	query := `
+		SELECT id, symbol, trade_date, factor_name, raw_value, z_score, percentile
+		FROM factor_cache
+		WHERE symbol = $1 AND trade_date = $2 AND factor_name = $3
+	`
+	var e domain.FactorCacheEntry
+	err := s.pool.QueryRow(ctx, query, symbol, date, factor).Scan(
+		&e.ID, &e.Symbol, &e.TradeDate, &e.FactorName, &e.RawValue, &e.ZScore, &e.Percentile,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get factor cache: %w", err)
+	}
+	return &e, nil
+}
+
+// GetFactorCacheRange retrieves factor cache entries for a factor within a date range.
+func (s *PostgresStore) GetFactorCacheRange(ctx context.Context, factor domain.FactorType, startDate, endDate time.Time) ([]*domain.FactorCacheEntry, error) {
+	query := `
+		SELECT id, symbol, trade_date, factor_name, raw_value, z_score, percentile
+		FROM factor_cache
+		WHERE factor_name = $1 AND trade_date >= $2 AND trade_date <= $3
+		ORDER BY trade_date ASC, symbol ASC
+	`
+	rows, err := s.pool.Query(ctx, query, factor, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query factor cache range: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*domain.FactorCacheEntry
+	for rows.Next() {
+		var e domain.FactorCacheEntry
+		if err := rows.Scan(&e.ID, &e.Symbol, &e.TradeDate, &e.FactorName, &e.RawValue, &e.ZScore, &e.Percentile); err != nil {
+			return nil, fmt.Errorf("failed to scan factor cache row: %w", err)
+		}
+		results = append(results, &e)
 	}
 
 	return results, rows.Err()

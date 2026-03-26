@@ -109,6 +109,27 @@ type FundamentalData struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+// FactorType represents a factor name
+type FactorType string
+
+const (
+	FactorMomentum FactorType = "momentum" // 20-day return
+	FactorValue    FactorType = "value"    // EP, BP, SP
+	FactorQuality  FactorType = "quality"   // ROE, ROA, gross_margin
+	FactorSize     FactorType = "size"     // market cap rank
+)
+
+// FactorCacheEntry is a pre-computed factor z-score for a stock on a date
+type FactorCacheEntry struct {
+	ID         int64      `json:"id"`
+	Symbol     string     `json:"symbol"`
+	TradeDate  time.Time  `json:"trade_date"`
+	FactorName FactorType `json:"factor_name"`
+	RawValue   float64    `json:"raw_value"`  // raw factor value before z-score
+	ZScore     float64    `json:"z_score"`    // cross-sectional z-score (mean=0, std=1)
+	Percentile float64    `json:"percentile"` // percentile rank [0, 100]
+}
+
 // ScreenFilters defines filter criteria for stock screening.
 type ScreenFilters struct {
 	PE_min           *float64 `json:"pe_min"`

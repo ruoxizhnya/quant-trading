@@ -235,6 +235,12 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 	// Cache warming (called by backtest engine before a run)
 	r.POST("/api/v1/cache/warm", warmCacheHandler(dc))
 
+	// Factor cache endpoints
+	factorComputer := data.NewFactorComputer(store)
+	r.GET("/factors/:factor_name", getFactorHandler(store))
+	r.POST("/sync/factors/:factor_name", syncFactorHandler(factorComputer))
+	r.POST("/sync/factors/all", syncAllFactorsHandler(factorComputer))
+
 	// Fundamental data endpoints (stock_fundamentals table)
 	r.GET("/fundamentals/:symbol", getFundamentalsHandler(store))
 	r.GET("/fundamentals/:symbol/history", getFundamentalsHistoryHandler(store))
@@ -1209,6 +1215,126 @@ func syncDividendsHandler(tc *data.TushareClient, store *storage.PostgresStore) 
 			"stocks_synced":   totalSynced,
 			"records_saved":   totalRecords,
 			"failed_stocks":   totalFailed,
+		})
+	}
+}
+
+// ---- Factor Cache Handlers ----
+
+// getFactorHandler retrieves a factor z-score from the cache.
+// GET /factors/:factor_name?symbol=...&date=...
+func getFactorHandler(store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		factorName := domain.FactorType(c.Param("factor_name"))
+		symbol := c.Query("symbol")
+		dateStr := c.Query("date")
+
+		if symbol == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "symbol query param is required"})
+			return
+		}
+		if dateStr == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "date query param is required (YYYYMMDD)"})
+			return
+		}
+
+		date, err := time.Parse("20060102", dateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, use YYYYMMDD"})
+			return
+		}
+
+		entry, err := store.GetFactorCache(ctx, symbol, date, factorName)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if entry == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "factor cache entry not found"})
+			return
+		}
+
+		c.JSON(http.StatusOK, entry)
+	}
+}
+
+// syncFactorHandler computes and caches a specific factor for all stocks.
+// POST /sync/factors/:factor_name
+func syncFactorHandler(fc *data.FactorComputer) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		factorName := c.Param("factor_name")
+
+		var req struct {
+			Date string `json:"date"` // YYYYMMDD
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.Date == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "date field required (YYYYMMDD)"})
+			return
+		}
+
+		date, err := time.Parse("20060102", req.Date)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, use YYYYMMDD"})
+			return
+		}
+
+		factor := domain.FactorType(factorName)
+		var computeErr error
+		switch factor {
+		case domain.FactorMomentum:
+			computeErr = fc.ComputeMomentumFactor(ctx, date)
+		case domain.FactorValue:
+			computeErr = fc.ComputeValueFactor(ctx, date)
+		case domain.FactorQuality:
+			computeErr = fc.ComputeQualityFactor(ctx, date)
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported factor: " + factorName})
+			return
+		}
+
+		if computeErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": computeErr.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":     "factor computed and cached",
+			"factor_name": factorName,
+			"date":        req.Date,
+		})
+	}
+}
+
+// syncAllFactorsHandler computes and caches all factors for all stocks.
+// POST /sync/factors/all
+func syncAllFactorsHandler(fc *data.FactorComputer) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+
+		var req struct {
+			Date string `json:"date"` // YYYYMMDD
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.Date == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "date field required (YYYYMMDD)"})
+			return
+		}
+
+		date, err := time.Parse("20060102", req.Date)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, use YYYYMMDD"})
+			return
+		}
+
+		if err := fc.ComputeAllFactors(ctx, date); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "all factors computed and cached",
+			"date":    req.Date,
 		})
 	}
 }
