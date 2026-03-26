@@ -719,3 +719,68 @@ func (c *TushareClient) normalizeDividends(resp *TushareResponse) []domain.Divid
 	}
 	return records
 }
+
+// FetchSplits retrieves stock split/rights-issue data from tushare split API.
+// startDate, endDate: format "YYYYMMDD" (optional — pass "" to fetch all available).
+// Tushare split API fields: ts_code, trade_date, stk_div_ratio, cash_div_ratio, currency
+func (c *TushareClient) FetchSplits(ctx context.Context, symbol string, startDate, endDate string) ([]domain.Split, error) {
+	params := map[string]interface{}{
+		"ts_code": symbol,
+	}
+	if startDate != "" {
+		params["start_date"] = formatDate(startDate)
+	}
+	if endDate != "" {
+		params["end_date"] = formatDate(endDate)
+	}
+
+	resp, err := c.call(ctx, "split", params, "ts_code,trade_date,stk_div_ratio,cash_div_ratio,currency")
+	if err != nil {
+		return nil, err
+	}
+
+	records := c.normalizeSplits(resp)
+	if len(records) == 0 {
+		return nil, nil
+	}
+
+	// Save to database
+	ptrs := make([]*domain.Split, len(records))
+	for i := range records {
+		ptrs[i] = &records[i]
+	}
+	if err := c.store.SaveSplitBatch(ctx, ptrs); err != nil {
+		c.logger.Warn().Err(err).Msg("Failed to batch save splits")
+	}
+
+	c.logger.Info().Str("symbol", symbol).Int("count", len(records)).Msg("Splits fetched and saved")
+	return records, nil
+}
+
+// normalizeSplits converts tushare split API response to domain.Split.
+func (c *TushareClient) normalizeSplits(resp *TushareResponse) []domain.Split {
+	var records []domain.Split
+	for _, item := range resp.Data.Items {
+		if len(item) < 5 {
+			continue
+		}
+
+		tsCode := c.fieldStr(item, 0)
+		if tsCode == "" {
+			continue
+		}
+
+		tradeDateStr := c.fieldStr(item, 1)
+		tradeDate, _ := time.Parse("20060102", tradeDateStr)
+
+		record := domain.Split{
+			Symbol:       tsCode,
+			TradeDate:    tradeDate,
+			StkDivRatio:  c.fieldFloat(item, 2),  // stk_div_ratio — stock dividend/split ratio
+			CashDivRatio: c.fieldFloat(item, 3),    // cash_div_ratio — cash dividend ratio
+			Currency:     c.fieldStr(item, 4),      // currency
+		}
+		records = append(records, record)
+	}
+	return records
+}

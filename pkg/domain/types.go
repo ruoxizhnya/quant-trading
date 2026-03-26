@@ -55,6 +55,18 @@ type IndexConstituent struct {
 	Weight     float64   `json:"weight"`      // weight in index (if available from index_weight API)
 }
 
+// Split represents a stock split or rights issue event.
+// Used for forward-price adjustment verification.
+type Split struct {
+	ID          int64     `json:"id"`
+	Symbol      string    `json:"symbol"`
+	TradeDate   time.Time `json:"trade_date"`    // ex-date of the split
+	AnnDate     time.Time `json:"ann_date"`       // announcement date
+	StkDivRatio float64   `json:"stk_div_ratio"` // stock dividend / split ratio (e.g., 0.1 = 10% stock dividend)
+	CashDivRatio float64  `json:"cash_div_ratio"` // cash dividend ratio
+	Currency    string    `json:"currency"`      // usually CNY
+}
+
 // Dividend represents a dividend event for a stock.
 type Dividend struct {
 	ID        int64     `json:"id"`

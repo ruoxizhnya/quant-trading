@@ -231,6 +231,7 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 	r.POST("/sync/fundamental", syncFundamentalHandler(tc))
 	r.POST("/sync/fundamentals", syncFundamentalsHandler(tc, store))
 	r.POST("/sync/dividends", syncDividendsHandler(tc, store))
+	r.POST("/sync/splits", syncSplitsHandler(tc, store))
 
 	// Cache warming (called by backtest engine before a run)
 	r.POST("/api/v1/cache/warm", warmCacheHandler(dc))
@@ -1212,6 +1213,83 @@ func syncDividendsHandler(tc *data.TushareClient, store *storage.PostgresStore) 
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":         "Dividends synced successfully",
+			"stocks_synced":   totalSynced,
+			"records_saved":   totalRecords,
+			"failed_stocks":   totalFailed,
+		})
+	}
+}
+
+// ---- Split Sync Handlers ----
+
+type syncSplitsRequest struct {
+	Symbols   []string `json:"symbols"`
+	StartDate string   `json:"start_date"` // YYYYMMDD
+	EndDate   string   `json:"end_date"`   // YYYYMMDD
+}
+
+// syncSplitsHandler syncs split/rights-issue data from Tushare for the given symbols (or all stocks if not specified).
+// POST /sync/splits
+func syncSplitsHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		var req syncSplitsRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			req = syncSplitsRequest{}
+		}
+
+		var symbols []string
+		if len(req.Symbols) > 0 {
+			symbols = req.Symbols
+		} else {
+			allStocks, err := store.GetAllStocks(ctx)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks from DB: " + err.Error()})
+				return
+			}
+			for _, s := range allStocks {
+				symbols = append(symbols, s.Symbol)
+			}
+			logging.Logger.Info().Int("count", len(symbols)).Msg("No symbols provided, fetched all from DB for split sync")
+		}
+
+		if len(symbols) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no stocks found in DB. Run POST /sync/stocks first."})
+			return
+		}
+
+		totalRecords := 0
+		totalSynced := 0
+		totalFailed := 0
+
+		batchSize := 10
+		for i := 0; i < len(symbols); i += batchSize {
+			end := i + batchSize
+			if end > len(symbols) {
+				end = len(symbols)
+			}
+			batch := symbols[i:end]
+
+			for _, symbol := range batch {
+				records, err := tc.FetchSplits(ctx, symbol, req.StartDate, req.EndDate)
+				if err != nil {
+					totalFailed++
+					logging.Logger.Warn().Err(err).Str("symbol", symbol).Msg("Failed to sync splits")
+					continue
+				}
+				totalSynced++
+				totalRecords += len(records)
+			}
+
+			logging.Logger.Info().
+				Int("batch", (i/batchSize)+1).
+				Int("progress", end).
+				Int("total", len(symbols)).
+				Msg("Split sync batch complete")
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":         "Splits synced successfully",
 			"stocks_synced":   totalSynced,
 			"records_saved":   totalRecords,
 			"failed_stocks":   totalFailed,

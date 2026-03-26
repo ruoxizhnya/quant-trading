@@ -169,6 +169,17 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			percentile DOUBLE PRECISION,
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		// Migration 007: docs/migrations/007_add_splits_table.sql
+		`CREATE TABLE IF NOT EXISTS splits (
+			id SERIAL PRIMARY KEY,
+			symbol VARCHAR(20) NOT NULL,
+			trade_date DATE NOT NULL,
+			ann_date DATE,
+			stk_div_ratio DOUBLE PRECISION,
+			cash_div_ratio DOUBLE PRECISION,
+			currency VARCHAR(10) DEFAULT 'CNY',
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -204,6 +215,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_fc_pk ON factor_cache(symbol, trade_date, factor_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_fc_trade_date ON factor_cache(trade_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_fc_factor_name ON factor_cache(factor_name)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_splits_symbol_trade ON splits(symbol, trade_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_splits_trade_date ON splits(trade_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_splits_symbol ON splits(symbol)`,
 	}
 
 	for _, idx := range indexes {
@@ -1164,6 +1178,90 @@ func (s *PostgresStore) GetFactorCacheRange(ctx context.Context, factor domain.F
 			return nil, fmt.Errorf("failed to scan factor cache row: %w", err)
 		}
 		results = append(results, &e)
+	}
+
+	return results, rows.Err()
+}
+
+// SaveSplitBatch saves multiple split/rights-issue records in a batch.
+func (s *PostgresStore) SaveSplitBatch(ctx context.Context, records []*domain.Split) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	batch := &pgx.Batch{}
+	for _, r := range records {
+		batch.Queue(`
+			INSERT INTO splits (symbol, trade_date, ann_date, stk_div_ratio, cash_div_ratio, currency)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (symbol, trade_date) DO UPDATE SET
+				ann_date = EXCLUDED.ann_date,
+				stk_div_ratio = EXCLUDED.stk_div_ratio,
+				cash_div_ratio = EXCLUDED.cash_div_ratio,
+				currency = EXCLUDED.currency
+		`, r.Symbol, r.TradeDate, r.AnnDate, r.StkDivRatio, r.CashDivRatio, r.Currency)
+	}
+
+	results := s.pool.SendBatch(ctx, batch)
+	defer results.Close()
+
+	for i := 0; i < len(records); i++ {
+		if _, err := results.Exec(); err != nil {
+			return fmt.Errorf("batch split insert failed at index %d: %w", i, err)
+		}
+	}
+
+	s.logger.Info().Int("count", len(records)).Msg("Batch splits saved")
+	return nil
+}
+
+// GetSplitsBySymbol retrieves all split records for a given symbol.
+func (s *PostgresStore) GetSplitsBySymbol(ctx context.Context, symbol string) ([]*domain.Split, error) {
+	query := `
+		SELECT id, symbol, trade_date, ann_date, stk_div_ratio, cash_div_ratio, currency
+		FROM splits
+		WHERE symbol = $1
+		ORDER BY trade_date ASC
+	`
+	rows, err := s.pool.Query(ctx, query, symbol)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query splits for symbol %s: %w", symbol, err)
+	}
+	defer rows.Close()
+
+	var results []*domain.Split
+	for rows.Next() {
+		var r domain.Split
+		if err := rows.Scan(&r.ID, &r.Symbol, &r.TradeDate, &r.AnnDate, &r.StkDivRatio, &r.CashDivRatio, &r.Currency); err != nil {
+			return nil, fmt.Errorf("failed to scan split row: %w", err)
+		}
+		results = append(results, &r)
+	}
+
+	return results, rows.Err()
+}
+
+// GetSplitsInRange retrieves split records within a date range.
+func (s *PostgresStore) GetSplitsInRange(ctx context.Context, startDate, endDate time.Time) ([]*domain.Split, error) {
+	query := `
+		SELECT id, symbol, trade_date, ann_date, stk_div_ratio, cash_div_ratio, currency
+		FROM splits
+		WHERE trade_date >= $1 AND trade_date <= $2
+		ORDER BY trade_date ASC, symbol ASC
+	`
+	rows, err := s.pool.Query(ctx, query, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query splits in range: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*domain.Split
+	for rows.Next() {
+		var r domain.Split
+		if err := rows.Scan(&r.ID, &r.Symbol, &r.TradeDate, &r.AnnDate, &r.StkDivRatio, &r.CashDivRatio, &r.Currency); err != nil {
+			return nil, fmt.Errorf("failed to scan split row: %w", err)
+		}
+		results = append(results, &r)
 	}
 
 	return results, rows.Err()
