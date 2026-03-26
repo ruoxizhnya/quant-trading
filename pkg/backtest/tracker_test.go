@@ -22,7 +22,7 @@ func TestExecuteTrade_LongPosition(t *testing.T) {
 	quantity := 100.0
 
 	// Buy 100 shares at 10.0
-	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, quantity, price, day1)
+	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, quantity, price, day1, nil)
 	require.NoError(t, err)
 	assert.Equal(t, quantity, trade.Quantity)
 	assert.Equal(t, domain.DirectionLong, trade.Direction)
@@ -56,7 +56,7 @@ func TestExecuteTrade_ShortPosition(t *testing.T) {
 	quantity := 100.0
 
 	// Short sell 100 shares at 10.0
-	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionShort, quantity, price, day1)
+	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionShort, quantity, price, day1, nil)
 	require.NoError(t, err)
 	assert.Equal(t, quantity, trade.Quantity)
 	assert.Equal(t, domain.DirectionShort, trade.Direction)
@@ -89,14 +89,14 @@ func TestExecuteTrade_CloseLong(t *testing.T) {
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
 
 	// Day 1: Buy 100 shares
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Day 2: Advance to make shares sellable
 	tracker.AdvanceDay(day2)
 
 	// Day 2: Sell 100 shares (close long) — stamp tax should apply
-	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 11.0, day2)
+	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 11.0, day2, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 100.0, trade.Quantity)
 
@@ -116,13 +116,13 @@ func TestExecuteTrade_CloseShort(t *testing.T) {
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
 	// Day 1: Short sell 100 shares
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionShort, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionShort, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Day 1: Close short — currently code has a bug: stamp tax is incorrectly applied
 	// (the CloseShort branch doesn't reset trade.StampTax set by DirectionClose block above)
 	// The actual behavior: stamp tax IS charged. Test reflects actual (buggy) behavior.
-	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 9.0, day1)
+	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 9.0, day1, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 100.0, trade.Quantity)
 	assert.Greater(t, trade.StampTax, 0.0) // Bug: should be 0.0 per Chinese tax rules
@@ -136,7 +136,7 @@ func TestExecuteTrade_CommissionFloor(t *testing.T) {
 
 	// Very small trade: 1 share at 10.0 = 10 CNY trade value
 	// Commission = max(10 * 0.0003, 5.0) = 5.0 (floor kicks in)
-	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 1, 10.0, day1)
+	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 1, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Commission should be exactly 5.0 (the floor)
@@ -150,7 +150,7 @@ func TestExecuteTrade_TransferFee(t *testing.T) {
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
 	// Buy: transfer fee should apply
-	tradeBuy, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 1000, 10.0, day1)
+	tradeBuy, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 1000, 10.0, day1, nil)
 	require.NoError(t, err)
 	// Transfer fee = 1000 * 10.0 * 0.00001 = 0.1
 	expectedTransferFeeBuy := 1000 * 10.0 * 0.00001
@@ -160,7 +160,7 @@ func TestExecuteTrade_TransferFee(t *testing.T) {
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
 	tracker.AdvanceDay(day2)
 
-	tradeSell, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 500, 11.0, day2)
+	tradeSell, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 500, 11.0, day2, nil)
 	require.NoError(t, err)
 	// Transfer fee on sell
 	expectedTransferFeeSell := 500 * 11.0 * 0.00001
@@ -174,12 +174,12 @@ func TestExecuteTrade_StampTax_SellOnly(t *testing.T) {
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
 	// Buy: no stamp tax
-	tradeBuy, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	tradeBuy, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 0.0, tradeBuy.StampTax)
 
 	// Short sell: stamp tax applies (DirectionShort is treated as sell)
-	tradeShort, err := tracker.ExecuteTrade("600001.SH", domain.DirectionShort, 100, 10.0, day1)
+	tradeShort, err := tracker.ExecuteTrade("600001.SH", domain.DirectionShort, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 	assert.Greater(t, tradeShort.StampTax, 0.0)
 }
@@ -192,14 +192,14 @@ func TestT1Settlement_CanSellYesterday(t *testing.T) {
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
 
 	// Day 1: Buy 100 shares
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Advance to Day 2
 	tracker.AdvanceDay(day2)
 
 	// Day 2: Sell 50 shares — should succeed
-	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 50, 10.5, day2)
+	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 50, 10.5, day2, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 50.0, trade.Quantity)
 }
@@ -211,11 +211,11 @@ func TestT1Settlement_CannotSellToday(t *testing.T) {
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
 	// Day 1: Buy 100 shares
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Day 1: Try to sell immediately — should fail
-	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 10.5, day1)
+	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 10.5, day1, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "T+1 settlement violation")
 }
@@ -228,14 +228,14 @@ func TestPartialFill(t *testing.T) {
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
 
 	// Day 1: Buy 100 shares
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Advance to Day 2
 	tracker.AdvanceDay(day2)
 
 	// Day 2: Try to sell 150 (only 100 sellable)
-	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 150, 10.5, day2)
+	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 150, 10.5, day2, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 100.0, trade.Quantity) // reduced to sellable qty
 }
@@ -249,7 +249,7 @@ func TestExecuteTrade_InsufficientCash(t *testing.T) {
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
 	// Try to buy 100 shares at 10.0 = 1000 CNY cost > 100 CNY available
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "insufficient cash")
 }
@@ -261,7 +261,7 @@ func TestExecuteTrade_CloseNonExistentPosition(t *testing.T) {
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
 	// Try to close a position that doesn't exist
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 10.0, day1, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "position not found")
 }
@@ -274,18 +274,18 @@ func TestExecuteTrade_CloseZeroQuantity(t *testing.T) {
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
 
 	// Buy 100 shares
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Advance
 	tracker.AdvanceDay(day2)
 
 	// Sell all 100
-	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 10.0, day2)
+	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 10.0, day2, nil)
 	require.NoError(t, err)
 
 	// Position is gone, try to sell again
-	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 10.0, day2)
+	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 10.0, day2, nil)
 	assert.Error(t, err)
 }
 
@@ -295,8 +295,8 @@ func TestGetAllPositions(t *testing.T) {
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
-	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
-	tracker.ExecuteTrade("600001.SH", domain.DirectionLong, 200, 20.0, day1)
+	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
+	tracker.ExecuteTrade("600001.SH", domain.DirectionLong, 200, 20.0, day1, nil)
 
 	positions := tracker.GetAllPositions()
 	assert.Len(t, positions, 2)
@@ -310,7 +310,7 @@ func TestGetPortfolioValue(t *testing.T) {
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
-	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 
 	prices := map[string]float64{"600000.SH": 12.0}
 	totalValue := tracker.GetPortfolioValue(prices)
@@ -328,7 +328,7 @@ func TestRecordDailyValue(t *testing.T) {
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
-	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 
 	prices := map[string]float64{"600000.SH": 12.0}
 	pv := tracker.RecordDailyValue(day1, prices)
@@ -356,8 +356,8 @@ func TestGetTrades(t *testing.T) {
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
-	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
-	tracker.ExecuteTrade("600001.SH", domain.DirectionLong, 200, 20.0, day1)
+	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
+	tracker.ExecuteTrade("600001.SH", domain.DirectionLong, 200, 20.0, day1, nil)
 
 	trades := tracker.GetTrades()
 	assert.Len(t, trades, 2)
@@ -385,7 +385,7 @@ func TestClosePosition(t *testing.T) {
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
 
 	// Buy
-	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	tracker.AdvanceDay(day2)
 
 	// Close position
@@ -413,7 +413,7 @@ func TestGetTotalValue(t *testing.T) {
 	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
-	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 
 	prices := map[string]float64{"600000.SH": 12.0}
 	// GetTotalValue is a thin wrapper around GetPortfolioValue
@@ -430,11 +430,11 @@ func TestHasPosition(t *testing.T) {
 
 	assert.False(t, tracker.HasPosition("600000.SH"))
 
-	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	assert.True(t, tracker.HasPosition("600000.SH"))
 
 	tracker.AdvanceDay(day2)
-	tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 11.0, day2)
+	tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 11.0, day2, nil)
 	assert.False(t, tracker.HasPosition("600000.SH"))
 }
 
@@ -444,7 +444,7 @@ func TestGetPortfolio(t *testing.T) {
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
-	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 
 	prices := map[string]float64{"600000.SH": 12.0}
 	portfolio := tracker.GetPortfolio(prices)
@@ -458,7 +458,7 @@ func TestReset(t *testing.T) {
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
-	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	tracker.Reset(500000)
 
 	assert.Equal(t, 500000.0, tracker.GetCash())

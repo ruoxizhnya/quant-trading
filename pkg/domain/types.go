@@ -17,6 +17,14 @@ const (
 	DirectionHold  Direction = "hold"
 )
 
+// OrderType represents the type of order
+type OrderType string
+
+const (
+	OrderTypeMarket OrderType = "market"
+	OrderTypeLimit  OrderType = "limit"
+)
+
 // OHLCV represents daily candlestick data
 type OHLCV struct {
 	Symbol    string    `json:"symbol"`
@@ -188,6 +196,8 @@ type Signal struct {
 	CompositeScore float64          `json:"composite_score"`
 	Factors       map[string]float64 `json:"factors"`
 	Metadata      map[string]any     `json:"metadata"`
+	LimitPrice    float64            `json:"limit_price"` // 0 for market orders
+	OrderType     OrderType          `json:"order_type"`  // market or limit
 }
 
 // Position represents a single position in the portfolio
@@ -276,6 +286,22 @@ type Trade struct {
 	StampTax    float64   `json:"stamp_tax"`    // 0.1% on sell only (A-share)
 	Timestamp   time.Time `json:"timestamp"`
 	PendingQty  float64   `json:"pending_qty"` // quantity not yet filled from target position
+	FilledQty   float64   `json:"filled_qty"`  // actual filled quantity (for partial fills)
+}
+
+// Order represents a trading order
+type Order struct {
+	ID         string    `json:"id"`
+	Symbol     string    `json:"symbol"`
+	Direction  Direction `json:"direction"` // long or short
+	OrderType  OrderType `json:"order_type"`
+	Quantity   float64   `json:"quantity"`
+	LimitPrice float64   `json:"limit_price"` // 0 for market orders
+	Timestamp  time.Time `json:"timestamp"`
+	FilledQty  float64   `json:"filled_qty"`
+	FillPrice  float64   `json:"fill_price"`
+	Status     string    `json:"status"` // "filled" / "partial" / "cancelled" / "expired"
+	Notes      string    `json:"notes"`
 }
 
 // TargetPosition tracks the target vs actual position for execution gap management.

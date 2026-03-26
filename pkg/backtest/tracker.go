@@ -26,8 +26,12 @@ type Tracker struct {
 	equityCurve     []domain.PortfolioValue
 
 	// Configuration
-	commissionRate float64
-	slippageRate   float64
+	commissionRate  float64
+	slippageRate    float64
+	liquidityFactor float64 // fraction of prev day volume used for partial fill threshold
+
+	// Order log for tracking all orders
+	orderLog *OrderLog
 
 	logger zerolog.Logger
 }
@@ -40,12 +44,14 @@ const transferFeeRate = 0.00001 // A-share transfer fee (过户费): 0.001% on b
 // NewTracker creates a new portfolio tracker.
 func NewTracker(initialCapital, commissionRate, slippageRate float64, logger zerolog.Logger) *Tracker {
 	return &Tracker{
-		cash:          initialCapital,
-		initialCash:   initialCapital,
-		positions:     make(map[string]*domain.Position),
-		commissionRate: commissionRate,
-		slippageRate:   slippageRate,
-		logger:        logger.With().Str("component", "tracker").Logger(),
+		cash:           initialCapital,
+		initialCash:    initialCapital,
+		positions:      make(map[string]*domain.Position),
+		commissionRate:  commissionRate,
+		slippageRate:    slippageRate,
+		liquidityFactor: 0.1, // default: 10% of prev day volume
+		orderLog:       &OrderLog{},
+		logger:         logger.With().Str("component", "tracker").Logger(),
 	}
 }
 
@@ -97,30 +103,102 @@ func (t *Tracker) GetPortfolioValue(prices map[string]float64) float64 {
 	return totalValue
 }
 
+// OrderExecutionOpts holds options for trade execution.
+type OrderExecutionOpts struct {
+	OrderType   domain.OrderType
+	LimitPrice  float64
+	DayBar      *domain.OHLCV // today's OHLCV bar (needed for limit order fill check)
+}
+
 // ExecuteTrade executes a trade and returns the trade record.
-func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quantity float64, price float64, timestamp time.Time) (*domain.Trade, error) {
+// opts may be nil (defaults to market order at given price).
+func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quantity float64, price float64, timestamp time.Time, opts *OrderExecutionOpts) (*domain.Trade, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Apply slippage: buy at higher price, sell at lower price
+	orderType := domain.OrderTypeMarket
+	limitPrice := price
+	var dayBar *domain.OHLCV
+	if opts != nil {
+		orderType = opts.OrderType
+		limitPrice = opts.LimitPrice
+		dayBar = opts.DayBar
+	}
+
+	// --- Limit order fill check ---
+	filledQty := quantity
 	executionPrice := price
-	switch direction {
-	case domain.DirectionLong:
-		executionPrice = price * (1 + t.slippageRate)
-	case domain.DirectionShort:
-		executionPrice = price * (1 - t.slippageRate)
-	case domain.DirectionClose:
-		// For closing, use the direction of the existing position
-		if pos, exists := t.positions[symbol]; exists {
-			if pos.Quantity > 0 {
-				executionPrice = price * (1 - t.slippageRate)
-			} else {
-				executionPrice = price * (1 + t.slippageRate)
+	orderStatus := "filled"
+
+	if orderType == domain.OrderTypeLimit && dayBar != nil {
+		limitFilled := false
+		if direction == domain.DirectionLong {
+			// Buy limit: fills if price dropped to or below limit
+			if dayBar.Low <= limitPrice {
+				limitFilled = true
+				executionPrice = min(limitPrice, dayBar.Close)
+			}
+		} else if direction == domain.DirectionShort {
+			// Sell limit: fills if price rose to or above limit
+			if dayBar.High >= limitPrice {
+				limitFilled = true
+				executionPrice = max(limitPrice, dayBar.Close)
+			}
+		}
+		if !limitFilled {
+			// Expired — record order and return
+			order := domain.Order{
+				ID:          uuid.New().String(),
+				Symbol:      symbol,
+				Direction:   direction,
+				OrderType:   orderType,
+				Quantity:    quantity,
+				LimitPrice:  limitPrice,
+				Timestamp:   timestamp,
+				FilledQty:  0,
+				FillPrice:  0,
+				Status:     "expired",
+			}
+			t.orderLog.Record(order)
+			return nil, fmt.Errorf("limit order expired: %s %s @ %.4f (day low=%.4f high=%.4f)",
+				direction, symbol, limitPrice, dayBar.Low, dayBar.High)
+		}
+	}
+
+	// --- Partial fill: liquidity check ---
+	if dayBar != nil && dayBar.Volume > 0 {
+		maxLiquidity := dayBar.Volume * t.liquidityFactor
+		if filledQty > maxLiquidity {
+			filledQty = maxLiquidity
+			orderStatus = "partial"
+			t.logger.Info().
+				Str("symbol", symbol).
+				Float64("requested", quantity).
+				Float64("filled", filledQty).
+				Float64("max_liquidity", maxLiquidity).
+				Msg("Partial fill: liquidity constraint")
+		}
+	}
+
+	// --- Apply slippage (for market orders only; limit orders use LimitPrice) ---
+	if orderType != domain.OrderTypeLimit {
+		switch direction {
+		case domain.DirectionLong:
+			executionPrice = price * (1 + t.slippageRate)
+		case domain.DirectionShort:
+			executionPrice = price * (1 - t.slippageRate)
+		case domain.DirectionClose:
+			if pos, exists := t.positions[symbol]; exists {
+				if pos.Quantity > 0 {
+					executionPrice = price * (1 - t.slippageRate)
+				} else {
+					executionPrice = price * (1 + t.slippageRate)
+				}
 			}
 		}
 	}
 
-	tradeValue := quantity * executionPrice
+	tradeValue := filledQty * executionPrice
 	commission := max(tradeValue*t.commissionRate, minCommission)
 	transferFee := tradeValue * transferFeeRate
 
@@ -132,15 +210,17 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 	}
 
 	trade := &domain.Trade{
-		ID:          uuid.New().String(),
-		Symbol:      symbol,
-		Direction:  direction,
-		Quantity:   quantity,
-		Price:      executionPrice,
-		Commission: commission,
-		TransferFee: transferFee,
-		StampTax:   stampTax,
-		Timestamp:  timestamp,
+		ID:           uuid.New().String(),
+		Symbol:       symbol,
+		Direction:   direction,
+		Quantity:     filledQty,
+		FilledQty:    filledQty,
+		Price:        executionPrice,
+		Commission:   commission,
+		TransferFee:  transferFee,
+		StampTax:     stampTax,
+		Timestamp:    timestamp,
+		PendingQty:   quantity - filledQty, // track unfilled portion
 	}
 
 	switch direction {
@@ -156,8 +236,8 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 
 		if existing, exists := t.positions[symbol]; exists {
 			// Update average cost
-			totalQty := existing.Quantity + quantity
-			existing.AvgCost = (existing.AvgCost*existing.Quantity + executionPrice*quantity) / totalQty
+			totalQty := existing.Quantity + filledQty
+			existing.AvgCost = (existing.AvgCost*existing.Quantity + executionPrice*filledQty) / totalQty
 			existing.Quantity = totalQty
 			existing.EntryDate = timestamp
 
@@ -167,16 +247,16 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 				// New trading day: today's qty starts fresh (yesterday's carry already in QuantityYesterday)
 				existing.QuantityToday = 0
 			}
-			existing.QuantityToday += quantity
+			existing.QuantityToday += filledQty
 			existing.BuyDate = timestamp
 		} else {
 			t.positions[symbol] = &domain.Position{
-				Symbol:           symbol,
-				Quantity:         quantity,
-				AvgCost:          executionPrice,
-				EntryDate:        timestamp,
-				BuyDate:          timestamp,
-				QuantityToday:    quantity, // newly bought, not sellable until T+1
+				Symbol:            symbol,
+				Quantity:          filledQty,
+				AvgCost:           executionPrice,
+				EntryDate:         timestamp,
+				BuyDate:           timestamp,
+				QuantityToday:     filledQty, // newly bought, not sellable until T+1
 				QuantityYesterday: 0,
 			}
 		}
@@ -187,11 +267,11 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 		t.cash += proceeds
 
 		if existing, exists := t.positions[symbol]; exists {
-			existing.Quantity -= quantity
+			existing.Quantity -= filledQty
 		} else {
 			t.positions[symbol] = &domain.Position{
 				Symbol:    symbol,
-				Quantity:  -quantity, // negative for short
+				Quantity:  -filledQty, // negative for short
 				AvgCost:   executionPrice,
 				EntryDate: timestamp,
 			}
@@ -300,12 +380,30 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 	}
 
 	t.trades = append(t.trades, *trade)
+
+	// Record order in order log
+	order := domain.Order{
+		ID:          uuid.New().String(),
+		Symbol:      symbol,
+		Direction:   direction,
+		OrderType:   orderType,
+		Quantity:    quantity,
+		LimitPrice:  limitPrice,
+		Timestamp:   timestamp,
+		FilledQty:  filledQty,
+		FillPrice:   executionPrice,
+		Status:      orderStatus,
+	}
+	t.orderLog.Record(order)
+
 	t.logger.Debug().
 		Str("symbol", symbol).
 		Str("direction", string(direction)).
-		Float64("quantity", quantity).
+		Str("order_type", string(orderType)).
+		Float64("filled_qty", filledQty).
 		Float64("price", executionPrice).
 		Float64("commission", commission).
+		Str("status", orderStatus).
 		Time("timestamp", timestamp).
 		Msg("Trade executed")
 
@@ -434,7 +532,9 @@ func (t *Tracker) GetTotalValue(prices map[string]float64) float64 {
 }
 
 // ClosePosition closes a position for a symbol.
+// No lock needed here — ExecuteTrade acquires its own write lock.
 func (t *Tracker) ClosePosition(symbol string, price float64, timestamp time.Time) (*domain.Trade, error) {
+	// Read position quantity without lock (ExecuteTrade locks internally)
 	t.mu.RLock()
 	pos, exists := t.positions[symbol]
 	t.mu.RUnlock()
@@ -443,7 +543,8 @@ func (t *Tracker) ClosePosition(symbol string, price float64, timestamp time.Tim
 		return nil, fmt.Errorf("position not found for symbol %s", symbol)
 	}
 
-	return t.ExecuteTrade(symbol, domain.DirectionClose, abs(pos.Quantity), price, timestamp)
+	// ExecuteTrade acquires its own write lock — no deadlock since we release RLock first
+	return t.ExecuteTrade(symbol, domain.DirectionClose, abs(pos.Quantity), price, timestamp, nil)
 }
 
 // HasPosition checks if there is an open position for a symbol.

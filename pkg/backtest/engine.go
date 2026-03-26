@@ -498,9 +498,11 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 				continue
 			}
 
-			// Enforce price limit: reject buys on limit-up days, sells on limit-down days
+			// Get today's OHLCV bar (used for limit checks and order execution)
+			var todayBar *domain.OHLCV
 			if ohlcvData, ok := marketDataCache[signal.Symbol]; ok && len(ohlcvData) > 0 {
-				todayBar := ohlcvData[len(ohlcvData)-1]
+				todayBar = &ohlcvData[len(ohlcvData)-1]
+				// Enforce price limit: reject buys on limit-up days, sells on limit-down days
 				if todayBar.LimitUp && (signal.Direction == domain.DirectionLong || signal.Direction == domain.DirectionShort) {
 					logger.Info().
 						Str("symbol", signal.Symbol).
@@ -516,6 +518,13 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 						Msg("Trade blocked: stock hit limit-down (跌停), cannot sell")
 					continue
 				}
+			}
+
+			// Build order execution options from signal
+			execOpts := &OrderExecutionOpts{
+				OrderType:  signal.OrderType,
+				LimitPrice:  signal.LimitPrice,
+				DayBar:      todayBar,
 			}
 
 			// Calculate position size
@@ -606,6 +615,7 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 						effectiveTarget,
 						price,
 						date,
+						execOpts,
 					)
 					if err != nil {
 						logger.Warn().
@@ -625,6 +635,7 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 						effectiveTarget,
 						price,
 						date,
+						execOpts,
 					)
 					if err != nil {
 						logger.Warn().
@@ -712,6 +723,7 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 					event.Quantity,
 					event.Price,
 					date,
+					nil,
 				)
 				if err != nil {
 					logger.Warn().

@@ -18,7 +18,7 @@ func TestT1Settlement_LongPosition(t *testing.T) {
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local) // 2024-01-03
 
 	// Day 1: Buy 100 shares
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Verify position exists
@@ -29,7 +29,7 @@ func TestT1Settlement_LongPosition(t *testing.T) {
 	assert.Equal(t, 0.0, pos.QuantityYesterday)  // None from yesterday
 
 	// Day 1: Try to sell — should FAIL due to T+1
-	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 10.5, day1)
+	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 10.5, day1, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "T+1 settlement violation")
 
@@ -42,14 +42,14 @@ func TestT1Settlement_LongPosition(t *testing.T) {
 	assert.Equal(t, 100.0, pos.QuantityYesterday)
 
 	// Day 2: Sell 50 shares — should SUCCEED
-	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 50, 10.5, day2)
+	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 50, 10.5, day2, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 50.0, trade.Quantity)
 	// Stamp tax should be applied (0.1%)
 	assert.Greater(t, trade.StampTax, 0.0)
 
 	// Day 2: Try to sell remaining 60 (only 50 available) — should reduce to 50
-	trade, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 60, 10.5, day2)
+	trade, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 60, 10.5, day2, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 50.0, trade.Quantity) // Reduced to available
 
@@ -67,14 +67,14 @@ func TestT1Settlement_MultipleBuys(t *testing.T) {
 	day3 := time.Date(2024, 1, 4, 15, 0, 0, 0, time.Local)
 
 	// Day 1: Buy 100 shares
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Advance to Day 2
 	tracker.AdvanceDay(day2)
 
 	// Day 2: Buy 50 more shares (now have 100 yesterday-able + 50 today)
-	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 50, 11.0, day2)
+	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 50, 11.0, day2, nil)
 	require.NoError(t, err)
 
 	pos, _ := tracker.GetPosition("600000.SH")
@@ -83,11 +83,11 @@ func TestT1Settlement_MultipleBuys(t *testing.T) {
 	assert.Equal(t, 100.0, pos.QuantityYesterday) // 100 from yesterday
 
 	// Day 2: Sell 100 — should succeed (only 100 yesterday-able)
-	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 11.5, day2)
+	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 11.5, day2, nil)
 	require.NoError(t, err)
 
 	// Day 2: Try to sell remaining 60 (only 50 today, not sellable) — should fail
-	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 60, 11.5, day2)
+	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 60, 11.5, day2, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "T+1 settlement violation")
 
@@ -95,7 +95,7 @@ func TestT1Settlement_MultipleBuys(t *testing.T) {
 	tracker.AdvanceDay(day3)
 
 	// Day 3: Sell remaining 50 — should succeed
-	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 50, 12.0, day3)
+	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 50, 12.0, day3, nil)
 	require.NoError(t, err)
 }
 
@@ -107,12 +107,12 @@ func TestT1Settlement_StampTax(t *testing.T) {
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
 
 	// Day 1: Buy
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Day 2: Sell
 	tracker.AdvanceDay(day2)
-	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 11.0, day2)
+	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 11.0, day2, nil)
 	require.NoError(t, err)
 
 	// Commission: min(tradeValue * 0.0003, 5.0) = max(100*11*0.0003, 5) = 5.0 (floor applies)
@@ -133,11 +133,11 @@ func TestT1Settlement_NewPositionSameDaySell(t *testing.T) {
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
 	// Day 1: Buy and immediately try to sell same-day
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Sell same day — should fail
-	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 10.5, day1)
+	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 10.5, day1, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "T+1 settlement violation")
 }
@@ -150,14 +150,14 @@ func TestT1Settlement_PartialFill(t *testing.T) {
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
 
 	// Day 1: Buy 100 shares
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Advance to Day 2
 	tracker.AdvanceDay(day2)
 
 	// Day 2: Try to sell 150 (only 100 sellable) — should partially fill with 100
-	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 150, 10.5, day2)
+	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 150, 10.5, day2, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 100.0, trade.Quantity) // Only 100 were sellable
 }
@@ -175,7 +175,7 @@ func TestT1Settlement_YesterdayDepletedFirst(t *testing.T) {
 	day3 := time.Date(2024, 1, 4, 15, 0, 0, 0, time.Local)
 
 	// Day 1: Buy 300 shares
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 300, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 300, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Advance to Day 2
@@ -187,7 +187,7 @@ func TestT1Settlement_YesterdayDepletedFirst(t *testing.T) {
 	assert.Equal(t, 0.0, pos.QuantityToday)
 
 	// Day 2: Buy 200 more shares (now holding 500 total: YD=300, TD=200)
-	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 200, 11.0, day2)
+	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 200, 11.0, day2, nil)
 	require.NoError(t, err)
 
 	pos, _ = tracker.GetPosition("600000.SH")
@@ -196,7 +196,7 @@ func TestT1Settlement_YesterdayDepletedFirst(t *testing.T) {
 	assert.Equal(t, 200.0, pos.QuantityToday)     // 200 locked
 
 	// Day 2: Sell 100 shares — should deplete from YD first (YD=200, TD=200)
-	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 11.5, day2)
+	trade, err := tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 11.5, day2, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 100.0, trade.Quantity)
 
@@ -214,7 +214,7 @@ func TestT1Settlement_YesterdayDepletedFirst(t *testing.T) {
 	assert.Equal(t, 400.0, pos.QuantityYesterday, "After advance: YD should carry over TD")
 	assert.Equal(t, 0.0, pos.QuantityToday)
 
-	trade, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 200, 12.0, day3)
+	trade, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 200, 12.0, day3, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 200.0, trade.Quantity)
 
@@ -232,10 +232,10 @@ func TestT1Settlement_ShortPosition_NoT1Restriction(t *testing.T) {
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
 	// Day 1: Short sell 100 shares — no T+1 restriction for shorting
-	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionShort, 100, 10.0, day1)
+	_, err := tracker.ExecuteTrade("600000.SH", domain.DirectionShort, 100, 10.0, day1, nil)
 	require.NoError(t, err)
 
 	// Day 1: Close short — should succeed (no T+1 for short)
-	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 9.5, day1)
+	_, err = tracker.ExecuteTrade("600000.SH", domain.DirectionClose, 100, 9.5, day1, nil)
 	require.NoError(t, err)
 }
