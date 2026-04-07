@@ -17,6 +17,7 @@
 *.dylib
 /test/
 *_test.go
+*.test
 
 # Build output
 /bin/
