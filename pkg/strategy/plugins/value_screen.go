@@ -41,8 +41,7 @@ type valueScreeningStrategy struct {
 }
 
 // Configure sets the strategy parameters.
-func (s *valueScreeningStrategy) Configure(params map[string]any) {
-	// Ensure cacheLimit has a sane default even if init() was skipped
+func (s *valueScreeningStrategy) Configure(params map[string]any) error {
 	if s.cacheLimit == 0 {
 		s.cacheLimit = 30
 	}
@@ -91,6 +90,31 @@ func (s *valueScreeningStrategy) Configure(params map[string]any) {
 			s.params.RebalanceFrequency = val
 		}
 	}
+	return nil
+}
+
+// Weight returns position weight based on signal strength and composite score.
+// For value screening: weight proportional to strength (capped at 0.05).
+func (s *valueScreeningStrategy) Weight(signal strategy.Signal, portfolioValue float64) float64 {
+	baseWeight := 1.0 / float64(s.params.TopN)
+	weight := signal.Strength * baseWeight
+	if weight > 0.05 {
+		weight = 0.05
+	}
+	if weight < 0.01 {
+		weight = 0.01
+	}
+	return weight
+}
+
+// Cleanup releases resources (cache, HTTP client).
+func (s *valueScreeningStrategy) Cleanup() {
+	s.cache.Range(func(key, value interface{}) bool {
+		s.cache.Delete(key)
+		return true
+	})
+	s.httpClient = nil
+	s.params = ValueScreeningConfig{}
 }
 
 // Name returns the strategy name.

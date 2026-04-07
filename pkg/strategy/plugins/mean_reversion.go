@@ -147,7 +147,7 @@ func (s *meanReversionStrategy) GenerateSignals(ctx context.Context, bars map[st
 }
 
 // Configure sets the strategy parameters.
-func (s *meanReversionStrategy) Configure(params map[string]any) {
+func (s *meanReversionStrategy) Configure(params map[string]any) error {
 	if v, ok := params["ma_period"]; ok {
 		switch val := v.(type) {
 		case float64:
@@ -172,6 +172,25 @@ func (s *meanReversionStrategy) Configure(params map[string]any) {
 			s.params.SellThresholdPct = float64(val)
 		}
 	}
+	return nil
+}
+
+// Weight returns the position weight based on signal strength.
+// For mean reversion: weight is proportional to deviation from MA (capped at 0.05).
+func (s *meanReversionStrategy) Weight(signal strategy.Signal, portfolioValue float64) float64 {
+	weight := signal.Strength * 0.1
+	if weight > 0.05 {
+		weight = 0.05
+	}
+	if weight < 0.01 {
+		weight = 0.01
+	}
+	return weight
+}
+
+// Cleanup releases any resources held by the strategy.
+func (s *meanReversionStrategy) Cleanup() {
+	s.params = MeanReversionConfig{}
 }
 
 func init() {

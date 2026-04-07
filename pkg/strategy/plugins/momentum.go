@@ -176,7 +176,7 @@ func (s *momentumStrategy) GenerateSignals(ctx context.Context, bars map[string]
 }
 
 // Configure sets the strategy parameters.
-func (s *momentumStrategy) Configure(params map[string]any) {
+func (s *momentumStrategy) Configure(params map[string]any) error {
 	if v, ok := params["lookback_days"]; ok {
 		switch val := v.(type) {
 		case float64:
@@ -198,6 +198,26 @@ func (s *momentumStrategy) Configure(params map[string]any) {
 			s.params.RebalanceFrequency = val
 		}
 	}
+	return nil
+}
+
+// Weight returns the position weight based on signal strength.
+// For momentum strategy: weight = strength * base_weight (capped at 0.05 per position).
+func (s *momentumStrategy) Weight(signal strategy.Signal, portfolioValue float64) float64 {
+	baseWeight := 1.0 / float64(s.params.TopN)
+	weight := signal.Strength * baseWeight
+	if weight > 0.05 {
+		weight = 0.05
+	}
+	if weight < 0.01 {
+		weight = 0.01
+	}
+	return weight
+}
+
+// Cleanup releases any resources held by the strategy.
+func (s *momentumStrategy) Cleanup() {
+	s.params = MomentumConfig{}
 }
 
 // isRebalanceDay returns true if today is a rebalance day based on frequency.

@@ -40,8 +40,7 @@ type multiFactorStrategy struct {
 }
 
 // Configure sets the strategy parameters.
-func (s *multiFactorStrategy) Configure(params map[string]any) {
-	// Ensure cacheLimit has a sane default even if init() was skipped
+func (s *multiFactorStrategy) Configure(params map[string]any) error {
 	if s.cacheLimit == 0 {
 		s.cacheLimit = 30
 	}
@@ -90,6 +89,31 @@ func (s *multiFactorStrategy) Configure(params map[string]any) {
 			s.params.RebalanceFrequency = val
 		}
 	}
+	return nil
+}
+
+// Weight returns position weight based on composite score.
+// For multi-factor: weight proportional to composite score (capped at 0.05).
+func (s *multiFactorStrategy) Weight(signal strategy.Signal, portfolioValue float64) float64 {
+	baseWeight := 1.0 / float64(s.params.TopN)
+	weight := signal.Strength * baseWeight
+	if weight > 0.05 {
+		weight = 0.05
+	}
+	if weight < 0.01 {
+		weight = 0.01
+	}
+	return weight
+}
+
+// Cleanup releases resources (cache, HTTP client).
+func (s *multiFactorStrategy) Cleanup() {
+	s.cache.Range(func(key, value interface{}) bool {
+		s.cache.Delete(key)
+		return true
+	})
+	s.httpClient = nil
+	s.params = MultiFactorConfig{}
 }
 
 // Name returns the strategy name.
