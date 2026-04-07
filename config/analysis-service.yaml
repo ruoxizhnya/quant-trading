@@ -3,6 +3,7 @@ server:
   port: 8085
 
 database:
+  url: "postgres://postgres:postgres@postgres:5432/quant_trading?sslmode=disable"
   host: "localhost"
   port: 5432
   user: "postgres"

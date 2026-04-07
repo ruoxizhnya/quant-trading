@@ -527,6 +527,16 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 		c.File("./cmd/analysis/static/copilot.html")
 	})
 
+	router.GET("/strategy-selector", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.File("./cmd/analysis/static/strategy-selector.html")
+	})
+
+	router.GET("/strategy-selector.html", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.File("./cmd/analysis/static/strategy-selector.html")
+	})
+
 	router.GET("/index.html", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./cmd/analysis/static/index.html")
