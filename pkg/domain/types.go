@@ -403,7 +403,7 @@ type MarketDataProvider interface {
 
 // RiskManager defines the interface for risk management
 type RiskManager interface {
-	CalculatePosition(ctx context.Context, signal Signal, portfolio *Portfolio, regime *MarketRegime, currentPrice float64) (PositionSize, error)
+	CalculatePosition(ctx context.Context, signal Signal, portfolio *Portfolio, regime *MarketRegime, currentPrice float64, ohlcv []OHLCV) (PositionSize, error)
 	DetectRegime(ctx context.Context, ohlcv []OHLCV) (*MarketRegime, error)
 	CheckStopLoss(ctx context.Context, positions []Position, prices map[string]float64) ([]StopLossEvent, error)
 }

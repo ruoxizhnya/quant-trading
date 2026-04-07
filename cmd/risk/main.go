@@ -248,6 +248,7 @@ type CalculatePositionRequest struct {
 	Portfolio    domain.Portfolio     `json:"portfolio"`
 	Regime       *domain.MarketRegime `json:"regime"`
 	CurrentPrice float64             `json:"current_price"`
+	OHLCV        []domain.OHLCV      `json:"ohlcv,omitempty"`
 }
 
 type CalculatePositionResponse struct {
@@ -269,7 +270,7 @@ func calculatePositionHandler(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	positionSize, err := riskManager.CalculatePosition(ctx, req.Signal, &req.Portfolio, req.Regime, req.CurrentPrice)
+	positionSize, err := riskManager.CalculatePosition(ctx, req.Signal, &req.Portfolio, req.Regime, req.CurrentPrice, req.OHLCV)
 	if err != nil {
 		log.Error().Err(err).Msg("position calculation failed")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

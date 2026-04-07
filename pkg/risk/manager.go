@@ -90,7 +90,7 @@ func NewRiskManager(cfg RiskManagerConfig, logger zerolog.Logger) (*RiskManager,
 }
 
 // CalculatePosition calculates the appropriate position size for a signal.
-func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Signal, portfolio *domain.Portfolio, regime *domain.MarketRegime, currentPrice float64) (domain.PositionSize, error) {
+func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Signal, portfolio *domain.Portfolio, regime *domain.MarketRegime, currentPrice float64, ohlcv []domain.OHLCV) (domain.PositionSize, error) {
 	rm.logger.Debug().
 		Str("symbol", signal.Symbol).
 		Str("direction", string(signal.Direction)).
@@ -99,7 +99,6 @@ func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Sign
 		Float64("current_price", currentPrice).
 		Msg("calculating position size")
 
-	// Validate inputs
 	if signal.Symbol == "" {
 		return domain.PositionSize{}, ErrInvalidInput
 	}
@@ -107,7 +106,6 @@ func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Sign
 		return domain.PositionSize{}, ErrInvalidInput
 	}
 	if regime == nil {
-		// Use neutral regime if not provided
 		regime = &domain.MarketRegime{
 			Trend:      "sideways",
 			Volatility: "medium",
@@ -115,13 +113,9 @@ func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Sign
 		}
 	}
 
-	// Calculate base weight from market regime
 	baseWeight := rm.calculateBaseWeightFromRegime(regime)
-
-	// Adjust for signal strength
 	weight := baseWeight * signal.Strength
 
-	// Ensure weight is within bounds
 	if weight < rm.config.MinPositionWeight {
 		weight = rm.config.MinPositionWeight
 	}
@@ -129,28 +123,64 @@ func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Sign
 		weight = rm.config.MaxPositionWeight
 	}
 
-	// Calculate position size using the provided current price
 	positionValue := portfolio.TotalValue * weight
 	if currentPrice <= 0 {
-		currentPrice = 100.0 // Fallback if price is invalid
+		currentPrice = 100.0
 	}
 	size := math.Floor(positionValue / currentPrice)
 
-	// Calculate risk score (higher strength = lower risk)
 	riskScore := 1.0 - signal.CompositeScore
+
+	var stopLoss, takeProfit float64
+
+	if len(ohlcv) >= rm.config.ATRPeriod {
+		atr, err := rm.stopLossChecker.CalculateATR(ohlcv)
+		if err == nil && atr > 0 {
+			stopLoss = rm.stopLossChecker.CalculateStopLossPrice(currentPrice, atr, regime)
+			takeProfit = rm.stopLossChecker.CalculateTakeProfitPrice(currentPrice, atr, regime)
+
+			rm.logger.Debug().
+				Str("symbol", signal.Symbol).
+				Float64("atr", atr).
+				Float64("stop_loss", stopLoss).
+				Float64("take_profit", takeProfit).
+				Msg("ATR-based stop loss/take profit calculated")
+		} else {
+			defaultATR := currentPrice * 0.02
+			stopLoss = rm.stopLossChecker.CalculateStopLossPrice(currentPrice, defaultATR, regime)
+			takeProfit = rm.stopLossChecker.CalculateTakeProfitPrice(currentPrice, defaultATR, regime)
+
+			rm.logger.Warn().
+				Err(err).
+				Str("symbol", signal.Symbol).
+				Msg("ATR calculation failed, using default 2%")
+		}
+	} else {
+		defaultATR := currentPrice * 0.02
+		stopLoss = rm.stopLossChecker.CalculateStopLossPrice(currentPrice, defaultATR, regime)
+		takeProfit = rm.stopLossChecker.CalculateTakeProfitPrice(currentPrice, defaultATR, regime)
+
+		rm.logger.Debug().
+			Str("symbol", signal.Symbol).
+			Int("ohlcv_len", len(ohlcv)).
+			Int("atr_period", rm.config.ATRPeriod).
+			Msg("insufficient data for ATR, using default 2%")
+	}
 
 	rm.logger.Debug().
 		Str("symbol", signal.Symbol).
 		Float64("weight", weight).
 		Float64("size", size).
 		Float64("risk_score", riskScore).
+		Float64("stop_loss", stopLoss).
+		Float64("take_profit", takeProfit).
 		Msg("position size calculated")
 
 	return domain.PositionSize{
 		Size:       size,
 		Weight:     weight,
-		StopLoss:   0, // Would be calculated with ATR
-		TakeProfit: 0, // Would be calculated with ATR
+		StopLoss:   stopLoss,
+		TakeProfit: takeProfit,
 		RiskScore:  riskScore,
 	}, nil
 }
