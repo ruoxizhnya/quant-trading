@@ -2,10 +2,12 @@ package risk
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/rs/zerolog"
 )
 
@@ -37,7 +39,10 @@ func NewRegimeDetector(cfg RegimeConfig, logger zerolog.Logger) *RegimeDetector 
 // DetectRegime detects the market regime from OHLCV data.
 func (rd *RegimeDetector) DetectRegime(ctx context.Context, ohlcv []domain.OHLCV) (*domain.MarketRegime, error) {
 	if len(ohlcv) < rd.slowMAPeriod {
-		return nil, ErrInsufficientData
+		return nil, errors.DataQuality(
+			fmt.Sprintf("insufficient data for regime detection: need %d, got %d", rd.slowMAPeriod, len(ohlcv)),
+			"DetectRegime",
+		)
 	}
 
 	trend := rd.detectTrend(ohlcv)

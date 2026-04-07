@@ -3,9 +3,11 @@ package risk
 
 import (
 	"context"
+	"fmt"
 	"math"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/rs/zerolog"
 )
 
@@ -44,7 +46,10 @@ func NewVolatilitySizer(cfg VolatilityConfig, logger zerolog.Logger) *Volatility
 // Uses close-to-close returns for volatility calculation.
 func (vs *VolatilitySizer) CalculateVolatility(ohlcv []domain.OHLCV) (float64, error) {
 	if len(ohlcv) < vs.lookbackDays {
-		return 0, ErrInsufficientData
+		return 0, errors.DataQuality(
+			fmt.Sprintf("insufficient data for volatility calculation: need %d, got %d", vs.lookbackDays, len(ohlcv)),
+			"CalculateVolatility",
+		)
 	}
 
 	// Calculate daily returns
@@ -156,7 +161,10 @@ func (vs *VolatilitySizer) CalculateBaseWeight(currentVol float64) float64 {
 // GetVolatilityStats returns volatility statistics for risk reporting.
 func (vs *VolatilitySizer) GetVolatilityStats(ohlcv []domain.OHLCV) (daily, annualized float64, err error) {
 	if len(ohlcv) < 2 {
-		return 0, 0, ErrInsufficientData
+		return 0, 0, errors.DataQuality(
+			fmt.Sprintf("insufficient data for volatility stats: need 2, got %d", len(ohlcv)),
+			"GetVolatilityStats",
+		)
 	}
 
 	returns := make([]float64, len(ohlcv)-1)

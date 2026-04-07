@@ -2,10 +2,12 @@ package risk
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/rs/zerolog"
 )
 
@@ -46,7 +48,10 @@ func NewStopLossChecker(cfg StopLossConfig, logger zerolog.Logger) *StopLossChec
 // CalculateATR calculates the Average True Range from OHLCV data.
 func (slc *StopLossChecker) CalculateATR(ohlcv []domain.OHLCV) (float64, error) {
 	if len(ohlcv) < slc.atrPeriod {
-		return 0, ErrInsufficientData
+		return 0, errors.DataQuality(
+			fmt.Sprintf("insufficient data for ATR calculation: need %d, got %d", slc.atrPeriod, len(ohlcv)),
+			"CalculateATR",
+		)
 	}
 
 	trueRanges := make([]float64, len(ohlcv)-1)

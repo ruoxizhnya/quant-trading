@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
@@ -124,7 +125,7 @@ type BacktestResponse struct {
 func NewEngine(v *viper.Viper, logger zerolog.Logger) (*Engine, error) {
 	config := Config{}
 	if err := v.Sub("backtest").Unmarshal(&config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal backtest config: %w", err)
+		return nil, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "failed to unmarshal backtest config", "NewEngine")
 	}
 
 	dataServiceURL := v.GetString("data_service.url")
@@ -178,20 +179,20 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 	// Parse dates
 	startDate, err := time.Parse("2006-01-02", req.StartDate)
 	if err != nil {
-		return nil, fmt.Errorf("invalid start_date format: %w", err)
+		return nil, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "invalid start_date format: "+req.StartDate, "RunBacktest")
 	}
 	endDate, err := time.Parse("2006-01-02", req.EndDate)
 	if err != nil {
-		return nil, fmt.Errorf("invalid end_date format: %w", err)
+		return nil, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "invalid end_date format: "+req.EndDate, "RunBacktest")
 	}
 
 	// Pre-check: verify trading calendar has data for the requested date range
 	hasCalendar, err := e.checkCalendarExists(ctx, startDate, endDate)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check trading calendar: %w", err)
+		return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, "failed to check trading calendar", "RunBacktest")
 	}
 	if !hasCalendar {
-		return nil, fmt.Errorf("trading calendar not synced, please run POST /sync/calendar first (with exchange 'SSE' or 'both')")
+		return nil, apperrors.New(apperrors.ErrCodeInvalidInput, "trading calendar not synced, please run POST /sync/calendar first (with exchange 'SSE' or 'both')").WithOperation("RunBacktest")
 	}
 
 	// Use default initial capital if not provided
@@ -299,11 +300,11 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 	// Get trading days
 	tradingDays, err := e.getTradingDays(ctx, params.StartDate, params.EndDate)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get trading days: %w", err)
+		return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, "failed to get trading days", "RunBacktest")
 	}
 
 	if len(tradingDays) == 0 {
-		return nil, fmt.Errorf("no trading days found in range")
+		return nil, apperrors.New(apperrors.ErrCodeDataQuality, "no trading days found in range").WithOperation("RunBacktest")
 	}
 
 	logger.Info().Int("trading_days", len(tradingDays)).Msg("Retrieved trading days")
@@ -380,7 +381,7 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 					// --- getOHLCV ---
 					ohlcvData, err := e.getOHLCV(ctx, job.symbol, params.StartDate, date)
 					if err != nil {
-						res.err = fmt.Errorf("symbol %s: %w", job.symbol, err)
+						res.err = apperrors.Wrapf(err, apperrors.ErrCodeDataQuality, "fetch_ohlcv", "symbol %s failed to fetch OHLCV", job.symbol)
 						resultCh <- res
 						continue
 					}
@@ -799,7 +800,7 @@ func (e *Engine) checkCalendarExists(ctx context.Context, start, end time.Time) 
 		return false, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("data service returned status %d", resp.StatusCode)
+		return false, apperrors.Unavailable("data", fmt.Errorf("HTTP %d", resp.StatusCode))
 	}
 
 	var result struct {
@@ -834,23 +835,23 @@ func (e *Engine) warmCache(ctx context.Context, symbols []string, start, end tim
 	}
 	jsonData, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("failed to marshal bulk request: %w", err)
+		return apperrors.Wrap(err, apperrors.ErrCodeInternal, "failed to marshal bulk request", "warmCache")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonData))
 	if err != nil {
-		return fmt.Errorf("failed to create bulk request: %w", err)
+		return apperrors.Wrap(err, apperrors.ErrCodeInternal, "failed to create bulk request", "warmCache")
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("bulk OHLCV request failed: %w", err)
+		return apperrors.Wrap(err, apperrors.ErrCodeUnavailable, "bulk OHLCV request failed", "warmCache")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bulk endpoint returned status %d", resp.StatusCode)
+		return apperrors.New(apperrors.ErrCodeUnavailable, fmt.Sprintf("bulk endpoint returned status %d", resp.StatusCode)).WithOperation("warmCache")
 	}
 
 	var result struct {
@@ -861,14 +862,14 @@ func (e *Engine) warmCache(ctx context.Context, symbols []string, start, end tim
 		} `json:"results"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("failed to decode bulk response: %w", err)
+		return apperrors.Wrap(err, apperrors.ErrCodeInternal, "failed to decode bulk response", "warmCache")
 	}
 
 	// Populate in-memory cache from bulk result.
 	// Subsequent getOHLCV calls will hit this map directly (zero HTTP).
 	for _, r := range result.Results {
 		if r.Error != "" {
-			return fmt.Errorf("bulk fetch failed for %s: %s", r.Symbol, r.Error)
+			return apperrors.New(apperrors.ErrCodeDataQuality, fmt.Sprintf("bulk fetch failed for %s: %s", r.Symbol, r.Error)).WithOperation("warmCache")
 		}
 		// Sort by date ascending for consistent iteration.
 		sort.Slice(r.OHLCV, func(i, j int) bool {
@@ -897,7 +898,7 @@ func (e *Engine) getTradingDays(ctx context.Context, start, end time.Time) ([]ti
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("data service returned status %d", resp.StatusCode)
+		return nil, apperrors.Unavailable("data", fmt.Errorf("HTTP %d", resp.StatusCode))
 	}
 
 	var result struct {
@@ -962,7 +963,7 @@ func (e *Engine) getOHLCV(ctx context.Context, symbol string, start, end time.Ti
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("data service returned status %d", resp.StatusCode)
+		return nil, apperrors.Unavailable("data", fmt.Errorf("HTTP %d", resp.StatusCode))
 	}
 
 	var result struct {
@@ -1025,7 +1026,7 @@ func (e *Engine) detectRegime(ctx context.Context, marketData map[string][]domai
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("risk service returned status %d", resp.StatusCode)
+		return nil, apperrors.Unavailable("risk", fmt.Errorf("HTTP %d", resp.StatusCode))
 	}
 
 	var regime domain.MarketRegime
@@ -1051,7 +1052,7 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 
 		signals, err := strat.GenerateSignals(ctx, marketData, portfolio)
 		if err != nil {
-			return nil, fmt.Errorf("local strategy %s failed: %w", strategyName, err)
+			return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, fmt.Sprintf("local strategy %s failed", strategyName), "getSignals")
 		}
 
 		// Convert strategy.Signal to domain.Signal
@@ -1125,7 +1126,7 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("strategy service returned status %d", resp.StatusCode)
+		return nil, apperrors.Unavailable("strategy", fmt.Errorf("HTTP %d", resp.StatusCode))
 	}
 
 	var result struct {
@@ -1172,7 +1173,7 @@ func (e *Engine) calculatePosition(ctx context.Context, signal domain.Signal, po
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return domain.PositionSize{}, fmt.Errorf("risk service returned status %d", resp.StatusCode)
+		return domain.PositionSize{}, apperrors.Unavailable("risk", fmt.Errorf("HTTP %d", resp.StatusCode))
 	}
 
 	var positionSize domain.PositionSize
@@ -1222,7 +1223,7 @@ func (e *Engine) checkStopLosses(ctx context.Context, tracker *Tracker, prices m
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("risk service returned status %d", resp.StatusCode)
+		return nil, apperrors.Unavailable("risk", fmt.Errorf("HTTP %d", resp.StatusCode))
 	}
 
 	var events struct {
@@ -1242,11 +1243,11 @@ func (e *Engine) GetBacktestResult(backtestID string) (*domain.BacktestResult, e
 	e.mu.RUnlock()
 
 	if state == nil || state.ID != backtestID {
-		return nil, fmt.Errorf("backtest not found: %s", backtestID)
+		return nil, apperrors.NotFound("backtest", backtestID)
 	}
 
 	if state.Status != "completed" {
-		return nil, fmt.Errorf("backtest not completed: %s", state.Status)
+		return nil, apperrors.New(apperrors.ErrCodeConflict, fmt.Sprintf("backtest not completed: %s", state.Status)).WithOperation("GetBacktestResult")
 	}
 
 	return state.Result, nil
@@ -1259,7 +1260,7 @@ func (e *Engine) GetBacktestTrades(backtestID string) ([]domain.Trade, error) {
 	e.mu.RUnlock()
 
 	if state == nil || state.ID != backtestID {
-		return nil, fmt.Errorf("backtest not found: %s", backtestID)
+		return nil, apperrors.NotFound("backtest", backtestID)
 	}
 
 	return state.Tracker.GetTrades(), nil
@@ -1272,7 +1273,7 @@ func (e *Engine) GetBacktestEquity(backtestID string) ([]domain.PortfolioValue, 
 	e.mu.RUnlock()
 
 	if state == nil || state.ID != backtestID {
-		return nil, fmt.Errorf("backtest not found: %s", backtestID)
+		return nil, apperrors.NotFound("backtest", backtestID)
 	}
 
 	return state.Tracker.GetEquityCurve(), nil
@@ -1285,7 +1286,7 @@ func (e *Engine) GetBacktestStatus(backtestID string) (string, error) {
 	e.mu.RUnlock()
 
 	if state == nil || state.ID != backtestID {
-		return "", fmt.Errorf("backtest not found: %s", backtestID)
+		return "", apperrors.NotFound("backtest", backtestID)
 	}
 
 	return state.Status, nil
@@ -1385,7 +1386,7 @@ func (e *Engine) getStock(ctx context.Context, symbol string) (domain.Stock, err
 		return domain.Stock{Symbol: symbol}, nil // Return minimal stock if not found
 	}
 	if resp.StatusCode != http.StatusOK {
-		return domain.Stock{}, fmt.Errorf("data service returned status %d", resp.StatusCode)
+		return domain.Stock{}, apperrors.Unavailable("data", fmt.Errorf("HTTP %d", resp.StatusCode))
 	}
 
 	var result struct {

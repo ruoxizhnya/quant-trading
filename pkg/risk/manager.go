@@ -2,18 +2,12 @@ package risk
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"math"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/rs/zerolog"
-)
-
-// Common errors
-var (
-	ErrInsufficientData = errors.New("insufficient data for calculation")
-	ErrInvalidInput      = errors.New("invalid input parameters")
-	ErrNoDataForSymbol   = errors.New("no data available for symbol")
 )
 
 // RiskManagerConfig holds all configuration for the risk manager.
@@ -100,10 +94,10 @@ func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Sign
 		Msg("calculating position size")
 
 	if signal.Symbol == "" {
-		return domain.PositionSize{}, ErrInvalidInput
+		return domain.PositionSize{}, errors.InvalidInput("symbol is required", "CalculatePosition")
 	}
 	if portfolio == nil || portfolio.TotalValue <= 0 {
-		return domain.PositionSize{}, ErrInvalidInput
+		return domain.PositionSize{}, errors.InvalidInput("portfolio must be non-nil with positive total value", "CalculatePosition")
 	}
 	if regime == nil {
 		regime = &domain.MarketRegime{
@@ -224,7 +218,10 @@ func (rm *RiskManager) DetectRegime(ctx context.Context, ohlcv []domain.OHLCV) (
 			Int("required", rm.config.SlowMAPeriod).
 			Int("available", len(ohlcv)).
 			Msg("insufficient data for regime detection")
-		return nil, ErrInsufficientData
+		return nil, errors.DataQuality(
+			fmt.Sprintf("insufficient data for regime detection: need %d, got %d", rm.config.SlowMAPeriod, len(ohlcv)),
+			"DetectRegime",
+		)
 	}
 
 	regime, err := rm.regimeDetector.DetectRegime(ctx, ohlcv)
@@ -253,7 +250,7 @@ func (rm *RiskManager) CheckStopLoss(ctx context.Context, positions []domain.Pos
 		return nil, nil
 	}
 	if len(prices) == 0 {
-		return nil, ErrInvalidInput
+		return nil, errors.InvalidInput("prices map cannot be empty", "CheckStopLoss")
 	}
 
 	// Calculate ATR for each symbol
