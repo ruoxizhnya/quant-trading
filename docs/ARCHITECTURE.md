@@ -1,6 +1,12 @@
 # 量化交易系统架构文档
 
-_最后更新: 2026-03-24_
+_最后更新: 2026-04-08 (Phase 2.5)_
+
+**Phase 2.5 更新:**
+- 新增 `pkg/errors` 统一错误处理模块
+- 新增 ATR StopLoss 风控组件 (pkg/risk/stoploss.go)
+- 策略接口统一化 (pkg/strategy/strategy.go)
+- 测试覆盖大幅提升 (>55 cases)
 
 ---
 

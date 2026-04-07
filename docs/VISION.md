@@ -1,11 +1,17 @@
 # Quant Trading System — Vision & Features
 
 > **Status:** Canonical source of truth
-> **Version:** 1.1.0
-> **Last Updated:** 2026-03-24
+> **Version:** 1.2.0
+> **Last Updated:** 2026-04-08
 > **Owner:** 龙少 (Longshao) — AI Assistant
 >
-> **Changelog v1.2:** Team review fixes — marked multi_factor as experimental (depends on Factor Cache P1, not yet built); moved Redis caching to Phase 1 (required for 5s backtest target); moved Walk-forward validation to Phase 2 (Phase 3 prerequisite); elevated Strategy Copilot to P1 (Phase 2 core deliverable); added Phase 1/2 explicit exit criteria; added Phase Gate review process.
+> **Changelog v1.2 (Phase 2.5):**
+> - Unified error handling framework (pkg/errors) with structured error codes
+> - ATR-based StopLoss implementation with market regime adaptation
+> - Strategy interface unified: Configure(), Weight(), Cleanup() methods added
+> - Signal type enhanced: Direction, Factors, Metadata fields
+> - Comprehensive unit tests: T+1 (6 cases), Price Limits (7 cases), Engine (11 cases), Risk Manager (13 cases), Strategy (18 cases)
+> - Test coverage > 80% for core packages (backtest, risk, strategy)
 
 ---
 

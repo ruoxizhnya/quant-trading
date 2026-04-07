@@ -1,8 +1,18 @@
 # Quant Trading System - System Specification
 
+> **Version:** 1.2.0 (Phase 2.5 Updated)
+> **Last Updated:** 2026-04-08
+
 ## Overview
 
 A production-grade quantitative trading system targeting A-share markets with market-agnostic core services. The system implements a microservices architecture with hot-swappable multi-factor strategies, dynamic risk management, and comprehensive backtesting capabilities.
+
+**Phase 2.5 Changes:**
+- Unified error handling: `pkg/errors` with structured error codes (ErrorCode, AppError)
+- ATR StopLoss: Market regime-adaptive stop loss (bull/bear/sideways multipliers)
+- Strategy interface finalized: Configure(), Weight(), GenerateSignals(), Cleanup()
+- Signal type enhanced: Direction enum, Factors map, Metadata map
+- Test coverage: 55+ unit tests across core packages
 
 ---
 
