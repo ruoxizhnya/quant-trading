@@ -926,25 +926,46 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 			return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, fmt.Sprintf("local strategy %s failed", strategyName), "getSignals")
 		}
 
-		// Convert strategy.Signal to domain.Signal
+		// Convert strategy.Signal to domain.Signal (lossless conversion)
 		domainSignals := make([]domain.Signal, 0, len(signals))
 		for _, s := range signals {
 			if s.Action == "hold" {
 				continue
 			}
-			var dir domain.Direction
-			if s.Action == "buy" {
-				dir = domain.DirectionLong
-			} else if s.Action == "sell" {
-				dir = domain.DirectionShort
-			} else {
-				continue
+			dir := s.Direction
+			if dir == "" || dir == domain.DirectionHold {
+				if s.Action == "buy" {
+					dir = domain.DirectionLong
+				} else if s.Action == "sell" {
+					dir = domain.DirectionClose
+				} else {
+					continue
+				}
 			}
+
+			sigDate := date
+			if d, ok := s.Date.(time.Time); ok && !d.IsZero() {
+				sigDate = d
+			}
+
+			factors := s.Factors
+			if factors == nil {
+				factors = make(map[string]float64)
+			}
+			metadata := s.Metadata
+			if metadata == nil {
+				metadata = make(map[string]interface{})
+			}
+
 			domainSignals = append(domainSignals, domain.Signal{
-				Symbol:    s.Symbol,
-				Direction: dir,
-				Strength:  s.Strength,
-				Date:      date,
+				Symbol:        s.Symbol,
+				Date:          sigDate,
+				Direction:     dir,
+				Strength:      s.Strength,
+				Factors:       factors,
+				Metadata:      metadata,
+				LimitPrice:    s.Price,
+				CompositeScore: s.Strength,
 			})
 		}
 

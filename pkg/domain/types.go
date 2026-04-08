@@ -383,6 +383,10 @@ type BacktestParams struct {
 }
 
 // Strategy interface must be implemented by all trading strategies
+//
+// Deprecated: Use pkg/strategy.Strategy instead. This interface is kept for backward
+// compatibility with existing example strategies and cmd/strategy service.
+// The canonical interface is strategy.Strategy which includes Parameters() method.
 type Strategy interface {
 	Name() string
 	Description() string

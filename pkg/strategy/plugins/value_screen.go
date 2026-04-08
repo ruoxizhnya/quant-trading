@@ -328,7 +328,10 @@ func (s *valueScreeningStrategy) GenerateSignals(
 	if !s.isRebalanceDay(screenDate) {
 		// Not a rebalance day: return sell signals only for positions that
 		// should be exited (momentum turned negative), no new buys
-		sellSignals, _ := s.generateSellSignals(bars, portfolio, momentumDays)
+		sellSignals, err := s.generateSellSignals(bars, portfolio, momentumDays)
+		if err != nil {
+			return nil, fmt.Errorf("value screen sell signal generation failed: %w", err)
+		}
 		return sellSignals, nil
 	}
 

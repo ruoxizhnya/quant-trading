@@ -372,7 +372,10 @@ func (s *multiFactorStrategy) GenerateSignals(
 
 	// Check rebalance frequency
 	if !s.isRebalanceDay(screenDate) {
-		sellSignals, _ := s.generateSellSignals(bars, portfolio, lookback)
+		sellSignals, err := s.generateSellSignals(bars, portfolio, lookback)
+		if err != nil {
+			return nil, fmt.Errorf("multi-factor sell signal generation failed: %w", err)
+		}
 		return sellSignals, nil
 	}
 
