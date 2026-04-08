@@ -11,6 +11,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	_ "github.com/ruoxizhnya/quant-trading/pkg/strategy/plugins" // registers momentum strategy via init()
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -207,7 +208,7 @@ func BenchmarkBacktest(b *testing.B) {
 	v.Set("risk_service.url", riskServer.URL)
 
 	logger := zerolog.New(zerolog.NewTestWriter(b))
-	eng, err := NewEngine(v, logger)
+	eng, err := NewEngine(v, marketdata.NewInMemoryProvider(), logger)
 	if err != nil {
 		b.Fatalf("failed to create engine: %v", err)
 	}
@@ -244,6 +245,7 @@ func TestBenchmarkSmoke(t *testing.T) {
 
 	// Build in-memory OHLCV cache from fixture.
 	inMemoryOHLCV := make(map[string][]domain.OHLCV, len(fixture.Metadata.Symbols))
+	dateSet := make(map[string]time.Time)
 	for _, b := range fixture.OHLCV {
 		tm, _ := time.Parse("2006-01-02", b.TradeDate)
 		inMemoryOHLCV[b.Symbol] = append(inMemoryOHLCV[b.Symbol], domain.OHLCV{
@@ -252,6 +254,12 @@ func TestBenchmarkSmoke(t *testing.T) {
 			Close: b.Close, Volume: b.Volume,
 			LimitUp: b.LimitUp, LimitDown: b.LimitDown,
 		})
+		dateSet[b.TradeDate] = tm
+	}
+	// Extract unique trading days
+	tradingDays := make([]time.Time, 0, len(dateSet))
+	for _, d := range dateSet {
+		tradingDays = append(tradingDays, d)
 	}
 
 	dataServer := httptest.NewServer(buildFixtureHandler(fixture))
@@ -287,7 +295,9 @@ func TestBenchmarkSmoke(t *testing.T) {
 	v.Set("risk_service.url", riskServer.URL)
 
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	eng, err := NewEngine(v, logger)
+	provider := marketdata.NewInMemoryProvider()
+	provider.SetTradingDays(tradingDays)
+	eng, err := NewEngine(v, provider, logger)
 	require.NoError(t, err)
 	eng.LoadOHLCVInMemory(inMemoryOHLCV)
 	eng.SetParallelWorkers(4)

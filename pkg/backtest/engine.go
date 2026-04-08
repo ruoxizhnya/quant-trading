@@ -1,7 +1,6 @@
 package backtest
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,6 +15,8 @@ import (
 	"github.com/spf13/viper"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
+	"github.com/ruoxizhnya/quant-trading/pkg/httpclient"
+	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
@@ -26,15 +27,41 @@ type Config struct {
 	SlippageRate   float64 `mapstructure:"slippage_rate"`
 	RiskFreeRate   float64 `mapstructure:"risk_free_rate"`
 	Seed           int64   `mapstructure:"seed"` // Random seed for determinism; 0 = use time-based seed
+
+	// Trading rules loaded from config
+	Trading TradingConfig `mapstructure:"trading"`
 }
 
-// Price limit constants for A-share stocks
-const (
-	priceLimitNormal   = 0.10  // ±10% for normal A-shares
-	priceLimitST       = 0.05  // ±5% for ST stocks
-	priceLimitNew      = 0.20  // ±20% for stocks listed < 60 trading days
-	newStockTradeDays  = 60    // threshold for new stock price limit
-)
+// TradingConfig holds A-share trading rules
+type TradingConfig struct {
+	StampTaxRate    float64          `mapstructure:"stamp_tax_rate"`
+	MinCommission   float64          `mapstructure:"min_commission"`
+	TransferFeeRate float64          `mapstructure:"transfer_fee_rate"`
+	PriceLimit      PriceLimitConfig `mapstructure:"price_limit"`
+	NewStockDays    int              `mapstructure:"new_stock_days"`
+}
+
+// PriceLimitConfig holds price limit rules
+type PriceLimitConfig struct {
+	Normal float64 `mapstructure:"normal"`
+	ST     float64 `mapstructure:"st"`
+	New    float64 `mapstructure:"new"`
+}
+
+// Default trading constants (fallback if not configured)
+func defaultTradingConfig() TradingConfig {
+	return TradingConfig{
+		StampTaxRate:    0.001,
+		MinCommission:   5.0,
+		TransferFeeRate: 0.00001,
+		PriceLimit: PriceLimitConfig{
+			Normal: 0.10,
+			ST:     0.05,
+			New:    0.20,
+		},
+		NewStockDays: 60,
+	}
+}
 
 // Engine is the backtesting engine that simulates trading strategies.
 type Engine struct {
@@ -43,13 +70,15 @@ type Engine struct {
 	// Configuration
 	config Config
 
-	// External service clients
-	dataServiceURL    string
+	// Market data provider (abstracted for testability)
+	provider marketdata.Provider
+
+	// External service URLs (for non-market-data calls: risk, strategy)
 	strategyServiceURL string
 	riskServiceURL    string
 
-	// HTTP client for service communication
-	httpClient *http.Client
+	// HTTP client for non-market-data service communication (with retry)
+	httpClient *httpclient.Client
 
 	// Current backtest state
 	currentBacktest *BacktestState
@@ -122,16 +151,12 @@ type BacktestResponse struct {
 }
 
 // NewEngine creates a new backtest engine.
-func NewEngine(v *viper.Viper, logger zerolog.Logger) (*Engine, error) {
+func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logger) (*Engine, error) {
 	config := Config{}
 	if err := v.Sub("backtest").Unmarshal(&config); err != nil {
 		return nil, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "failed to unmarshal backtest config", "NewEngine")
 	}
 
-	dataServiceURL := v.GetString("data_service.url")
-	if dataServiceURL == "" {
-		dataServiceURL = "http://localhost:8081"
-	}
 	strategyServiceURL := v.GetString("strategy_service.url")
 	if strategyServiceURL == "" {
 		strategyServiceURL = "http://localhost:8082"
@@ -155,6 +180,11 @@ func NewEngine(v *viper.Viper, logger zerolog.Logger) (*Engine, error) {
 		config.RiskFreeRate = 0.03
 	}
 
+	// Load trading rules from config, use defaults if not set
+	if config.Trading.StampTaxRate == 0 {
+		config.Trading = defaultTradingConfig()
+	}
+
 	// Initialize random seed for deterministic backtests.
 	// If Seed is 0, math/rand is not used (no shuffle operations currently exist).
 	// Document the seed value used in test fixtures for reproducibility.
@@ -164,12 +194,10 @@ func NewEngine(v *viper.Viper, logger zerolog.Logger) (*Engine, error) {
 
 	return &Engine{
 		config:            config,
-		dataServiceURL:    dataServiceURL,
+		provider:          provider,
 		strategyServiceURL: strategyServiceURL,
 		riskServiceURL:    riskServiceURL,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		httpClient:        httpclient.New("", 30*time.Second, 3),
 		logger: logger.With().Str("component", "backtest_engine").Logger(),
 	}, nil
 }
@@ -224,6 +252,7 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 			initialCapital,
 			e.config.CommissionRate,
 			e.config.SlippageRate,
+			e.config.Trading,
 			e.logger,
 		),
 		targetPositions: make(map[string]*domain.TargetPosition),
@@ -401,12 +430,12 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 							prevClose = ohlcvData[len(ohlcvData)-2].Close
 						}
 						if prevClose > 0 {
-							limitRate := priceLimitNormal
-							if tradeDays < newStockTradeDays {
-								limitRate = priceLimitNew
-							} else if hasSTPrefix(stockName) {
-								limitRate = priceLimitST
-							}
+							limitRate := e.config.Trading.PriceLimit.Normal
+						if tradeDays < e.config.Trading.NewStockDays {
+							limitRate = e.config.Trading.PriceLimit.New
+						} else if hasSTPrefix(stockName) {
+							limitRate = e.config.Trading.PriceLimit.ST
+						}
 							todayBar := ohlcvData[len(ohlcvData)-1]
 							upperLimit := prevClose * (1 + limitRate)
 							lowerLimit := prevClose * (1 - limitRate)
@@ -781,145 +810,37 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 
 // checkCalendarExists verifies the trading calendar has entries for the given range.
 func (e *Engine) checkCalendarExists(ctx context.Context, start, end time.Time) (bool, error) {
-	url := fmt.Sprintf("%s/api/v1/trading/calendar?start=%s&end=%s",
-		e.dataServiceURL, start.Format("2006-01-02"), end.Format("2006-01-02"))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return false, err
-	}
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest {
-		// Calendar not synced — no data at all
-		return false, nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return false, apperrors.Unavailable("data", fmt.Errorf("HTTP %d", resp.StatusCode))
-	}
-
-	var result struct {
-		TradingDays []string `json:"trading_days"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false, err
-	}
-
-	return len(result.TradingDays) > 0, nil
+	return e.provider.CheckCalendarExists(ctx, start, end)
 }
 
 // warmCache pre-fetches all OHLCV data for the stock universe into the engine's
-// in-memory cache (e.inMemoryOHLCV) in a single bulk call. After this completes,
-// all getOHLCV calls during the backtest run are served from memory — zero HTTP overhead.
-//
-// This replaces the previous approach of warming Redis only, which the engine did not
-// directly read from.
+// in-memory cache (e.inMemoryOHLCV) using the provider's bulk endpoint.
 func (e *Engine) warmCache(ctx context.Context, symbols []string, start, end time.Time) error {
 	if len(symbols) == 0 {
 		return nil
 	}
 
-	url := fmt.Sprintf("%s/api/v1/ohlcv/bulk", e.dataServiceURL)
-	startStr := start.Format("20060102")
-	endStr := end.Format("20060102")
-
-	body := map[string]any{
-		"symbols":    symbols,
-		"start_date": startStr,
-		"end_date":   endStr,
-	}
-	jsonData, err := json.Marshal(body)
-	if err != nil {
-		return apperrors.Wrap(err, apperrors.ErrCodeInternal, "failed to marshal bulk request", "warmCache")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonData))
-	if err != nil {
-		return apperrors.Wrap(err, apperrors.ErrCodeInternal, "failed to create bulk request", "warmCache")
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := e.httpClient.Do(req)
+	data, err := e.provider.BulkLoadOHLCV(ctx, symbols, start, end)
 	if err != nil {
 		return apperrors.Wrap(err, apperrors.ErrCodeUnavailable, "bulk OHLCV request failed", "warmCache")
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return apperrors.New(apperrors.ErrCodeUnavailable, fmt.Sprintf("bulk endpoint returned status %d", resp.StatusCode)).WithOperation("warmCache")
+	e.mu.Lock()
+	for symbol, bars := range data {
+		e.inMemoryOHLCV[symbol] = bars
 	}
-
-	var result struct {
-		Results []struct {
-			Symbol string          `json:"symbol"`
-			OHLCV  []domain.OHLCV `json:"ohlcv"`
-			Error  string          `json:"error,omitempty"`
-		} `json:"results"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return apperrors.Wrap(err, apperrors.ErrCodeInternal, "failed to decode bulk response", "warmCache")
-	}
-
-	// Populate in-memory cache from bulk result.
-	// Subsequent getOHLCV calls will hit this map directly (zero HTTP).
-	for _, r := range result.Results {
-		if r.Error != "" {
-			return apperrors.New(apperrors.ErrCodeDataQuality, fmt.Sprintf("bulk fetch failed for %s: %s", r.Symbol, r.Error)).WithOperation("warmCache")
-		}
-		// Sort by date ascending for consistent iteration.
-		sort.Slice(r.OHLCV, func(i, j int) bool {
-			return r.OHLCV[i].Date.Before(r.OHLCV[j].Date)
-		})
-		e.inMemoryOHLCV[r.Symbol] = r.OHLCV
-	}
+	e.mu.Unlock()
 
 	return nil
 }
 
 // getTradingDays retrieves trading days from data service.
 func (e *Engine) getTradingDays(ctx context.Context, start, end time.Time) ([]time.Time, error) {
-	url := fmt.Sprintf("%s/api/v1/trading/calendar?start=%s&end=%s",
-		e.dataServiceURL, start.Format("2006-01-02"), end.Format("2006-01-02"))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	days, err := e.provider.GetTradingDays(ctx, start, end)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, apperrors.Unavailable("data", fmt.Errorf("HTTP %d", resp.StatusCode))
-	}
-
-	var result struct {
-		TradingDays []string `json:"trading_days"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-
-	days := make([]time.Time, 0, len(result.TradingDays))
-	for _, d := range result.TradingDays {
-		t, err := time.Parse("2006-01-02", d)
-		if err != nil {
-			continue
-		}
-		days = append(days, t)
-	}
-
-	// Sort deterministically: ascending by date.
-	// This ensures the backtest loop processes days in a fixed order,
-	// regardless of the order returned by the data service.
 	sort.Slice(days, func(i, j int) bool {
 		return days[i].Before(days[j])
 	})
@@ -929,15 +850,12 @@ func (e *Engine) getTradingDays(ctx context.Context, start, end time.Time) ([]ti
 
 // getOHLCV retrieves OHLCV data for a symbol.
 // It first checks the in-memory cache (populated by LoadOHLCVInMemory),
-// falling back to HTTP only if the cache is empty.
+// falling back to provider only if the cache is empty.
 func (e *Engine) getOHLCV(ctx context.Context, symbol string, start, end time.Time) ([]domain.OHLCV, error) {
-	// Fast path: serve from in-memory cache (zero HTTP overhead).
 	e.mu.RLock()
 	cached, ok := e.inMemoryOHLCV[symbol]
 	e.mu.RUnlock()
 	if ok {
-		// Slice the cached data to the requested date range.
-		// The cached slice is sorted ascending by date.
 		var filtered []domain.OHLCV
 		for _, bar := range cached {
 			if !bar.Date.Before(start) && !bar.Date.After(end) {
@@ -947,42 +865,7 @@ func (e *Engine) getOHLCV(ctx context.Context, symbol string, start, end time.Ti
 		return filtered, nil
 	}
 
-	// Slow path: fetch via HTTP.
-	url := fmt.Sprintf("%s/ohlcv/%s?start_date=%s&end_date=%s",
-		e.dataServiceURL, symbol, start.Format("20060102"), end.Format("20060102"))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, apperrors.Unavailable("data", fmt.Errorf("HTTP %d", resp.StatusCode))
-	}
-
-	var result struct {
-		OHLCV []domain.OHLCV `json:"ohlcv"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-
-	// Sort OHLCV data deterministically: by symbol, then by date.
-	// This ensures consistent ordering regardless of data service response order.
-	sort.Slice(result.OHLCV, func(i, j int) bool {
-		if result.OHLCV[i].Symbol != result.OHLCV[j].Symbol {
-			return result.OHLCV[i].Symbol < result.OHLCV[j].Symbol
-		}
-		return result.OHLCV[i].Date.Before(result.OHLCV[j].Date)
-	})
-
-	return result.OHLCV, nil
+	return e.provider.GetOHLCV(ctx, symbol, start, end)
 }
 
 // detectRegime detects market regime using risk service.
@@ -1008,29 +891,17 @@ func (e *Engine) detectRegime(ctx context.Context, marketData map[string][]domai
 		Data []domain.OHLCV `json:"data"`
 	}{Data: allData}
 
-	jsonData, err := json.Marshal(reqBody)
+	resp, err := e.httpClient.Post(ctx, url, reqBody)
 	if err != nil {
 		return nil, err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonData))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, apperrors.Unavailable("risk", fmt.Errorf("HTTP %d", resp.StatusCode))
 	}
 
 	var regime domain.MarketRegime
-	if err := json.NewDecoder(resp.Body).Decode(&regime); err != nil {
+	if err := json.Unmarshal(resp.Body, &regime); err != nil {
 		return nil, err
 	}
 
@@ -1108,22 +979,10 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 		Date:        date.Format("2006-01-02"),
 	}
 
-	jsonData, err := json.Marshal(reqBody)
+	resp, err := e.httpClient.Post(ctx, url, reqBody)
 	if err != nil {
 		return nil, err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonData))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, apperrors.Unavailable("strategy", fmt.Errorf("HTTP %d", resp.StatusCode))
@@ -1132,7 +991,7 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 	var result struct {
 		Signals []domain.Signal `json:"signals"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
 		return nil, err
 	}
 
@@ -1155,29 +1014,17 @@ func (e *Engine) calculatePosition(ctx context.Context, signal domain.Signal, po
 		CurrentPrice: currentPrice,
 	}
 
-	jsonData, err := json.Marshal(reqBody)
+	resp, err := e.httpClient.Post(ctx, url, reqBody)
 	if err != nil {
 		return domain.PositionSize{}, err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonData))
-	if err != nil {
-		return domain.PositionSize{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return domain.PositionSize{}, err
-	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return domain.PositionSize{}, apperrors.Unavailable("risk", fmt.Errorf("HTTP %d", resp.StatusCode))
 	}
 
 	var positionSize domain.PositionSize
-	if err := json.NewDecoder(resp.Body).Decode(&positionSize); err != nil {
+	if err := json.Unmarshal(resp.Body, &positionSize); err != nil {
 		return domain.PositionSize{}, err
 	}
 
@@ -1205,22 +1052,10 @@ func (e *Engine) checkStopLosses(ctx context.Context, tracker *Tracker, prices m
 		Positions: prices,
 	}
 
-	jsonData, err := json.Marshal(reqBody)
+	resp, err := e.httpClient.Post(ctx, url, reqBody)
 	if err != nil {
 		return nil, err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonData))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, apperrors.Unavailable("risk", fmt.Errorf("HTTP %d", resp.StatusCode))
@@ -1229,7 +1064,7 @@ func (e *Engine) checkStopLosses(ctx context.Context, tracker *Tracker, prices m
 	var events struct {
 		Events []domain.StopLossEvent `json:"events"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+	if err := json.Unmarshal(resp.Body, &events); err != nil {
 		return nil, err
 	}
 
@@ -1369,34 +1204,7 @@ func (e *Engine) SetParallelWorkers(n int) {
 
 // getStock retrieves stock info (Name, ListDate) from the data service.
 func (e *Engine) getStock(ctx context.Context, symbol string) (domain.Stock, error) {
-	url := fmt.Sprintf("%s/api/v1/stocks/%s", e.dataServiceURL, symbol)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return domain.Stock{}, err
-	}
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return domain.Stock{}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return domain.Stock{Symbol: symbol}, nil // Return minimal stock if not found
-	}
-	if resp.StatusCode != http.StatusOK {
-		return domain.Stock{}, apperrors.Unavailable("data", fmt.Errorf("HTTP %d", resp.StatusCode))
-	}
-
-	var result struct {
-		Stock domain.Stock `json:"stock"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return domain.Stock{}, err
-	}
-
-	return result.Stock, nil
+	return e.provider.GetStock(ctx, symbol)
 }
 
 // hasSTPrefix returns true if the stock name starts with an ST prefix (indicating special treatment).

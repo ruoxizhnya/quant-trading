@@ -10,7 +10,7 @@ import (
 
 func newTestTracker(initialCapital float64) *Tracker {
 	logger := zerolog.Nop()
-	return NewTracker(initialCapital, 0.0003, 0.001, logger)
+	return NewTracker(initialCapital, 0.0003, 0.001, defaultTradingConfig(), logger)
 }
 
 func TestTracker_TPlusOne_BasicViolation(t *testing.T) {

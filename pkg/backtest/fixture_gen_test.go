@@ -13,6 +13,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )
@@ -273,7 +274,7 @@ func runAndSaveFixture(t *testing.T, logger zerolog.Logger, seed int64,
 	v.Set("strategy_service.url", "http://localhost:8082")
 	v.Set("risk_service.url", "http://localhost:8083")
 
-	engine, err := NewEngine(v, logger)
+	engine, err := NewEngine(v, marketdata.NewInMemoryProvider(), logger)
 	require.NoError(t, err)
 	engine.LoadOHLCVInMemory(ohlcvData)
 

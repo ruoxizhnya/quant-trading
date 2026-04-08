@@ -29,6 +29,17 @@ backtest:
   slippage_rate: 0.0001
   risk_free_rate: 0.03
 
+# A-share trading rules
+trading:
+  stamp_tax_rate: 0.001          # 印花税 0.1%
+  min_commission: 5.0            # 最低佣金 5元
+  transfer_fee_rate: 0.00001     # 过户费 0.001%
+  price_limit:
+    normal: 0.10                 # 普通股票涨跌幅限制 ±10%
+    st: 0.05                     # ST股票涨跌幅限制 ±5%
+    new: 0.20                    # 新股涨跌幅限制 ±20%
+  new_stock_days: 60             # 新股判断阈值（上市60天内）
+
 logging:
   level: "info"
   format: "json"

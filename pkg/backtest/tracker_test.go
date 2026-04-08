@@ -15,7 +15,7 @@ import (
 func TestExecuteTrade_LongPosition(t *testing.T) {
 	logger := zerolog.New(nil)
 	initialCash := 1000000.0
-	tracker := NewTracker(initialCash, 0.0003, 0.0001, logger)
+	tracker := NewTracker(initialCash, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 	price := 10.0
@@ -49,7 +49,7 @@ func TestExecuteTrade_LongPosition(t *testing.T) {
 func TestExecuteTrade_ShortPosition(t *testing.T) {
 	logger := zerolog.New(nil)
 	initialCash := 1000000.0
-	tracker := NewTracker(initialCash, 0.0003, 0.0001, logger)
+	tracker := NewTracker(initialCash, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 	price := 10.0
@@ -83,7 +83,7 @@ func TestExecuteTrade_ShortPosition(t *testing.T) {
 func TestExecuteTrade_CloseLong(t *testing.T) {
 	logger := zerolog.New(nil)
 	initialCash := 1000000.0
-	tracker := NewTracker(initialCash, 0.0003, 0.0001, logger)
+	tracker := NewTracker(initialCash, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
@@ -111,7 +111,7 @@ func TestExecuteTrade_CloseLong(t *testing.T) {
 func TestExecuteTrade_CloseShort(t *testing.T) {
 	logger := zerolog.New(nil)
 	initialCash := 1000000.0
-	tracker := NewTracker(initialCash, 0.0003, 0.0001, logger)
+	tracker := NewTracker(initialCash, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -130,7 +130,7 @@ func TestExecuteTrade_CloseShort(t *testing.T) {
 
 func TestExecuteTrade_CommissionFloor(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -145,7 +145,7 @@ func TestExecuteTrade_CommissionFloor(t *testing.T) {
 
 func TestExecuteTrade_TransferFee(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -169,7 +169,7 @@ func TestExecuteTrade_TransferFee(t *testing.T) {
 
 func TestExecuteTrade_StampTax_SellOnly(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -186,7 +186,7 @@ func TestExecuteTrade_StampTax_SellOnly(t *testing.T) {
 
 func TestT1Settlement_CanSellYesterday(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
@@ -206,7 +206,7 @@ func TestT1Settlement_CanSellYesterday(t *testing.T) {
 
 func TestT1Settlement_CannotSellToday(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -222,7 +222,7 @@ func TestT1Settlement_CannotSellToday(t *testing.T) {
 
 func TestPartialFill(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
@@ -244,7 +244,7 @@ func TestPartialFill(t *testing.T) {
 
 func TestExecuteTrade_InsufficientCash(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(100.0, 0.0003, 0.0001, logger) // only 100 CNY cash
+	tracker := NewTracker(100.0, 0.0003, 0.0001, defaultTradingConfig(), logger) // only 100 CNY cash
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -256,7 +256,7 @@ func TestExecuteTrade_InsufficientCash(t *testing.T) {
 
 func TestExecuteTrade_CloseNonExistentPosition(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -268,7 +268,7 @@ func TestExecuteTrade_CloseNonExistentPosition(t *testing.T) {
 
 func TestExecuteTrade_CloseZeroQuantity(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
@@ -291,7 +291,7 @@ func TestExecuteTrade_CloseZeroQuantity(t *testing.T) {
 
 func TestGetAllPositions(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -306,7 +306,7 @@ func TestGetAllPositions(t *testing.T) {
 
 func TestGetPortfolioValue(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -324,7 +324,7 @@ func TestGetPortfolioValue(t *testing.T) {
 
 func TestRecordDailyValue(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -338,7 +338,7 @@ func TestRecordDailyValue(t *testing.T) {
 
 func TestGetPortfolioValues(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
@@ -352,7 +352,7 @@ func TestGetPortfolioValues(t *testing.T) {
 
 func TestGetTrades(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -365,7 +365,7 @@ func TestGetTrades(t *testing.T) {
 
 func TestGetEquityCurve(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
@@ -379,7 +379,7 @@ func TestGetEquityCurve(t *testing.T) {
 
 func TestClosePosition(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
@@ -400,7 +400,7 @@ func TestClosePosition(t *testing.T) {
 
 func TestClosePosition_NotFound(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -410,7 +410,7 @@ func TestClosePosition_NotFound(t *testing.T) {
 
 func TestGetTotalValue(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 	tracker.ExecuteTrade("600000.SH", domain.DirectionLong, 100, 10.0, day1, nil)
@@ -423,7 +423,7 @@ func TestGetTotalValue(t *testing.T) {
 
 func TestHasPosition(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 	day2 := time.Date(2024, 1, 3, 15, 0, 0, 0, time.Local)
@@ -440,7 +440,7 @@ func TestHasPosition(t *testing.T) {
 
 func TestGetPortfolio(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 
@@ -454,7 +454,7 @@ func TestGetPortfolio(t *testing.T) {
 
 func TestReset(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1000000, 0.0003, 0.0001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
 	day1 := time.Date(2024, 1, 2, 15, 0, 0, 0, time.Local)
 

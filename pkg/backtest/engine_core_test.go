@@ -13,7 +13,7 @@ import (
 func TestEngine_NewEngine_DefaultConfig(t *testing.T) {
 	logger := zerolog.Nop()
 
-	tracker := NewTracker(1000000, 0.0003, 0.001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.001, defaultTradingConfig(), logger)
 
 	assert.Equal(t, 1000000.0, tracker.GetCash())
 	assert.Equal(t, 1000000.0, tracker.initialCash)
@@ -25,7 +25,7 @@ func TestEngine_NewEngine_DefaultConfig(t *testing.T) {
 
 func TestEngine_Tracker_BuyAndSellCycle(t *testing.T) {
 	logger := zerolog.Nop()
-	tracker := NewTracker(1000000, 0.0003, 0.001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.001, defaultTradingConfig(), logger)
 
 	symbol := "600000.SH"
 	price := 10.0
@@ -62,7 +62,7 @@ func TestEngine_Tracker_BuyAndSellCycle(t *testing.T) {
 
 func TestEngine_Tracker_PortfolioValue(t *testing.T) {
 	logger := zerolog.Nop()
-	tracker := NewTracker(1000000, 0.0003, 0.001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.001, defaultTradingConfig(), logger)
 
 	symbol := "600001.SH"
 	price := 20.0
@@ -87,7 +87,7 @@ func TestEngine_Tracker_PortfolioValue(t *testing.T) {
 
 func TestEngine_Tracker_RecordDailyValue(t *testing.T) {
 	logger := zerolog.Nop()
-	tracker := NewTracker(1000000, 0.0003, 0.001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.001, defaultTradingConfig(), logger)
 
 	symbol := "600002.SH"
 	day1 := time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC)
@@ -118,7 +118,7 @@ func TestEngine_Tracker_RecordDailyValue(t *testing.T) {
 
 func TestEngine_Tracker_MultiplePositions(t *testing.T) {
 	logger := zerolog.Nop()
-	tracker := NewTracker(1000000, 0.0003, 0.001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.001, defaultTradingConfig(), logger)
 
 	symbols := []string{"600003.SH", "600004.SH", "600005.SH"}
 	day1 := time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC)
@@ -156,7 +156,7 @@ func TestEngine_Tracker_MultiplePositions(t *testing.T) {
 
 func TestEngine_Tracker_ClosePosition(t *testing.T) {
 	logger := zerolog.Nop()
-	tracker := NewTracker(1000000, 0.0003, 0.001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.001, defaultTradingConfig(), logger)
 
 	symbol := "600006.SH"
 	day1 := time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC)
@@ -177,7 +177,7 @@ func TestEngine_Tracker_ClosePosition(t *testing.T) {
 
 func TestEngine_Tracker_Reset(t *testing.T) {
 	logger := zerolog.Nop()
-	tracker := NewTracker(1000000, 0.0003, 0.001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.001, defaultTradingConfig(), logger)
 
 	day := time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC)
 
@@ -197,7 +197,7 @@ func TestEngine_Tracker_Reset(t *testing.T) {
 
 func TestEngine_Tracker_InsufficientCash(t *testing.T) {
 	logger := zerolog.Nop()
-	tracker := NewTracker(1000, 0.0003, 0.001, logger) // Only 1000 CNY
+	tracker := NewTracker(1000, 0.0003, 0.001, defaultTradingConfig(), logger) // Only 1000 CNY
 
 	day := time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC)
 
@@ -209,7 +209,7 @@ func TestEngine_Tracker_InsufficientCash(t *testing.T) {
 
 func TestEngine_Tracker_DividendProcessing(t *testing.T) {
 	logger := zerolog.Nop()
-	tracker := NewTracker(1000000, 0.0003, 0.001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.001, defaultTradingConfig(), logger)
 
 	symbol := "600007.SH"
 	day := time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC)
@@ -233,7 +233,7 @@ func TestEngine_Tracker_DividendProcessing(t *testing.T) {
 
 func TestEngine_Tracker_GetPortfolioSnapshot(t *testing.T) {
 	logger := zerolog.Nop()
-	tracker := NewTracker(1000000, 0.0003, 0.001, logger)
+	tracker := NewTracker(1000000, 0.0003, 0.001, defaultTradingConfig(), logger)
 
 	symbol := "600008.SH"
 	day := time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC)

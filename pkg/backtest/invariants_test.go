@@ -116,6 +116,7 @@ func TestInvariant_CashNeverNegative(t *testing.T) {
 		fixture.Metadata.InitialCapital,
 		fixture.Metadata.CommissionRate,
 		fixture.Metadata.SlippageRate,
+		defaultTradingConfig(),
 		logger,
 	)
 
@@ -152,6 +153,7 @@ func TestInvariant_PositionQuantityNeverNegative(t *testing.T) {
 		fixture.Metadata.InitialCapital,
 		fixture.Metadata.CommissionRate,
 		fixture.Metadata.SlippageRate,
+		defaultTradingConfig(),
 		logger,
 	)
 
@@ -195,6 +197,7 @@ func TestInvariant_NAVEqualsCashPlusPositions(t *testing.T) {
 		fixture.Metadata.InitialCapital,
 		fixture.Metadata.CommissionRate,
 		fixture.Metadata.SlippageRate,
+		defaultTradingConfig(),
 		logger,
 	)
 
@@ -266,6 +269,7 @@ func TestInvariant_AllTradesHavePositiveFee(t *testing.T) {
 		fixture.Metadata.InitialCapital,
 		fixture.Metadata.CommissionRate,
 		fixture.Metadata.SlippageRate,
+		defaultTradingConfig(),
 		logger,
 	)
 
@@ -310,6 +314,7 @@ func TestInvariant_AllTradesHaveTimestamp(t *testing.T) {
 		fixture.Metadata.InitialCapital,
 		fixture.Metadata.CommissionRate,
 		fixture.Metadata.SlippageRate,
+		defaultTradingConfig(),
 		logger,
 	)
 
@@ -343,6 +348,7 @@ func TestInvariant_EquityCurveIsNonEmptyAfterBacktest(t *testing.T) {
 		fixture.Metadata.InitialCapital,
 		fixture.Metadata.CommissionRate,
 		fixture.Metadata.SlippageRate,
+		defaultTradingConfig(),
 		logger,
 	)
 
@@ -403,6 +409,7 @@ func TestGolden_Momentum5Stock1Yr(t *testing.T) {
 		fixture.Metadata.InitialCapital,
 		fixture.Metadata.CommissionRate,
 		fixture.Metadata.SlippageRate,
+		defaultTradingConfig(),
 		logger,
 	)
 

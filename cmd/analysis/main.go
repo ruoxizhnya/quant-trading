@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	_ "github.com/ruoxizhnya/quant-trading/pkg/strategy/plugins"
@@ -86,8 +87,15 @@ func main() {
 	}
 	zerolog.SetGlobalLevel(level)
 
+	// Initialize market data provider
+	dataServiceURL := v.GetString("data_service.url")
+	if dataServiceURL == "" {
+		dataServiceURL = "http://localhost:8081"
+	}
+	dataProvider := marketdata.NewHTTPProvider(dataServiceURL, logger)
+
 	// Initialize backtest engine
-	engine, err := backtest.NewEngine(v, logger)
+	engine, err := backtest.NewEngine(v, dataProvider, logger)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize backtest engine")
 	}

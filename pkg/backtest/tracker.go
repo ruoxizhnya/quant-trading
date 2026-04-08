@@ -30,19 +30,22 @@ type Tracker struct {
 	slippageRate    float64
 	liquidityFactor float64 // fraction of prev day volume used for partial fill threshold
 
+	// Trading rules (loaded from config)
+	trading TradingConfig
+
 	// Order log for tracking all orders
 	orderLog *OrderLog
 
 	logger zerolog.Logger
 }
 
-// stampTaxRate is the A-share stamp tax rate (0.1% on sell only)
-const stampTaxRate = 0.001
-const minCommission = 5.0   // minimum commission per trade in CNY
-const transferFeeRate = 0.00001 // A-share transfer fee (过户费): 0.001% on both buy and sell
-
 // NewTracker creates a new portfolio tracker.
-func NewTracker(initialCapital, commissionRate, slippageRate float64, logger zerolog.Logger) *Tracker {
+func NewTracker(initialCapital, commissionRate, slippageRate float64, trading TradingConfig, logger zerolog.Logger) *Tracker {
+	// Use defaults if trading config is empty
+	if trading.StampTaxRate == 0 {
+		trading = defaultTradingConfig()
+	}
+
 	return &Tracker{
 		cash:           initialCapital,
 		initialCash:    initialCapital,
@@ -50,6 +53,7 @@ func NewTracker(initialCapital, commissionRate, slippageRate float64, logger zer
 		commissionRate:  commissionRate,
 		slippageRate:    slippageRate,
 		liquidityFactor: 0.1, // default: 10% of prev day volume
+		trading:        trading,
 		orderLog:       &OrderLog{},
 		logger:         logger.With().Str("component", "tracker").Logger(),
 	}
@@ -199,14 +203,14 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 	}
 
 	tradeValue := filledQty * executionPrice
-	commission := max(tradeValue*t.commissionRate, minCommission)
-	transferFee := tradeValue * transferFeeRate
+	commission := max(tradeValue*t.commissionRate, t.trading.MinCommission)
+	transferFee := tradeValue * t.trading.TransferFeeRate
 
 	// Stamp tax applies to all sell trades: closing long (DirectionClose) and opening short (DirectionShort)
 	// A-share stamp tax: 0.1% charged on ALL sell transactions
 	stampTax := 0.0
 	if direction == domain.DirectionClose || direction == domain.DirectionShort {
-		stampTax = tradeValue * stampTaxRate
+		stampTax = tradeValue * t.trading.StampTaxRate
 	}
 
 	trade := &domain.Trade{
@@ -323,9 +327,9 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 
 				// Recalculate commission, transfer fee, and stamp tax based on actualQty
 				actualTradeValue := actualQty * executionPrice
-				actualCommission := max(actualTradeValue*t.commissionRate, minCommission)
-				actualTransferFee := actualTradeValue * transferFeeRate
-				actualStampTax := actualTradeValue * stampTaxRate
+				actualCommission := max(actualTradeValue*t.commissionRate, t.trading.MinCommission)
+				actualTransferFee := actualTradeValue * t.trading.TransferFeeRate
+				actualStampTax := actualTradeValue * t.trading.StampTaxRate
 
 				// Update trade record
 				trade.Quantity = actualQty
@@ -348,8 +352,8 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 					return nil, fmt.Errorf("cannot close position: quantity is zero")
 				}
 				actualTradeValue := actualQty * executionPrice
-				actualCommission := max(actualTradeValue*t.commissionRate, minCommission)
-				actualTransferFee := actualTradeValue * transferFeeRate
+				actualCommission := max(actualTradeValue*t.commissionRate, t.trading.MinCommission)
+				actualTransferFee := actualTradeValue * t.trading.TransferFeeRate
 
 				// Update trade record with actual values
 				trade.Quantity = actualQty
