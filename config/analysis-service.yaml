@@ -43,3 +43,31 @@ trading:
 logging:
   level: "info"
   format: "json"
+
+# Data Source Adapter Configuration (Phase 3)
+datasource:
+  primary: "http"
+  fallback: ""
+  cache:
+    ohlcv_ttl: "24h"
+    fundamental_ttl: "6h"
+    stocks_ttl: "1h"
+    calendar_ttl: "24h"
+    prefix: "md:"
+    redis_url: ""                # set to enable Redis cache (e.g. "redis:6379")
+  sources:
+    http:
+      type: "http"
+      url: "http://data-service:8081"
+    tushare:
+      type: "tushare"
+      url: "http://tushare.pro"
+      token: ""                  # fill in your TUSHARE_TOKEN
+    postgres:
+      type: "postgres"           # requires PostgresStore injection at init
+    akshare:
+      type: "akshare"
+      python_path: "python3"
+      script_dir: "./scripts"
+    inmemory:
+      type: "inmemory"           # for testing only

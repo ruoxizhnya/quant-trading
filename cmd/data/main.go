@@ -1376,7 +1376,7 @@ func syncFactorHandler(fc *data.FactorComputer) gin.HandlerFunc {
 		var computeErr error
 		switch factor {
 		case domain.FactorMomentum:
-			computeErr = fc.ComputeMomentumFactor(ctx, date)
+			computeErr = fc.ComputeMomentumFactor(ctx, date, 20)
 		case domain.FactorValue:
 			computeErr = fc.ComputeValueFactor(ctx, date)
 		case domain.FactorQuality:
@@ -1419,7 +1419,7 @@ func syncAllFactorsHandler(fc *data.FactorComputer) gin.HandlerFunc {
 			return
 		}
 
-		if err := fc.ComputeAllFactors(ctx, date); err != nil {
+		if err := fc.ComputeAllFactors(ctx, date, 20); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

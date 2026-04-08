@@ -18,10 +18,6 @@ const (
 	ohlcvTTLOld     = 24 * time.Hour // historical data older than last 7 days
 	ohlcvTTLRecent  = 1 * time.Hour   // data that includes the last 7 days
 	fundamentalsTTL = 24 * time.Hour
-
-	// Redis key prefixes
-	keyPrefixOHLCV = "ohlcv:"
-	keyPrefixFund   = "fund:"
 )
 
 // DataCache is a cache-aside data access layer.
@@ -254,12 +250,12 @@ func (dc *DataCache) setWithTTL(ctx context.Context, key string, value any, ttl 
 
 // ohlcvKey builds: ohlcv:{symbol}:{startYYYYMMDD}:{endYYYYMMDD}
 func ohlcvKey(symbol, start, end string) string {
-	return fmt.Sprintf("%s%s:%s:%s", keyPrefixOHLCV, symbol, start, end)
+	return fmt.Sprintf("%s%s:%s:%s", storage.KeyPrefixOHLCV, symbol, start, end)
 }
 
 // fundKey builds: fund:{symbol}:{dateYYYYMMDD}
 func fundKey(symbol, date string) string {
-	return fmt.Sprintf("%s%s:%s", keyPrefixFund, symbol, date)
+	return fmt.Sprintf("%s%s:%s", storage.KeyPrefixFund, symbol, date)
 }
 
 // parseDate parses a YYYYMMDD string. Returns zero time on error.

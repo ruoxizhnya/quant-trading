@@ -17,6 +17,7 @@ import (
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/ruoxizhnya/quant-trading/pkg/httpclient"
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
+	"github.com/ruoxizhnya/quant-trading/pkg/risk"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
@@ -86,20 +87,34 @@ type Engine struct {
 	// Logger
 	logger zerolog.Logger
 
-	// In-memory OHLCV cache for backtest speed.
+	// L1 in-memory OHLCV cache (per-backtest-lifecycle).
 	// Key: symbol, Value: all OHLCV bars for that symbol (sorted by date).
-	// When populated via LoadOHLCVInMemory, getOHLCV returns from here
-	// instead of making HTTP calls, eliminating per-stock-per-day latency.
+	// Populated via warmCache() or LoadOHLCVInMemory().
+	// getOHLCV() checks this first — zero-latency hit, falls back to provider on miss.
+	// This is the primary speed optimization: eliminates N×D HTTP calls
+	// (N=stocks, D=trading days) during a backtest run.
 	inMemoryOHLCV map[string][]domain.OHLCV
+
+	// L1 factor cache (per-backtest-lifecycle).
+	// Structure: factorType -> tradeDate -> symbol -> zScore.
+	// Populated via LoadFactorCache() before a backtest run.
+	// GetFactorZScore() reads from this map — zero-latency hit.
+	// Eliminates per-symbol-per-day DB queries for multi-factor strategies.
+	factorCache map[domain.FactorType]map[time.Time]map[string]float64
+
+	// In-process risk manager — when set, position sizing, stop-loss, and
+	// regime detection are computed locally without HTTP calls to risk-service.
+	// Pass nil (default) to fall back to HTTP-based risk service calls.
+	riskManager *risk.RiskManager
 
 	// ParallelWorkers controls how many goroutines fetch data concurrently
 	// inside each trading day. A value <= 0 means sequential (1 worker).
 	parallelWorkers int
 
-	// factorCache holds pre-computed factor z-scores loaded from the factor_cache table.
-	// Structure: factorName -> tradeDate -> symbol -> zScore
-	// Populated via LoadFactorCache before a backtest run.
-	factorCache map[domain.FactorType]map[time.Time]map[string]float64
+	// Optional DataAdapter for event-driven data pipeline with multi-source
+	// fallback and runtime source switching. When set, provider reads are
+	// routed through the adapter; when nil, the raw provider is used directly.
+	dataAdapter *marketdata.DataAdapter
 }
 
 // BacktestState holds the state of a backtest run.
@@ -200,6 +215,45 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 		httpClient:        httpclient.New("", 30*time.Second, 3),
 		logger: logger.With().Str("component", "backtest_engine").Logger(),
 	}, nil
+}
+
+func (e *Engine) SetDataAdapter(adapter *marketdata.DataAdapter) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.dataAdapter = adapter
+	if adapter != nil {
+		e.logger.Info().Str("source", adapter.Primary()).Msg("DataAdapter attached to engine")
+	}
+}
+
+func (e *Engine) DataAdapter() *marketdata.DataAdapter {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.dataAdapter
+}
+
+func (e *Engine) SwitchDataSource(ctx context.Context, name string, p marketdata.Provider) error {
+	e.mu.RLock()
+	adapter := e.dataAdapter
+	e.mu.RUnlock()
+
+	if adapter == nil {
+		return fmt.Errorf("no DataAdapter set — call SetDataAdapter first")
+	}
+	if err := adapter.SetPrimary(name, p); err != nil {
+		return err
+	}
+	e.logger.Info().Str("new_source", name).Msg("Data source switched via engine")
+	return nil
+}
+
+func (e *Engine) effectiveProvider() marketdata.Provider {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.dataAdapter != nil {
+		return e.dataAdapter
+	}
+	return e.provider
 }
 
 // RunBacktest executes a backtest with the given parameters.
@@ -315,8 +369,10 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 
 	logger.Info().Msg("Starting backtest")
 
-	// Warm the cache before running the backtest — pre-fetch all symbols into Redis
-	// so the backtest loop hits Redis instead of PostgreSQL on every getOHLCV call.
+	// Warm the cache before running the backtest — pre-fetch all OHLCV data into
+	// the engine's in-memory cache (e.inMemoryOHLCV) via provider.BulkLoadOHLCV.
+	// After warm-up, getOHLCV serves from memory with zero latency,
+	// eliminating per-symbol-per-day HTTP/DB round-trips during the backtest loop.
 	warmCtx, warmCancel := context.WithTimeout(ctx, 2*time.Minute)
 	if err := e.warmCache(warmCtx, params.StockPool, params.StartDate, params.EndDate); err != nil {
 		warmCancel()
@@ -810,17 +866,17 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 
 // checkCalendarExists verifies the trading calendar has entries for the given range.
 func (e *Engine) checkCalendarExists(ctx context.Context, start, end time.Time) (bool, error) {
-	return e.provider.CheckCalendarExists(ctx, start, end)
+	return e.effectiveProvider().CheckCalendarExists(ctx, start, end)
 }
 
-// warmCache pre-fetches all OHLCV data for the stock universe into the engine's
+// warmCache pre-fetches all OHLCV data for the stock universe into the L1
 // in-memory cache (e.inMemoryOHLCV) using the provider's bulk endpoint.
 func (e *Engine) warmCache(ctx context.Context, symbols []string, start, end time.Time) error {
 	if len(symbols) == 0 {
 		return nil
 	}
 
-	data, err := e.provider.BulkLoadOHLCV(ctx, symbols, start, end)
+	data, err := e.effectiveProvider().BulkLoadOHLCV(ctx, symbols, start, end)
 	if err != nil {
 		return apperrors.Wrap(err, apperrors.ErrCodeUnavailable, "bulk OHLCV request failed", "warmCache")
 	}
@@ -836,7 +892,7 @@ func (e *Engine) warmCache(ctx context.Context, symbols []string, start, end tim
 
 // getTradingDays retrieves trading days from data service.
 func (e *Engine) getTradingDays(ctx context.Context, start, end time.Time) ([]time.Time, error) {
-	days, err := e.provider.GetTradingDays(ctx, start, end)
+	days, err := e.effectiveProvider().GetTradingDays(ctx, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -849,8 +905,8 @@ func (e *Engine) getTradingDays(ctx context.Context, start, end time.Time) ([]ti
 }
 
 // getOHLCV retrieves OHLCV data for a symbol.
-// It first checks the in-memory cache (populated by LoadOHLCVInMemory),
-// falling back to provider only if the cache is empty.
+// L1 cache hit (inMemoryOHLCV) → zero-latency return with date-range filtering.
+// L1 cache miss → fallback to provider (HTTP or InMemoryProvider).
 func (e *Engine) getOHLCV(ctx context.Context, symbol string, start, end time.Time) ([]domain.OHLCV, error) {
 	e.mu.RLock()
 	cached, ok := e.inMemoryOHLCV[symbol]
@@ -865,7 +921,7 @@ func (e *Engine) getOHLCV(ctx context.Context, symbol string, start, end time.Ti
 		return filtered, nil
 	}
 
-	return e.provider.GetOHLCV(ctx, symbol, start, end)
+	return e.effectiveProvider().GetOHLCV(ctx, symbol, start, end)
 }
 
 // detectRegime detects market regime using risk service.
@@ -883,6 +939,18 @@ func (e *Engine) detectRegime(ctx context.Context, marketData map[string][]domai
 			Sentiment:  0.0,
 			Timestamp:  time.Now(),
 		}, nil
+	}
+
+	e.mu.RLock()
+	rm := e.riskManager
+	e.mu.RUnlock()
+
+	if rm != nil {
+		regime, err := rm.DetectRegime(ctx, allData)
+		if err != nil {
+			return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, "in-process regime detection failed", "detectRegime")
+		}
+		return regime, nil
 	}
 
 	url := fmt.Sprintf("%s/api/v1/risk/regime", e.riskServiceURL)
@@ -1020,7 +1088,25 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 }
 
 // calculatePosition calculates position size using risk service.
+// When an in-process RiskManager is set (via SetRiskManager), computes locally
+// without HTTP calls. Otherwise falls back to the external risk-service.
 func (e *Engine) calculatePosition(ctx context.Context, signal domain.Signal, portfolio *domain.Portfolio, regime *domain.MarketRegime, currentPrice float64) (domain.PositionSize, error) {
+	e.mu.RLock()
+	rm := e.riskManager
+	e.mu.RUnlock()
+
+	if rm != nil {
+		var ohlcv []domain.OHLCV
+		if e.inMemoryOHLCV != nil {
+			ohlcv = e.inMemoryOHLCV[signal.Symbol]
+		}
+		pos, err := rm.CalculatePosition(ctx, signal, portfolio, regime, currentPrice, ohlcv)
+		if err != nil {
+			return domain.PositionSize{}, apperrors.Wrap(err, apperrors.ErrCodeInternal, "in-process position calculation failed", "calculatePosition")
+		}
+		return pos, nil
+	}
+
 	url := fmt.Sprintf("%s/calculate_position", e.riskServiceURL)
 
 	reqBody := struct {
@@ -1053,10 +1139,28 @@ func (e *Engine) calculatePosition(ctx context.Context, signal domain.Signal, po
 }
 
 // checkStopLosses checks and triggers stop losses using risk service.
+// When an in-process RiskManager is set (via SetRiskManager), computes locally
+// without HTTP calls. Otherwise falls back to the external risk-service.
 func (e *Engine) checkStopLosses(ctx context.Context, tracker *Tracker, prices map[string]float64) ([]domain.StopLossEvent, error) {
 	positions := tracker.GetAllPositions()
 	if len(positions) == 0 {
 		return nil, nil
+	}
+
+	e.mu.RLock()
+	rm := e.riskManager
+	e.mu.RUnlock()
+
+	if rm != nil {
+		var positionsList []domain.Position
+		for _, pos := range positions {
+			positionsList = append(positionsList, pos)
+		}
+		events, err := rm.CheckStopLoss(ctx, positionsList, prices)
+		if err != nil {
+			return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, "in-process stop loss check failed", "checkStopLosses")
+		}
+		return events, nil
 	}
 
 	url := fmt.Sprintf("%s/api/v1/risk/stoploss", e.riskServiceURL)
@@ -1148,73 +1252,54 @@ func (e *Engine) GetBacktestStatus(backtestID string) (string, error) {
 	return state.Status, nil
 }
 
-// LoadOHLCVInMemory loads all OHLCV data into memory, bypassing HTTP for backtest speed.
+// LoadOHLCVInMemory directly populates the L1 in-memory OHLCV cache.
 // The map key is symbol; each slice is sorted by date ascending.
-// After calling this, getOHLCV returns cached data instantly.
-// Pass nil to clear the in-memory cache (forces HTTP mode again).
+// After calling this, getOHLCV returns cached data instantly (L1 hit).
+// Pass nil to clear the L1 cache (forces provider fallback on next getOHLCV).
 func (e *Engine) LoadOHLCVInMemory(data map[string][]domain.OHLCV) {
 	e.mu.Lock()
 	e.inMemoryOHLCV = data
 	e.mu.Unlock()
 }
 
-// LoadFactorCache loads pre-computed factor z-scores into memory for the given factor and date range.
-// The factor cache is stored as: factorName -> tradeDate -> symbol -> zScore
-// This is called before a backtest run to enable fast factor-based stock ranking.
-// Pass nil to clear the cache.
-func (e *Engine) LoadFactorCache(factor domain.FactorType, startDate, endDate time.Time, entries []*domain.FactorCacheEntry) {
+// LoadFactorCache loads pre-computed factor z-scores into the L1 factor cache.
+// The input is typically from storage.GetFactorCacheRange() or data.LoadFactorCacheIntoMap().
+// After calling this, GetFactorZScore returns cached z-scores instantly (L1 hit).
+// Pass nil to clear the factor cache.
+func (e *Engine) LoadFactorCache(data map[domain.FactorType]map[time.Time]map[string]float64) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if e.factorCache == nil {
-		e.factorCache = make(map[domain.FactorType]map[time.Time]map[string]float64)
-	}
-
-	// Initialize nested maps
-	if e.factorCache[factor] == nil {
-		e.factorCache[factor] = make(map[time.Time]map[string]float64)
-	}
-
-	// Group entries by trade date
-	for _, entry := range entries {
-		if entry.FactorName != factor {
-			continue
-		}
-		dateKey := entry.TradeDate.Truncate(24 * time.Hour)
-		if e.factorCache[factor][dateKey] == nil {
-			e.factorCache[factor][dateKey] = make(map[string]float64)
-		}
-		e.factorCache[factor][dateKey][entry.Symbol] = entry.ZScore
-	}
-
-	e.logger.Info().
-		Str("factor", string(factor)).
-		Time("start_date", startDate).
-		Time("end_date", endDate).
-		Int("entries_loaded", len(entries)).
-		Msg("Factor cache loaded into memory")
+	e.factorCache = data
+	e.mu.Unlock()
 }
 
-// GetFactorZScore returns the z-score for a given factor, date, and symbol from the in-memory cache.
-// Returns 0 and false if the entry is not found.
+// GetFactorZScore returns the pre-computed z-score for a given factor, date, and symbol.
+// Returns (0, false) if the factor cache is not loaded or the entry doesn't exist.
 func (e *Engine) GetFactorZScore(factor domain.FactorType, date time.Time, symbol string) (float64, bool) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-
 	if e.factorCache == nil {
 		return 0, false
 	}
-	dateKey := date.Truncate(24 * time.Hour)
 	dateMap, ok := e.factorCache[factor]
 	if !ok {
 		return 0, false
 	}
-	symbolMap, ok := dateMap[dateKey]
+	symbolMap, ok := dateMap[date]
 	if !ok {
 		return 0, false
 	}
-	zScore, ok := symbolMap[symbol]
-	return zScore, ok
+	z, ok := symbolMap[symbol]
+	return z, ok
+}
+
+// SetRiskManager injects an in-process risk manager.
+// When set, calculatePosition/checkStopLosses/detectRegime use local computation
+// (zero HTTP latency) instead of calling the external risk-service.
+// Pass nil to clear and fall back to HTTP-based risk service calls.
+func (e *Engine) SetRiskManager(rm *risk.RiskManager) {
+	e.mu.Lock()
+	e.riskManager = rm
+	e.mu.Unlock()
 }
 
 // SetParallelWorkers sets the number of concurrent workers for per-stock data fetching.
@@ -1225,7 +1310,7 @@ func (e *Engine) SetParallelWorkers(n int) {
 
 // getStock retrieves stock info (Name, ListDate) from the data service.
 func (e *Engine) getStock(ctx context.Context, symbol string) (domain.Stock, error) {
-	return e.provider.GetStock(ctx, symbol)
+	return e.effectiveProvider().GetStock(ctx, symbol)
 }
 
 // hasSTPrefix returns true if the stock name starts with an ST prefix (indicating special treatment).

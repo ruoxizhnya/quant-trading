@@ -24,6 +24,21 @@ func NewHTTPProvider(baseURL string, logger zerolog.Logger) Provider {
 	}
 }
 
+func (p *httpProvider) Name() string {
+	return "http"
+}
+
+func (p *httpProvider) CheckConnectivity(ctx context.Context) error {
+	resp, err := p.client.Get(ctx, "/health")
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("data service health check failed: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (p *httpProvider) GetOHLCV(ctx context.Context, symbol string, start, end time.Time) ([]domain.OHLCV, error) {
 	path := fmt.Sprintf("/ohlcv/%s?start_date=%s&end_date=%s",
 		symbol, start.Format("20060102"), end.Format("20060102"))

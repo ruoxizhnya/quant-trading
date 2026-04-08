@@ -360,15 +360,22 @@ type WalkForwardResult struct {
 
 // WalkForwardReport is the full walk-forward validation report
 type WalkForwardReport struct {
-	StrategyID     string               `json:"strategy_id"`
-	Universe       string               `json:"universe"`
-	Windows        []*WalkForwardResult `json:"windows"`
-	AvgTestSharpe  float64              `json:"avg_test_sharpe"`
-	AvgTestReturn  float64              `json:"avg_test_return"`
-	AvgTestMaxDD   float64              `json:"avg_test_max_drawdown"`
-	AvgDegradation float64              `json:"avg_degradation"` // avg(OOSvsTrain)
-	PassRate       float64              `json:"pass_rate"`       // fraction of windows where test_sharpe > 0
-	OverallPass    bool                 `json:"overall_pass"`    // pass if avg_test_sharpe > 0.5 AND avg_degradation < 0.7
+	StrategyID      string               `json:"strategy_id"`
+	Universe        string               `json:"universe"`
+	Windows         []*WalkForwardResult `json:"windows"`
+	AvgTestSharpe   float64              `json:"avg_test_sharpe"`
+	AvgTestReturn   float64              `json:"avg_test_return"`
+	AvgTestMaxDD    float64              `json:"avg_test_max_drawdown"`
+	AvgDegradation  float64              `json:"avg_degradation"` // avg(OOSvsTrain)
+	PassRate        float64              `json:"pass_rate"`       // fraction of windows where test_sharpe > 0
+	OverallPass     bool                 `json:"overall_pass"`    // pass if avg_test_sharpe > 0.5 AND avg_degradation < 0.7
+
+	StdTestSharpe   float64 `json:"std_test_sharpe"`   // cross-window std dev of OOS Sharpe
+	StdDegradation  float64 `json:"std_degradation"`    // cross-window std dev of degradation ratio
+
+	OverfitScore    float64 `json:"overfit_score"`     // 0=robust, 1=severely overfit
+	ProbNoOverfit   float64 `json:"prob_no_overfit"`   // P(strategy is NOT overfitted)
+	StabilityScore  float64 `json:"stability_score"`   // 0-1, higher = more consistent across windows
 }
 
 // BacktestParams contains parameters for a backtest run

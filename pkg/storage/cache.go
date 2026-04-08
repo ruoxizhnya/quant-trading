@@ -15,9 +15,11 @@ import (
 const (
 	ohlcvTTL    = 1 * time.Hour
 	stockTTL    = 24 * time.Hour
-	keyPrefixOHLCV    = "ohlcv:"
-	keyPrefixStock    = "stock:"
-	keyPrefixStockList = "stocks:list:"
+
+	KeyPrefixOHLCV    = "ohlcv:"
+	KeyPrefixStock    = "stock:"
+	KeyPrefixStockList = "stocks:list:"
+	KeyPrefixFund     = "fund:"
 )
 
 // Cache provides Redis caching operations.
@@ -54,6 +56,10 @@ func (c *Cache) Close() error {
 }
 
 // CacheOHLCV caches OHLCV data with 1-hour TTL.
+//
+// Deprecated: Use pkg/data.DataCache instead, which provides cache-aside
+// with PostgreSQL fallback and smarter TTL (recent=1h, historical=24h).
+// This method is kept for backward compatibility with existing tests only.
 func (c *Cache) CacheOHLCV(ctx context.Context, symbol string, startDate, endDate time.Time, data []domain.OHLCV) error {
 	key := c.ohlcvKey(symbol, startDate, endDate)
 	jsonData, err := json.Marshal(data)
@@ -68,6 +74,8 @@ func (c *Cache) CacheOHLCV(ctx context.Context, symbol string, startDate, endDat
 }
 
 // GetCachedOHLCV retrieves cached OHLCV data.
+//
+// Deprecated: Use pkg/data.DataCache.GetOHLCV instead.
 func (c *Cache) GetCachedOHLCV(ctx context.Context, symbol string, startDate, endDate time.Time) ([]domain.OHLCV, error) {
 	key := c.ohlcvKey(symbol, startDate, endDate)
 	data, err := c.client.Get(ctx, key).Bytes()
@@ -148,6 +156,8 @@ func (c *Cache) GetCachedStock(ctx context.Context, symbol string) (*domain.Stoc
 }
 
 // InvalidateOHLCV removes OHLCV from cache.
+//
+// Deprecated: Use pkg/data.DataCache for cache management.
 func (c *Cache) InvalidateOHLCV(ctx context.Context, symbol string, startDate, endDate time.Time) error {
 	key := c.ohlcvKey(symbol, startDate, endDate)
 	return c.client.Del(ctx, key).Err()
@@ -184,16 +194,16 @@ func (c *Cache) RedisClient() *redis.Client {
 }
 
 func (c *Cache) ohlcvKey(symbol string, start, end time.Time) string {
-	return fmt.Sprintf("%s%s:%s:%s", keyPrefixOHLCV, symbol, start.Format("20060102"), end.Format("20060102"))
+	return fmt.Sprintf("%s%s:%s:%s", KeyPrefixOHLCV, symbol, start.Format("20060102"), end.Format("20060102"))
 }
 
 func (c *Cache) stockKey(symbol string) string {
-	return keyPrefixStock + symbol
+	return KeyPrefixStock + symbol
 }
 
 func (c *Cache) stockListKey(exchange string) string {
 	if exchange == "" {
 		exchange = "all"
 	}
-	return keyPrefixStockList + exchange
+	return KeyPrefixStockList + exchange
 }

@@ -400,7 +400,73 @@ func (s *PostgresStore) GetTradingDays(ctx context.Context, startDate, endDate t
 	return days, rows.Err()
 }
 
-// SaveStock saves or updates a stock record.
+// GetOHLCVForDateRange returns OHLCV data for ALL stocks within a date range.
+// Used by FactorComputer to compute cross-sectional factors (momentum).
+func (s *PostgresStore) GetOHLCVForDateRange(ctx context.Context, startDate, endDate time.Time) ([]domain.OHLCV, error) {
+	query := `
+		SELECT symbol, trade_date, open, high, low, close, volume, turnover, trade_days
+		FROM ohlcv_daily_qfq
+		WHERE trade_date >= $1 AND trade_date <= $2
+		ORDER BY symbol ASC, trade_date ASC
+	`
+	rows, err := s.pool.Query(ctx, query, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query bulk OHLCV: %w", err)
+	}
+	defer rows.Close()
+
+	var results []domain.OHLCV
+	for rows.Next() {
+		var o domain.OHLCV
+		if err := rows.Scan(&o.Symbol, &o.Date, &o.Open, &o.High, &o.Low, &o.Close, &o.Volume, &o.Turnover, &o.TradeDays); err != nil {
+			return nil, fmt.Errorf("failed to scan OHLCV row: %w", err)
+		}
+		results = append(results, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.logger.Debug().Time("start", startDate).Time("end", endDate).Int("count", len(results)).Msg("Bulk OHLCV loaded")
+	return results, nil
+}
+
+// GetFundamentalsSnapshot returns latest fundamental data for all stocks as of a cutoff date.
+// Used by FactorComputer to compute value/quality factors cross-sectionally.
+func (s *PostgresStore) GetFundamentalsSnapshot(ctx context.Context, cutoffDate time.Time) ([]domain.FundamentalData, error) {
+	query := `
+		SELECT DISTINCT ON (ts_code)
+			id, ts_code, trade_date, ann_date, end_date,
+			pe, pb, ps, roe, roa, debt_to_equity, gross_margin, net_margin,
+			revenue, net_profit, total_assets, total_liab, created_at
+		FROM stock_fundamentals
+		WHERE trade_date <= $1 AND pe IS NOT NULL
+		ORDER BY ts_code, trade_date DESC
+	`
+	rows, err := s.pool.Query(ctx, query, cutoffDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query fundamentals snapshot: %w", err)
+	}
+	defer rows.Close()
+
+	var results []domain.FundamentalData
+	for rows.Next() {
+		var f domain.FundamentalData
+		if err := rows.Scan(
+			&f.ID, &f.TsCode, &f.TradeDate, &f.AnnDate, &f.EndDate,
+			&f.PE, &f.PB, &f.PS, &f.ROE, &f.ROA, &f.DebtToEquity,
+			&f.GrossMargin, &f.NetMargin, &f.Revenue, &f.NetProfit,
+			&f.TotalAssets, &f.TotalLiab, &f.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan fundamental row: %w", err)
+		}
+		results = append(results, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.logger.Debug().Time("cutoff", cutoffDate).Int("count", len(results)).Msg("Fundamentals snapshot loaded")
+	return results, nil
+}
 func (s *PostgresStore) SaveStock(ctx context.Context, stock *domain.Stock) error {
 	query := `
 		INSERT INTO stocks (symbol, name, exchange, industry, market_cap, list_date, status)

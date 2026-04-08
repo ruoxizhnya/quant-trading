@@ -75,6 +75,14 @@ func (p *inmemoryProvider) SetIndexConstituents(indexCode string, symbols []stri
 	p.indexes[indexCode] = symbols
 }
 
+func (p *inmemoryProvider) Name() string {
+	return "inmemory"
+}
+
+func (p *inmemoryProvider) CheckConnectivity(ctx context.Context) error {
+	return nil
+}
+
 func (p *inmemoryProvider) GetOHLCV(ctx context.Context, symbol string, start, end time.Time) ([]domain.OHLCV, error) {
 	p.mu.RLock()
 	bars := p.ohlcv[symbol]

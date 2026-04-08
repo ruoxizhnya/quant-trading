@@ -26,6 +26,19 @@ type MultiFactorConfig struct {
 	TopN             int
 }
 
+// FactorZScoreReader is a function type for reading pre-computed factor z-scores.
+// Returns (zScore, true) if found, (0, false) if not available.
+type FactorZScoreReader func(factor domain.FactorType, date time.Time, symbol string) (float64, bool)
+
+// rankedStock holds a stock's factor scores and composite ranking.
+type rankedStock struct {
+	symbol         string
+	compositeScore float64
+	valueScore     float64
+	qualityScore   float64
+	momentumScore  float64
+}
+
 // multiFactorStrategy implements a weighted multi-factor ranking strategy.
 // Factors: value (1/PE), quality (ROE), momentum (price return).
 type multiFactorStrategy struct {
@@ -37,6 +50,10 @@ type multiFactorStrategy struct {
 	// Cache: date string -> screening results
 	cache      sync.Map
 	cacheLimit int
+
+	// L1 factor cache reader — set via SetFactorCache before backtest.
+	// When nil, falls back to HTTP-based real-time computation.
+	factorReader FactorZScoreReader
 }
 
 // Configure sets the strategy parameters.
@@ -114,6 +131,15 @@ func (s *multiFactorStrategy) Cleanup() {
 	})
 	s.httpClient = nil
 	s.params = MultiFactorConfig{}
+	s.factorReader = nil
+}
+
+// SetFactorCache injects a pre-computed factor z-score reader.
+// When set, GenerateSignals reads z-scores from this cache (zero-latency)
+// instead of computing them via HTTP API calls on each rebalance day.
+// Pass nil to clear and fall back to HTTP-based computation.
+func (s *multiFactorStrategy) SetFactorCache(reader FactorZScoreReader) {
+	s.factorReader = reader
 }
 
 // Name returns the strategy name.
@@ -380,150 +406,17 @@ func (s *multiFactorStrategy) GenerateSignals(
 	}
 
 	// Get all stocks with fundamentals from the /screen API
-	screened, err := s.callScreenAPI(screenDateStr)
-	if err != nil {
-		return nil, fmt.Errorf("multi-factor screening failed: %w", err)
-	}
-
-	// Calculate momentum for each screened stock
-	type stockData struct {
-		symbol     string
-		pe         *float64
-		pb         *float64
-		roe        *float64
-		momentum   float64
-		valid      bool
-	}
-
-	stockList := make([]stockData, 0, len(screened))
-	for _, sr := range screened {
-		sd := stockData{symbol: sr.TsCode}
-
-		// PE and ROE from screening results
-		if sr.PE != nil && *sr.PE > 0 { // Only positive PE for value scoring
-			sd.pe = sr.PE
-		}
-		if sr.ROE != nil {
-			sd.roe = sr.ROE
-		}
-
-		// Momentum from OHLCV bars
-		data, ok := bars[sr.TsCode]
-		if !ok || len(data) < lookback+1 {
-			stockList = append(stockList, sd)
-			continue
-		}
-
-		sorted := make([]domain.OHLCV, len(data))
-		copy(sorted, data)
-		sort.Slice(sorted, func(i, j int) bool {
-			return sorted[i].Date.Before(sorted[j].Date)
-		})
-
-		endIdx := len(sorted) - 1
-		if endIdx >= lookback {
-			startPrice := sorted[endIdx-lookback].Close
-			endPrice := sorted[endIdx].Close
-			if startPrice > 0 {
-				sd.momentum = (endPrice - startPrice) / startPrice
-				sd.valid = true
-			}
-		}
-
-		stockList = append(stockList, sd)
-	}
-
-	// Separate into groups for normalization
-	var peValues []float64
-	var roeValues []float64
-	var momValues []float64
-
-	peIndices := make(map[int]bool) // which stocks have valid PE
-	roeIndices := make(map[int]bool)
-	momIndices := make(map[int]bool)
-
-	for i, sd := range stockList {
-		if sd.pe != nil {
-			peValues = append(peValues, *sd.pe)
-			peIndices[i] = true
-		}
-		if sd.roe != nil {
-			roeValues = append(roeValues, *sd.roe)
-			roeIndices[i] = true
-		}
-		if sd.valid {
-			momValues = append(momValues, sd.momentum)
-			momIndices[i] = true
-		}
-	}
-
-	// Compute percentile ranks for each factor
-	peRanks := rankPercentile(peValues)   // rank among PE-valid stocks
-	roeRanks := rankPercentile(roeValues) // rank among ROE-valid stocks
-	momRanks := rankPercentile(momValues) // rank among momentum-valid stocks
-
-	// Build reverse maps: stockIndex -> rankIndex
-	peRankIdx := 0
-	roeRankIdx := 0
-	momRankIdx := 0
-
-	type rankedStock struct {
-		symbol         string
-		compositeScore float64
-		valueScore     float64
-		qualityScore   float64
-		momentumScore  float64
-		momentum       float64
-	}
-
+	// OR read pre-computed z-scores from L1 factor cache (zero-latency path)
 	var ranked []rankedStock
-	for i, sd := range stockList {
-		var valueScore, qualityScore, momentumScore float64
 
-		// Value score: 1/PE normalized via percentile rank among PE-valid stocks
-		if peIndices[i] {
-			valueScore = peRanks[peRankIdx]
-			peRankIdx++
-		} else {
-			valueScore = 0.0 // no valid PE = no value score
+	if s.factorReader != nil {
+		ranked = s.generateSignalsFromFactorCache(bars, screenDate, vw, qw, mw)
+	} else {
+		var err error
+		ranked, err = s.generateSignalsFromHTTP(ctx, bars, screenDate, screenDateStr, lookback, vw, qw, mw)
+		if err != nil {
+			return nil, fmt.Errorf("multi-factor screening failed: %w", err)
 		}
-
-		// Quality score: ROE percentile rank
-		if roeIndices[i] {
-			qualityScore = roeRanks[roeRankIdx]
-			roeRankIdx++
-		} else {
-			qualityScore = 0.0
-		}
-
-		// Momentum score: percentile rank
-		if momIndices[i] {
-			momentumScore = momRanks[momRankIdx]
-			momRankIdx++
-		} else {
-			momentumScore = 0.0
-		}
-
-		// Composite score
-		composite := vw*valueScore + qw*qualityScore + mw*momentumScore
-
-		// For stocks with missing fundamentals, boost momentum weight
-		// This ensures stocks with partial data can still be ranked
-		if !peIndices[i] && !roeIndices[i] {
-			// Only momentum available
-			composite = momentumScore
-			valueScore = 0
-			qualityScore = 0
-		}
-
-		ranked = append(ranked, rankedStock{
-			symbol:         sd.symbol,
-			compositeScore: composite,
-			valueScore:     valueScore,
-			qualityScore:   qualityScore,
-			momentumScore:  momentumScore,
-			momentum:       sd.momentum,
-		})
 	}
 
 	// Sort by composite score descending
@@ -541,7 +434,7 @@ func (s *multiFactorStrategy) GenerateSignals(
 	topNSymbols := make(map[string]bool)
 	for i := 0; i < n; i++ {
 		// Require positive momentum for buy signals
-		if ranked[i].momentum <= 0 {
+		if ranked[i].momentumScore <= 0 {
 			continue
 		}
 		// Require at least some fundamental score
@@ -592,6 +485,177 @@ func (s *multiFactorStrategy) GenerateSignals(
 	}
 
 	return signals, nil
+}
+
+// generateSignalsFromFactorCache is the fast path: reads pre-computed z-scores from L1 cache.
+// No HTTP calls, no percentile computation — z-scores are already normalized.
+func (s *multiFactorStrategy) generateSignalsFromFactorCache(
+	bars map[string][]domain.OHLCV,
+	screenDate time.Time,
+	vw, qw, mw float64,
+) []rankedStock {
+	var ranked []rankedStock
+	for symbol := range bars {
+		valZ, valOk := s.factorReader(domain.FactorValue, screenDate, symbol)
+		quaZ, quaOk := s.factorReader(domain.FactorQuality, screenDate, symbol)
+		momZ, momOk := s.factorReader(domain.FactorMomentum, screenDate, symbol)
+
+		factorsAvailable := 0
+		if valOk {
+			factorsAvailable++
+		}
+		if quaOk {
+			factorsAvailable++
+		}
+		if momOk {
+			factorsAvailable++
+		}
+		if factorsAvailable == 0 {
+			continue
+		}
+
+		composite := 0.0
+		totalW := 0.0
+		if valOk {
+			composite += vw * valZ
+			totalW += vw
+		}
+		if quaOk {
+			composite += qw * quaZ
+			totalW += qw
+		}
+		if momOk {
+			composite += mw * momZ
+			totalW += mw
+		}
+		if totalW > 0 {
+			composite /= totalW
+		}
+
+		ranked = append(ranked, rankedStock{
+			symbol:         symbol,
+			compositeScore: composite,
+			valueScore:     valZ,
+			qualityScore:   quaZ,
+			momentumScore:  momZ,
+		})
+	}
+	return ranked
+}
+
+// generateSignalsFromHTTP is the fallback path: calls screen API and computes factors in-process.
+func (s *multiFactorStrategy) generateSignalsFromHTTP(
+	ctx context.Context,
+	bars map[string][]domain.OHLCV,
+	screenDate time.Time,
+	screenDateStr string,
+	lookback int,
+	vw, qw, mw float64,
+) ([]rankedStock, error) {
+	screened, err := s.callScreenAPI(screenDateStr)
+	if err != nil {
+		return nil, fmt.Errorf("screen API call failed: %w", err)
+	}
+
+	type stockData struct {
+		symbol   string
+		pe       *float64
+		roe      *float64
+		momentum float64
+		valid    bool
+	}
+
+	stockList := make([]stockData, 0, len(screened))
+	for _, sr := range screened {
+		sd := stockData{symbol: sr.TsCode}
+		if sr.PE != nil && *sr.PE > 0 {
+			sd.pe = sr.PE
+		}
+		if sr.ROE != nil {
+			sd.roe = sr.ROE
+		}
+		data, ok := bars[sr.TsCode]
+		if !ok || len(data) < lookback+1 {
+			stockList = append(stockList, sd)
+			continue
+		}
+		sorted := make([]domain.OHLCV, len(data))
+		copy(sorted, data)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date.Before(sorted[j].Date) })
+		endIdx := len(sorted) - 1
+		if endIdx >= lookback {
+			startPrice := sorted[endIdx-lookback].Close
+			endPrice := sorted[endIdx].Close
+			if startPrice > 0 {
+				sd.momentum = (endPrice - startPrice) / startPrice
+				sd.valid = true
+			}
+		}
+		stockList = append(stockList, sd)
+	}
+
+	var peValues []float64
+	var roeValues []float64
+	var momValues []float64
+	peIndices := make(map[int]bool)
+	roeIndices := make(map[int]bool)
+	momIndices := make(map[int]bool)
+
+	for i, sd := range stockList {
+		if sd.pe != nil {
+			peValues = append(peValues, *sd.pe)
+			peIndices[i] = true
+		}
+		if sd.roe != nil {
+			roeValues = append(roeValues, *sd.roe)
+			roeIndices[i] = true
+		}
+		if sd.valid {
+			momValues = append(momValues, sd.momentum)
+			momIndices[i] = true
+		}
+	}
+
+	peRanks := rankPercentile(peValues)
+	roeRanks := rankPercentile(roeValues)
+	momRanks := rankPercentile(momValues)
+
+	peRankIdx := 0
+	roeRankIdx := 0
+	momRankIdx := 0
+
+	var ranked []rankedStock
+	for i, sd := range stockList {
+		var valueScore, qualityScore, momentumScore float64
+		if peIndices[i] {
+			valueScore = peRanks[peRankIdx]
+			peRankIdx++
+		}
+		if roeIndices[i] {
+			qualityScore = roeRanks[roeRankIdx]
+			roeRankIdx++
+		}
+		if momIndices[i] {
+			momentumScore = momRanks[momRankIdx]
+			momRankIdx++
+		}
+
+		composite := vw*valueScore + qw*qualityScore + mw*momentumScore
+		if !peIndices[i] && !roeIndices[i] {
+			composite = momentumScore
+			valueScore = 0
+			qualityScore = 0
+		}
+
+		ranked = append(ranked, rankedStock{
+			symbol:         sd.symbol,
+			compositeScore: composite,
+			valueScore:     valueScore,
+			qualityScore:   qualityScore,
+			momentumScore:  momentumScore,
+		})
+	}
+	return ranked, nil
 }
 
 // generateSellSignals generates sell signals for positions with negative momentum.
