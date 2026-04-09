@@ -10,7 +10,7 @@
 
 ## Overview
 
-This roadmap covers all sprints for Phase 1 (Foundation & Accuracy) and Phase 2 (Reliability & Copilot). Phase 1 is the current priority — every sprint is scoped to clear P0 blockers before the Phase Gate.
+This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase 2** (Reliability & Copilot), and **Phase 3** (Integration & Scale). Phases 1-2 are complete. **Phase 3 is the current active phase** — see [PHASE3-PLAN.md](PHASE3-PLAN.md) for detailed implementation plan.
 
 **Dependency order (risk-ranked):**
 1. **T+1 enforcement** — highest accuracy risk; blocks vnpy comparison

@@ -158,7 +158,7 @@ These are the **acceptance tests** that must pass before advancing phases. Recor
 | T+1 unit tests | All 5 T+1 cases (above) pass |
 | 涨跌停 unit tests | All boundary cases (ST ±5%, gap model) pass |
 | Determinism regression | 3 fixtures produce identical results across 3 consecutive runs |
-| vnpy drift comparison | 5yr/500stock backtest vs vnpy: < 5% drift on same universe/dates/rebalancing |
+| ~~vnpy drift comparison~~ | ⚠️ **Deprioritized** — requires parquet data not available; replaced by internal determinism + fixture validation |
 | Backtest speed | 5yr/500stock backtest: ≤ 5 seconds |
 | Test coverage | `go test -cover ./pkg/backtest/...` > 80% |
 
@@ -175,7 +175,9 @@ These are the **acceptance tests** that must pass before advancing phases. Recor
 
 ---
 
-## 4. Backtest Accuracy Validation (vs vnpy)
+## 4. Backtest Accuracy Validation (vs vnpy) 📦 *Archived — Reference Only*
+
+> **Status**: This comparison was deprioritized (Phase 1 Gate). Section retained for future reference when parquet data becomes available.
 
 ### Methodology for 5% Drift Comparison
 

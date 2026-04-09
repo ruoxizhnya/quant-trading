@@ -67,3 +67,7 @@ FRONTEND_*.md
 *.bak
 *.tmp
 *.temp
+
+# ── AI Session State (gitignored, per-session) ─────
+.session/
+.session/*

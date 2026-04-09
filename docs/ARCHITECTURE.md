@@ -71,13 +71,15 @@ _最后更新: 2026-04-08 (Phase 3)_
 
 ## 服务端口映射
 
-| 服务 | 容器内端口 | Host 端口 | 用途 |
-|------|-----------|----------|------|
-| analysis-service | 8085 | 8085 | 回测 UI + API 网关 |
-| data-service | 8081 | 8081 | 数据同步 + 选股 API |
-| strategy-service | 8082 | - | 外部策略服务（备用）|
-| postgres | 5432 | - | 数据库 |
-| redis | 6379 | - | 缓存（备用）|
+| 服务 | 容器内端口 | Host 端口 | 用途 | 状态 |
+|------|-----------|----------|------|------|
+| analysis-service | 8085 | 8085 | 回测 API 网关 | ✅ 运行中 |
+| data-service | 8081 | 8081 | 数据同步 + 选股 API | ✅ 运行中 |
+| strategy-service | 8082 | - | 外部策略服务（备用）| 🔄 备用 |
+| postgres | 5432 | - | 数据库 | ✅ 运行中 |
+| redis | 6379 | - | 缓存层 | ✅ 运行中 |
+| risk-service | — | 8083 | 风控服务 (Phase 3) | 🔲 规划中 |
+| execution-service | — | 8084 | 执行服务 (Phase 3) | 🔲 规划中 |
 
 ---
 
@@ -183,12 +185,18 @@ is_trading_day BOOLEAN
 ## 策略架构
 
 ### 策略接口 (pkg/strategy/strategy.go)
+> **Canonical definition** — matches [SPEC.md](SPEC.md) and source code
 ```go
 type Strategy interface {
     Name() string
     Description() string
     Parameters() []Parameter
-    GenerateSignals(ctx, bars, portfolio) ([]Signal, error)
+    Configure(params map[string]interface{}) error
+    GenerateSignals(ctx context.Context,
+        bars map[string][]domain.OHLCV,
+        portfolio *domain.Portfolio) ([]Signal, error)
+    Weight(signal Signal, portfolioValue float64) float64
+    Cleanup()
 }
 ```
 
@@ -321,3 +329,76 @@ quant-trading/
 4. **CEO 复核** — 确认符合高级需求
 
 详见: `~/.openclaw/workspace/PRINCIPLES.md`
+
+---
+
+## 前端架构 (Vue 3 SPA)
+
+> **定位**: Vue 3 SPA 是唯一正式前端，`cmd/analysis/static/` 中的 legacy HTML 已 deprecated
+
+### 技术栈
+
+| 层 | 技术 | 用途 |
+|----|------|------|
+| 框架 | Vue 3 + Composition API | 响应式 UI |
+| 语言 | TypeScript 5.x | 类型安全 |
+| 构建 | Vite 6.x | 开发服务器 + HMR |
+| UI 库 | Naive UI (dark theme) | 组件库 |
+| 图表 | Chart.js 4.x | 净值曲线 + 交易标记 |
+| 状态管理 | Pinia | 全局状态 (backtest store) |
+| 路由 | Vue Router 4 | SPA 导航 |
+| HTTP | fetch wrapper | API 客户端 |
+
+### 页面结构
+
+```
+web/src/
+├── App.vue              — 根组件 (Provider 层)
+├── main.ts              — 入口
+├── api/                 — API 客户端层
+│   ├── client.ts        — fetch 封装 + 错误处理
+│   ├── backtest.ts      — 回测 API
+│   ├── market.ts        — 市场 API
+│   └── strategy.ts      — 策略 API
+├── pages/               — 页面组件
+│   ├── Dashboard.vue    — 控制台
+│   ├── BacktestEngine.vue — 回测引擎
+│   ├── Screener.vue     — 选股器
+│   ├── Copilot.vue      — AI Copilot
+│   └── StrategyLab.vue  — 策略实验室
+├── components/layout/   — 布局组件
+│   ├── AppLayout.vue    — 主布局 (sidebar + header + content)
+│   ├── AppSidebar.vue   — 侧边导航
+│   └── AppHeader.vue    — 顶部栏
+├── stores/              — Pinia stores
+│   └── backtest.ts      — 回测历史 + 结果状态
+├── types/               — TypeScript 接口定义
+│   └── api.ts           — API 响应类型
+├── utils/               — 工具函数
+│   └── format.ts        — 格式化 (百分比, 数字)
+└── styles/              — 全局样式
+    ├── variables.css    — CSS 变量 (暗色主题)
+    └── global.css       — 全局样式
+```
+
+### 与后端通信
+
+```
+Browser (:5173)                    Backend (:8085)
+┌─────────────┐                   ┌──────────────┐
+│ Vue SPA     │  ───HTTP────▶    │ analysis-svc │
+│             │                  │              │
+│ api/client  │  GET  /health    │ /health      │
+│ api/market  │  GET  /stocks/*  │ /stocks/*    │
+│ api/backtest│  POST /backtest  │ /backtest    │
+│ api/strategy│  GET  /strategies│ /strategies   │
+└─────────────┘                   └──────────────┘
+```
+
+开发模式: Vite dev server proxy → `http://localhost:8085`
+生产模式: `web/dist/` 由 Nginx 托管, proxy 到后端
+
+### Legacy HTML (deprecated)
+
+`cmd/analysis/static/*.html` 是早期原型，功能已被 Vue SPA 完全替代。
+保留原因: 部分后端测试仍引用这些静态文件。计划在 Phase 3 移除。

@@ -126,13 +126,18 @@ type Portfolio struct {
 
 ## Strategy Interface
 
+> **Canonical definition** — matches [pkg/strategy/strategy.go](../pkg/strategy/strategy.go)
+
 ```go
 type Strategy interface {
     Name() string
     Description() string
-    Configure(config map[string]interface{}) error
-    Signals(ctx context.Context, universe []Stock, data MarketData, date time.Time) ([]Signal, error)
-    Weight(signal Signal) float64  // Position weight based on signal
+    Parameters() []Parameter
+    Configure(params map[string]interface{}) error
+    GenerateSignals(ctx context.Context,
+        bars map[string][]domain.OHLCV,
+        portfolio *domain.Portfolio) ([]Signal, error)
+    Weight(signal Signal, portfolioValue float64) float64
     Cleanup()
 }
 ```
@@ -325,7 +330,9 @@ POST /signals                     - Generate signals
 GET  /signals/:date               - Get signals for date
 ```
 
-### 3. Risk Service (port 8083)
+### 3. Risk Service (port 8083) ⚠️ *Planned — Phase 3*
+> **Status**: Not yet implemented. Endpoints below are design targets.
+
 **Responsibilities**:
 - Calculate position sizes
 - Monitor portfolio risk metrics
@@ -344,7 +351,9 @@ POST /stop_loss                   - Check stop-loss triggers
 GET  /regime                      - Get current market regime
 ```
 
-### 4. Execution Service (port 8084)
+### 4. Execution Service (port 8084) ⚠️ *Planned — Phase 3*
+> **Status**: Interface defined (`pkg/live/trader.go`), mock implementation exists, real broker integration not started.
+
 **Responsibilities**:
 - Order management (stub for now)
 - Simulated order execution

@@ -1,13 +1,14 @@
-# Architecture Decision Records (ADR)
+# Architecture Decision Records (ADR) & Operational Decision Records (ODR)
 
-> **Location:** `docs/adr/` — individual ADR files
+> **Location:** `docs/adr/` — architectural ADR files | `docs/odr/` — operational ODR files
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Version:** 1.1.0
+> **Version:** 2.0.0
 > **Created:** 2026-03-24
+> **Updated:** 2026-04-09
 
 ---
 
-## Index
+## ADR Index — Architectural Decisions
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
@@ -24,8 +25,20 @@
 
 ---
 
+## ODR Index — Operational Decisions
+
+| ODR | Title | Status | Category | Date |
+|-----|-------|--------|----------|------|
+| [ODR-001](odr/odr-001-document-cleanup.md) | Document Cleanup Operation | Completed | Cleanup | 2026-04-09 |
+| [ODR-002](odr/odr-002-design-doc-audit.md) | Design Document Audit Framework | Completed | Audit | 2026-04-09 |
+| [ODR-003](odr/odr-003-agents-md-adoption.md) | AGENTS.md Adoption Decision | Completed | Migration | 2026-04-09 |
+| [ODR-004](odr/odr-004-verification-standard.md) | Verification Standard Definition | Completed | Process | 2026-04-09 |
+
+---
+
 ## Status Legend
 
+### ADR Status
 | Status | Meaning |
 |--------|---------|
 | Draft | Under discussion, not yet decided |
@@ -35,11 +48,18 @@
 | Decided | Decided but not yet implemented |
 | Superseded | Replaced by a later ADR |
 
+### ODR Status
+| Status | Meaning |
+|--------|---------|
+| Proposed | Draft, pending review |
+| Accepted | Approved, execution pending |
+| Completed | Execution finished, outcomes verified |
+| Deprecated | No longer relevant, kept for history |
+| Superseded | Replaced by a later ODR (link to replacement) |
+
 ---
 
 ## Future ADRs
-
-The following decisions are anticipated but not yet written:
 
 | ADR | Topic | Phase |
 |-----|-------|-------|
@@ -50,4 +70,15 @@ The following decisions are anticipated but not yet written:
 
 ---
 
-_Last updated by: 龙少 (AI Assistant) — 2026-03-25_
+## ODR Creation Guide
+
+When to create an ODR:
+- After completing a document cleanup, audit, or migration operation
+- When making a process/tooling decision that affects how the team works
+- When archiving or restructuring project documentation
+
+ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical example.
+
+---
+
+_Last updated by: AI Assistant — 2026-04-09_

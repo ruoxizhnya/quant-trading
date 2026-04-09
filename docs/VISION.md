@@ -125,12 +125,17 @@ Every trading decision in the system is backed by a backtest. Every strategy is 
 **How are strategies created, managed, executed?**
 
 Strategies implement the `Strategy` interface:
+> **Canonical definition** — matches [pkg/strategy/strategy.go](../pkg/strategy/strategy.go)
 ```go
 type Strategy interface {
     Name() string
     Description() string
     Parameters() []Parameter
-    GenerateSignals(ctx context.Context, bars []OHLCV, portfolio *Portfolio) ([]Signal, error)
+    Configure(params map[string]interface{}) error
+    GenerateSignals(ctx context.Context,
+        bars map[string][]domain.OHLCV,
+        portfolio *domain.Portfolio) ([]Signal, error)
+    Weight(signal Signal, portfolioValue float64) float64
     Cleanup()
 }
 ```
@@ -674,18 +679,17 @@ This document is the **single source of truth** for what the system is and where
 
 - `ROADMAP.md` — tactical implementation roadmap (what to build next)
 - `ARCHITECTURE.md` — technical architecture (how it is built)
-- `PRODUCT.md` — product vision and feature list (what, for whom, why)
 - `SPEC.md` — detailed system specification and interfaces
-- `ROADMAP_UPDATE_2026-03-23.md` — research findings and gap analysis
-- `high-level-requirements.yaml` — original user requirements
+- `ADR.md` + `docs/adr/` — architectural decision records
+- `NEXT_STEPS.md` — audit findings and development plan
 
 When this document conflicts with any of the above, this document takes precedence. The roadmap, architecture, and spec should be updated to match this document — not the other way around.
 
-**Change process:** To propose a change to VISION.md, write the rationale and submit to 龙少 for review. Changes require understanding of both the product vision and the technical constraints. No single feature addition should contradict the Core Principles.
+**Change process:** To propose a change to VISION.md, write the rationale and submit for review. Changes require understanding of both the product vision and the technical constraints. No single feature addition should contradict the Core Principles.
 
 ---
 
-_Last updated by: 龙少 (AI Assistant) — 2026-03-24_
+_Last updated: 2026-04-09 (document audit pass)_
 
 ---
 
