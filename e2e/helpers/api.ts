@@ -1,11 +1,11 @@
 import { request, APIRequestContext, expect } from '@playwright/test';
 
-const BASE = process.env.BASE_URL || 'http://localhost:8085';
+const BACKEND = process.env.BACKEND_URL || 'http://localhost:8085';
 const DATA = process.env.DATA_SERVICE_URL || 'http://localhost:8081';
 
 export async function apiRequest(): Promise<APIRequestContext> {
   return await request.newContext({
-    baseURL: BASE,
+    baseURL: BACKEND,
     extraHTTPHeaders: { 'Content-Type': 'application/json' },
   });
 }
@@ -46,8 +46,8 @@ export const API = {
     return ctx.post('/api/copilot/generate', { data: { prompt } });
   },
 
-  async screen(ctx: APIRequestContext, filters: any) {
-    return ctx.post('/screen', { data: { filters } });
+  async screen(ctx: APIRequestContext, params: Record<string, number>) {
+    return ctx.post('/screen', { data: params });
   },
 
   async ohlcv(ctx: APIRequestContext, symbol: string, start: string, end: string) {
@@ -55,7 +55,7 @@ export const API = {
   },
 };
 
-export async function waitForAPIReady(timeoutMs = 60000): Promise<boolean> {
+export async function waitForBackendReady(timeoutMs = 60000): Promise<boolean> {
   const ctx = await apiRequest();
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {

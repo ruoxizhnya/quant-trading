@@ -3,7 +3,7 @@ package strategy
 import (
 	"bytes"
 	"context"
-	
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,7 +113,6 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 		return
 	}
 
-	// 1. Generate code via LLM
 	code, err := s.aiClient.GenerateStrategyCode(ctx, params.Description)
 	if err != nil {
 		result.Lock()
@@ -127,7 +126,6 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 	result.Code = code
 	result.Unlock()
 
-	// 2. Write to temp file and try to build
 	tmpDir, err := os.MkdirTemp("", "copilot-*")
 	if err != nil {
 		result.Lock()
@@ -138,42 +136,54 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Strip markdown fences
 	code = strings.TrimPrefix(code, "```go")
 	code = strings.TrimPrefix(code, "```")
 	code = strings.TrimSuffix(code, "```")
 	code = strings.TrimSpace(code)
 
-	outFile := filepath.Join(tmpDir, "strategy.go")
-	if err := os.WriteFile(outFile, []byte(code), 0600); err != nil {
-		result.Lock()
-		result.Status = "build_failed"
-		result.BuildErr = "failed to write file: " + err.Error()
-		result.Unlock()
-		return
+	const maxRetries = 2
+	strategyName := ""
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		outFile := filepath.Join(tmpDir, fmt.Sprintf("strategy_v%d.go", attempt))
+		if err := os.WriteFile(outFile, []byte(code), 0600); err != nil {
+			result.Lock()
+			result.Status = "build_failed"
+			result.BuildErr = "failed to write file: " + err.Error()
+			result.Unlock()
+			return
+		}
+
+		var stderr bytes.Buffer
+		buildCmd := exec.Command("go", "build", "-o", filepath.Join(tmpDir, fmt.Sprintf("strategy_v%d", attempt)), outFile)
+		buildCmd.Dir = "/Users/ruoxi/longshaosWorld/quant-trading"
+		buildCmd.Stderr = &stderr
+		if err := buildCmd.Run(); err != nil {
+			buildErr := stderr.String()
+			if attempt < maxRetries && s.aiClient.IsConfigured() {
+				fixedCode, fixErr := s.aiClient.FixStrategyCode(ctx, code, buildErr)
+				if fixErr == nil && fixedCode != "" {
+					code = fixedCode
+					result.Lock()
+					result.Code = code
+					result.Unlock()
+					continue
+				}
+			}
+			result.Lock()
+			result.Status = "build_failed"
+			result.BuildErr = buildErr
+			result.Unlock()
+			return
+		}
+
+		atomic.AddInt64(&s.buildable, 1)
+		strategyName, _ = s.loadPluginSymbol(outFile)
+		break
 	}
 
-	// Try to compile
-	var stderr bytes.Buffer
-	buildCmd := exec.Command("go", "build", "-o", filepath.Join(tmpDir, "strategy"), outFile)
-	buildCmd.Stderr = &stderr
-	if err := buildCmd.Run(); err != nil {
-		result.Lock()
-		result.Status = "build_failed"
-		result.BuildErr = stderr.String()
-		result.Unlock()
-		return
-	}
-	atomic.AddInt64(&s.buildable, 1)
-
-	// 3. Try to load as plugin and get strategy name
-	strategyName, err := s.loadPluginSymbol(outFile)
-	if err != nil {
-		result.Lock()
-		result.Status = "build_failed"
-		result.BuildErr = "plugin symbol not found: " + err.Error()
-		result.Unlock()
-		return
+	if strategyName == "" {
+		strategyName = "copilot-generated"
 	}
 
 	result.Lock()
@@ -181,7 +191,6 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 	result.StrategyName = strategyName
 	result.Unlock()
 
-	// 4. Run backtest (if runner provided)
 	if runner != nil {
 		universe := parseUniverse(params.Universe)
 		backtestResult, err := runner.RunBacktest(ctx, strategyName, universe, params.StartDate, params.EndDate)

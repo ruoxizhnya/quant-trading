@@ -1,136 +1,140 @@
-import { test, expect, Page } from '@playwright/test';
-import { waitForAPIReady } from '../helpers/api';
+import { test, expect } from '@playwright/test';
+import { waitForBackendReady } from '../helpers/api';
 
-const BASE = process.env.BASE_URL || 'http://localhost:8085';
-
-test.describe('Dashboard Page', () => {
+test.describe('Dashboard Page (Vue SPA)', () => {
 
   test.beforeAll(async () => {
-    const ready = await waitForAPIReady(60000);
+    const ready = await waitForBackendReady(60000);
     expect(ready).toBe(true);
   });
 
   test('page loads successfully with correct title', async ({ page }) => {
-    await page.goto(`${BASE}/dashboard.html`);
+    await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.dashboard-page', { timeout: 15000 });
 
-    await expect(page.locator('.logo-text')).toContainText('Quant Lab');
-    await expect(page.locator('#greeting')).toBeVisible({ timeout: 5000 });
+    await expect(page).toHaveTitle(/控制台.*Quant Lab/);
+
+    const greeting = page.locator('.greeting');
+    await expect(greeting).toBeVisible();
   });
 
-  test('header shows clock and service status indicators', async ({ page }) => {
-    await page.goto(`${BASE}/dashboard.html`);
+  test('sidebar navigation renders with all items', async ({ page }) => {
+    await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.dashboard-page', { timeout: 15000 });
+    await page.waitForTimeout(1000);
 
-    // Clock should be visible
-    const clock = page.locator('#clock');
-    await expect(clock).toBeVisible();
-    const clockText = await clock.textContent();
-    expect(clockText?.trim().length).toBeGreaterThan(0);
+    const navItems = page.locator('.nav-item');
+    await expect(navItems.first()).toBeVisible({ timeout: 10000 });
+    const count = await navItems.count();
+    expect(count).toBe(5);
 
-    // Status dots should exist
-    await expect(page.locator('#apiDot')).toBeVisible();
-    await expect(page.locator('#dataDot')).toBeVisible();
+    await expect(navItems.filter({ hasText: '控制台' })).toBeVisible();
+    await expect(navItems.filter({ hasText: '回测引擎' })).toBeVisible();
+    await expect(navItems.filter({ hasText: '选股器' })).toBeVisible();
+    await expect(navItems.filter({ hasText: '策略 Copilot' })).toBeVisible();
+    await expect(navItems.filter({ hasText: '策略实验室' })).toBeVisible();
   });
 
-  test('stats cards render with labels', async ({ page }) => {
-    await page.goto(`${BASE}/dashboard.html`);
+  test('header shows logo, API status and clock', async ({ page }) => {
+    await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.app-header', { timeout: 15000 });
 
-    // Wait for stats to load (they fetch asynchronously)
-    await page.waitForTimeout(3000);
+    await expect(page.locator('.logo')).toContainText('Quant Lab');
 
-    // Check stat cards exist
-    await expect(page.locator('#stat-stocks')).toBeVisible();
-    await expect(page.locator('#stat-bt-count')).toBeVisible();
-    await expect(page.locator('#stat-strategies')).toBeVisible();
-    await expect(page.locator('#stat-sync')).toBeVisible();
+    const apiTag = page.locator('.app-header .n-tag').first();
+    await expect(apiTag).toContainText(/API/);
 
-    // Labels should be present
-    await expect(page.locator('.stat-label').filter({ hasText: '股票数' })).toBeVisible();
-    await expect(page.locator('.stat-label').filter({ hasText: '回测' })).toBeVisible();
-    await expect(page.locator('.stat-label').filter({ hasText: '策略' })).toBeVisible();
+    const timeTag = page.locator('.app-header .n-tag').nth(1);
+    await expect(timeTag).toBeVisible();
+    const timeText = await timeTag.textContent();
+    expect(timeText?.trim().length).toBeGreaterThan(0);
   });
 
-  test('quick run form renders correctly', async ({ page }) => {
-    await page.goto(`${BASE}/dashboard.html`);
+  test('metrics cards render with labels', async ({ page }) => {
+    await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.metric-card', { timeout: 15000 });
 
-    // Quick form elements
-    await expect(page.locator('#qf-strategy')).toBeVisible();
-    await expect(page.locator('#qf-stock')).toBeVisible();
-    await expect(page.locator('#qf-start')).toBeVisible();
-    await expect(page.locator('#qf-end')).toBeVisible();
+    const cards = page.locator('.metric-card');
+    const count = await cards.count();
+    expect(count).toBe(4);
 
-    // Run button
-    const runBtn = page.locator('.qf-btn');
-    await expect(runBtn).toBeVisible();
-    await expect(runBtn).toHaveText(/运行回测/);
+    await expect(page.locator('.metric-label').filter({ hasText: '股票数' })).toBeVisible();
+    await expect(page.locator('.metric-label').filter({ hasText: '回测' })).toBeVisible();
+    await expect(page.locator('.metric-label').filter({ hasText: '策略' })).toBeVisible();
   });
 
-  test('navigation tiles are present and link correctly', async ({ page }) => {
-    await page.goto(`${BASE}/dashboard.html`);
+  test('quick backtest form renders correctly', async ({ page }) => {
+    await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.quick-bt-card', { timeout: 15000 });
 
-    // Nav tiles should include 回测引擎, 选股器, 策略 Copilot
+    const card = page.locator('.quick-bt-card');
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('快速回测');
+
+    await expect(page.locator('.n-select').first()).toBeVisible();
+    await expect(page.getByPlaceholder('600000.SH')).toBeVisible();
+
+    const runBtn = page.locator('.n-button--primary-type');
+    await expect(runBtn.first()).toBeVisible();
+    await expect(runBtn).toContainText(/运行回测/);
+  });
+
+  test('navigation tiles are present and link to correct routes', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.nav-tile', { timeout: 15000 });
+    await page.waitForTimeout(500);
+
     const tiles = page.locator('.nav-tile');
     const count = await tiles.count();
-    expect(count).toBeGreaterThanOrEqual(3);
+    expect(count).toBe(4);
 
     await expect(tiles.filter({ hasText: '回测引擎' })).toBeVisible();
     await expect(tiles.filter({ hasText: '选股器' })).toBeVisible();
-    await expect(tiles.filter({ hasText: 'Copilot' })).toBeVisible();
+    await expect(tiles.filter({ hasText: '策略 Copilot' })).toBeVisible();
+    await expect(tiles.filter({ hasText: '因子分析' })).toBeVisible();
   });
 
-  test('system status section renders', async ({ page }) => {
-    await page.goto(`${BASE}/dashboard.html`);
+  test('greeting text shows time-appropriate message', async ({ page }) => {
+    await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.greeting', { timeout: 15000 });
 
-    // Wait for async data to load
-    await page.waitForTimeout(3000);
-
-    // System status rows
-    await expect(page.locator('#sys-api')).toBeVisible();
-    await expect(page.locator('#sys-db')).toBeVisible();
-    await expect(page.locator('#sys-engine')).toBeVisible();
-  });
-
-  test('market overview pills display', async ({ page }) => {
-    await page.goto(`${BASE}/dashboard.html`);
-    await page.waitForLoadState('domcontentloaded');
-
-    await page.waitForTimeout(3000);
-
-    // Market pills should exist
-    await expect(page.locator('#m-sh300')).toBeVisible();
-    await expect(page.locator('#m-sse')).toBeVisible();
-    await expect(page.locator('#m-cyb')).toBeVisible();
-  });
-
-  test('header navigation tiles have correct hrefs', async ({ page }) => {
-    await page.goto(`${BASE}/dashboard.html`);
-    await page.waitForLoadState('domcontentloaded');
-
-    // 回测引擎 tile links to index.html
-    const backtestTile = page.locator('.nav-tile').filter({ hasText: '回测引擎' });
-    await expect(backtestTile).toBeVisible();
-
-    // 选股器 tile exists
-    const screenerTile = page.locator('.nav-tile').filter({ hasText: '选股器' });
-    await expect(screenerTile).toBeVisible();
-
-    // Copilot tile exists
-    const copilotTile = page.locator('.nav-tile').filter({ hasText: 'Copilot' });
-    await expect(copilotTile).toBeVisible();
-  });
-
-  test('greeting text changes based on time of day', async ({ page }) => {
-    await page.goto(`${BASE}/dashboard.html`);
-    await page.waitForLoadState('domcontentloaded');
-
-    const greeting = page.locator('#greeting');
+    const greeting = page.locator('.greeting');
     await expect(greeting).toBeVisible();
     const text = await greeting.textContent();
     expect(text).toMatch(/(早上好|中午好|下午好|晚上好)/);
+  });
+
+  test('history card section renders', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.history-card', { timeout: 15000 });
+
+    await expect(page.locator('.history-card')).toBeVisible();
+    await expect(page.locator('.history-card')).toContainText('控制台日志');
+  });
+
+  test('no naive-ui provider errors in console', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+
+    await page.goto('/');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.greeting', { timeout: 15000 });
+    await page.waitForTimeout(3000);
+
+    const providerErrors = errors.filter(e =>
+      e.includes('n-message-provider') ||
+      e.includes('n-dialog-provider') ||
+      e.includes('n-notification-provider') ||
+      e.includes('n-config-provider')
+    );
+    expect(providerErrors.length).toBe(0);
   });
 });

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -499,6 +500,9 @@ func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 
 // registerRoutes registers all HTTP routes.
 func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, logger zerolog.Logger) {
+	// Serve static files (CSS, JS, etc.)
+	router.Static("/static", "./cmd/analysis/static")
+
 	// Serve UI
 	router.GET("/", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
@@ -769,42 +773,49 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 	// Backtest endpoints
 	api := router.Group("/backtest")
 	{
-		// Run a backtest — async via job service
+		// Run a backtest — supports both old (synchronous) and new (async job) format
 		api.POST("", func(c *gin.Context) {
+			bodyBytes, err := io.ReadAll(c.Request.Body)
+			if err != nil || len(bodyBytes) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "empty request body"})
+				return
+			}
+
+			// Try new async format first (CreateJobRequest)
 			var jobReq backtest.CreateJobRequest
-			if err := c.ShouldBindJSON(&jobReq); err != nil {
-				// Fallback: try old synchronous format
-				var req backtest.BacktestRequest
-				if err2 := c.ShouldBindJSON(&req); err2 == nil {
-					ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Minute)
-					defer cancel()
-					result, err := engine.RunBacktest(ctx, req)
-					if err != nil {
-						c.JSON(http.StatusInternalServerError, gin.H{"error": "backtest failed", "details": err.Error()})
-						return
-					}
-					c.JSON(http.StatusOK, result)
+			if json.Unmarshal(bodyBytes, &jobReq) == nil && jobReq.StrategyID != "" && jobReq.Universe != "" {
+				logger.Info().
+					Str("strategy", jobReq.StrategyID).
+					Str("start_date", jobReq.StartDate).
+					Str("end_date", jobReq.EndDate).
+					Str("universe", jobReq.Universe).
+					Msg("Creating backtest job")
+
+				job, err := jobService.CreateJob(c.Request.Context(), jobReq)
+				if err != nil {
+					logger.Error().Err(err).Msg("Failed to create job")
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create job", "details": err.Error()})
 					return
 				}
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+				c.JSON(http.StatusAccepted, gin.H{"job_id": job.ID, "status": job.Status})
 				return
 			}
 
-			logger.Info().
-				Str("strategy", jobReq.StrategyID).
-				Str("start_date", jobReq.StartDate).
-				Str("end_date", jobReq.EndDate).
-				Str("universe", jobReq.Universe).
-				Msg("Creating backtest job")
-
-			job, err := jobService.CreateJob(c.Request.Context(), jobReq)
-			if err != nil {
-				logger.Error().Err(err).Msg("Failed to create job")
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create job", "details": err.Error()})
+			// Fallback: old synchronous format (BacktestRequest)
+			var req backtest.BacktestRequest
+			if json.Unmarshal(bodyBytes, &req) == nil && req.Strategy != "" {
+				ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Minute)
+				defer cancel()
+				result, err := engine.RunBacktest(ctx, req)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "backtest failed", "details": err.Error()})
+					return
+				}
+				c.JSON(http.StatusOK, result)
 				return
 			}
 
-			c.JSON(http.StatusAccepted, gin.H{"job_id": job.ID, "status": job.Status})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: must provide strategy+stock_pool (old format) or strategy_id+universe (new format)"})
 		})
 
 		// Get backtest job status and result

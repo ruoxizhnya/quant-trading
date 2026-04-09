@@ -1,62 +1,69 @@
 import { test, expect } from '@playwright/test';
-import { waitForAPIReady } from '../helpers/api';
+import { waitForBackendReady } from '../helpers/api';
 
-const BASE = process.env.BASE_URL || 'http://localhost:8085';
-
-test.describe('Cross-page Navigation & Integration', () => {
+test.describe('Cross-page Navigation & Integration (Vue SPA)', () => {
 
   test.beforeAll(async () => {
-    const ready = await waitForAPIReady(60000);
+    const ready = await waitForBackendReady(60000);
     expect(ready).toBe(true);
   });
 
-  test('can navigate Dashboard -> Backtest Engine -> Dashboard', async ({ page }) => {
-    await page.goto(`${BASE}/dashboard.html`);
+  test('can navigate Dashboard -> Backtest -> Dashboard via sidebar', async ({ page }) => {
+    await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
-    await expect(page.locator('.logo-text')).toContainText('Quant Lab');
+    await page.waitForSelector('.dashboard-page', { timeout: 15000 });
+    await expect(page.locator('.dashboard-page')).toBeVisible();
 
-    await page.locator('.nav-tile').filter({ hasText: '回测引擎' }).click();
+    await page.locator('.nav-item').filter({ hasText: '回测引擎' }).click();
     await page.waitForLoadState('domcontentloaded');
-    await expect(page.url()).toMatch(/index\.html|localhost:8085\/$/);
+    await page.waitForSelector('.bt-page', { timeout: 20000 });
+    await expect(page).toHaveURL(/\/backtest/);
+    await expect(page.locator('.bt-page')).toBeVisible();
 
-    await page.locator('a[href="dashboard.html"]').first().click();
+    await page.locator('.nav-item').filter({ hasText: '控制台' }).click();
     await page.waitForLoadState('domcontentloaded');
-    await expect(page.url()).toContain('dashboard.html');
+    await page.waitForSelector('.dashboard-page', { timeout: 15000 });
+    await expect(page).toHaveURL(/\//);
+    await expect(page.locator('.dashboard-page')).toBeVisible();
   });
 
-  test('Dashboard page loads and nav tiles exist', async ({ page }) => {
-    await page.goto(`${BASE}/dashboard.html`);
+  test('Dashboard nav tiles navigate to correct routes', async ({ page }) => {
+    await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.nav-tile', { timeout: 15000 });
+    await page.waitForTimeout(500);
 
     const tiles = page.locator('.nav-tile');
     const count = await tiles.count();
-    expect(count).toBeGreaterThanOrEqual(3);
+    expect(count).toBe(4);
   });
 
-  test('root URL serves backtest engine (index.html)', async ({ page }) => {
-    await page.goto(`${BASE}/`);
+  test('root URL serves Dashboard (default route)', async ({ page }) => {
+    await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
-    await expect(page.locator('#s-strategy')).toBeVisible();
+    await page.waitForSelector('.dashboard-page', { timeout: 15000 });
+
+    await expect(page.locator('.dashboard-page')).toBeVisible();
+    await expect(page.locator('.greeting')).toBeVisible();
   });
 
-  test('all pages load without crashing', async ({ browser }) => {
-    const urls = [
-      `${BASE}/dashboard.html`,
-      `${BASE}/`,
-      `${BASE}/strategy-selector.html`,
-      `${BASE}/copilot.html`,
-      `${BASE}/screen.html`,
+  test('all SPA routes load without crashing (via sidebar navigation)', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.dashboard-page', { timeout: 15000 });
+
+    const routes = [
+      { label: '选股器', urlPattern: /\/screener/, selector: '.screener-page' },
+      { label: '策略 Copilot', urlPattern: /\/copilot/, selector: '.copilot-page' },
+      { label: '策略实验室', urlPattern: /\/strategy-lab/, selector: '.strategy-lab-page' },
     ];
 
-    for (const url of urls) {
-      const ctx = await browser.newContext();
-      const p = await ctx.newPage();
-      await p.goto(url);
-      await p.waitForLoadState('domcontentloaded');
-
-      const logo = p.locator('.logo-text, .logo, h1');
-      await expect(logo.first()).toBeVisible({ timeout: 10000 });
-      await ctx.close();
+    for (const route of routes) {
+      await page.locator('.nav-item').filter({ hasText: route.label }).click();
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector(route.selector, { timeout: 20000 });
+      await expect(page).toHaveURL(route.urlPattern);
+      await expect(page.locator(route.selector)).toBeVisible();
     }
   });
 
@@ -64,10 +71,10 @@ test.describe('Cross-page Navigation & Integration', () => {
     const errors: string[] = [];
     page.on('pageerror', (err) => errors.push(err.message));
 
-    for (const url of [`${BASE}/dashboard.html`, `${BASE}/`, `${BASE}/copilot.html`]) {
+    for (const url of ['/', '/screener', '/copilot']) {
       await page.goto(url);
       await page.waitForLoadState('domcontentloaded');
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(3000);
     }
 
     const criticalErrors = errors.filter(e =>
@@ -76,6 +83,47 @@ test.describe('Cross-page Navigation & Integration', () => {
     if (criticalErrors.length > 0) {
       console.log('JS errors:', criticalErrors);
     }
-    expect(true).toBe(true);
+
+    const naiveErrors = criticalErrors.filter(e =>
+      e.includes('naive-ui') || e.includes('provider')
+    );
+    expect(naiveErrors.length).toBe(0);
+  });
+
+  test('sidebar is present on all main pages', async ({ page }) => {
+    const pages = [
+      { url: '/', selector: '.dashboard-page' },
+      { url: '/screener', selector: '.screener-page' },
+      { url: '/copilot', selector: '.copilot-page' },
+      { url: '/strategy-lab', selector: '.strategy-lab-page' },
+    ];
+
+    for (const p of pages) {
+      await page.goto(p.url);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForSelector(p.selector, { timeout: 15000 });
+
+      await expect(page.locator('.app-sidebar')).toBeVisible();
+      await expect(page.locator('.app-header')).toBeVisible();
+      await expect(page.locator('.logo')).toContainText('Quant Lab');
+    }
+  });
+
+  test('SPA navigation does not cause full page reload', async ({ page }) => {
+    let loadCount = 0;
+    page.on('load', () => loadCount++);
+
+    await page.goto('/');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('.nav-item', { timeout: 15000 });
+
+    await page.locator('.nav-item').filter({ hasText: '选股器' }).click();
+    await page.waitForTimeout(1000);
+
+    await page.locator('.nav-item').filter({ hasText: '策略 Copilot' }).click();
+    await page.waitForTimeout(1000);
+
+    // Initial page load + possible lazy-loaded component loads
+    expect(loadCount).toBeLessThanOrEqual(3);
   });
 });

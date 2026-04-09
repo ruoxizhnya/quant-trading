@@ -105,9 +105,25 @@ func (c *Client) GenerateStrategyCode(ctx context.Context, description string) (
 	if err != nil {
 		return "", err
 	}
-	// Strip triple-backtick fences that LLMs often add
-	resp = strings.TrimPrefix(resp, "```go")
-	resp = strings.TrimPrefix(resp, "```")
-	resp = strings.TrimSuffix(resp, "```")
-	return strings.TrimSpace(resp), nil
+	return stripFences(resp), nil
+}
+
+// FixStrategyCode asks the LLM to fix compilation errors in the given code.
+func (c *Client) FixStrategyCode(ctx context.Context, code string, buildErrors string) (string, error) {
+	messages := []ChatMessage{
+		{Role: "system", Content: SystemPrompt},
+		{Role: "user", Content: fmt.Sprintf(FixPromptTemplate, code, buildErrors)},
+	}
+	resp, err := c.Chat(ctx, messages)
+	if err != nil {
+		return "", err
+	}
+	return stripFences(resp), nil
+}
+
+func stripFences(s string) string {
+	s = strings.TrimPrefix(s, "```go")
+	s = strings.TrimPrefix(s, "```")
+	s = strings.TrimSuffix(s, "```")
+	return strings.TrimSpace(s)
 }

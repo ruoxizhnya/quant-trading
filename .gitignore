@@ -1,15 +1,24 @@
-# Credentials (never commit)
+# ── Credentials (never commit) ──────────────────
 .github-token
+.env
+.env.local
+.env.*.local
 
-# IDE
+# ── IDE ────────────────────────────────────────
 .idea/
 .vscode/
 *.swp
+*.swo
+*~
+.sublime-workspace
+.sublime-project
 
-# OS
+# ── OS ─────────────────────────────────────────
 .DS_Store
+Thumbs.db
+*.log
 
-# Go
+# ── Go ─────────────────────────────────────────
 *.exe
 *.exe~
 *.dll
@@ -18,15 +27,43 @@
 /test/
 *_test.go
 *.test
-
-# Build output
+*.out
 /bin/
 /dist/
 
-# Environment
-.env
-.env.local
+# Go coverage / profiling
+*.prof
+*.pprof
+coverage.html
+coverage.out
 
-# Logs
-*.log
-logs/
+# ── Node.js / Frontend (web/) ──────────────────
+web/node_modules/
+web/dist/
+web/.vite/
+web/.cache/
+web/tsconfig.tsbuildinfo
+web/.eslintcache
+web/.parcel-cache
+
+# ── E2E Test Artifacts ─────────────────────────
+e2e/node_modules/
+e2e/test-results/
+e2e/e2e-report/
+e2e/playwright-report/
+
+# ── Python / AI ────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ── Docker ─────────────────────────────────────
+docker-compose.override.yml
+
+# ── Generated / Temp Files ─────────────────────
+FRONTEND_*.md
+*.bak
+*.tmp
+*.temp

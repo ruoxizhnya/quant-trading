@@ -424,7 +424,6 @@ func (t *Tracker) ProcessDividend(symbol string, dividend domain.Dividend) error
 
 	pos, exists := t.positions[symbol]
 	if !exists || pos.Quantity <= 0 {
-		// No long position — no dividend credited
 		return nil
 	}
 
@@ -438,6 +437,43 @@ func (t *Tracker) ProcessDividend(symbol string, dividend domain.Dividend) error
 		Float64("credit", dividendCredit).
 		Time("pay_date", dividend.PayDate).
 		Msg("Dividend credited to cash")
+
+	return nil
+}
+
+func (t *Tracker) ProcessSplit(symbol string, split domain.Split) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	pos, exists := t.positions[symbol]
+	if !exists || pos.Quantity <= 0 {
+		return nil
+	}
+
+	oldQty := pos.Quantity
+	oldCost := pos.AvgCost
+
+	if split.StkDivRatio > 0 {
+		additionalShares := oldQty * split.StkDivRatio
+		pos.Quantity += additionalShares
+		pos.AvgCost = (oldCost * oldQty) / pos.Quantity
+		pos.QuantityToday += additionalShares
+	}
+
+	if split.CashDivRatio > 0 {
+		cashCredit := oldQty * split.CashDivRatio
+		t.cash += cashCredit
+	}
+
+	t.logger.Info().
+		Str("symbol", symbol).
+		Float64("old_qty", oldQty).
+		Float64("new_qty", pos.Quantity).
+		Float64("old_cost", oldCost).
+		Float64("new_cost", pos.AvgCost).
+		Float64("stk_div_ratio", split.StkDivRatio).
+		Float64("cash_div_ratio", split.CashDivRatio).
+		Msg("Stock split/dividend processed")
 
 	return nil
 }

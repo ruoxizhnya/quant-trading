@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { apiRequest, API, waitForAPIReady } from '../helpers/api';
+import { apiRequest, API, waitForBackendReady } from '../helpers/api';
 
 test.describe('Backend API — Backtest Engine', () => {
 
   test.beforeAll(async () => {
-    const ready = await waitForAPIReady(60000);
+    const ready = await waitForBackendReady(60000);
     expect(ready).toBe(true);
   });
 

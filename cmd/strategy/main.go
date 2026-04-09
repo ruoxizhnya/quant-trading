@@ -87,7 +87,7 @@ func main() {
 	}
 
 	// Initialize strategy registry
-	strategy.Init(logger)
+	strategy.OldInit(logger)
 
 	// Register strategies
 	registerStrategies(logger)

@@ -18,6 +18,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/httpclient"
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	"github.com/ruoxizhnya/quant-trading/pkg/risk"
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
@@ -115,6 +116,11 @@ type Engine struct {
 	// fallback and runtime source switching. When set, provider reads are
 	// routed through the adapter; when nil, the raw provider is used directly.
 	dataAdapter *marketdata.DataAdapter
+
+	// Optional PostgresStore for direct factor cache access.
+	// When set, the engine pre-loads factor z-scores from DB before backtest,
+	// eliminating per-symbol-per-day HTTP/DB queries for multi-factor strategies.
+	store *storage.PostgresStore
 }
 
 // BacktestState holds the state of a backtest run.
@@ -132,12 +138,13 @@ type BacktestState struct {
 
 // BacktestRequest represents the API request to start a backtest.
 type BacktestRequest struct {
-	Strategy      string   `json:"strategy" binding:"required"`
-	StockPool     []string `json:"stock_pool" binding:"required"`
-	StartDate     string   `json:"start_date" binding:"required"`
-	EndDate       string   `json:"end_date" binding:"required"`
-	InitialCapital float64 `json:"initial_capital"`
-	RiskFreeRate  float64  `json:"risk_free_rate"`
+	Strategy       string   `json:"strategy" binding:"required"`
+	StockPool      []string `json:"stock_pool"`
+	IndexCode      string   `json:"index_code"`
+	StartDate      string   `json:"start_date" binding:"required"`
+	EndDate        string   `json:"end_date" binding:"required"`
+	InitialCapital float64  `json:"initial_capital"`
+	RiskFreeRate   float64  `json:"risk_free_rate"`
 }
 
 // BacktestResponse represents the API response for a backtest run.
@@ -213,7 +220,8 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 		strategyServiceURL: strategyServiceURL,
 		riskServiceURL:    riskServiceURL,
 		httpClient:        httpclient.New("", 30*time.Second, 3),
-		logger: logger.With().Str("component", "backtest_engine").Logger(),
+		logger:           logger.With().Str("component", "backtest_engine").Logger(),
+		inMemoryOHLCV:    make(map[string][]domain.OHLCV),
 	}, nil
 }
 
@@ -223,6 +231,15 @@ func (e *Engine) SetDataAdapter(adapter *marketdata.DataAdapter) {
 	e.dataAdapter = adapter
 	if adapter != nil {
 		e.logger.Info().Str("source", adapter.Primary()).Msg("DataAdapter attached to engine")
+	}
+}
+
+func (e *Engine) SetStore(store *storage.PostgresStore) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.store = store
+	if store != nil {
+		e.logger.Info().Msg("PostgresStore attached to engine — factor cache warming enabled")
 	}
 }
 
@@ -289,13 +306,32 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 	}
 
 	// Create backtest state
+	stockPool := req.StockPool
+	if len(stockPool) == 0 && req.IndexCode != "" {
+		e.mu.RLock()
+		st := e.store
+		e.mu.RUnlock()
+		if st != nil {
+			constituents, err := st.GetIndexConstituentsByDate(ctx, req.IndexCode, startDate)
+			if err != nil {
+				e.logger.Warn().Err(err).Str("index_code", req.IndexCode).Msg("Failed to load index constituents")
+			} else if len(constituents) > 0 {
+				stockPool = constituents
+				e.logger.Info().Str("index_code", req.IndexCode).Int("constituents", len(constituents)).Msg("Using index constituents as stock pool")
+			}
+		}
+	}
+	if len(stockPool) == 0 {
+		return nil, apperrors.New(apperrors.ErrCodeInvalidInput, "stock_pool or index_code is required").WithOperation("RunBacktest")
+	}
+
 	backtestID := uuid.New().String()
 	state := &BacktestState{
 		ID:              backtestID,
 		Status:          "running",
 		Params:          domain.BacktestParams{
 			StrategyName:   req.Strategy,
-			StockPool:      req.StockPool,
+			StockPool:      stockPool,
 			StartDate:      startDate,
 			EndDate:        endDate,
 			InitialCapital: initialCapital,
@@ -382,6 +418,12 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		logger.Info().Msg("Cache warm-up completed")
 	}
 
+	if err := e.warmFactorCache(ctx, params.StartDate, params.EndDate); err != nil {
+		logger.Warn().Err(err).Msg("Factor cache warm-up failed — strategies will fall back to HTTP computation")
+	} else if e.factorCache != nil {
+		logger.Info().Msg("Factor cache warm-up completed")
+	}
+
 	// Get trading days
 	tradingDays, err := e.getTradingDays(ctx, params.StartDate, params.EndDate)
 	if err != nil {
@@ -394,11 +436,32 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 
 	logger.Info().Int("trading_days", len(tradingDays)).Msg("Retrieved trading days")
 
-	// Prepare market data cache
 	marketDataCache := make(map[string][]domain.OHLCV)
-	pricesCache := make(map[string]float64)         // Latest prices for each symbol
-	stockCache := make(map[string]domain.Stock)      // Stock info cache (Name, ListDate)
-	prevCloseCache := make(map[string]float64)      // Previous close per symbol (updated for limit-up)
+	pricesCache := make(map[string]float64)
+	stockCache := make(map[string]domain.Stock)
+	prevCloseCache := make(map[string]float64)
+
+	dividendsByDate := make(map[time.Time][]*domain.Dividend)
+	splitsByDate := make(map[time.Time][]*domain.Split)
+	e.mu.RLock()
+	store := e.store
+	e.mu.RUnlock()
+	if store != nil {
+		if divs, err := store.GetDividendsInRange(ctx, params.StartDate, params.EndDate); err == nil {
+			for _, d := range divs {
+				day := d.PayDate.Truncate(24 * time.Hour)
+				dividendsByDate[day] = append(dividendsByDate[day], d)
+			}
+			logger.Info().Int("dividend_events", len(divs)).Msg("Dividend data loaded")
+		}
+		if splits, err := store.GetSplitsInRange(ctx, params.StartDate, params.EndDate); err == nil {
+			for _, s := range splits {
+				day := s.TradeDate.Truncate(24 * time.Hour)
+				splitsByDate[day] = append(splitsByDate[day], s)
+			}
+			logger.Info().Int("split_events", len(splits)).Msg("Split data loaded")
+		}
+	}
 
 	// Run backtest for each trading day
 	for i, date := range tradingDays {
@@ -821,6 +884,22 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 			}
 		}
 
+		truncatedDate := date.Truncate(24 * time.Hour)
+		if divs, ok := dividendsByDate[truncatedDate]; ok {
+			for _, d := range divs {
+				if err := state.Tracker.ProcessDividend(d.Symbol, *d); err != nil {
+					logger.Warn().Str("symbol", d.Symbol).Err(err).Msg("Failed to process dividend")
+				}
+			}
+		}
+		if splits, ok := splitsByDate[truncatedDate]; ok {
+			for _, s := range splits {
+				if err := state.Tracker.ProcessSplit(s.Symbol, *s); err != nil {
+					logger.Warn().Str("symbol", s.Symbol).Err(err).Msg("Failed to process split")
+				}
+			}
+		}
+
 		// Step 6: Record daily portfolio value
 		state.Tracker.RecordDailyValue(date, pricesCache)
 
@@ -886,6 +965,51 @@ func (e *Engine) warmCache(ctx context.Context, symbols []string, start, end tim
 		e.inMemoryOHLCV[symbol] = bars
 	}
 	e.mu.Unlock()
+
+	return nil
+}
+
+func (e *Engine) warmFactorCache(ctx context.Context, start, end time.Time) error {
+	e.mu.RLock()
+	store := e.store
+	e.mu.RUnlock()
+	if store == nil {
+		return nil
+	}
+
+	factors := []domain.FactorType{domain.FactorMomentum, domain.FactorValue, domain.FactorQuality}
+	combined := make(map[domain.FactorType]map[time.Time]map[string]float64)
+
+	for _, factor := range factors {
+		entries, err := store.GetFactorCacheRange(ctx, factor, start, end)
+		if err != nil {
+			e.logger.Warn().Str("factor", string(factor)).Err(err).Msg("Failed to load factor cache from DB")
+			continue
+		}
+		if len(entries) == 0 {
+			e.logger.Info().Str("factor", string(factor)).Msg("No factor cache entries in DB — run sync/factors/all first")
+			continue
+		}
+		for _, entry := range entries {
+			if combined[entry.FactorName] == nil {
+				combined[entry.FactorName] = make(map[time.Time]map[string]float64)
+			}
+			if combined[entry.FactorName][entry.TradeDate] == nil {
+				combined[entry.FactorName][entry.TradeDate] = make(map[string]float64)
+			}
+			combined[entry.FactorName][entry.TradeDate][entry.Symbol] = entry.ZScore
+		}
+		e.logger.Info().
+			Str("factor", string(factor)).
+			Int("entries", len(entries)).
+			Msg("Factor cache loaded from DB")
+	}
+
+	if len(combined) > 0 {
+		e.mu.Lock()
+		e.factorCache = combined
+		e.mu.Unlock()
+	}
 
 	return nil
 }
@@ -980,7 +1104,10 @@ func (e *Engine) detectRegime(ctx context.Context, marketData map[string][]domai
 func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool []string, marketData map[string][]domain.OHLCV, date time.Time, tracker *Tracker) ([]domain.Signal, error) {
 	// Step 1: Try local strategy registry first (plugins/ directory)
 	if strat, err := strategy.DefaultRegistry.Get(strategyName); err == nil {
-		// Build current portfolio from tracker state
+		if fa, ok := strat.(strategy.FactorAware); ok {
+			fa.SetFactorCache(e.GetFactorZScore)
+		}
+
 		prices := make(map[string]float64)
 		for sym, bars := range marketData {
 			if len(bars) > 0 {
@@ -994,7 +1121,6 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 			return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, fmt.Sprintf("local strategy %s failed", strategyName), "getSignals")
 		}
 
-		// Convert strategy.Signal to domain.Signal (lossless conversion)
 		domainSignals := make([]domain.Signal, 0, len(signals))
 		for _, s := range signals {
 			if s.Action == "hold" {
@@ -1025,6 +1151,15 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 				metadata = make(map[string]interface{})
 			}
 
+			limitPrice := s.LimitPrice
+			if limitPrice == 0 {
+				limitPrice = s.Price
+			}
+			orderType := s.OrderType
+			if orderType == "" {
+				orderType = domain.OrderTypeMarket
+			}
+
 			domainSignals = append(domainSignals, domain.Signal{
 				Symbol:        s.Symbol,
 				Date:          sigDate,
@@ -1032,7 +1167,8 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 				Strength:      s.Strength,
 				Factors:       factors,
 				Metadata:      metadata,
-				LimitPrice:    s.Price,
+				LimitPrice:    limitPrice,
+				OrderType:     orderType,
 				CompositeScore: s.Strength,
 			})
 		}

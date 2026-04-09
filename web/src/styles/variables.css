@@ -1,0 +1,28 @@
+:root {
+  --q-bg: #0d1117;
+  --q-surface: #161b22;
+  --q-surface2: #1c2333;
+  --q-surface3: #21262d;
+  --q-border: #30363d;
+  --q-border-light: #21262d;
+  --q-text: #e6edf3;
+  --q-text2: #8b949e;
+  --q-text3: #484f58;
+  --q-primary: #58a6ff;
+  --q-primary-dark: #1f6feb;
+  --q-primary-light: #79c0ff;
+  --q-success: #3fb950;
+  --q-danger: #f85149;
+  --q-warning: #d29922;
+  --q-info: #79c0ff;
+  --q-radius: 10px;
+  --q-radius-sm: 6px;
+  --q-radius-xs: 4px;
+  --q-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  --q-shadow-lg: 0 10px 25px rgba(0,0,0,0.3);
+  --q-transition: 0.2s ease;
+  --q-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', Roboto, sans-serif;
+  --q-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --q-sidebar-width: 220px;
+  --q-header-height: 56px;
+}

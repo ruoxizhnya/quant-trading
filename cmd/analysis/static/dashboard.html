@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Quant Lab - 量化交易系统</title>
+<link rel="stylesheet" href="/static/quant-theme.css">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f1419; color: #e7e9ea; min-height: 100vh; }
@@ -315,12 +316,21 @@
 <script>
 const API = 'http://localhost:8085';
 
+// ── Page lifecycle guard — prevent & cancel fetches during navigation ──
+let pageActive = true;
+const navAbort = new AbortController();
+function cancelAllFetches() {
+  pageActive = false;
+  navAbort.abort();
+}
+window.addEventListener('pagehide', cancelAllFetches);
+
 // ── Clock & Date ──────────────────────────────────────────────
 function updateClock() {
   const now = new Date();
   const h = now.getHours();
   const els = {
-    clock: now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: true, hour12: false }),
+    clock: now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
   };
   for (const [id, v] of Object.entries(els)) {
     const el = document.getElementById(id);
@@ -340,8 +350,9 @@ function updateClock() {
 
 // ── Market Overview ───────────────────────────────────────────
 async function fetchMarket() {
+  if (!pageActive) return;
   try {
-    const r = await fetch(API + '/market/index');
+    const r = await fetch(API + '/market/index', { signal: navAbort.signal });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     const indices = ['sh300', 'sse', 'cyb'];
@@ -371,10 +382,11 @@ async function fetchMarket() {
 let strategiesCache = [];
 
 async function fetchStats() {
+  if (!pageActive) return;
   try {
     const [stockR, stratR] = await Promise.all([
-      fetch(API + '/stocks/count').catch(() => null),
-      fetch(API + '/api/strategies').catch(() => null),
+      fetch(API + '/stocks/count', { signal: navAbort.signal }).catch(e => e.name === 'AbortError' ? null : Promise.reject(e)),
+      fetch(API + '/api/strategies', { signal: navAbort.signal }).catch(e => e.name === 'AbortError' ? null : Promise.reject(e)),
     ]);
 
     if (stockR && stockR.ok) {
@@ -395,6 +407,7 @@ async function fetchStats() {
 
 // ── System Status ─────────────────────────────────────────────
 async function fetchSystemStatus() {
+  if (!pageActive) return;
   try {
     const checks = [
       { url: API + '/health', id: 'sys-api', label: 'API 服务' },
@@ -403,11 +416,14 @@ async function fetchSystemStatus() {
     let ok = 0;
     await Promise.all(checks.map(async c => {
       try {
-        const r = await fetch(c.url);
+        const r = await fetch(c.url, { signal: navAbort.signal });
         const el = document.getElementById(c.id);
         if (r.ok) { el.textContent = '正常'; el.className = 'sys-val good'; ok++; }
         else { el.textContent = '异常'; el.className = 'sys-val err'; }
-      } catch { const el = document.getElementById(c.id); el.textContent = '离线'; el.className = 'sys-val err'; }
+      } catch (e) {
+        if (e.name === 'AbortError') return;
+        const el = document.getElementById(c.id); el.textContent = '离线'; el.className = 'sys-val err';
+      }
     }));
 
     // Update header dots
@@ -473,6 +489,9 @@ async function quickRun() {
     alert('请填写完整参数');
     return;
   }
+
+  // Cancel all pending fetches before navigation
+  cancelAllFetches();
 
   // Save to session for index.html to pick up
   sessionStorage.setItem('qf_strategy', strategy);

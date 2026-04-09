@@ -1172,6 +1172,54 @@ func (s *PostgresStore) SaveDividendBatch(ctx context.Context, records []*domain
 	return nil
 }
 
+func (s *PostgresStore) GetDividendsInRange(ctx context.Context, startDate, endDate time.Time) ([]*domain.Dividend, error) {
+	query := `
+		SELECT id, symbol, ann_date, rec_date, pay_date, div_amt, stk_div, stk_ratio, cash_ratio
+		FROM dividends
+		WHERE pay_date >= $1 AND pay_date <= $2
+		ORDER BY pay_date ASC
+	`
+	rows, err := s.pool.Query(ctx, query, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query dividends in range: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*domain.Dividend
+	for rows.Next() {
+		var r domain.Dividend
+		if err := rows.Scan(&r.ID, &r.Symbol, &r.AnnDate, &r.RecDate, &r.PayDate, &r.DivAmt, &r.StkDiv, &r.StkRatio, &r.CashRatio); err != nil {
+			return nil, fmt.Errorf("failed to scan dividend row: %w", err)
+		}
+		results = append(results, &r)
+	}
+	return results, rows.Err()
+}
+
+func (s *PostgresStore) GetDividendsBySymbol(ctx context.Context, symbol string) ([]*domain.Dividend, error) {
+	query := `
+		SELECT id, symbol, ann_date, rec_date, pay_date, div_amt, stk_div, stk_ratio, cash_ratio
+		FROM dividends
+		WHERE symbol = $1
+		ORDER BY pay_date ASC
+	`
+	rows, err := s.pool.Query(ctx, query, symbol)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query dividends for symbol %s: %w", symbol, err)
+	}
+	defer rows.Close()
+
+	var results []*domain.Dividend
+	for rows.Next() {
+		var r domain.Dividend
+		if err := rows.Scan(&r.ID, &r.Symbol, &r.AnnDate, &r.RecDate, &r.PayDate, &r.DivAmt, &r.StkDiv, &r.StkRatio, &r.CashRatio); err != nil {
+			return nil, fmt.Errorf("failed to scan dividend row: %w", err)
+		}
+		results = append(results, &r)
+	}
+	return results, rows.Err()
+}
+
 // SaveIndexConstituentBatch saves multiple index constituent records in a batch.
 // Uses ON CONFLICT to update existing entries (symbol, index_code).
 func (s *PostgresStore) SaveIndexConstituentBatch(ctx context.Context, records []*domain.IndexConstituent) error {
@@ -1231,7 +1279,32 @@ func (s *PostgresStore) GetIndexConstituents(ctx context.Context, indexCode stri
 	return results, rows.Err()
 }
 
-// SaveFactorCacheBatch saves multiple factor cache entries in a batch.
+func (s *PostgresStore) GetIndexConstituentsByDate(ctx context.Context, indexCode string, date time.Time) ([]string, error) {
+	query := `
+		SELECT symbol
+		FROM index_constituents
+		WHERE index_code = $1
+		  AND in_date <= $2
+		  AND (out_date IS NULL OR out_date > $2)
+		ORDER BY symbol
+	`
+	rows, err := s.pool.Query(ctx, query, indexCode, date)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query index constituents by date: %w", err)
+	}
+	defer rows.Close()
+
+	var symbols []string
+	for rows.Next() {
+		var sym string
+		if err := rows.Scan(&sym); err != nil {
+			return nil, fmt.Errorf("failed to scan index constituent symbol: %w", err)
+		}
+		symbols = append(symbols, sym)
+	}
+	return symbols, rows.Err()
+}
+
 func (s *PostgresStore) SaveFactorCacheBatch(ctx context.Context, entries []*domain.FactorCacheEntry) error {
 	if len(entries) == 0 {
 		return nil

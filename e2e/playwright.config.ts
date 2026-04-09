@@ -1,7 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const BASE_URL = process.env.BASE_URL || 'http://localhost:8085';
+const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const DATA_SERVICE_URL = process.env.DATA_SERVICE_URL || 'http://localhost:8081';
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8085';
 
 export default defineConfig({
   testDir: './tests',
@@ -27,10 +28,4 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: 'echo "Assuming services are already running on ${BASE_URL}"',
-    port: 8085,
-    reuseExistingServer: true,
-    timeout: 120000,
-  },
 });

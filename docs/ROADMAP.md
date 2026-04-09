@@ -148,3 +148,30 @@ This roadmap covers all sprints for Phase 1 (Foundation & Accuracy) and Phase 2 
 - **vnpy comparison in Sprint 3 only** — requires Sprint 1 (T+1 + 涨跌停), Sprint 2 (speed + determinism), and actual vnpy reference data setup. Don't run it earlier; results will be meaningless.
 - **Determinism fixtures created Sprint 1** — even if empty, the scaffold should be in place early so CI can start catching drift immediately.
 - **Phase Gate sign-off (Sprint 3)** requires all 9 checklist items — if any are red, Phase 2 cannot start.
+
+---
+
+## Phase 3 — 融合发展 (Event-Driven + 多数据源 + 批量回测)
+
+**Status: Phase 3 IN PROGRESS**
+
+### Phase 3 已完成项
+
+| # | 任务 | 优先级 | 状态 | 说明 |
+|---|------|--------|------|------|
+| P0-A | FactorComputer 批量计算 | 高 | ✅ | ComputeFactorsForDateRange + LoadFactorCacheIntoMap |
+| P0-B | Engine 因子缓存预热 | 高 | ✅ | warmFactorCache + FactorZScoreReader 注入 FactorAware 策略 |
+| P0-C | Signal OrderType/LimitPrice | 高 | ✅ | strategy.Signal 增强 + engine 信号转换适配 |
+| P0-D | 限价单策略示例 | 高 | ✅ | Bollinger MR 用限价单在布林带下轨挂买入 |
+| P1-A | 股息/送股收益计算 | 中 | ✅ | Tracker.ProcessDividend/ProcessSplit + Engine 日循环集成 |
+| P1-B | 指数成分股股票池 | 中 | ✅ | BacktestRequest.IndexCode + GetIndexConstituentsByDate |
+| P1-C | 实盘接口预留 | 中 | ✅ | pkg/live/ (LiveTrader 接口 + MockTrader) |
+| P1-D | 文档同步更新 | 中 | ✅ | ARCHITECTURE.md + ROADMAP.md 更新 |
+
+### Phase 3 待完成项 (P2)
+
+| # | 任务 | 优先级 | 状态 | 说明 |
+|---|------|--------|------|------|
+| P2-A | 因子归因 + IC 分析 API | 低 | ⏳ | factor_attribution.go 已有基础设施，需暴露 HTTP API |
+| P2-B | Go Plugin 热加载 | 低 | ⏳ | 需评估替代方案 (Lua/WASM/配置驱动) |
+| P2-C | AI Copilot 深度集成 | 低 | ⏳ | Copilot 已有基础，需 E2E 流程优化 |

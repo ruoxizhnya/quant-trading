@@ -1,6 +1,17 @@
 # 量化交易系统架构文档
 
-_最后更新: 2026-04-08 (Phase 2.5)_
+_最后更新: 2026-04-08 (Phase 3)_
+
+**Phase 3 更新:**
+- Event-Driven 数据管道 (pkg/marketdata/eventbus.go + provider 接口)
+- 多数据源适配器: Tushare / AkShare / Postgres / HTTP / Cached (Redis)
+- 因子缓存预热: Engine 自动从 factor_cache 表加载 z-score，注入 FactorZScoreReader
+- 限价单支持: strategy.Signal 增加 OrderType/LimitPrice，Tracker 按日内高低价判断成交
+- 股息/送股处理: Tracker.ProcessDividend + ProcessSplit，Engine 日循环自动处理
+- 指数成分股股票池: BacktestRequest.IndexCode，从 index_constituents 按日期加载
+- 实盘接口预留: pkg/live/ (LiveTrader 接口 + MockTrader 实现)
+- 新策略: TD Sequential / Bollinger MR / Volume-Price Trend / Vol Breakout
+- 批量回测框架: pkg/backtest/batch.go + walkforward.go
 
 **Phase 2.5 更新:**
 - 新增 `pkg/errors` 统一错误处理模块
@@ -187,8 +198,12 @@ type Strategy interface {
 |------|------|------|
 | momentum | `plugins/momentum.go` | 动量策略：买强势股 |
 | mean_reversion | `plugins/mean_reversion.go` | 均值回归 |
-| multi_factor | `plugins/multi_factor.go` | 多因子评分（PE+ROE+动量）|
+| multi_factor | `plugins/multi_factor.go` | 多因子评分（PE+ROE+动量），支持 FactorAware 缓存 |
 | value_screening | `plugins/value_screen.go` | 价值筛选（PE/PB/ROE 过滤 + 动量排名）|
+| td_sequential | `plugins/new_strategies.go` | TD Sequential：Tom DeMark 趋势衰竭指标 |
+| bollinger_mr | `plugins/new_strategies.go` | 布林带均值回归：限价单买入（下轨挂单） |
+| vpt | `plugins/new_strategies.go` | 量价趋势：成交量确认价格突破 |
+| vol_breakout | `plugins/new_strategies.go` | 波动率突破：ATR 通道突破 |
 
 ### 策略加载流程
 1. `plugins/` 包通过 `init()` 自动注册到 `strategy.GlobalRegistry`
@@ -209,10 +224,15 @@ type Strategy interface {
 每日循环:
   1. 获取当日 K 线数据 (marketDataCache)
   2. 获取信号 (getSignals → 本地 registry 或外部 service)
+     - 若策略实现 FactorAware，注入 FactorZScoreReader
   3. 处理信号 → 执行交易 (Tracker.ExecuteTrade)
+     - 限价单: 检查日内低/高价是否触及 LimitPrice
+     - 市价单: 按当日收盘价成交
   4. 更新持仓 (T+1 规则)
   5. 检查涨跌停 (涨停日禁买，跌停日禁卖)
+  5.5 处理股息/送股 (ProcessDividend / ProcessSplit)
   6. 记录每日组合价值
+  7. AdvanceDay (T+1 滚动)
 ```
 
 ### 佣金计算规则
@@ -248,18 +268,42 @@ quant-trading/
 │   └── strategy/       — 外部策略服务 (:8082, 备用)
 ├── pkg/
 │   ├── backtest/       — 回测引擎
-│   │   ├── engine.go    — 主引擎
-│   │   └── tracker.go   — 持仓/佣金追踪
+│   │   ├── engine.go    — 主引擎 (因子缓存预热 + 股息/送股 + 指数成分股)
+│   │   ├── tracker.go   — 持仓/佣金追踪 (限价单 + ProcessDividend/ProcessSplit)
+│   │   ├── batch.go     — 批量回测框架
+│   │   ├── walkforward.go — Walk-Forward 验证
+│   │   └── job.go       — 异步回测任务
 │   ├── data/
-│   │   └── tushare.go  — Tushare API 封装
+│   │   ├── tushare.go  — Tushare API 封装
+│   │   ├── factor.go   — 因子计算 + 缓存
+│   │   └── factor_attribution.go — 因子归因分析
 │   ├── domain/
-│   │   └── types.go    — 核心类型（OHLCV, Trade, Position, Signal 等）
+│   │   └── types.go    — 核心类型（OHLCV, Trade, Position, Signal, OrderType 等）
+│   ├── live/           — 实盘接口预留
+│   │   ├── trader.go    — LiveTrader 接口定义
+│   │   └── mock_trader.go — MockTrader 模拟交易实现
+│   ├── marketdata/     — Event-Driven 数据管道
+│   │   ├── eventbus.go  — DataEventBus (pub/sub)
+│   │   ├── provider.go  — Provider 接口
+│   │   ├── tushare_provider.go
+│   │   ├── akshare_provider.go
+│   │   ├── postgres_provider.go
+│   │   ├── http_provider.go
+│   │   └── cached_provider.go — Redis 缓存装饰器
+│   ├── risk/           — 风控模块
+│   │   ├── manager.go
+│   │   ├── regime.go
+│   │   ├── stoploss.go  — ATR StopLoss
+│   │   └── volatility.go
 │   ├── strategy/
-│   │   ├── strategy.go — 策略接口定义
+│   │   ├── strategy.go — 策略接口 + FactorAware + Signal(OrderType/LimitPrice)
 │   │   ├── registry.go — 策略注册中心
+│   │   ├── copilot.go  — AI Copilot 服务
+│   │   ├── db.go       — 策略配置 CRUD
 │   │   └── plugins/    — 内置策略实现
 │   └── storage/
-│       └── postgres.go  — PostgreSQL 操作
+│       ├── postgres.go  — PostgreSQL 操作 (含 GetDividendsInRange/GetIndexConstituentsByDate)
+│       └── cache.go     — Redis 缓存
 ├── docker-compose.yml
 └── config/
     └── config.yaml

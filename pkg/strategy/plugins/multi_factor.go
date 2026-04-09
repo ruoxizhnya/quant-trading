@@ -26,11 +26,6 @@ type MultiFactorConfig struct {
 	TopN             int
 }
 
-// FactorZScoreReader is a function type for reading pre-computed factor z-scores.
-// Returns (zScore, true) if found, (0, false) if not available.
-type FactorZScoreReader func(factor domain.FactorType, date time.Time, symbol string) (float64, bool)
-
-// rankedStock holds a stock's factor scores and composite ranking.
 type rankedStock struct {
 	symbol         string
 	compositeScore float64
@@ -53,7 +48,7 @@ type multiFactorStrategy struct {
 
 	// L1 factor cache reader — set via SetFactorCache before backtest.
 	// When nil, falls back to HTTP-based real-time computation.
-	factorReader FactorZScoreReader
+	factorReader strategy.FactorZScoreReader
 }
 
 // Configure sets the strategy parameters.
@@ -138,7 +133,7 @@ func (s *multiFactorStrategy) Cleanup() {
 // When set, GenerateSignals reads z-scores from this cache (zero-latency)
 // instead of computing them via HTTP API calls on each rebalance day.
 // Pass nil to clear and fall back to HTTP-based computation.
-func (s *multiFactorStrategy) SetFactorCache(reader FactorZScoreReader) {
+func (s *multiFactorStrategy) SetFactorCache(reader strategy.FactorZScoreReader) {
 	s.factorReader = reader
 }
 
