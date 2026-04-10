@@ -42,6 +42,22 @@ export const API = {
     return ctx.get(`/backtest/${id}/report`);
   },
 
+  async listBacktestJobs(ctx: APIRequestContext, limit = 20) {
+    return ctx.get(`/backtest?limit=${limit}`);
+  },
+
+  async getBacktestJob(ctx: APIRequestContext, id: string) {
+    return ctx.get(`/backtest/${id}`);
+  },
+
+  async getBacktestTrades(ctx: APIRequestContext, id: string) {
+    return ctx.get(`/backtest/${id}/trades`);
+  },
+
+  async getBacktestEquity(ctx: APIRequestContext, id: string) {
+    return ctx.get(`/backtest/${id}/equity`);
+  },
+
   async copilotGenerate(ctx: APIRequestContext, prompt: string) {
     return ctx.post('/api/copilot/generate', { data: { prompt } });
   },

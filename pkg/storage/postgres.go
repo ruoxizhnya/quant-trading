@@ -229,6 +229,21 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+		// Migration 009: backtest_jobs table (async job queue)
+		`CREATE TABLE IF NOT EXISTS backtest_jobs (
+			id VARCHAR(64) PRIMARY KEY,
+			strategy_id VARCHAR(50) NOT NULL,
+			params JSONB NOT NULL DEFAULT '{}',
+			universe VARCHAR(100) NOT NULL,
+			start_date DATE NOT NULL,
+			end_date DATE NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			result JSONB,
+			error_message TEXT,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			started_at TIMESTAMPTZ,
+			completed_at TIMESTAMPTZ
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -277,6 +292,8 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_wfr_report_date ON walk_forward_reports(report_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_strategies_type ON strategies(strategy_type)`,
 		`CREATE INDEX IF NOT EXISTS idx_strategies_active ON strategies(is_active)`,
+		`CREATE INDEX IF NOT EXISTS idx_bj_status ON backtest_jobs(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_bj_created_at ON backtest_jobs(created_at)`,
 	}
 
 	for _, idx := range indexes {
@@ -1787,7 +1804,8 @@ func (s *PostgresStore) UpdateJobFailed(ctx context.Context, jobID string, errMs
 // GetBacktestJob retrieves a single backtest job by ID as map[string]any.
 func (s *PostgresStore) GetBacktestJob(ctx context.Context, jobID string) (map[string]any, error) {
 	query := `
-		SELECT id, strategy_id, params, universe, start_date, end_date,
+		SELECT id, strategy_id, params, universe,
+		       start_date::text, end_date::text,
 		       status, result, error_message, created_at, started_at, completed_at
 		FROM backtest_jobs WHERE id = $1
 	`
@@ -1834,7 +1852,8 @@ func (s *PostgresStore) GetBacktestJob(ctx context.Context, jobID string) (map[s
 // ListBacktestJobs returns recent backtest jobs as []map[string]any.
 func (s *PostgresStore) ListBacktestJobs(ctx context.Context, limit int) ([]map[string]any, error) {
 	query := `
-		SELECT id, strategy_id, params, universe, start_date, end_date,
+		SELECT id, strategy_id, params, universe,
+		       start_date::text, end_date::text,
 		       status, result, error_message, created_at, started_at, completed_at
 		FROM backtest_jobs
 		ORDER BY created_at DESC

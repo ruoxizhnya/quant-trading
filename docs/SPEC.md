@@ -379,6 +379,7 @@ GET  /positions                   - Get current positions
 **Endpoints**:
 ```
 GET  /health                      - Health check
+GET  /backtest?limit=20           - List recent backtest jobs
 POST /backtest                    - Run backtest
      {
        "strategy": "value_momentum",
@@ -388,8 +389,10 @@ POST /backtest                    - Run backtest
        "initial_capital": 1000000,
        "commission": 0.0003
      }
-GET  /backtest/:id/report         - Get backtest report
-GET  /backtest/:id/equity_curve   - Get equity curve data
+GET  /backtest/:id                - Get backtest job status (async)
+GET  /backtest/:id/report         - Get backtest report (checks DB if not in memory)
+GET  /backtest/:id/trades         - Get backtest trades (checks DB if not in memory)
+GET  /backtest/:id/equity         - Get equity curve data (checks DB if not in memory)
 POST /analyze                     - Analyze existing portfolio
 ```
 

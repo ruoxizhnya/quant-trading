@@ -31,6 +31,10 @@ export interface Trade {
 export interface BacktestResult {
   id: string
   status: string
+  strategy?: string
+  stock_pool?: string[]
+  start_date?: string
+  end_date?: string
   total_return: number
   annual_return: number
   sharpe_ratio: number
@@ -43,6 +47,22 @@ export interface BacktestResult {
   portfolio_values: PortfolioPoint[]
   trades: Trade[]
   metrics?: Record<string, number>
+  initial_capital?: number
+}
+
+export interface BacktestJob {
+  id: string
+  strategy_id: string
+  params: Record<string, any>
+  universe: string
+  start_date: string
+  end_date: string
+  status: string
+  result?: BacktestResult
+  error?: string
+  created_at: string
+  started_at?: string
+  completed_at?: string
 }
 
 export interface Strategy {

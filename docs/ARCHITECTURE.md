@@ -106,11 +106,17 @@ POST /screen               — 选股请求 (proxy → data-service)
 GET  /ohlcv/:symbol        — K 线数据 (proxy → data-service)
      Query: ?start_date=YYYYMMDD&end_date=YYYYMMDD
 
-POST /backtest             — 发起回测
+POST /backtest             — 发起回测（同步或异步）
      Body: BacktestRequest
-     → BacktestResponse
+     → BacktestResponse (含 id, strategy, total_return 等)
 
-GET  /backtest/:id/report  — 回测报告
+GET  /backtest?limit=20    — 回测任务列表（从 DB 加载）
+     → {"jobs": [...], "total": N}
+
+GET  /backtest/:id          — 回测任务状态（内存优先，DB 回退）
+GET  /backtest/:id/report   — 回测报告（含 portfolio_values, trades）
+GET  /backtest/:id/trades   — 交易记录
+GET  /backtest/:id/equity   — 净值曲线数据
 ```
 
 ### Data Service (8081)
@@ -178,6 +184,37 @@ net_profit_growth FLOAT
 trade_date DATE PK
 exchange VARCHAR(10)
 is_trading_day BOOLEAN
+```
+
+### strategies
+```sql
+id SERIAL PK
+strategy_id VARCHAR(50) UNIQUE NOT NULL  -- 如 "momentum", "value_momentum"
+name VARCHAR(100) NOT NULL
+description TEXT
+strategy_type VARCHAR(30) NOT NULL        -- "trend_following" | "mean_reversion" | ...
+params JSONB NOT NULL DEFAULT '{}'       -- 策略参数配置
+is_active BOOLEAN NOT NULL DEFAULT TRUE
+created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+Indexes: idx_strategies_type, idx_strategies_active
+```
+
+### backtest_jobs (异步回测任务队列 + 结果持久化)
+```sql
+id VARCHAR(64) PK                          -- UUID
+strategy_id VARCHAR(50) NOT NULL           -- 策略名
+params JSONB NOT NULL DEFAULT '{}'         -- 回测参数
+universe VARCHAR(100) NOT NULL             -- 股票池（逗号分隔）
+start_date DATE NOT NULL                   -- 回测起始日期
+end_date DATE NOT NULL                     -- 回测结束日期
+status VARCHAR(20) NOT NULL DEFAULT 'pending' -- pending | running | completed | failed
+result JSONB                               -- 完整回测结果（BacktestResponse JSON）
+error_message TEXT                         -- 失败时的错误信息
+created_at TIMESTAMPTZ DEFAULT NOW()       -- 创建时间
+started_at TIMESTAMPTZ                      -- 开始执行时间
+completed_at TIMESTAMPTZ                    -- 完成时间
+Indexes: idx_bj_status, idx_bj_created_at
 ```
 
 ---
@@ -360,12 +397,27 @@ web/src/
 │   ├── backtest.ts      — 回测 API
 │   ├── market.ts        — 市场 API
 │   └── strategy.ts      — 策略 API
-├── pages/               — 页面组件
-│   ├── Dashboard.vue    — 控制台
-│   ├── BacktestEngine.vue — 回测引擎
+├── pages/               — 页面组件 (编排容器, ~100-200行)
+│   ├── Dashboard.vue    — 控制台 (编排: MarketMetrics + QuickBacktest + NavTiles + ConsoleHistory)
+│   ├── BacktestEngine.vue — 回测引擎 (编排: BacktestForm + MetricsCards + EquityChart + TradeTable + DetailMetrics + BacktestHistory)
 │   ├── Screener.vue     — 选股器
 │   ├── Copilot.vue      — AI Copilot
 │   └── StrategyLab.vue  — 策略实验室
+├── components/          — 可复用子组件
+│   ├── backtest/        — 回测引擎子组件
+│   │   ├── BacktestForm.vue      — 回测参数表单
+│   │   ├── MetricsCards.vue      — 指标卡片网格
+│   │   ├── EquityChart.vue       — 净值曲线 (Chart.js + 交易标记)
+│   │   ├── TradeTable.vue        — 交易记录表
+│   │   ├── DetailMetrics.vue     — 详细指标
+│   │   └── BacktestHistory.vue   — 历史记录列表
+│   └── dashboard/       — 控制台子组件
+│       ├── MarketMetrics.vue     — 市场概览 (指数数据)
+│       ├── QuickBacktest.vue     — 快速回测表单
+│       ├── NavTiles.vue          — 导航磁贴
+│       └── ConsoleHistory.vue    — 控制台历史
+├── composables/         — 组合式函数
+│   └── useBacktestChart.ts       — Chart.js 渲染逻辑 (创建/销毁/采样/标记)
 ├── components/layout/   — 布局组件
 │   ├── AppLayout.vue    — 主布局 (sidebar + header + content)
 │   ├── AppSidebar.vue   — 侧边导航

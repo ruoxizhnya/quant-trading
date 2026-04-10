@@ -176,38 +176,26 @@ ROADMAP.md 标记:
 
 #### Q-001: BacktestEngine.vue — God Component (600+ 行)
 
-[BacktestEngine.vue](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue) 承担了 7 个职责:
-1. 表单状态管理 (reactive form)
-2. API 调用 (runBacktest, getBacktestReport)
-3. 数据转换 (stripHeavyData, sampleData, tradeMarkers)
-4. Chart.js 渲染 (renderChart, 图表配置)
-5. 历史管理 (loadHistory, addToHistory, clearHistory)
-6. 格式化 (fmtPercent, formatNum, formatMetric, itemDesc, historyDesc)
-7. 模板渲染 (整个 SFC)
-
-**建议拆分为**:
-```
-components/backtest/
-├── BacktestForm.vue        — 表单 + 参数输入
-├── BacktestResults.vue     — 结果展示容器
-├── EquityChart.vue         — 净值曲线 + 买卖标记
-├── MetricsCards.vue        — 指标卡片网格
-├── TradeTable.vue          — 交易记录表格
-├── HistoryList.vue          — 历史记录列表
-├── useBacktest.ts          — composable (API + 状态)
-└── chartConfig.ts          — Chart.js 配置常量
-```
+> ✅ **已解决 (2026-04-10)**: 拆分为 6 个子组件 + 1 个 composable:
+> - [BacktestForm.vue](../web/src/components/backtest/BacktestForm.vue) — 表单参数输入
+> - [MetricsCards.vue](../web/src/components/backtest/MetricsCards.vue) — 指标卡片网格
+> - [EquityChart.vue](../web/src/components/backtest/EquityChart.vue) — 净值曲线 + 交易标记
+> - [TradeTable.vue](../web/src/components/backtest/TradeTable.vue) — 交易记录表
+> - [DetailMetrics.vue](../web/src/components/backtest/DetailMetrics.vue) — 详细指标
+> - [BacktestHistory.vue](../web/src/components/backtest/BacktestHistory.vue) — 历史记录列表
+> - [useBacktestChart.ts](../web/src/composables/useBacktestChart.ts) — Chart.js 渲染 composable
+>
+> **结果**: BacktestEngine.vue 从 **602行 → 185行** (减少 69%)
 
 #### Q-002: Dashboard.vue — 同样过重 (270+ 行)
 
-[Dashboard.vue](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/Dashboard.vue) 混合了:
-- 指标数据获取 + 展示
-- 快速回测表单 + 执行
-- 导航磁贴
-- 历史记录展示
-- 格式化函数 (historyDesc)
-
-**建议**: 提取 `useDashboard.ts` composable + 子组件
+> ✅ **已解决 (2026-04-10)**: 拆分为 4 个子组件:
+> - [MarketMetrics.vue](../web/src/components/dashboard/MarketMetrics.vue) — 市场概览 (指数数据)
+> - [QuickBacktest.vue](../web/src/components/dashboard/QuickBacktest.vue) — 快速回测表单
+> - [NavTiles.vue](../web/src/components/dashboard/NavTiles.vue) — 导航磁贴
+> - [ConsoleHistory.vue](../web/src/components/dashboard/ConsoleHistory.vue) — 控制台历史
+>
+> **结果**: Dashboard.vue 从 **272行 → 123行** (减少 55%)
 
 ### 🟠 HIGH Issues
 
@@ -243,6 +231,8 @@ var results = make(map[string]BacktestResult) // 进程重启即丢失
 - **当前未实现**
 
 **建议**: 优先级 P0 — 实现 result 持久化到 PostgreSQL
+
+> ✅ **已解决 (2026-04-10)**: 同步回测结果通过 `SaveSyncResult()` 写入 `backtest_jobs` 表；所有 GET 端点支持内存优先 + DB 回退；新增 `GET /backtest?limit=20` 列表端点。详见 [engine.go](../pkg/backtest/engine.go)、[job.go](../pkg/backtest/job.go)、[postgres.go](../pkg/storage/postgres.go)。
 
 #### Q-005: API Client 错误处理不统一
 
@@ -309,9 +299,12 @@ var results = make(map[string]BacktestResult) // 进程重启即丢失
 | ID | 任务 | 涉及文件 | 预估 |
 |----|------|---------|------|
 | B-1 | **拆分 BacktestEngine.vue** 为 7 个子组件 | web/src/components/backtest/* | 4h |
+| | ✅ **已完成 (2026-04-10)**: 6 子组件 + 1 composable; 602→185行 (-69%) | — |
 | B-2 | **拆分 Dashboard.vue** — 提取 useDashboard composable | web/src/composables/useDashboard.ts | 2h |
+| | ✅ **已完成 (2026-04-10)**: 4 子组件; 272→123行 (-55%) | — |
 | B-3 | **统一格式化函数** — 消除重复 fmtPercent | web/src/utils/format.ts | 30min |
 | B-4 | **回测结果持久化** — POST /backtest 写入 backtest_runs 表 | pkg/backtest/engine.go + postgres.go | 4h |
+| | ✅ **已完成 (2026-04-10)**: 同步回测 → SaveSyncResult() → backtest_jobs 表；GET 端点 DB 回退；5 个 E2E 测试覆盖 | — |
 | B-5 | **更新设计文档** — 同步 C-02~C-05 发现 | docs/*.md | 1h |
 | B-6 | **明确双轨 UI 定位** — 在 ARCHITECTURE.md 说明 | docs/ARCHITECTURE.md | 30min |
 

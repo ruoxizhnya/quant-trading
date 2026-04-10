@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
-	"github.com/spf13/viper"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/ruoxizhnya/quant-trading/pkg/httpclient"
@@ -20,6 +19,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/risk"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
+	"github.com/spf13/viper"
 )
 
 // Config holds backtest engine configuration.
@@ -77,7 +77,7 @@ type Engine struct {
 
 	// External service URLs (for non-market-data calls: risk, strategy)
 	strategyServiceURL string
-	riskServiceURL    string
+	riskServiceURL     string
 
 	// HTTP client for non-market-data service communication (with retry)
 	httpClient *httpclient.Client
@@ -151,6 +151,9 @@ type BacktestRequest struct {
 type BacktestResponse struct {
 	ID              string                  `json:"id"`
 	Status          string                  `json:"status"`
+	Strategy        string                  `json:"strategy,omitempty"`
+	StartDate       string                  `json:"start_date,omitempty"`
+	EndDate         string                  `json:"end_date,omitempty"`
 	TotalReturn     float64                 `json:"total_return,omitempty"`
 	AnnualReturn    float64                 `json:"annual_return,omitempty"`
 	SharpeRatio     float64                 `json:"sharpe_ratio,omitempty"`
@@ -167,9 +170,9 @@ type BacktestResponse struct {
 	CompletedAt     string                  `json:"completed_at,omitempty"`
 	Error           string                  `json:"error,omitempty"`
 	PortfolioValues []domain.PortfolioValue `json:"portfolio_values,omitempty"`
-	Trades          []domain.Trade         `json:"trades,omitempty"`
-	StockPool       []string               `json:"stock_pool,omitempty"`
-	InitialCapital  float64                `json:"initial_capital,omitempty"`
+	Trades          []domain.Trade          `json:"trades,omitempty"`
+	StockPool       []string                `json:"stock_pool,omitempty"`
+	InitialCapital  float64                 `json:"initial_capital,omitempty"`
 }
 
 // NewEngine creates a new backtest engine.
@@ -215,13 +218,13 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 	}
 
 	return &Engine{
-		config:            config,
-		provider:          provider,
+		config:             config,
+		provider:           provider,
 		strategyServiceURL: strategyServiceURL,
-		riskServiceURL:    riskServiceURL,
-		httpClient:        httpclient.New("", 30*time.Second, 3),
-		logger:           logger.With().Str("component", "backtest_engine").Logger(),
-		inMemoryOHLCV:    make(map[string][]domain.OHLCV),
+		riskServiceURL:     riskServiceURL,
+		httpClient:         httpclient.New("", 30*time.Second, 3),
+		logger:             logger.With().Str("component", "backtest_engine").Logger(),
+		inMemoryOHLCV:      make(map[string][]domain.OHLCV),
 	}, nil
 }
 
@@ -327,9 +330,9 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 
 	backtestID := uuid.New().String()
 	state := &BacktestState{
-		ID:              backtestID,
-		Status:          "running",
-		Params:          domain.BacktestParams{
+		ID:     backtestID,
+		Status: "running",
+		Params: domain.BacktestParams{
 			StrategyName:   req.Strategy,
 			StockPool:      stockPool,
 			StartDate:      startDate,
@@ -337,7 +340,7 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 			InitialCapital: initialCapital,
 			RiskFreeRate:   riskFreeRate,
 		},
-		StartedAt:       time.Now(),
+		StartedAt: time.Now(),
 		Tracker: NewTracker(
 			initialCapital,
 			e.config.CommissionRate,
@@ -372,11 +375,14 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 	return &BacktestResponse{
 		ID:              backtestID,
 		Status:          "completed",
+		Strategy:        req.Strategy,
+		StartDate:       req.StartDate,
+		EndDate:         req.EndDate,
 		TotalReturn:     result.TotalReturn,
 		AnnualReturn:    result.AnnualReturn,
-		SharpeRatio:    result.SharpeRatio,
-		SortinoRatio:   result.SortinoRatio,
-		MaxDrawdown:    result.MaxDrawdown,
+		SharpeRatio:     result.SharpeRatio,
+		SortinoRatio:    result.SortinoRatio,
+		MaxDrawdown:     result.MaxDrawdown,
 		MaxDrawdownDate: result.MaxDrawdownDate.Format("2006-01-02"),
 		WinRate:         result.WinRate,
 		TotalTrades:     result.TotalTrades,
@@ -385,11 +391,11 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 		AvgHoldingDays:  result.AvgHoldingDays,
 		CalmarRatio:     result.CalmarRatio,
 		StartedAt:       state.StartedAt.Format(time.RFC3339),
-		CompletedAt:    state.CompletedAt.Format(time.RFC3339),
+		CompletedAt:     state.CompletedAt.Format(time.RFC3339),
 		PortfolioValues: result.PortfolioValues,
 		Trades:          result.Trades,
 		StockPool:       req.StockPool,
-		InitialCapital:   initialCapital,
+		InitialCapital:  initialCapital,
 	}, nil
 }
 
@@ -550,11 +556,11 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 						}
 						if prevClose > 0 {
 							limitRate := e.config.Trading.PriceLimit.Normal
-						if tradeDays < e.config.Trading.NewStockDays {
-							limitRate = e.config.Trading.PriceLimit.New
-						} else if hasSTPrefix(stockName) {
-							limitRate = e.config.Trading.PriceLimit.ST
-						}
+							if tradeDays < e.config.Trading.NewStockDays {
+								limitRate = e.config.Trading.PriceLimit.New
+							} else if hasSTPrefix(stockName) {
+								limitRate = e.config.Trading.PriceLimit.ST
+							}
 							todayBar := ohlcvData[len(ohlcvData)-1]
 							upperLimit := prevClose * (1 + limitRate)
 							lowerLimit := prevClose * (1 - limitRate)
@@ -672,8 +678,8 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 			// Build order execution options from signal
 			execOpts := &OrderExecutionOpts{
 				OrderType:  signal.OrderType,
-				LimitPrice:  signal.LimitPrice,
-				DayBar:      todayBar,
+				LimitPrice: signal.LimitPrice,
+				DayBar:     todayBar,
 			}
 
 			// Calculate position size
@@ -1161,14 +1167,14 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 			}
 
 			domainSignals = append(domainSignals, domain.Signal{
-				Symbol:        s.Symbol,
-				Date:          sigDate,
-				Direction:     dir,
-				Strength:      s.Strength,
-				Factors:       factors,
-				Metadata:      metadata,
-				LimitPrice:    limitPrice,
-				OrderType:     orderType,
+				Symbol:         s.Symbol,
+				Date:           sigDate,
+				Direction:      dir,
+				Strength:       s.Strength,
+				Factors:        factors,
+				Metadata:       metadata,
+				LimitPrice:     limitPrice,
+				OrderType:      orderType,
 				CompositeScore: s.Strength,
 			})
 		}
@@ -1191,11 +1197,11 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 
 	// Convert market data to the format expected by strategy service
 	reqBody := struct {
-		StockPool   []string                       `json:"stock_pool"`
-		Stocks      []domain.Stock                 `json:"stocks"`
-		MarketData  map[string][]domain.OHLCV      `json:"market_data"`
+		StockPool   []string                        `json:"stock_pool"`
+		Stocks      []domain.Stock                  `json:"stocks"`
+		MarketData  map[string][]domain.OHLCV       `json:"market_data"`
 		Fundamental map[string][]domain.Fundamental `json:"fundamental"`
-		Date        string                         `json:"date"`
+		Date        string                          `json:"date"`
 	}{
 		StockPool:   stockPool,
 		Stocks:      stocks,
@@ -1308,7 +1314,7 @@ func (e *Engine) checkStopLosses(ctx context.Context, tracker *Tracker, prices m
 	}
 
 	reqBody := struct {
-		Positions map[string]float64    `json:"prices"`
+		Positions map[string]float64 `json:"prices"`
 	}{
 		Positions: prices,
 	}

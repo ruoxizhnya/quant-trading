@@ -110,6 +110,7 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 | 5.3 | **Factor attribution + IC analysis** | Backend Dev | Factor returns table (top quintile vs bottom quintile per factor per period); IC rank correlation computed; factor attribution chart in dashboard | 2 |
 | 5.4 | **Strategy selector UI** | Frontend Dev | Dropdown of all registered strategies; YAML config panel for parameters; "Run" button wires to backtest API | 1 |
 | 5.5 | **Background backtest worker** | Backend Dev | `POST /backtest` returns `{job_id}` immediately; worker goroutine processes async; `GET /backtest/:id` returns status/result; jobs persisted to `backtest_runs` table | 2 |
+|     | ✅ **同步路径已完成 (2026-04-10)**: 同步回测结果持久化到 `backtest_jobs` 表；GET 端点支持 DB 回退；异步 job 路径已存在（JobService.StartJob）。待完善：前端适配异步模式、job 列表 UI 集成 | — |
 
 ---
 
@@ -167,6 +168,7 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 | P1-B | 指数成分股股票池 | 中 | ✅ | BacktestRequest.IndexCode + GetIndexConstituentsByDate |
 | P1-C | 实盘接口预留 | 中 | ✅ | pkg/live/ (LiveTrader 接口 + MockTrader) |
 | P1-D | 文档同步更新 | 中 | ✅ | ARCHITECTURE.md + ROADMAP.md 更新 |
+| P1-E | 回测结果持久化 (DB 写入 + DB 回退查询) | 高 | ✅ | SaveSyncResult() → backtest_jobs 表；GET 端点 DB fallback；5 个 E2E 测试 |
 
 ### Phase 3 待完成项 (P2)
 

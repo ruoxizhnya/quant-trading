@@ -281,6 +281,43 @@ func (s *JobService) CancelJob(ctx context.Context, jobID string) error {
 	}
 }
 
+// SaveSyncResult persists a completed synchronous backtest result to the DB.
+func (s *JobService) SaveSyncResult(ctx context.Context, resp *BacktestResponse) error {
+	resultJSON, err := json.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %w", err)
+	}
+
+	universe := ""
+	if len(resp.StockPool) > 0 {
+		universe = strings.Join(resp.StockPool, ",")
+	}
+
+	job := map[string]any{
+		"id":          resp.ID,
+		"strategy_id": resp.Strategy,
+		"params":      []byte("{}"),
+		"universe":    universe,
+		"start_date":  resp.StartDate,
+		"end_date":    resp.EndDate,
+		"status":      "pending",
+	}
+
+	if err := s.store.CreateBacktestJob(ctx, job); err != nil {
+		return fmt.Errorf("failed to create job record: %w", err)
+	}
+
+	if err := s.store.UpdateJobStarted(ctx, resp.ID); err != nil {
+		return fmt.Errorf("failed to mark job started: %w", err)
+	}
+
+	if err := s.store.UpdateJobCompleted(ctx, resp.ID, resultJSON); err != nil {
+		return fmt.Errorf("failed to persist job result: %w", err)
+	}
+
+	return nil
+}
+
 // parseUniverse converts a universe string to a list of stock symbols.
 func parseUniverse(universe string) []string {
 	if universe == "" || universe == "all" {

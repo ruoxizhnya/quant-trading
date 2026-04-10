@@ -348,7 +348,6 @@ Please continue from where we left off.
 ## Known Issues & Workarounds
 | Issue | Workaround |
 |-------|-----------|
-| Backtest results not persisted to DB | Results stored in-memory only; refresh loses data. See NEXT_STEPS.md Q-004 |
 | Legacy HTML UI still exists at `cmd/analysis/static/` | Deprecated; Vue SPA is the official frontend. Do not modify legacy HTML. |
 | `ChatbubbleEllipsisOutline` icon name doesn't exist | Correct name is `ChatbubbleEllipsesOutline` (with 'e' before 's') |
 | Trade markers may not render if portfolio_values is empty | Ensure backtest returns valid data before calling renderChart() |

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { BacktestResult } from '@/types/api'
+import type { BacktestResult, BacktestJob } from '@/types/api'
+import { listBacktestJobs } from '@/api/backtest'
 
 const MAX_HISTORY = 20
 const STORAGE_KEY = 'qbh'
@@ -36,7 +37,24 @@ function stripHeavyData(result: BacktestResult): any {
     win_rate: result.win_rate,
     total_trades: result.total_trades,
     initial_capital: result.initial_capital,
-    final_capital: result.final_capital,
+  }
+}
+
+function jobToLightResult(job: BacktestJob): any {
+  const r = job.result
+  return {
+    id: job.id,
+    strategy: job.strategy_id,
+    stock_pool: job.universe ? job.universe.split(',') : [],
+    start_date: job.start_date,
+    end_date: job.end_date,
+    total_return: r?.total_return ?? 0,
+    sharpe_ratio: r?.sharpe_ratio ?? 0,
+    max_drawdown: r?.max_drawdown ?? 0,
+    win_rate: r?.win_rate ?? 0,
+    total_trades: r?.total_trades ?? 0,
+    status: job.status,
+    created_at: job.created_at,
   }
 }
 
@@ -49,7 +67,12 @@ export const useBacktestStore = defineStore('backtest', () => {
     if (!result || !result.id) return
 
     const light = stripHeavyData(result)
-    history.value.unshift(light as any)
+    const existingIdx = history.value.findIndex((h: any) => h.id === result.id)
+    if (existingIdx >= 0) {
+      history.value[existingIdx] = light as any
+    } else {
+      history.value.unshift(light as any)
+    }
 
     if (history.value.length > MAX_HISTORY) {
       history.value = history.value.slice(0, MAX_HISTORY)
@@ -74,10 +97,36 @@ export const useBacktestStore = defineStore('backtest', () => {
     }
   }
 
+  async function loadHistoryFromDB() {
+    try {
+      const res = await listBacktestJobs(MAX_HISTORY)
+      const dbJobs = (res.jobs || [])
+        .filter((j: BacktestJob) => j.status === 'completed')
+        .map(jobToLightResult)
+
+      const existingIds = new Set(history.value.map((h: any) => h.id))
+      for (const dbItem of dbJobs) {
+        if (!existingIds.has(dbItem.id)) {
+          history.value.push(dbItem as any)
+        }
+      }
+
+      history.value.sort((a: any, b: any) => {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0
+        return tb - ta
+      })
+
+      if (history.value.length > MAX_HISTORY) {
+        history.value = history.value.slice(0, MAX_HISTORY)
+      }
+    } catch {}
+  }
+
   function clearHistory() {
     history.value = []
     try { localStorage.removeItem(STORAGE_KEY) } catch {}
   }
 
-  return { history, currentResult, loading, addToHistory, loadHistory, clearHistory }
+  return { history, currentResult, loading, addToHistory, loadHistory, loadHistoryFromDB, clearHistory }
 })
