@@ -31,6 +31,7 @@ import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { NCard, NSpace, NTag, NCheckbox } from 'naive-ui'
 import { Chart, registerables, type TooltipItem } from 'chart.js'
 import type { PortfolioPoint, Trade } from '@/types/api'
+import { buildTradeMarkers, type TradeMarker } from '@/utils/tradeMarkers'
 
 Chart.register(...registerables)
 
@@ -39,14 +40,6 @@ const MAX_CHART_POINTS = 150
 interface PricePoint {
   date: string
   price: number
-}
-
-interface TradeMarker {
-  date: string
-  value: number
-  direction: string
-  symbol: string
-  price: number | undefined
 }
 
 const props = defineProps<{
@@ -82,39 +75,6 @@ function sampleData(raw: { date: string; value: number }[]) {
     sampled.push(last)
   }
   return sampled
-}
-
-function buildTradeMarkers(portfolioValues: PortfolioPoint[], trades: Trade[]): TradeMarker[] {
-  if (!portfolioValues?.length || !trades.length) return []
-  const pvMap = new Map<string, number>()
-  portfolioValues.forEach((p) => {
-    const d = (p.date || '').split('T')[0]
-    if (d) pvMap.set(d, p.total_value || 0)
-  })
-
-  return trades.map(t => {
-    // 根据交易方向选择正确的日期和价格字段
-    let tradeDate = ''
-    let tradePrice: number | undefined = undefined
-
-    if (t.direction === 'close') {
-      // 卖出交易：使用 timestamp 或 exit_date
-      tradeDate = (t.timestamp || t.exit_date || '').split('T')[0]
-      tradePrice = t.price ?? t.exit_price  // 后端的price字段存储执行价格
-    } else {
-      // 买入交易：使用 timestamp 或 entry_date
-      tradeDate = (t.timestamp || t.entry_date || '').split('T')[0]
-      tradePrice = t.price ?? t.entry_price
-    }
-
-    return {
-      date: tradeDate,
-      value: pvMap.get(tradeDate) || 0,
-      direction: t.direction,
-      symbol: t.symbol,
-      price: tradePrice,
-    }
-  }).filter(m => m.date && m.value > 0)
 }
 
 async function renderChart() {

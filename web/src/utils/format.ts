@@ -14,9 +14,15 @@ export function fmtCurrency(n: number | null | undefined): string {
   return '¥' + n.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 }
 
-export function formatDate(d: string): string {
+export function formatDate(d: string | null | undefined): string {
   if (!d) return '-'
-  return new Date(d).toLocaleDateString('zh-CN')
+  try {
+    const date = new Date(d)
+    if (isNaN(date.getTime())) return d.slice(0, 10)
+    return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+  } catch {
+    return d.slice(0, 10)
+  }
 }
 
 export function formatTime(d: string): string {

@@ -56,11 +56,11 @@
                 </td>
                 <td><code>{{ trade.symbol }}</code></td>
                 <td>{{ formatDate(trade.timestamp ?? trade.entry_date) }}</td>
-                <td>{{ formatPrice(trade.price ?? trade.entry_price ?? null) }}</td>
-                <td>{{ (trade.quantity ?? 0).toLocaleString() }}</td>
+                <td>{{ fmtNumber(trade.price ?? trade.entry_price ?? null, 2) }}</td>
+                <td>{{ fmtNumber(trade.quantity ?? 0, 0) }}</td>
                 <td>
                   <span v-if="trade.commission != null" class="cost-info">
-                    {{ trade.commission.toFixed(2) }}
+                    {{ fmtNumber(trade.commission, 2) }}
                   </span>
                   <span v-else>-</span>
                 </td>
@@ -79,7 +79,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NCard, NCollapse, NCollapseItem, NTable, NTag, NSpace, NButton, NEmpty } from 'naive-ui'
-import { fmtPercent } from '@/utils/format'
+import { fmtPercent, fmtNumber, formatDate } from '@/utils/format'
 
 // Use a minimal interface that matches what the store actually provides
 interface HistoryEntry {

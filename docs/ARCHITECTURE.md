@@ -317,7 +317,7 @@ quant-trading/
 │   │   ├── tracker.go   — 持仓/佣金追踪 (限价单 + ProcessDividend/ProcessSplit)
 │   │   ├── batch.go     — 批量回测框架
 │   │   ├── walkforward.go — Walk-Forward 验证
-│   │   └── job.go       — 异步回测任务
+│   │   └── job.go       — 异步回测任务 (混合context模式: Background+parent监控)
 │   ├── data/
 │   │   ├── tushare.go  — Tushare API 封装
 │   │   ├── factor.go   — 因子计算 + 缓存

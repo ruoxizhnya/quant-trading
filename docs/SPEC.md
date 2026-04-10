@@ -393,6 +393,10 @@ GET  /backtest/:id                - Get backtest job status (async)
 GET  /backtest/:id/report         - Get backtest report (checks DB if not in memory)
 GET  /backtest/:id/trades         - Get backtest trades (checks DB if not in memory)
 GET  /backtest/:id/equity         - Get equity curve data (checks DB if not in memory)
+GET  /ohlcv/:symbol               - Get OHLCV data for symbol (proxied to data-service)
+     ?start_date=2024-01-01
+     &end_date=2024-12-31
+     Response: { "ohlcv": [{ "trade_date": "2024-01-02", "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2, "volume": 1000000 }] }
 POST /analyze                     - Analyze existing portfolio
 ```
 

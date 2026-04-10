@@ -164,7 +164,7 @@ func (s *JobService) CreateJob(ctx context.Context, req CreateJobRequest) (*Job,
 		return nil, fmt.Errorf("failed to create job record: %w", err)
 	}
 
-	s.StartJob(ctx, jobID)
+	s.StartJob(context.Background(), jobID)
 
 	return &Job{
 		ID:         jobID,
