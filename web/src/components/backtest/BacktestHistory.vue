@@ -39,7 +39,7 @@ const emit = defineEmits<{
 }>()
 
 const validHistory = computed(() =>
-  (props.history || []).filter((item: any) => item && item.id)
+  (props.history || []).filter((item: BacktestResult) => item && item.id)
 )
 
 function itemTitle(item: BacktestResult): string {

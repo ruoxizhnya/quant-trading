@@ -1,3 +1,5 @@
+import { API_TIMEOUT, API_RETRY_DELAY } from '@/constants/api'
+
 export class ApiError extends Error {
   constructor(public status: number, message: string, public body?: any) {
     super(message)
@@ -43,7 +45,7 @@ class ApiClient {
   }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-    const { timeout = 60000, retry = 0, signal, ...init } = options
+    const { timeout = API_TIMEOUT, retry = 0, signal, ...init } = options
 
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeout)
@@ -88,7 +90,7 @@ class ApiClient {
       }
       if (e instanceof ApiError) throw e
       if (retry > 0) {
-        await new Promise(r => setTimeout(r, 1000 * (4 - retry)))
+        await new Promise(r => setTimeout(r, API_RETRY_DELAY * (4 - retry)))
         return this.request<T>(path, { ...options, retry: retry - 1 })
       }
       throw new ApiError(0, e?.message || '网络连接失败')

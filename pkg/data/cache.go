@@ -7,16 +7,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
-	"github.com/rs/zerolog"
 )
 
 const (
 	// TTLs — recent data gets shorter TTL to stay fresh
 	ohlcvTTLOld     = 24 * time.Hour // historical data older than last 7 days
-	ohlcvTTLRecent  = 1 * time.Hour   // data that includes the last 7 days
+	ohlcvTTLRecent  = 1 * time.Hour  // data that includes the last 7 days
 	fundamentalsTTL = 24 * time.Hour
 )
 
@@ -27,13 +27,13 @@ const (
 // All keys use the pattern defined by the task: ohlcv:{symbol}:{start}:{end}
 // and fund:{symbol}:{date} (dates in YYYYMMDD).
 type DataCache struct {
-	cache  *storage.Cache
+	cache  storage.Cache
 	store  *storage.PostgresStore
 	logger zerolog.Logger
 }
 
 // NewDataCache creates a DataCache wrapping the provided Redis cache and Postgres store.
-func NewDataCache(cache *storage.Cache, store *storage.PostgresStore) *DataCache {
+func NewDataCache(cache storage.Cache, store *storage.PostgresStore) *DataCache {
 	return &DataCache{
 		cache:  cache,
 		store:  store,

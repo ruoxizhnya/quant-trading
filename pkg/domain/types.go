@@ -55,42 +55,42 @@ type Stock struct {
 
 // IndexConstituent represents a constituent stock of an index.
 type IndexConstituent struct {
-	ID         int64     `json:"id"`
-	IndexCode  string    `json:"index_code"`  // e.g. "000300.SH" (CSI 300), "000500.SH" (CSI 500), "000852.SH" (CSI 800)
-	Symbol     string    `json:"symbol"`      // stock ts_code, e.g. "000001.SZ"
-	InDate     time.Time `json:"in_date"`     // date when stock entered index
-	OutDate    time.Time `json:"out_date"`    // date when stock exited index (zero if still in)
-	Weight     float64   `json:"weight"`      // weight in index (if available from index_weight API)
+	ID        int64     `json:"id"`
+	IndexCode string    `json:"index_code"` // e.g. "000300.SH" (CSI 300), "000500.SH" (CSI 500), "000852.SH" (CSI 800)
+	Symbol    string    `json:"symbol"`     // stock ts_code, e.g. "000001.SZ"
+	InDate    time.Time `json:"in_date"`    // date when stock entered index
+	OutDate   time.Time `json:"out_date"`   // date when stock exited index (zero if still in)
+	Weight    float64   `json:"weight"`     // weight in index (if available from index_weight API)
 }
 
 // Split represents a stock split or rights issue event.
 // Used for forward-price adjustment verification.
 type Split struct {
-	ID          int64     `json:"id"`
-	Symbol      string    `json:"symbol"`
-	TradeDate   time.Time `json:"trade_date"`    // ex-date of the split
-	AnnDate     time.Time `json:"ann_date"`       // announcement date
-	StkDivRatio float64   `json:"stk_div_ratio"` // stock dividend / split ratio (e.g., 0.1 = 10% stock dividend)
-	CashDivRatio float64  `json:"cash_div_ratio"` // cash dividend ratio
-	Currency    string    `json:"currency"`      // usually CNY
+	ID           int64     `json:"id"`
+	Symbol       string    `json:"symbol"`
+	TradeDate    time.Time `json:"trade_date"`     // ex-date of the split
+	AnnDate      time.Time `json:"ann_date"`       // announcement date
+	StkDivRatio  float64   `json:"stk_div_ratio"`  // stock dividend / split ratio (e.g., 0.1 = 10% stock dividend)
+	CashDivRatio float64   `json:"cash_div_ratio"` // cash dividend ratio
+	Currency     string    `json:"currency"`       // usually CNY
 }
 
 // Dividend represents a dividend event for a stock.
 type Dividend struct {
 	ID        int64     `json:"id"`
 	Symbol    string    `json:"symbol"`
-	AnnDate   time.Time `json:"ann_date"`    // announcement date
-	RecDate   time.Time `json:"rec_date"`    // record date (shareholders as of this date receive dividend)
-	PayDate   time.Time `json:"pay_date"`    // payment date / ex-dividend date
-	DivAmt    float64   `json:"div_amt"`     // cash dividend amount per share
-	StkDiv    float64   `json:"stk_div"`     // stock dividend per share (bonus shares)
-	StkRatio  float64   `json:"stk_ratio"`   // stock split ratio
-	CashRatio float64   `json:"cash_ratio"`  // cash dividend ratio
+	AnnDate   time.Time `json:"ann_date"`   // announcement date
+	RecDate   time.Time `json:"rec_date"`   // record date (shareholders as of this date receive dividend)
+	PayDate   time.Time `json:"pay_date"`   // payment date / ex-dividend date
+	DivAmt    float64   `json:"div_amt"`    // cash dividend amount per share
+	StkDiv    float64   `json:"stk_div"`    // stock dividend per share (bonus shares)
+	StkRatio  float64   `json:"stk_ratio"`  // stock split ratio
+	CashRatio float64   `json:"cash_ratio"` // cash dividend ratio
 }
 
 // Fundamental represents fundamental financial data
 type Fundamental struct {
-	Symbol        string    `json:"symbol"`
+	Symbol       string    `json:"symbol"`
 	Date         time.Time `json:"date"`
 	PE           float64   `json:"pe"`
 	PB           float64   `json:"pb"`
@@ -109,35 +109,57 @@ type Fundamental struct {
 // FundamentalData represents financial data from Tushare financial_data API.
 // Used for factor-based screening (PE, PB, PS, ROE, ROA, etc.).
 type FundamentalData struct {
-	ID             int       `json:"id"`
-	TsCode         string    `json:"ts_code"`
-	TradeDate      time.Time `json:"trade_date"`
-	AnnDate        time.Time `json:"ann_date"` // announcement date
-	EndDate        time.Time `json:"end_date"`  // reporting period
-	PE             *float64  `json:"pe"`
-	PB             *float64  `json:"pb"`
-	PS             *float64  `json:"ps"`
-	ROE            *float64  `json:"roe"`
-	ROA            *float64  `json:"roa"`
-	DebtToEquity   *float64  `json:"debt_to_equity"`
-	GrossMargin    *float64  `json:"gross_margin"`
-	NetMargin      *float64  `json:"net_margin"`
-	Revenue        *float64  `json:"revenue"`
-	NetProfit      *float64  `json:"net_profit"`
-	TotalAssets    *float64  `json:"total_assets"`
-	TotalLiab      *float64  `json:"total_liab"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID           int       `json:"id"`
+	TsCode       string    `json:"ts_code"`
+	TradeDate    time.Time `json:"trade_date"`
+	AnnDate      time.Time `json:"ann_date"` // announcement date
+	EndDate      time.Time `json:"end_date"` // reporting period
+	PE           *float64  `json:"pe"`
+	PB           *float64  `json:"pb"`
+	PS           *float64  `json:"ps"`
+	ROE          *float64  `json:"roe"`
+	ROA          *float64  `json:"roa"`
+	DebtToEquity *float64  `json:"debt_to_equity"`
+	GrossMargin  *float64  `json:"gross_margin"`
+	NetMargin    *float64  `json:"net_margin"`
+	Revenue      *float64  `json:"revenue"`
+	NetProfit    *float64  `json:"net_profit"`
+	TotalAssets  *float64  `json:"total_assets"`
+	TotalLiab    *float64  `json:"total_liab"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // FactorType represents a factor name
 type FactorType string
 
 const (
-	FactorMomentum FactorType = "momentum" // 20-day return
-	FactorValue    FactorType = "value"    // EP, BP, SP
-	FactorQuality  FactorType = "quality"   // ROE, ROA, gross_margin
-	FactorSize     FactorType = "size"     // market cap rank
+	FactorMomentum   FactorType = "momentum"   // 20-day return
+	FactorValue      FactorType = "value"      // EP, BP, SP
+	FactorQuality    FactorType = "quality"    // ROE, ROA, gross_margin
+	FactorSize       FactorType = "size"       // market cap rank
+	FactorVolatility FactorType = "volatility" // standard deviation of returns
+	FactorGrowth     FactorType = "growth"     // earnings growth rate
 )
+
+// ParseFactorType parses a string into a FactorType, returning false if invalid.
+func ParseFactorType(s string) (FactorType, bool) {
+	switch s {
+	case string(FactorMomentum):
+		return FactorMomentum, true
+	case string(FactorValue):
+		return FactorValue, true
+	case string(FactorQuality):
+		return FactorQuality, true
+	case string(FactorSize):
+		return FactorSize, true
+	case string(FactorVolatility):
+		return FactorVolatility, true
+	case string(FactorGrowth):
+		return FactorGrowth, true
+	default:
+		return "", false
+	}
+}
 
 // FactorCacheEntry is a pre-computed factor z-score for a stock on a date
 type FactorCacheEntry struct {
@@ -155,7 +177,7 @@ type FactorReturn struct {
 	ID               int64      `json:"id"`
 	FactorName       FactorType `json:"factor_name"`
 	TradeDate        time.Time  `json:"trade_date"`
-	Quintile         int        `json:"quintile"`         // 1 (bottom) to 5 (top)
+	Quintile         int        `json:"quintile"`          // 1 (bottom) to 5 (top)
 	AvgReturn        float64    `json:"avg_return"`        // equal-weight avg return of the quintile
 	CumulativeReturn float64    `json:"cumulative_return"` // cumulative return over forward period
 	TopMinusBot      float64    `json:"top_minus_bot"`     // spread: quintile 5 minus quintile 1
@@ -166,9 +188,9 @@ type ICEntry struct {
 	ID         int64      `json:"id"`
 	FactorName FactorType `json:"factor_name"`
 	TradeDate  time.Time  `json:"trade_date"`
-	IC         float64    `json:"ic"`         // Spearman rank IC
-	PValue     float64    `json:"p_value"`    // approximate p-value
-	TopIC      float64    `json:"top_ic"`     // top quintile IC (avg IC when stock is in top quintile)
+	IC         float64    `json:"ic"`      // Spearman rank IC
+	PValue     float64    `json:"p_value"` // approximate p-value
+	TopIC      float64    `json:"top_ic"`  // top quintile IC (avg IC when stock is in top quintile)
 }
 
 // ScreenFilters defines filter criteria for stock screening.
@@ -196,12 +218,12 @@ type ScreenRequest struct {
 
 // ScreenResult represents a single stock screening result.
 type ScreenResult struct {
-	TsCode   string  `json:"ts_code"`
-	PE       *float64 `json:"pe"`
-	PB       *float64 `json:"pb"`
-	PS       *float64 `json:"ps"`
-	ROE      *float64 `json:"roe"`
-	ROA      *float64 `json:"roa"`
+	TsCode       string   `json:"ts_code"`
+	PE           *float64 `json:"pe"`
+	PB           *float64 `json:"pb"`
+	PS           *float64 `json:"ps"`
+	ROE          *float64 `json:"roe"`
+	ROA          *float64 `json:"roa"`
 	DebtToEquity *float64 `json:"debt_to_equity"`
 	GrossMargin  *float64 `json:"gross_margin"`
 	NetMargin    *float64 `json:"net_margin"`
@@ -211,40 +233,40 @@ type ScreenResult struct {
 // Signal represents a trading signal generated by a strategy
 type Signal struct {
 	Symbol         string             `json:"symbol"`
-	Date          time.Time          `json:"date"`
-	Direction     Direction          `json:"direction"`
-	Strength      float64           `json:"strength"`
-	CompositeScore float64          `json:"composite_score"`
-	Factors       map[string]float64 `json:"factors"`
-	Metadata      map[string]any     `json:"metadata"`
-	LimitPrice    float64            `json:"limit_price"` // 0 for market orders
-	OrderType     OrderType          `json:"order_type"`  // market or limit
+	Date           time.Time          `json:"date"`
+	Direction      Direction          `json:"direction"`
+	Strength       float64            `json:"strength"`
+	CompositeScore float64            `json:"composite_score"`
+	Factors        map[string]float64 `json:"factors"`
+	Metadata       map[string]any     `json:"metadata"`
+	LimitPrice     float64            `json:"limit_price"` // 0 for market orders
+	OrderType      OrderType          `json:"order_type"`  // market or limit
 }
 
 // Position represents a single position in the portfolio
 type Position struct {
-	Symbol           string    `json:"symbol"`
-	Quantity         float64   `json:"quantity"`
-	AvgCost          float64   `json:"avg_cost"`
-	CurrentPrice     float64   `json:"current_price"`
-	MarketValue      float64   `json:"market_value"`
-	UnrealizedPnL    float64   `json:"unrealized_pnl"`
-	RealizedPnL      float64   `json:"realized_pnl"`
-	Weight           float64   `json:"weight"`
-	EntryDate        time.Time `json:"entry_date"`
+	Symbol        string    `json:"symbol"`
+	Quantity      float64   `json:"quantity"`
+	AvgCost       float64   `json:"avg_cost"`
+	CurrentPrice  float64   `json:"current_price"`
+	MarketValue   float64   `json:"market_value"`
+	UnrealizedPnL float64   `json:"unrealized_pnl"`
+	RealizedPnL   float64   `json:"realized_pnl"`
+	Weight        float64   `json:"weight"`
+	EntryDate     time.Time `json:"entry_date"`
 	// T+1 Settlement tracking (A-share rule: shares bought today cannot be sold today)
-	BuyDate          time.Time `json:"buy_date"`            // Last buy date for this position
-	QuantityToday    float64   `json:"quantity_today"`      // Shares bought today (not yet sellable)
-	QuantityYesterday float64  `json:"quantity_yesterday"`  // Shares from previous days (sellable today)
+	BuyDate           time.Time `json:"buy_date"`           // Last buy date for this position
+	QuantityToday     float64   `json:"quantity_today"`     // Shares bought today (not yet sellable)
+	QuantityYesterday float64   `json:"quantity_yesterday"` // Shares from previous days (sellable today)
 }
 
 // Portfolio represents the current portfolio state
 type Portfolio struct {
-	Cash        float64            `json:"cash"`
+	Cash        float64             `json:"cash"`
 	Positions   map[string]Position `json:"positions"`
-	TotalValue  float64           `json:"total_value"`
-	DailyReturn float64           `json:"daily_return"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	TotalValue  float64             `json:"total_value"`
+	DailyReturn float64             `json:"daily_return"`
+	UpdatedAt   time.Time           `json:"updated_at"`
 }
 
 // MarketRegime represents detected market regime
@@ -269,22 +291,22 @@ type RiskMetrics struct {
 
 // BacktestResult contains the result of a backtest run
 type BacktestResult struct {
-	StartDate       time.Time       `json:"start_date"`
-	EndDate        time.Time       `json:"end_date"`
-	TotalReturn    float64         `json:"total_return"`
-	AnnualReturn   float64         `json:"annual_return"`
-	SharpeRatio    float64         `json:"sharpe_ratio"`
-	SortinoRatio   float64         `json:"sortino_ratio"`
-	MaxDrawdown    float64         `json:"max_drawdown"`
-	MaxDrawdownDate time.Time      `json:"max_drawdown_date"`
-	WinRate        float64         `json:"win_rate"`
-	TotalTrades    int             `json:"total_trades"`
-	WinTrades      int             `json:"win_trades"`
-	LoseTrades     int             `json:"lose_trades"`
-	AvgHoldingDays float64         `json:"avg_holding_days"`
-	CalmarRatio    float64         `json:"calmar_ratio"`
+	StartDate       time.Time        `json:"start_date"`
+	EndDate         time.Time        `json:"end_date"`
+	TotalReturn     float64          `json:"total_return"`
+	AnnualReturn    float64          `json:"annual_return"`
+	SharpeRatio     float64          `json:"sharpe_ratio"`
+	SortinoRatio    float64          `json:"sortino_ratio"`
+	MaxDrawdown     float64          `json:"max_drawdown"`
+	MaxDrawdownDate time.Time        `json:"max_drawdown_date"`
+	WinRate         float64          `json:"win_rate"`
+	TotalTrades     int              `json:"total_trades"`
+	WinTrades       int              `json:"win_trades"`
+	LoseTrades      int              `json:"lose_trades"`
+	AvgHoldingDays  float64          `json:"avg_holding_days"`
+	CalmarRatio     float64          `json:"calmar_ratio"`
 	PortfolioValues []PortfolioValue `json:"portfolio_values"`
-	Trades         []Trade         `json:"trades"`
+	Trades          []Trade          `json:"trades"`
 }
 
 // PortfolioValue represents a single portfolio value snapshot
@@ -328,9 +350,9 @@ type Order struct {
 // TargetPosition tracks the target vs actual position for execution gap management.
 type TargetPosition struct {
 	Symbol      string    `json:"symbol"`
-	TargetQty   float64   `json:"target_qty"`    // desired quantity from strategy signal
-	ActualQty   float64   `json:"actual_qty"`   // what was actually executed
-	PendingQty  float64   `json:"pending_qty"`  // quantity not yet filled
+	TargetQty   float64   `json:"target_qty"`  // desired quantity from strategy signal
+	ActualQty   float64   `json:"actual_qty"`  // what was actually executed
+	PendingQty  float64   `json:"pending_qty"` // quantity not yet filled
 	LastUpdated time.Time `json:"last_updated"`
 }
 
@@ -344,38 +366,38 @@ type WalkForwardParams struct {
 
 // WalkForwardResult holds the result of a single train/test window
 type WalkForwardResult struct {
-	WindowIndex     int              `json:"window_index"`
-	TrainStart      string           `json:"train_start"`
-	TrainEnd        string           `json:"train_end"`
-	TestStart       string           `json:"test_start"`
-	TestEnd         string           `json:"test_end"`
-	TrainResult     *BacktestResult  `json:"train_result,omitempty"`
-	TestResult      *BacktestResult  `json:"test_result,omitempty"`
-	TrainSharpe     float64          `json:"train_sharpe"`
-	TestSharpe      float64          `json:"test_sharpe"`
-	TestReturn      float64          `json:"test_return"`
-	TestMaxDrawdown float64          `json:"test_max_drawdown"`
-	OOSvsTrain      float64          `json:"oos_vs_train"` // test_sharpe / train_sharpe (degradation ratio)
+	WindowIndex     int             `json:"window_index"`
+	TrainStart      string          `json:"train_start"`
+	TrainEnd        string          `json:"train_end"`
+	TestStart       string          `json:"test_start"`
+	TestEnd         string          `json:"test_end"`
+	TrainResult     *BacktestResult `json:"train_result,omitempty"`
+	TestResult      *BacktestResult `json:"test_result,omitempty"`
+	TrainSharpe     float64         `json:"train_sharpe"`
+	TestSharpe      float64         `json:"test_sharpe"`
+	TestReturn      float64         `json:"test_return"`
+	TestMaxDrawdown float64         `json:"test_max_drawdown"`
+	OOSvsTrain      float64         `json:"oos_vs_train"` // test_sharpe / train_sharpe (degradation ratio)
 }
 
 // WalkForwardReport is the full walk-forward validation report
 type WalkForwardReport struct {
-	StrategyID      string               `json:"strategy_id"`
-	Universe        string               `json:"universe"`
-	Windows         []*WalkForwardResult `json:"windows"`
-	AvgTestSharpe   float64              `json:"avg_test_sharpe"`
-	AvgTestReturn   float64              `json:"avg_test_return"`
-	AvgTestMaxDD    float64              `json:"avg_test_max_drawdown"`
-	AvgDegradation  float64              `json:"avg_degradation"` // avg(OOSvsTrain)
-	PassRate        float64              `json:"pass_rate"`       // fraction of windows where test_sharpe > 0
-	OverallPass     bool                 `json:"overall_pass"`    // pass if avg_test_sharpe > 0.5 AND avg_degradation < 0.7
+	StrategyID     string               `json:"strategy_id"`
+	Universe       string               `json:"universe"`
+	Windows        []*WalkForwardResult `json:"windows"`
+	AvgTestSharpe  float64              `json:"avg_test_sharpe"`
+	AvgTestReturn  float64              `json:"avg_test_return"`
+	AvgTestMaxDD   float64              `json:"avg_test_max_drawdown"`
+	AvgDegradation float64              `json:"avg_degradation"` // avg(OOSvsTrain)
+	PassRate       float64              `json:"pass_rate"`       // fraction of windows where test_sharpe > 0
+	OverallPass    bool                 `json:"overall_pass"`    // pass if avg_test_sharpe > 0.5 AND avg_degradation < 0.7
 
-	StdTestSharpe   float64 `json:"std_test_sharpe"`   // cross-window std dev of OOS Sharpe
-	StdDegradation  float64 `json:"std_degradation"`    // cross-window std dev of degradation ratio
+	StdTestSharpe  float64 `json:"std_test_sharpe"` // cross-window std dev of OOS Sharpe
+	StdDegradation float64 `json:"std_degradation"` // cross-window std dev of degradation ratio
 
-	OverfitScore    float64 `json:"overfit_score"`     // 0=robust, 1=severely overfit
-	ProbNoOverfit   float64 `json:"prob_no_overfit"`   // P(strategy is NOT overfitted)
-	StabilityScore  float64 `json:"stability_score"`   // 0-1, higher = more consistent across windows
+	OverfitScore   float64 `json:"overfit_score"`   // 0=robust, 1=severely overfit
+	ProbNoOverfit  float64 `json:"prob_no_overfit"` // P(strategy is NOT overfitted)
+	StabilityScore float64 `json:"stability_score"` // 0-1, higher = more consistent across windows
 }
 
 // BacktestParams contains parameters for a backtest run
@@ -439,10 +461,10 @@ type StopLossEvent struct {
 
 // Config represents YAML config structure
 type Config struct {
-	Database DatabaseConfig `json:"database"`
-	Redis    RedisConfig    `json:"redis"`
+	Database DatabaseConfig           `json:"database"`
+	Redis    RedisConfig              `json:"redis"`
 	Services map[string]ServiceConfig `json:"services"`
-	Tushare  TushareConfig  `json:"tushare"`
+	Tushare  TushareConfig            `json:"tushare"`
 }
 
 // DatabaseConfig holds database connection settings
@@ -468,19 +490,19 @@ type ServiceConfig struct {
 
 // TushareConfig holds tushare API settings
 type TushareConfig struct {
-	Token     string `json:"token"`
-	BaseURL   string `json:"base_url"`
-	MaxRetries int   `json:"max_retries"`
+	Token      string `json:"token"`
+	BaseURL    string `json:"base_url"`
+	MaxRetries int    `json:"max_retries"`
 }
 
 // StrategyConfig represents a stored strategy configuration.
 type StrategyConfig struct {
 	ID           int64     `json:"id"`
-	StrategyID   string    `json:"strategy_id"`    // unique slug, e.g. "my-momentum-v1"
+	StrategyID   string    `json:"strategy_id"` // unique slug, e.g. "my-momentum-v1"
 	Name         string    `json:"name"`
 	Description  string    `json:"description"`
 	StrategyType string    `json:"strategy_type"` // "momentum", "value", "quality", "composite"
-	Params       string    `json:"params"`         // JSON string of params schema
+	Params       string    `json:"params"`        // JSON string of params schema
 	IsActive     bool      `json:"is_active"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`

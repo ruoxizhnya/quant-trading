@@ -53,15 +53,15 @@ type PriceLimitConfig struct {
 // Default trading constants (fallback if not configured)
 func defaultTradingConfig() TradingConfig {
 	return TradingConfig{
-		StampTaxRate:    0.001,
-		MinCommission:   5.0,
-		TransferFeeRate: 0.00001,
+		StampTaxRate:    DefaultStampTaxRate,
+		MinCommission:   DefaultMinCommission,
+		TransferFeeRate: DefaultTransferFeeRate,
 		PriceLimit: PriceLimitConfig{
-			Normal: 0.10,
-			ST:     0.05,
-			New:    0.20,
+			Normal: DefaultPriceLimitNormal,
+			ST:     DefaultPriceLimitST,
+			New:    DefaultPriceLimitNew,
 		},
-		NewStockDays: 60,
+		NewStockDays: DefaultNewStockDays,
 	}
 }
 

@@ -27,19 +27,19 @@ function directionTag(direction: string) {
 
 const columns = [
   { title: '方向', key: 'direction', width: 70,
-    render(row: any) {
+    render(row: Trade) {
       const t = directionTag(row.direction)
       return h(NTag, { type: t.type, size: 'small', round: true, bordered: false }, () => t.text)
     },
   },
   { title: '股票', key: 'symbol', width: 110 },
   { title: '入场日期', key: 'entry_date', width: 110 },
-  { title: '入场价', key: 'entry_price', width: 85, render: (r: any) => r.entry_price?.toFixed(2) },
+  { title: '入场价', key: 'entry_price', width: 85, render: (r: Trade) => r.entry_price?.toFixed(2) },
   { title: '出场日期', key: 'exit_date', width: 110 },
-  { title: '出场价', key: 'exit_price', width: 85, render: (r: any) => r.exit_price?.toFixed(2) },
+  { title: '出场价', key: 'exit_price', width: 85, render: (r: Trade) => r.exit_price?.toFixed(2) },
   { title: '数量', key: 'quantity', width: 65 },
   { title: 'PnL', key: 'pnl', width: 90,
-    render: (r: any) => h('span', { class: r.pnl >= 0 ? 'pnl-pos' : 'pnl-neg' }, () => fmtPercent(r.pnl)),
+    render: (r: Trade) => h('span', { class: r.pnl >= 0 ? 'pnl-pos' : 'pnl-neg' }, () => fmtPercent(r.pnl)),
   },
 ]
 </script>

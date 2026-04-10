@@ -20,6 +20,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/data"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
@@ -114,6 +115,10 @@ func main() {
 	jobService := backtest.NewJobService(store, engine)
 	logger.Info().Msg("Job service initialized")
 
+	// Initialize Factor Attribution service
+	factorAttributor := data.NewFactorAttributor(store)
+	logger.Info().Msg("Factor attribution service initialized")
+
 	// Initialize Strategy Copilot service
 	copilotService := strategy.NewCopilotService()
 	logger.Info().Bool("ai_configured", copilotService.IsConfigured()).Msg("Copilot service initialized")
@@ -138,7 +143,7 @@ func main() {
 	router.Use(requestLogger(logger))
 
 	// Register routes
-	registerRoutes(router, engine, jobService, strategyDB, copilotService, copilotRunner, logger)
+	registerRoutes(router, engine, jobService, strategyDB, copilotService, copilotRunner, factorAttributor, logger)
 
 	// Get server config
 	host := v.GetString("server.host")
@@ -500,7 +505,7 @@ func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 }
 
 // registerRoutes registers all HTTP routes.
-func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, logger zerolog.Logger) {
+func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, logger zerolog.Logger) {
 	// Serve static files (CSS, JS, etc.)
 	router.Static("/static", "./cmd/analysis/static")
 
@@ -1138,6 +1143,204 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 			c.JSON(http.StatusOK, gin.H{
 				"status":  "healthy",
 				"primary": adapter.Primary(),
+			})
+		})
+	}
+
+	// ── Factor Attribution & IC Analysis ──────────────────────
+	factorAPI := router.Group("/api/factor")
+	{
+		// GET /api/factor/returns/:factor — get factor quintile returns time series
+		factorAPI.GET("/returns/:factor", func(c *gin.Context) {
+			factorStr := c.Param("factor")
+			factorType, ok := domain.ParseFactorType(factorStr)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid factor type: %s", factorStr)})
+				return
+			}
+
+			startDateStr := c.Query("start_date")
+			endDateStr := c.Query("end_date")
+			if startDateStr == "" || endDateStr == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date required (YYYY-MM-DD)"})
+				return
+			}
+
+			startDate, err := time.Parse("2006-01-02", startDateStr)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format"})
+				return
+			}
+			endDate, err := time.Parse("2006-01-02", endDateStr)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format"})
+				return
+			}
+
+			returns, err := factorAttributor.GetFactorReturnsTimeSeries(c.Request.Context(), factorType, startDate, endDate)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"factor":     factorStr,
+				"start_date": startDateStr,
+				"end_date":   endDateStr,
+				"total":      len(returns),
+				"data":       returns,
+			})
+		})
+
+		// GET /api/factor/ic/:factor — get IC time series for a factor
+		factorAPI.GET("/ic/:factor", func(c *gin.Context) {
+			factorStr := c.Param("factor")
+			factorType, ok := domain.ParseFactorType(factorStr)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid factor type: %s", factorStr)})
+				return
+			}
+
+			startDateStr := c.Query("start_date")
+			endDateStr := c.Query("end_date")
+			if startDateStr == "" || endDateStr == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date required (YYYY-MM-DD)"})
+				return
+			}
+
+			startDate, err := time.Parse("2006-01-02", startDateStr)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format"})
+				return
+			}
+			endDate, err := time.Parse("2006-01-02", endDateStr)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format"})
+				return
+			}
+
+			icEntries, err := factorAttributor.GetICTimeSeries(c.Request.Context(), factorType, startDate, endDate)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"factor":     factorStr,
+				"start_date": startDateStr,
+				"end_date":   endDateStr,
+				"total":      len(icEntries),
+				"data":       icEntries,
+			})
+		})
+
+		// POST /api/factor/compute-returns — compute factor quintile returns for a specific date
+		factorAPI.POST("/compute-returns", func(c *gin.Context) {
+			var req struct {
+				Factor    string `json:"factor" binding:"required"`
+				TradeDate string `json:"trade_date" binding:"required"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			factorType, ok := domain.ParseFactorType(req.Factor)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid factor type: %s", req.Factor)})
+				return
+			}
+
+			tradeDate, err := time.Parse("2006-01-02", req.TradeDate)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid trade_date format (YYYY-MM-DD)"})
+				return
+			}
+
+			logger.Info().
+				Str("factor", req.Factor).
+				Time("date", tradeDate).
+				Msg("Computing factor quintile returns")
+
+			if err := factorAttributor.ComputeFactorReturns(c.Request.Context(), factorType, tradeDate); err != nil {
+				logger.Error().Err(err).Msg("Failed to compute factor returns")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"message":    "factor returns computed successfully",
+				"factor":     req.Factor,
+				"trade_date": req.TradeDate,
+			})
+		})
+
+		// POST /api/factor/compute-ic — compute IC for a specific date
+		factorAPI.POST("/compute-ic", func(c *gin.Context) {
+			var req struct {
+				Factor      string `json:"factor" binding:"required"`
+				TradeDate   string `json:"trade_date" binding:"required"`
+				ForwardDays int    `json:"forward_days"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			factorType, ok := domain.ParseFactorType(req.Factor)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid factor type: %s", req.Factor)})
+				return
+			}
+
+			tradeDate, err := time.Parse("2006-01-02", req.TradeDate)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid trade_date format (YYYY-MM-DD)"})
+				return
+			}
+
+			forwardDays := req.ForwardDays
+			if forwardDays <= 0 {
+				forwardDays = 20 // default 20-day forward return
+			}
+
+			logger.Info().
+				Str("factor", req.Factor).
+				Time("date", tradeDate).
+				Int("forward_days", forwardDays).
+				Msg("Computing factor IC")
+
+			icEntry, err := factorAttributor.ComputeIC(c.Request.Context(), factorType, tradeDate, forwardDays)
+			if err != nil {
+				logger.Error().Err(err).Msg("Failed to compute IC")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"message":      "IC computed successfully",
+				"factor":       req.Factor,
+				"trade_date":   req.TradeDate,
+				"forward_days": forwardDays,
+				"ic":           icEntry.IC,
+				"p_value":      icEntry.PValue,
+				"top_ic":       icEntry.TopIC,
+			})
+		})
+
+		// GET /api/factor/list — list available factor types
+		factorAPI.GET("/list", func(c *gin.Context) {
+			factors := []string{
+				string(domain.FactorMomentum),
+				string(domain.FactorValue),
+				string(domain.FactorQuality),
+				string(domain.FactorVolatility),
+				string(domain.FactorSize),
+				string(domain.FactorGrowth),
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"total":   len(factors),
+				"factors": factors,
 			})
 		})
 	}

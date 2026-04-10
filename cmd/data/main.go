@@ -199,7 +199,7 @@ func requestLogger() gin.HandlerFunc {
 	}
 }
 
-func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.Cache, tc *data.TushareClient, dc *data.DataCache) {
+func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache storage.Cache, tc *data.TushareClient, dc *data.DataCache) {
 	// Health check
 	r.GET("/health", healthHandler(store, cache))
 
@@ -264,7 +264,7 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache *storage.
 
 // Handlers
 
-func healthHandler(store *storage.PostgresStore, cache *storage.Cache) gin.HandlerFunc {
+func healthHandler(store *storage.PostgresStore, cache storage.Cache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 
@@ -281,7 +281,7 @@ func healthHandler(store *storage.PostgresStore, cache *storage.Cache) gin.Handl
 	}
 }
 
-func listStocksHandler(store *storage.PostgresStore, cache *storage.Cache) gin.HandlerFunc {
+func listStocksHandler(store *storage.PostgresStore, cache storage.Cache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		exchange := c.Query("exchange")
@@ -307,7 +307,7 @@ func listStocksHandler(store *storage.PostgresStore, cache *storage.Cache) gin.H
 	}
 }
 
-func getStockHandler(store *storage.PostgresStore, cache *storage.Cache) gin.HandlerFunc {
+func getStockHandler(store *storage.PostgresStore, cache storage.Cache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 		symbol := c.Param("symbol")
@@ -450,9 +450,9 @@ func bulkOHLCVHandler(dc *data.DataCache) gin.HandlerFunc {
 
 		// Fetch all symbols in parallel via DataCache (Redis → PostgreSQL fallback)
 		type result struct {
-			Symbol string          `json:"symbol"`
+			Symbol string         `json:"symbol"`
 			OHLCV  []domain.OHLCV `json:"ohlcv"`
-			Error  string          `json:"error,omitempty"`
+			Error  string         `json:"error,omitempty"`
 		}
 		results := make([]result, len(req.Symbols))
 
@@ -554,9 +554,9 @@ func syncIndexConstituentsHandler(tc *data.TushareClient) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"message":     "index constituents synced successfully",
-			"index_code":  indexCode,
-			"count":       len(constituents),
+			"message":    "index constituents synced successfully",
+			"index_code": indexCode,
+			"count":      len(constituents),
 		})
 	}
 }
@@ -635,10 +635,10 @@ func syncOHLCVHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.
 }
 
 type syncAllOHLCVRequest struct {
-	StartDate   string `json:"start_date"`
-	EndDate     string `json:"end_date"`
-	BatchSize   int    `json:"batch_size"`
-	SkipExisting bool  `json:"skip_existing"`
+	StartDate    string `json:"start_date"`
+	EndDate      string `json:"end_date"`
+	BatchSize    int    `json:"batch_size"`
+	SkipExisting bool   `json:"skip_existing"`
 }
 
 // syncAllOHLCVHandler reads all stocks from DB and syncs OHLCV in batches.
@@ -857,9 +857,9 @@ func syncFundamentalsHandler(tc *data.TushareClient, store *storage.PostgresStor
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"message":        "Fundamentals synced successfully",
-			"stocks_synced":  totalSynced,
-			"records_saved":  totalCount,
+			"message":       "Fundamentals synced successfully",
+			"stocks_synced": totalSynced,
+			"records_saved": totalCount,
 			"failed_stocks": totalFailed,
 		})
 	}
@@ -995,9 +995,9 @@ func getTradingCalendarHandler(store *storage.PostgresStore) gin.HandlerFunc {
 }
 
 type syncCalendarRequest struct {
-	StartDate string   `json:"start_date"`
-	EndDate   string   `json:"end_date"`
-	Exchange  string   `json:"exchange"` // "SSE", "SZSE", or "both" (default: "both")
+	StartDate string `json:"start_date"`
+	EndDate   string `json:"end_date"`
+	Exchange  string `json:"exchange"` // "SSE", "SZSE", or "both" (default: "both")
 }
 
 func syncCalendarHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.HandlerFunc {
@@ -1226,10 +1226,10 @@ func syncDividendsHandler(tc *data.TushareClient, store *storage.PostgresStore) 
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"message":         "Dividends synced successfully",
-			"stocks_synced":   totalSynced,
-			"records_saved":   totalRecords,
-			"failed_stocks":   totalFailed,
+			"message":       "Dividends synced successfully",
+			"stocks_synced": totalSynced,
+			"records_saved": totalRecords,
+			"failed_stocks": totalFailed,
 		})
 	}
 }
@@ -1303,10 +1303,10 @@ func syncSplitsHandler(tc *data.TushareClient, store *storage.PostgresStore) gin
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"message":         "Splits synced successfully",
-			"stocks_synced":   totalSynced,
-			"records_saved":   totalRecords,
-			"failed_stocks":   totalFailed,
+			"message":       "Splits synced successfully",
+			"stocks_synced": totalSynced,
+			"records_saved": totalRecords,
+			"failed_stocks": totalFailed,
 		})
 	}
 }
@@ -1549,10 +1549,10 @@ func syncFactorAttributionHandler(fa *data.FactorAttributor) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"message":      "attribution computed",
-			"factor_name":  factorName,
-			"computed":     computed,
-			"failed":       failed,
+			"message":     "attribution computed",
+			"factor_name": factorName,
+			"computed":    computed,
+			"failed":      failed,
 		})
 	}
 }
@@ -1611,10 +1611,10 @@ func syncFactorICHandler(fa *data.FactorAttributor) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"message":      "IC computed",
-			"factor_name":  factorName,
-			"computed":     computed,
-			"failed":       failed,
+			"message":     "IC computed",
+			"factor_name": factorName,
+			"computed":    computed,
+			"failed":      failed,
 		})
 	}
 }
@@ -1821,16 +1821,16 @@ func buildWFWIindows(days []time.Time, params domain.WalkForwardParams) []wfWind
 }
 
 type backtestHTTPResponse struct {
-	SharpeRatio   float64 `json:"sharpe_ratio"`
-	AnnualReturn  float64 `json:"annual_return"`
-	MaxDrawdown   float64 `json:"max_drawdown"`
-	TotalReturn   float64 `json:"total_return"`
+	SharpeRatio  float64 `json:"sharpe_ratio"`
+	AnnualReturn float64 `json:"annual_return"`
+	MaxDrawdown  float64 `json:"max_drawdown"`
+	TotalReturn  float64 `json:"total_return"`
 }
 
 // runBacktestHTTP calls the analysis service backtest endpoint.
 func runBacktestHTTP(client *http.Client, strategyID, universe string, start, end time.Time) (*backtestHTTPResponse, error) {
 	body := map[string]any{
-		"strategy":  strategyID,
+		"strategy":   strategyID,
 		"stock_pool": []string{universe},
 		"start_date": start.Format("2006-01-02"),
 		"end_date":   end.Format("2006-01-02"),

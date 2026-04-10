@@ -75,11 +75,12 @@ export interface Strategy {
 
 export interface StrategyParam {
   name: string
-  type: string
-  default: any
+  type: 'number' | 'string' | 'boolean' | 'select'
+  default: number | string | boolean | null
   min?: number
   max?: number
   description: string
+  options?: { label: string; value: number | string | boolean }[] // For select type
 }
 
 export interface MarketIndex {

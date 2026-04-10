@@ -1,5 +1,5 @@
 import { ref, nextTick, onBeforeUnmount } from 'vue'
-import { Chart, registerables } from 'chart.js'
+import { Chart, registerables, type ChartData as ChartJSChartData, type TooltipItem } from 'chart.js'
 import type { PortfolioPoint, Trade } from '@/types/api'
 
 Chart.register(...registerables)
@@ -16,7 +16,7 @@ export interface TradeMarker {
 
 export interface ChartData {
   labels: string[]
-  datasets: any[]
+  datasets: ChartJSChartData['datasets']
 }
 
 export function useBacktestChart(canvasRef: { value: HTMLCanvasElement | null }) {
@@ -78,7 +78,7 @@ export function useBacktestChart(canvasRef: { value: HTMLCanvasElement | null })
       if (!ctx) return
 
       const tradeMarkers = buildTradeMarkers(portfolioValues, trades)
-      const datasets: any[] = [{
+      const datasets: ChartJSChartData['datasets'] = [{
         type: 'line' as const,
         label: '净值',
         data: data.map(d => d.value),
@@ -146,7 +146,7 @@ export function useBacktestChart(canvasRef: { value: HTMLCanvasElement | null })
             legend: { display: true, position: 'top', labels: { color: '#8b949e', boxWidth: 12, padding: 12, font: { size: 11 } } },
             tooltip: {
               callbacks: {
-                label(ctx: any) {
+                label(ctx: TooltipItem<'line' | 'scatter'>) {
                   if (ctx.dataset.type === 'scatter') {
                     const marker = tradeMarkers[ctx.dataIndex]
                     return `${marker.direction === 'long' ? '买入' : '卖出'} ${marker.symbol} @ ${marker.price?.toFixed(2)}`

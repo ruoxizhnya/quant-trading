@@ -26,7 +26,7 @@ type TushareClient struct {
 	token     string
 	logger    zerolog.Logger
 	store     *storage.PostgresStore
-	cache     *storage.Cache
+	cache     storage.Cache
 
 	mu           sync.Mutex
 	lastRequest  time.Time
@@ -34,7 +34,7 @@ type TushareClient struct {
 }
 
 // NewTushareClient creates a new Tushare API client.
-func NewTushareClient(token, baseURL string, maxRetries int, store *storage.PostgresStore, cache *storage.Cache) *TushareClient {
+func NewTushareClient(token, baseURL string, maxRetries int, store *storage.PostgresStore, cache storage.Cache) *TushareClient {
 	return &TushareClient{
 		httpClient: httpclient.New(baseURL, 30*time.Second, maxRetries),
 		token:     token,

@@ -6,7 +6,24 @@ import { listBacktestJobs } from '@/api/backtest'
 const MAX_HISTORY = 20
 const STORAGE_KEY = 'qbh'
 
-function safeSerialize(obj: any): string {
+// LightBacktestResult is a stripped-down version for history list (reduces localStorage size)
+interface LightBacktestResult {
+  id: string
+  strategy?: string
+  stock_pool?: string[]
+  start_date?: string
+  end_date?: string
+  total_return: number
+  sharpe_ratio: number
+  max_drawdown: number
+  win_rate?: number
+  total_trades?: number
+  initial_capital?: number
+  status?: string
+  created_at?: string
+}
+
+function safeSerialize(obj: LightBacktestResult[]): string {
   try {
     return JSON.stringify(obj)
   } catch {
@@ -14,7 +31,7 @@ function safeSerialize(obj: any): string {
   }
 }
 
-function safeParse(raw: string | null): any[] {
+function safeParse(raw: string | null): LightBacktestResult[] {
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw)
@@ -24,7 +41,7 @@ function safeParse(raw: string | null): any[] {
   }
 }
 
-function stripHeavyData(result: BacktestResult): any {
+function stripHeavyData(result: BacktestResult): LightBacktestResult {
   return {
     id: result.id,
     strategy: result.strategy,
@@ -34,13 +51,13 @@ function stripHeavyData(result: BacktestResult): any {
     total_return: result.total_return,
     sharpe_ratio: result.sharpe_ratio,
     max_drawdown: result.max_drawdown,
-    win_rate: result.win_rate,
-    total_trades: result.total_trades,
+    win_rate: (result as any).win_rate,
+    total_trades: (result as any).total_trades,
     initial_capital: result.initial_capital,
   }
 }
 
-function jobToLightResult(job: BacktestJob): any {
+function jobToLightResult(job: BacktestJob): LightBacktestResult {
   const r = job.result
   return {
     id: job.id,
@@ -51,15 +68,15 @@ function jobToLightResult(job: BacktestJob): any {
     total_return: r?.total_return ?? 0,
     sharpe_ratio: r?.sharpe_ratio ?? 0,
     max_drawdown: r?.max_drawdown ?? 0,
-    win_rate: r?.win_rate ?? 0,
-    total_trades: r?.total_trades ?? 0,
+    win_rate: (r as any)?.win_rate ?? 0,
+    total_trades: (r as any)?.total_trrades ?? 0,
     status: job.status,
     created_at: job.created_at,
   }
 }
 
 export const useBacktestStore = defineStore('backtest', () => {
-  const history = ref<BacktestResult[]>([])
+  const history = ref<LightBacktestResult[]>([])
   const currentResult = ref<BacktestResult | null>(null)
   const loading = ref(false)
 
@@ -67,11 +84,11 @@ export const useBacktestStore = defineStore('backtest', () => {
     if (!result || !result.id) return
 
     const light = stripHeavyData(result)
-    const existingIdx = history.value.findIndex((h: any) => h.id === result.id)
+    const existingIdx = history.value.findIndex((h) => h.id === result.id)
     if (existingIdx >= 0) {
-      history.value[existingIdx] = light as any
+      history.value[existingIdx] = light
     } else {
-      history.value.unshift(light as any)
+      history.value.unshift(light)
     }
 
     if (history.value.length > MAX_HISTORY) {
@@ -104,14 +121,14 @@ export const useBacktestStore = defineStore('backtest', () => {
         .filter((j: BacktestJob) => j.status === 'completed')
         .map(jobToLightResult)
 
-      const existingIds = new Set(history.value.map((h: any) => h.id))
+      const existingIds = new Set(history.value.map((h) => h.id))
       for (const dbItem of dbJobs) {
         if (!existingIds.has(dbItem.id)) {
-          history.value.push(dbItem as any)
+          history.value.push(dbItem)
         }
       }
 
-      history.value.sort((a: any, b: any) => {
+      history.value.sort((a, b) => {
         const ta = a.created_at ? new Date(a.created_at).getTime() : 0
         const tb = b.created_at ? new Date(b.created_at).getTime() : 0
         return tb - ta
