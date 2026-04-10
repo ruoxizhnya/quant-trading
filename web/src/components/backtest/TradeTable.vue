@@ -39,7 +39,7 @@ const columns = [
   { title: '出场价', key: 'exit_price', width: 85, render: (r: Trade) => r.exit_price?.toFixed(2) },
   { title: '数量', key: 'quantity', width: 65 },
   { title: 'PnL', key: 'pnl', width: 90,
-    render: (r: Trade) => h('span', { class: r.pnl >= 0 ? 'pnl-pos' : 'pnl-neg' }, () => fmtPercent(r.pnl)),
+    render: (r: Trade) => h('span', { class: (r.pnl ?? 0) >= 0 ? 'pnl-pos' : 'pnl-neg' }, () => fmtPercent(r.pnl ?? 0)),
   },
 ]
 </script>

@@ -36,6 +36,21 @@ export function getBacktestJob(id: string): Promise<BacktestJob> {
   return api.get<BacktestJob>(`/backtest/${id}`)
 }
 
-export function getOHLCV(symbol: string, start: string, end: string) {
+export function getOHLCV(symbol: string, start: string, end: string): Promise<OHLCVAPIResponse> {
   return api.get(`/ohlcv/${symbol}?start_date=${start}&end_date=${end}`)
+}
+
+export interface OHLCVAPIResponse {
+  ohlcv?: OHLCVDataPoint[] | null
+  data?: OHLCVDataPoint[] | null
+}
+
+export interface OHLCVDataPoint {
+  trade_date?: string
+  date?: string
+  close?: number | string
+  open?: number | string
+  high?: number | string
+  low?: number | string
+  volume?: number
 }

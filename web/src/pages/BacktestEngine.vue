@@ -43,6 +43,7 @@
         :portfolio-values="result.portfolio_values || []"
         :trades="safeTrades"
         :show-trades="showTrades"
+        :stock-prices="stockPrices"
         @toggle-trades="showTrades = !showTrades"
       />
       <TradeTable v-if="showTrades && safeTrades.length > 0" :trades="safeTrades" />
@@ -53,7 +54,7 @@
 
     <n-alert v-if="loadError" type="warning" title="报告加载失败" closable @close="loadError = ''">
       {{ loadError }}
-      <template #action>
+      <template #icon>
         <n-button size="small" @click="loadError = ''; fromQuickRun = false">确定</n-button>
       </template>
     </n-alert>
@@ -71,7 +72,7 @@ import { ref, reactive, computed, onMounted, nextTick, shallowRef, triggerRef, w
 import { useRoute } from 'vue-router'
 import { NEmpty, NAlert, NButton, NButtonGroup, useMessage } from 'naive-ui'
 import { useBacktestStore } from '@/stores/backtest'
-import { runBacktest as apiRunBacktest, getBacktestReport } from '@/api/backtest'
+import { runBacktest as apiRunBacktest, getBacktestReport, getOHLCV, type OHLCVAPIResponse, type OHLCVDataPoint } from '@/api/backtest'
 import { getStrategies } from '@/api/strategy'
 import { fmtPercent, fmtNumber } from '@/utils/format'
 import type { BacktestResult, PortfolioPoint, Trade } from '@/types/api'
@@ -91,9 +92,15 @@ const backtestStore = useBacktestStore()
 const loading = ref(false)
 const btRunning = ref(false)
 const loadError = ref('')
-const showTrades = ref(false)
+const showTrades = ref(true)
 const result = shallowRef<BacktestResult | null>(null)
 const asyncMode = ref(true)
+interface StockPricePoint {
+  date: string
+  price: number
+}
+
+const stockPrices = ref<StockPricePoint[]>([])
 
 const form = reactive({
   strategy: (route.query.strategy as string) || 'momentum',
@@ -134,8 +141,75 @@ watch(() => asyncState.value.result, (newResult) => {
     triggerRef(result)
     backtestStore.addToHistory(newResult)
     fromQuickRun.value = false
+    fetchStockPrices()
   }
 }, { immediate: true })
+
+// Fetch OHLCV data for price chart when result changes
+async function fetchStockPrices() {
+  const r = result.value
+  if (!r?.stock_pool?.length || !r.start_date || !r.end_date) {
+    stockPrices.value = []
+    return
+  }
+  const symbol = r.stock_pool[0]
+
+  console.log('[fetchStockPrices] Fetching price data for', symbol, r.start_date, 'to', r.end_date)
+
+  // Try OHLCV API first
+  try {
+    const res: OHLCVAPIResponse = await getOHLCV(symbol, r.start_date, r.end_date)
+    console.log('[fetchStockPrices] OHLCV API response:', res)
+
+    // Handle different response formats from backend
+    let ohlcvData: OHLCVDataPoint[] = []
+    if (res.ohlcv && Array.isArray(res.ohlcv)) {
+      ohlcvData = res.ohlcv
+    } else if (res.data && Array.isArray(res.data)) {
+      ohlcvData = res.data
+    }
+
+    if (ohlcvData.length > 0) {
+      stockPrices.value = ohlcvData
+        .map((d: OHLCVDataPoint) => ({
+          date: d.trade_date || d.date || '',
+          price: Number(d.close) || 0,
+        }))
+        .filter((p: StockPricePoint) => p.date && p.price > 0)
+      console.log('[fetchStockPrices] Loaded', stockPrices.value.length, 'price points from OHLCV API')
+      return
+    } else {
+      console.warn('[fetchStockPrices] OHLCV API returned empty data')
+    }
+  } catch (e: unknown) {
+    console.warn('[fetchStockPrices] OHLCV API failed:', e instanceof Error ? e.message : String(e))
+  }
+
+  // Fallback: Extract price points from trades
+  if (r.trades?.length) {
+    console.log('[fetchStockPrices] Falling back to trade extraction, trades count:', r.trades.length)
+    const priceMap = new Map<string, number>()
+    // Use trade execution prices as data points
+    r.trades.forEach((t: Trade) => {
+      if (t.timestamp && t.price != null) {
+        const dateKey = t.timestamp.split('T')[0]
+        if (dateKey && !priceMap.has(dateKey)) {
+          priceMap.set(dateKey, t.price)
+        }
+      }
+    })
+    if (priceMap.size > 0) {
+      stockPrices.value = Array.from(priceMap.entries())
+        .map(([date, price]) => ({ date, price }))
+        .sort((a: StockPricePoint, b: StockPricePoint) => a.date.localeCompare(b.date))
+      console.log('[fetchStockPrices] Extracted', stockPrices.value.length, 'price points from trades')
+      return
+    }
+  }
+
+  console.warn('[fetchStockPrices] No price data available')
+  stockPrices.value = []
+}
 
 onMounted(async () => {
   backtestStore.loadHistory()
@@ -182,6 +256,7 @@ async function runSyncBacktest() {
     triggerRef(result)
     backtestStore.addToHistory(res)
     fromQuickRun.value = false
+    fetchStockPrices()
   } catch (e: any) {
     message.error('回测失败: ' + (e.message || e))
   } finally {
@@ -209,6 +284,11 @@ async function loadReport(id: string) {
     triggerRef(result)
     fromQuickRun.value = false
     showTrades.value = false
+
+    // Sync trades to store for history display
+    backtestStore.addToHistory(res)
+
+    fetchStockPrices()
   } catch (e: any) {
     loadError.value = '加载失败: ' + (e.message || '未知错误')
   } finally {

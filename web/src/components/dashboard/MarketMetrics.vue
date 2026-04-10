@@ -55,6 +55,10 @@ const emit = defineEmits<{
   refresh: []
 }>()
 
+// Expose formatters to template
+const formatVolume = fmtVolume
+const formatAmount = fmtAmount
+
 const indexOptions = [
   { label: '上证指数', value: '000001.SH' },
   { label: '深证成指', value: '399001.SZ' },

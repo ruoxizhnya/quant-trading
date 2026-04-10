@@ -151,7 +151,7 @@ export function useBacktestChart(canvasRef: { value: HTMLCanvasElement | null })
                     const marker = tradeMarkers[ctx.dataIndex]
                     return `${marker.direction === 'long' ? '买入' : '卖出'} ${marker.symbol} @ ${marker.price?.toFixed(2)}`
                   }
-                  return `${ctx.dataset.label}: ¥${(ctx.parsed.y / 1000).toFixed(0)}K`
+                  return `${ctx.dataset.label}: ¥${((ctx.parsed.y ?? 0) / 1000).toFixed(0)}K`
                 },
               },
             },

@@ -7,12 +7,13 @@
       </n-button>
     </div>
     <n-progress
-      :type="status === 'failed' || status === 'cancelled' ? 'error' : 'default'"
-      :status="progress >= 100 ? 'success' : 'default'"
+      type="line"
+      :status="progress >= 100 ? 'success' : status === 'failed' || status === 'cancelled' ? 'error' : 'default'"
       :percentage="progress"
       :show-indicator="true"
       indicator-placement="inside"
       :processing="status === 'running' || status === 'pending'"
+      :class="{ 'progress-error': status === 'failed' || status === 'cancelled' }"
     />
     <div class="progress-status">
       <n-tag :type="statusType" size="small" round :bordered="false">

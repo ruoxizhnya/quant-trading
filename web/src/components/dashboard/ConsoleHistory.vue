@@ -1,6 +1,6 @@
 <template>
   <n-card title="控制台历史">
-    <template #extra>
+    <template #header-extra>
       <n-button quaternary size="tiny" @click="$emit('clear')">清除</n-button>
     </template>
     <n-list v-if="validHistory.length > 0" bordered>
@@ -24,9 +24,19 @@
 import { computed } from 'vue'
 import { NCard, NList, NListItem, NThing, NTag, NButton, NEmpty } from 'naive-ui'
 import { fmtPercent } from '@/utils/format'
-import type { BacktestResult } from '@/types/api'
+// Use a minimal interface that matches what the store actually provides
+interface HistoryEntry {
+  id: string
+  strategy?: string
+  stock_pool?: string[]
+  start_date?: string
+  end_date?: string
+  total_return: number
+  sharpe_ratio?: number
+  max_drawdown?: number
+}
 
-const props = defineProps<{ history: BacktestResult[] }>()
+const props = defineProps<{ history: HistoryEntry[] }>()
 
 const emit = defineEmits<{
   clear: []
@@ -34,14 +44,14 @@ const emit = defineEmits<{
 }>()
 
 const validHistory = computed(() =>
-  (props.history || []).filter((item: any) => item && item.id)
+  (props.history || []).filter((item: HistoryEntry) => item && item.id)
 )
 
-function itemTitle(item: BacktestResult): string {
+function itemTitle(item: HistoryEntry): string {
   return `${Array.isArray(item.stock_pool) ? item.stock_pool.join(',') : (item.stock_pool || '')} · ${item.strategy || ''}`
 }
 
-function itemDesc(item: BacktestResult): string {
+function itemDesc(item: HistoryEntry): string {
   const ret = fmtPercent(item.total_return)
   const sharpe = (item.sharpe_ratio != null && !isNaN(item.sharpe_ratio)) ? item.sharpe_ratio.toFixed(2) : '-'
   return `收益: ${ret} | 夏普: ${sharpe}`

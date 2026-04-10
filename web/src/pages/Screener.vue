@@ -32,7 +32,7 @@
     </n-card>
 
     <n-card v-if="results.symbols?.length" title="选股结果" class="results-card">
-      <template #extra>
+      <template #header-extra>
         <n-tag type="success" round :bordered="false">找到 {{ results.total }} 只股票</n-tag>
       </template>
       <n-data-table

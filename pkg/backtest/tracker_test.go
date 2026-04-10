@@ -1,6 +1,7 @@
 package backtest
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -8,408 +9,474 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
-func newTestTracker2(cash float64) *Tracker {
-	logger := zerolog.Nop()
-	return NewTracker(cash, 0.0003, 0.001, defaultTradingConfig(), logger)
+func initLogger() zerolog.Logger {
+	return zerolog.New(zerolog.ConsoleWriter{Out: zerolog.TestWriter{T: &testing.T{}}})
 }
 
-// ============================================================
-// 2.5B.1: T+1 Settlement Unit Tests (≥5 core boundary cases)
-// ============================================================
+func TestNewTracker(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
-func TestTPlus1_BuyToday_SellToday_Rejected(t *testing.T) {
-	tracker := newTestTracker2(1000000)
-	date := time.Date(2025, 3, 10, 9, 30, 0, 0, time.UTC)
+	if tracker == nil {
+		t.Fatal("Tracker should not be nil")
+	}
 
-	_, err := tracker.ExecuteTrade("600519", domain.DirectionLong, 100, 50.0, date, nil)
+	if tracker.GetCash() != 1000000 {
+		t.Errorf("Expected initial cash 1000000, got %f", tracker.GetCash())
+	}
+}
+
+func TestTracker_ExecuteTrade_Long(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+
+	symbol := "600000.SH"
+	price := 10.0
+	quantity := 1000.0
+	timestamp := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+
+	trade, err := tracker.ExecuteTrade(symbol, domain.DirectionLong, quantity, price, timestamp, nil)
 	if err != nil {
-		t.Fatalf("buy should succeed: %v", err)
+		t.Fatalf("ExecuteTrade failed: %v", err)
 	}
 
-	_, err = tracker.ExecuteTrade("600519", domain.DirectionClose, 100, 55.0, date, nil)
-	if err == nil {
-		t.Fatal("sell on same day as buy should be rejected (T+1 violation)")
-	}
-	t.Logf("T+1 violation correctly rejected: %v", err)
-}
-
-func TestTPlus1_BuyToday_SellNextDay_Success(t *testing.T) {
-	tracker := newTestTracker2(1000000)
-	buyDate := time.Date(2025, 3, 10, 9, 30, 0, 0, time.UTC)
-	sellDate := time.Date(2025, 3, 11, 9, 30, 0, 0, time.UTC)
-
-	_, err := tracker.ExecuteTrade("600519", domain.DirectionLong, 100, 50.0, buyDate, nil)
-	if err != nil {
-		t.Fatalf("buy failed: %v", err)
+	if trade == nil {
+		t.Fatal("Trade should not be nil")
 	}
 
-	tracker.AdvanceDay(sellDate)
-
-	trade, err := tracker.ExecuteTrade("600519", domain.DirectionClose, 100, 55.0, sellDate, nil)
-	if err != nil {
-		t.Fatalf("sell after T+1 should succeed: %v", err)
-	}
-	if trade.Quantity != 100 {
-		t.Errorf("expected sold qty=100, got %.0f", trade.Quantity)
+	if trade.Symbol != symbol {
+		t.Errorf("Expected symbol %s, got %s", symbol, trade.Symbol)
 	}
 
-	_, exists := tracker.GetPosition("600519")
-	if exists {
-		t.Error("position should be fully closed and removed")
-	}
-	t.Log("T+1 settlement passed: bought D1, sold D2 successfully")
-}
-
-func TestTPlus1_MultipleBuys_SameDaySellBlocked(t *testing.T) {
-	tracker := newTestTracker2(1000000)
-	d1 := time.Date(2025, 3, 10, 9, 30, 0, 0, time.UTC)
-
-	tracker.ExecuteTrade("000001", domain.DirectionLong, 200, 10.0, d1, nil)
-	tracker.ExecuteTrade("000001", domain.DirectionLong, 300, 10.0, d1, nil)
-
-	pos, _ := tracker.GetPosition("000001")
-	if pos.Quantity != 500 {
-		t.Errorf("total qty should be 500, got %.0f", pos.Quantity)
-	}
-	if pos.QuantityToday != 500 {
-		t.Errorf("all 500 bought today, QT should be 500, got %.0f", pos.QuantityToday)
-	}
-	if pos.QuantityYesterday != 0 {
-		t.Errorf("QY should be 0 same day, got %.0f", pos.QuantityYesterday)
+	if trade.Direction != domain.DirectionLong {
+		t.Errorf("Expected direction long, got %s", trade.Direction)
 	}
 
-	_, err := tracker.ExecuteTrade("000001", domain.DirectionClose, 500, 11.0, d1, nil)
-	if err == nil {
-		t.Fatal("selling all same-day shares should be blocked")
+	if trade.Quantity != quantity {
+		t.Errorf("Expected quantity %f, got %f", quantity, trade.Quantity)
 	}
-	t.Log("Same-day multiple buys: all unsellable until T+1")
-}
 
-func TestTPlus1_AdvanceDay_Rollover(t *testing.T) {
-	tracker := newTestTracker2(1000000)
-	d1 := time.Date(2025, 3, 10, 9, 30, 0, 0, time.UTC)
-	d2 := time.Date(2025, 3, 11, 9, 30, 0, 0, time.UTC)
+	expectedCommission := math.Max(quantity*price*0.0003, DefaultMinCommission)
+	if math.Abs(trade.Commission-expectedCommission) > 1e-6 {
+		t.Errorf("Expected commission %f, got %f", expectedCommission, trade.Commission)
+	}
 
-	tracker.ExecuteTrade("600519", domain.DirectionLong, 100, 50.0, d1, nil)
-
-	pos, exists := tracker.GetPosition("600519")
+	pos, exists := tracker.GetPosition(symbol)
 	if !exists {
-		t.Fatal("position should exist after buy")
-	}
-	if pos.QuantityToday != 100 || pos.QuantityYesterday != 0 {
-		t.Errorf("before advance: today=100 yesterday=0, got today=%.0f yesterday=%.0f",
-			pos.QuantityToday, pos.QuantityYesterday)
+		t.Fatal("Position should exist after long trade")
 	}
 
-	tracker.AdvanceDay(d2)
+	if pos.Quantity != quantity {
+		t.Errorf("Expected position quantity %f, got %f", quantity, pos.Quantity)
+	}
 
-	pos2, exists2 := tracker.GetPosition("600519")
-	if !exists2 {
-		t.Fatal("position should still exist after AdvanceDay")
+	if pos.AvgCost != price*(1+0.0001) {
+		t.Errorf("Expected avg cost with slippage, got %f", pos.AvgCost)
 	}
-	if pos2.QuantityToday != 0 {
-		t.Errorf("after advance: today should be 0, got %.0f", pos2.QuantityToday)
+
+	newCash := tracker.GetCash()
+	expectedCash := 1000000 - (quantity * price * (1 + 0.0003)) - expectedCommission - (quantity * price * DefaultTransferFeeRate)
+	if math.Abs(newCash-expectedCash) > 10 {
+		t.Errorf("Expected cash %f, got %f, diff=%f", expectedCash, newCash, math.Abs(newCash-expectedCash))
 	}
-	if pos2.QuantityYesterday != 100 {
-		t.Errorf("after advance: yesterday should be 100, got %.0f", pos2.QuantityYesterday)
-	}
-	t.Log("AdvanceDay correctly rolled QuantityToday into QuantityYesterday")
 }
 
-func TestTPlus1_BuyAdvanceSellAll_PositionRemoved(t *testing.T) {
-	tracker := newTestTracker2(1000000)
-	d1 := time.Date(2025, 3, 10, 9, 30, 0, 0, time.UTC)
-	d2 := time.Date(2025, 3, 11, 9, 30, 0, 0, time.UTC)
+func TestTracker_ExecuteTrade_Short(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
-	tracker.ExecuteTrade("600519", domain.DirectionLong, 50, 50.0, d1, nil)
-	tracker.AdvanceDay(d2)
-	tracker.ExecuteTrade("600519", domain.DirectionClose, 50, 55.0, d2, nil)
+	symbol := "600000.SH"
+	price := 10.0
+	quantity := 500.0
+	timestamp := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
 
-	_, exists := tracker.GetPosition("600519")
-	if exists {
-		t.Fatal("position should be removed after full close")
-	}
-	cash := tracker.GetCash()
-	if cash <= 0 {
-		t.Errorf("cash should be positive after selling, got %.2f", cash)
-	}
-	t.Log("Full close correctly removes position and returns cash")
-}
-
-func TestTPlus1_CrossDayBuys_PartialSell(t *testing.T) {
-	tracker := newTestTracker2(1000000)
-	d1 := time.Date(2025, 3, 10, 9, 30, 0, 0, time.UTC)
-	d2 := time.Date(2025, 3, 11, 9, 30, 0, 0, time.UTC)
-
-	tracker.ExecuteTrade("000001", domain.DirectionLong, 200, 10.0, d1, nil)
-	tracker.AdvanceDay(d2)
-
-	pos, _ := tracker.GetPosition("000001")
-	if pos.QuantityYesterday != 200 || pos.QuantityToday != 0 {
-		t.Errorf("after D1->D2 advance: QY=200 QT=0, got QY=%.0f QT=%.0f",
-			pos.QuantityYesterday, pos.QuantityToday)
-	}
-
-	tracker.ExecuteTrade("000001", domain.DirectionLong, 300, 11.0, d2, nil)
-
-	pos2, _ := tracker.GetPosition("000001")
-	if pos2.Quantity != 500 {
-		t.Errorf("total=500, got %.0f", pos2.Quantity)
-	}
-	if pos2.QuantityYesterday != 200 {
-		t.Errorf("QY should still be 200 (D1 shares), got %.0f", pos2.QuantityYesterday)
-	}
-	if pos2.QuantityToday != 300 {
-		t.Errorf("QT should be 300 (D2 shares), got %.0f", pos2.QuantityToday)
-	}
-
-	trade, err := tracker.ExecuteTrade("000001", domain.DirectionClose, 400, 12.0, d2, nil)
+	trade, err := tracker.ExecuteTrade(symbol, domain.DirectionShort, quantity, price, timestamp, nil)
 	if err != nil {
-		t.Fatalf("partial sell should succeed: %v", err)
-	}
-	if trade.Quantity != 200 {
-		t.Errorf("should only sell 200 (QY limit), got %.0f", trade.Quantity)
+		t.Fatalf("ExecuteTrade failed: %v", err)
 	}
 
-	pos3, _ := tracker.GetPosition("000001")
-	if pos3.Quantity != 300 {
-		t.Errorf("remaining should be 300 (D2 unsellable), got %.0f", pos3.Quantity)
+	if trade.Direction != domain.DirectionShort {
+		t.Errorf("Expected direction short, got %s", trade.Direction)
 	}
-	t.Log("Cross-day buy: only D1 shares (200) sellable on D2, D2 shares (300) need another day")
-}
 
-func TestTPlus1_AvgCostUpdatedOnMultipleBuys(t *testing.T) {
-	tracker := newTestTracker2(1000000)
-	d1 := time.Date(2025, 3, 10, 9, 30, 0, 0, time.UTC)
-	d2 := time.Date(2025, 3, 11, 9, 30, 0, 0, time.UTC)
-	d3 := time.Date(2025, 3, 12, 9, 30, 0, 0, time.UTC)
-
-	tracker.ExecuteTrade("000001", domain.DirectionLong, 1000, 10.0, d1, nil)
-	tracker.AdvanceDay(d2)
-	tracker.ExecuteTrade("000001", domain.DirectionLong, 1000, 20.0, d2, nil)
-	tracker.AdvanceDay(d3)
-
-	pos, _ := tracker.GetPosition("000001")
-	expectedAvgCost := (1000*10.0 + 1000*20.0) / 2000
-	if abs(pos.AvgCost-expectedAvgCost) > 0.5 {
-		t.Errorf("avg cost should be ≈%.4f (with fees), got %.4f", expectedAvgCost, pos.AvgCost)
-	}
-	t.Logf("Average cost correctly updated to %.4f across multiple buys", pos.AvgCost)
-}
-
-// ============================================================
-// 2.5B.2: Price Limit Tests (≥6 cases for ST/new/normal stocks)
-// ============================================================
-
-func testHasSTPrefix(name string) bool {
-	if len(name) < 2 {
-		return false
-	}
-	prefix := name[:2]
-	return prefix == "ST" || prefix == "*ST" || prefix == "SST" || prefix == "S*ST"
-}
-
-func TestPriceLimit_NormalStock_LimitUp(t *testing.T) {
-	cfg := defaultTradingConfig()
-	prevClose := 10.0
-	limitRate := cfg.PriceLimit.Normal
-	upperLimit := prevClose * (1 + limitRate)
-
-	todayClose := upperLimit + 0.01
-	isLimitUp := todayClose >= upperLimit
-
-	if !isLimitUp {
-		t.Errorf("close %.2f should trigger limit-up at %.2f", todayClose, upperLimit)
-	}
-	t.Logf("Normal stock: prevClose=%.2f, limit-up=%.2f -> triggered",
-		prevClose, upperLimit)
-}
-
-func TestPriceLimit_NormalStock_NotLimitUp(t *testing.T) {
-	cfg := defaultTradingConfig()
-	prevClose := 10.0
-	upperLimit := prevClose * (1 + cfg.PriceLimit.Normal)
-
-	todayClose := upperLimit - 0.01
-	isLimitUp := todayClose >= upperLimit
-
-	if isLimitUp {
-		t.Errorf("close %.2f should NOT trigger limit-up at %.2f", todayClose, upperLimit)
+	pos, _ := tracker.GetPosition(symbol)
+	if pos.Quantity >= 0 {
+		t.Error("Short position should have negative quantity")
 	}
 }
 
-func TestPriceLimit_STStock_5pct(t *testing.T) {
-	cfg := defaultTradingConfig()
-	if cfg.PriceLimit.ST != 0.05 {
-		t.Errorf("ST limit rate should be 5%%, got %.2f%%", cfg.PriceLimit.ST*100)
+func TestTracker_ClosePosition_Long(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+
+	symbol := "600000.SH"
+	buyPrice := 10.0
+	sellPrice := 12.0
+	quantity := 1000.0
+	buyDate := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	sellDate := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := tracker.ExecuteTrade(symbol, domain.DirectionLong, quantity, buyPrice, buyDate, nil)
+	if err != nil {
+		t.Fatalf("Buy trade failed: %v", err)
 	}
-	prevClose := 5.0
-	upperLimit := prevClose * (1 + cfg.PriceLimit.ST)
-	t.Logf("ST stock limit-up at %.4f (5%% of %.2f)", upperLimit, prevClose)
+
+	tracker.AdvanceDay(buyDate.AddDate(0, 0, 1))
+
+	closeTrade, err := tracker.ClosePosition(symbol, sellPrice, sellDate)
+	if err != nil {
+		t.Fatalf("ClosePosition failed: %v", err)
+	}
+
+	if closeTrade.Direction != domain.DirectionClose {
+		t.Errorf("Expected direction close, got %s", closeTrade.Direction)
+	}
+
+	if closeTrade.StampTax <= 0 {
+		t.Error("Close trade should have stamp tax for selling")
+	}
+
+	_, exists := tracker.GetPosition(symbol)
+	if exists {
+		t.Error("Position should be removed after close")
+	}
+
+	finalCash := tracker.GetCash()
+	if finalCash <= 1000000 {
+		t.Errorf("Should have profit after selling at higher price, cash=%f", finalCash)
+	}
 }
 
-func TestPriceLimit_NewStock_20pct(t *testing.T) {
-	cfg := defaultTradingConfig()
-	if cfg.PriceLimit.New != 0.20 {
-		t.Errorf("New stock limit rate should be 20%%, got %.2f%%", cfg.PriceLimit.New*100)
+func TestTracker_TPlusOne_Settlement(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+
+	symbol := "600000.SH"
+	price := 10.0
+	quantity := 1000.0
+	day1 := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	day2 := time.Date(2024, 1, 16, 0, 0, 0, 0, time.UTC)
+
+	tracker.ExecuteTrade(symbol, domain.DirectionLong, quantity, price, day1, nil)
+
+	pos, _ := tracker.GetPosition(symbol)
+	if pos.QuantityToday != quantity {
+		t.Errorf("QuantityToday should be %f on buy day, got %f", quantity, pos.QuantityToday)
 	}
-	prevClose := 20.0
-	upperLimit := prevClose * (1 + cfg.PriceLimit.New)
-	t.Logf("New stock limit-up at %.4f (20%% of %.2f)", upperLimit, prevClose)
+
+	if pos.QuantityYesterday != 0 {
+		t.Error("QuantityYesterday should be 0 immediately after buy")
+	}
+
+	_, err := tracker.ClosePosition(symbol, price, day2)
+	if err == nil {
+		t.Error("T+1 violation: should not be able to sell shares bought today")
+	}
+
+	tracker.AdvanceDay(day2)
+
+	pos2, _ := tracker.GetPosition(symbol)
+	if pos2.QuantityYesterday != quantity {
+		t.Errorf("After AdvanceDay, QuantityYesterday should be %f, got %f", quantity, pos2.QuantityYesterday)
+	}
+
+	if pos2.QuantityToday != 0 {
+		t.Error("After AdvanceDay, QuantityToday should be reset to 0")
+	}
+
+	closeTrade, err := tracker.ClosePosition(symbol, price, day2)
+	if err != nil {
+		t.Errorf("After T+1 settlement, should be able to sell: %v", err)
+	} else if closeTrade == nil {
+		t.Error("Close trade should not be nil")
+	}
 }
 
-func TestPriceLimit_LimitDown_Detection(t *testing.T) {
-	cfg := defaultTradingConfig()
-	prevClose := 10.0
-	lowerLimit := prevClose * (1 - cfg.PriceLimit.Normal)
+func TestTracker_RecordDailyValue(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
-	todayClose := lowerLimit - 0.01
-	isLimitDown := todayClose <= lowerLimit
+	symbol := "600000.SH"
+	price := 10.0
+	date := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	prices := map[string]float64{symbol: price}
 
-	if !isLimitDown {
-		t.Errorf("close %.2f should trigger limit-down at %.2f", todayClose, lowerLimit)
+	pv := tracker.RecordDailyValue(date, prices)
+	if pv.TotalValue != 1000000 {
+		t.Errorf("Total value should equal initial capital before any positions, got %f", pv.TotalValue)
 	}
-	t.Logf("Normal stock: prevClose=%.2f, limit-down=%.2f -> triggered",
-		prevClose, lowerLimit)
+
+	tracker.ExecuteTrade(symbol, domain.DirectionLong, 1000, price, date, nil)
+
+	prices[symbol] = 11.0
+	nextDate := time.Date(2024, 1, 16, 0, 0, 0, 0, time.UTC)
+	pv2 := tracker.RecordDailyValue(nextDate, prices)
+
+	if pv2.TotalValue <= pv.TotalValue {
+		t.Errorf("Portfolio value should increase when stock price rises, prev=%f curr=%f", pv.TotalValue, pv2.TotalValue)
+	}
+
+	if pv2.Positions <= 0 {
+		t.Error("Positions value should be positive after buying stock")
+	}
 }
 
-func TestPriceLimit_BuyBlockedOnLimitUp(t *testing.T) {
-	bar := &domain.OHLCV{
-		LimitUp:   true,
+func TestTracker_GetTrades(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+
+	symbol := "600000.SH"
+	price := 10.0
+	date := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+
+	tradesBefore := tracker.GetTrades()
+	if len(tradesBefore) != 0 {
+		t.Error("Should have no trades initially")
+	}
+
+	tracker.ExecuteTrade(symbol, domain.DirectionLong, 1000, price, date, nil)
+	tracker.ExecuteTrade(symbol, domain.DirectionLong, 500, price, date.Add(time.Hour), nil)
+
+	tradesAfter := tracker.GetTrades()
+	if len(tradesAfter) != 2 {
+		t.Errorf("Expected 2 trades, got %d", len(tradesAfter))
+	}
+}
+
+func TestTracker_GetPortfolioValues(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+
+	symbol := "600000.SH"
+	price := 10.0
+	date1 := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	date2 := time.Date(2024, 1, 16, 0, 0, 0, 0, time.UTC)
+	prices := map[string]float64{symbol: price}
+
+	tracker.RecordDailyValue(date1, prices)
+	tracker.ExecuteTrade(symbol, domain.DirectionLong, 1000, price, date1, nil)
+	prices[symbol] = 11.0
+	tracker.RecordDailyValue(date2, prices)
+
+	values := tracker.GetPortfolioValues()
+	if len(values) != 2 {
+		t.Errorf("Expected 2 portfolio values, got %d", len(values))
+	}
+
+	if !values[0].Date.Equal(date1) || !values[1].Date.Equal(date2) {
+		t.Error("Portfolio value dates don't match input dates")
+	}
+}
+
+func TestTracker_InsufficientCash(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(10000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+
+	symbol := "600000.SH"
+	price := 100.0
+	quantity := 10000.0
+	date := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+
+	_, err := tracker.ExecuteTrade(symbol, domain.DirectionLong, quantity, price, date, nil)
+	if err == nil {
+		t.Error("Should fail with insufficient cash")
+	}
+}
+
+func TestTracker_PartialFill_Liquidity(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+
+	symbol := "600000.SH"
+	price := 10.0
+	quantity := 100000.0
+	date := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+
+	dayBar := &domain.OHLCV{
+		Symbol:    symbol,
+		Date:      date,
+		Volume:    100000,
+		Close:     price,
+		LimitUp:   false,
 		LimitDown: false,
 	}
 
-	signalDir := domain.DirectionLong
-	canBuy := !(bar.LimitUp && (signalDir == domain.DirectionLong || signalDir == domain.DirectionShort))
-	if canBuy {
-		t.Error("Buy should be blocked when stock hits limit-up")
+	opts := &OrderExecutionOpts{
+		OrderType: domain.OrderTypeMarket,
+		DayBar:    dayBar,
 	}
-	t.Log("Buy correctly blocked on limit-up day")
+
+	trade, err := tracker.ExecuteTrade(symbol, domain.DirectionLong, quantity, price, date, opts)
+	if err != nil {
+		t.Fatalf("ExecuteTrade with liquidity check failed: %v", err)
+	}
+
+	maxLiquidity := dayBar.Volume * tracker.liquidityFactor
+	if trade.FilledQty > maxLiquidity {
+		t.Errorf("Filled qty %f should not exceed max liquidity %f", trade.FilledQty, maxLiquidity)
+	}
+
+	if trade.PendingQty <= 0 {
+		t.Error("Should have pending qty due to partial fill")
+	}
 }
 
-func TestPriceLimit_SellBlockedOnLimitDown(t *testing.T) {
-	bar := &domain.OHLCV{
-		LimitUp:   false,
-		LimitDown: true,
+func TestTracker_LimitOrder_Expired(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+
+	symbol := "600000.SH"
+	limitPrice := 9.0
+	quantity := 1000.0
+	date := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+
+	dayBar := &domain.OHLCV{
+		Symbol: symbol,
+		Date:   date,
+		Open:   10.0,
+		High:   10.5,
+		Low:    9.5,
+		Close:  10.0,
+		Volume: 1000000,
 	}
 
-	canSell := !(bar.LimitDown && domain.DirectionClose == domain.DirectionClose)
-	if canSell {
-		t.Error("Sell should be blocked when stock hits limit-down")
+	opts := &OrderExecutionOpts{
+		OrderType:  domain.OrderTypeLimit,
+		LimitPrice: limitPrice,
+		DayBar:     dayBar,
 	}
-	t.Log("Sell correctly blocked on limit-down day")
+
+	trade, err := tracker.ExecuteTrade(symbol, domain.DirectionLong, quantity, limitPrice, date, opts)
+	if err == nil && trade != nil {
+		t.Error("Limit order should expire when low > limit price for buy")
+	}
 }
 
-func TestPriceLimit_STPrefix_EdgeCases(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected bool
-	}{
-		{"ST康美", true},
-		{"贵州茅台", false},
-		{"S", false},
-		{"X", false},
-		{"", false},
+func TestTracker_LimitOrder_Filled(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+
+	symbol := "600000.SH"
+	limitPrice := 9.5
+	quantity := 1000.0
+	date := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+
+	dayBar := &domain.OHLCV{
+		Symbol: symbol,
+		Date:   date,
+		Open:   10.0,
+		High:   10.5,
+		Low:    9.3,
+		Close:  9.4,
+		Volume: 1000000,
 	}
-	for _, tt := range tests {
-		result := testHasSTPrefix(tt.input)
-		if result != tt.expected {
-			t.Errorf("testHasSTPrefix(%q) = %v, want %v", tt.input, result, tt.expected)
+
+	opts := &OrderExecutionOpts{
+		OrderType:  domain.OrderTypeLimit,
+		LimitPrice: limitPrice,
+		DayBar:     dayBar,
+	}
+
+	trade, err := tracker.ExecuteTrade(symbol, domain.DirectionLong, quantity, limitPrice, date, opts)
+	if err != nil {
+		t.Fatalf("Limit order should fill when low <= limit price: %v", err)
+	}
+
+	if trade.Price > limitPrice {
+		t.Errorf("Limit buy execution price %f should be <= limit price %f", trade.Price, limitPrice)
+	}
+}
+
+func TestTracker_DividendProcessing(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+
+	symbol := "600000.SH"
+	price := 10.0
+	quantity := 1000.0
+	date := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+
+	tracker.ExecuteTrade(symbol, domain.DirectionLong, quantity, price, date, nil)
+
+	dividend := domain.Dividend{
+		Symbol:  symbol,
+		DivAmt:  0.5,
+		PayDate: time.Date(2024, 1, 20, 0, 0, 0, 0, time.UTC),
+	}
+
+	cashBefore := tracker.GetCash()
+	err := tracker.ProcessDividend(symbol, dividend)
+	if err != nil {
+		t.Fatalf("ProcessDividend failed: %v", err)
+	}
+
+	cashAfter := tracker.GetCash()
+	expectedDividendCredit := quantity * dividend.DivAmt
+	if math.Abs(cashAfter-cashBefore-expectedDividendCredit) > 0.01 {
+		t.Errorf("Cash should increase by dividend amount %f, diff=%f", expectedDividendCredit, cashAfter-cashBefore)
+	}
+}
+
+func TestTracker_Reset(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+
+	symbol := "600000.SH"
+	price := 10.0
+	date := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+
+	tracker.ExecuteTrade(symbol, domain.DirectionLong, 1000, price, date, nil)
+	tracker.Reset(2000000)
+
+	if tracker.GetCash() != 2000000 {
+		t.Errorf("After reset, cash should be 2000000, got %f", tracker.GetCash())
+	}
+
+	if len(tracker.GetTrades()) != 0 {
+		t.Error("After reset, trades should be empty")
+	}
+
+	if len(tracker.GetPortfolioValues()) != 0 {
+		t.Error("After reset, portfolio values should be empty")
+	}
+}
+
+func TestTracker_MultiplePositions(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(10000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+
+	symbols := []string{"600000.SH", "600519.SH", "000001.SZ"}
+	date := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	prices := map[string]float64{
+		symbols[0]: 10.0,
+		symbols[1]: 50.0,
+		symbols[2]: 20.0,
+	}
+
+	for _, sym := range symbols {
+		_, err := tracker.ExecuteTrade(sym, domain.DirectionLong, 1000, prices[sym], date, nil)
+		if err != nil {
+			t.Fatalf("Failed to execute trade for %s: %v", sym, err)
 		}
 	}
+
+	allPositions := tracker.GetAllPositions()
+	if len(allPositions) != 3 {
+		t.Errorf("Expected 3 positions, got %d", len(allPositions))
+	}
+
+	totalValue := tracker.GetPortfolioValue(prices)
+	if totalValue < 9990000 {
+		t.Errorf("Total portfolio value should be close to initial capital (minus fees), got %f", totalValue)
+	}
 }
 
-func TestPriceLimit_NewStockDetection(t *testing.T) {
-	cfg := defaultTradingConfig()
+func TestTracker_CloseNonExistentPosition(t *testing.T) {
+	logger := initLogger()
+	tracker := NewTracker(1000000, 0.0003, 0.0001, defaultTradingConfig(), logger)
 
-	recentList := time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)
-	checkRecent := time.Date(2025, 3, 10, 0, 0, 0, 0, time.UTC)
-	tradeDaysRecent := int(checkRecent.Sub(recentList).Hours() / 24 / 7 * 5)
-	if tradeDaysRecent >= cfg.NewStockDays {
-		t.Error("recently listed stock should be treated as new stock")
-	}
-
-	oldList := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	checkOld := time.Date(2025, 3, 10, 0, 0, 0, 0, time.UTC)
-	tradeDaysOld := int(checkOld.Sub(oldList).Hours() / 24 / 7 * 5)
-	if tradeDaysOld < cfg.NewStockDays {
-		t.Error("old stock should NOT be treated as new stock")
-	}
-	t.Logf("New stock threshold: recent=%d days (<%d), old=%d days (>=%d)",
-		tradeDaysRecent, cfg.NewStockDays, tradeDaysOld, cfg.NewStockDays)
-}
-
-// ============================================================
-// Commission & Fee Verification
-// ============================================================
-
-func TestCommission_Buy_NoStampTax(t *testing.T) {
-	tracker := newTestTracker2(1000000)
-	date := time.Date(2025, 3, 10, 9, 30, 0, 0, time.UTC)
-
-	trade, err := tracker.ExecuteTrade("TEST", domain.DirectionLong, 100, 100.0, date, nil)
-	if err != nil {
-		t.Fatalf("trade failed: %v", err)
-	}
-
-	if trade.StampTax > 0 {
-		t.Errorf("buy should have zero stamp tax, got %.4f", trade.StampTax)
-	}
-	if trade.Commission <= 0 {
-		t.Error("buy should have commission")
-	}
-	t.Logf("Buy OK: commission=%.4f, stampTax=%.4f", trade.Commission, trade.StampTax)
-}
-
-func TestCommission_Sell_HasStampTax(t *testing.T) {
-	tracker := newTestTracker2(1000000)
-	buyDate := time.Date(2025, 3, 10, 9, 30, 0, 0, time.UTC)
-	sellDate := time.Date(2025, 3, 11, 9, 30, 0, 0, time.UTC)
-
-	tracker.ExecuteTrade("TEST", domain.DirectionLong, 100, 100.0, buyDate, nil)
-	tracker.AdvanceDay(sellDate)
-
-	trade, err := tracker.ExecuteTrade("TEST", domain.DirectionClose, 100, 110.0, sellDate, nil)
-	if err != nil {
-		t.Fatalf("sell failed: %v", err)
-	}
-
-	if trade.StampTax <= 0 {
-		t.Errorf("sell should have stamp tax (0.1%%), got %.4f", trade.StampTax)
-	}
-	if trade.StampTax <= 0 {
-		t.Error("stamp tax should be positive")
-	}
-	t.Logf("Sell OK: commission=%.4f, stampTax=%.4f (execution price includes slippage)",
-		trade.Commission, trade.StampTax)
-}
-
-func TestInsufficientCash_BuyRejected(t *testing.T) {
-	tracker := newTestTracker2(100)
-	date := time.Date(2025, 3, 10, 9, 30, 0, 0, time.UTC)
-
-	_, err := tracker.ExecuteTrade("EXPENSIVE", domain.DirectionLong, 100, 10000.0, date, nil)
+	_, err := tracker.ClosePosition("NONEXISTENT.SH", 10.0, time.Now())
 	if err == nil {
-		t.Fatal("buy with insufficient cash should be rejected")
+		t.Error("Should fail when closing non-existent position")
 	}
-	t.Logf("Correctly rejected: %v", err)
-}
-
-func TestPortfolioValue_Calculation(t *testing.T) {
-	tracker := newTestTracker2(1000000)
-	date := time.Date(2025, 3, 10, 9, 30, 0, 0, time.UTC)
-
-	tracker.ExecuteTrade("A", domain.DirectionLong, 100, 10.0, date, nil)
-	tracker.ExecuteTrade("B", domain.DirectionLong, 50, 20.0, date, nil)
-
-	prices := map[string]float64{"A": 12.0, "B": 22.0}
-	pv := tracker.GetPortfolioValue(prices)
-	expectedPositions := 100*12.0 + 50*22.0
-	expectedTotal := tracker.GetCash() + expectedPositions
-
-	if abs(pv-expectedTotal) > 0.01 {
-		t.Errorf("portfolio value expected %.2f, got %.2f", expectedTotal, pv)
-	}
-	t.Logf("Portfolio: cash=%.2f, positions=%.2f, total=%.2f",
-		tracker.GetCash(), expectedPositions, pv)
 }

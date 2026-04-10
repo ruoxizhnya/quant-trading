@@ -76,9 +76,9 @@ async function fetchMarketData() {
   marketLoading.value = true
   try {
     const res = await getMarketIndex(selectedIndex.value, selectedDate.value)
-    if (Array.isArray(res.data) && res.data.length > 0) {
-      const latest = res.data[res.data.length - 1]
-      marketMetrics.value = latest
+    if (Array.isArray(res.indices) && res.indices.length > 0) {
+      const latest = res.indices[res.indices.length - 1]
+      marketMetrics.value = latest as any
     }
   } catch (e) {
     console.warn('市场数据获取失败:', e)

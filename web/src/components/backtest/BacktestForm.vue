@@ -19,15 +19,15 @@
       </div>
       <div class="form-item">
         <label class="form-label">初始资金</label>
-        <n-input-number :value="initialCapital" :min="10000" :step="100000" size="small" @update:value="$emit('update:initialCapital', $event)" />
+        <n-input-number :value="initialCapital" :min="10000" :step="100000" size="small" @update:value="(val: number | null) => $emit('update:initialCapital', val ?? 1000000)" />
       </div>
       <div class="form-item">
         <label class="form-label">手续费率</label>
-        <n-input-number :value="commissionRate" :step="0.0001" :precision="4" size="small" @update:value="$emit('update:commissionRate', $event)" />
+        <n-input-number :value="commissionRate" :step="0.0001" :precision="4" size="small" @update:value="(val: number | null) => $emit('update:commissionRate', val ?? 0.0003)" />
       </div>
       <div class="form-item">
         <label class="form-label">滑点率</label>
-        <n-input-number :value="slippageRate" :step="0.0001" :precision="4" size="small" @update:value="$emit('update:slippageRate', $event)" />
+        <n-input-number :value="slippageRate" :step="0.0001" :precision="4" size="small" @update:value="(val: number | null) => $emit('update:slippageRate', val ?? 0.0001)" />
       </div>
       <div class="form-item form-item-btn">
         <n-button type="primary" :loading="loading" block @click="$emit('submit')">运行回测</n-button>

@@ -12,8 +12,10 @@
 <script setup lang="ts">
 import { fmtMetric } from '@/utils/format'
 
-defineProps<{ metrics: Record<string, number> | null }>()
+const props = defineProps<{ metrics: Record<string, number> | null }>()
 
+// Expose to template
+const formatMetric = fmtMetric
 </script>
 
 <style scoped>

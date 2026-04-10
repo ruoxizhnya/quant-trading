@@ -15,17 +15,27 @@ export interface PortfolioPoint {
   positions: number
 }
 
+// Trade as returned by backend engine (raw format from domain.Trade)
 export interface Trade {
   id: string
   symbol: string
   direction: 'long' | 'short' | 'close'
-  entry_date: string
-  exit_date: string | null
-  entry_price: number
-  exit_price: number | null
   quantity: number
-  pnl: number
-  pnl_pct: number
+  price: number              // execution price (entry for long/short, exit for close)
+  commission: number
+  transfer_fee: number
+  stamp_tax: number
+  timestamp: string          // ISO date when trade executed
+  pending_qty: number
+  filled_qty: number
+
+  // Computed/display fields (not from backend, derived in UI)
+  entry_date?: string        // = timestamp for long/short trades
+  exit_date?: string | null  // = timestamp for close trades
+  entry_price?: number       // = price for long/short
+  exit_price?: number | null // = price for close
+  pnl?: number               // computed from trade pair
+  pnl_pct?: number           // computed from trade pair
 }
 
 export interface BacktestResult {
@@ -44,6 +54,7 @@ export interface BacktestResult {
   calmar_ratio: number
   started_at: string
   completed_at: string | null
+  created_at?: string
   portfolio_values: PortfolioPoint[]
   trades: Trade[]
   metrics?: Record<string, number>

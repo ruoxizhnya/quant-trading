@@ -20,7 +20,7 @@
 
     <div class="sidebar-footer">
       <div v-if="!collapsed" class="sys-status">
-        <n-space vertical :size="4" size="small">
+        <n-space vertical :size="4">
           <div class="sys-row">
             <span class="sys-dot online"></span>
             <span class="sys-text">Redis</span>

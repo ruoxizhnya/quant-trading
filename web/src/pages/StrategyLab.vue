@@ -35,7 +35,6 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { NCard, NButton, NInput, NSelect, NSpace, NTag, NEmpty, useMessage, useDialog } from 'naive-ui'
 import { getStrategies } from '@/api/strategy'
-import { runBacktest } from '@/api/backtest'
 import type { Strategy } from '@/types/api'
 
 const router = useRouter()

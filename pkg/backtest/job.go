@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 )
 
 // JobService handles async backtest job lifecycle.
 type JobService struct {
 	store  JobStore
 	engine *Engine
+	logger zerolog.Logger
 
 	// cancelFuncs holds cancellation functions for running jobs.
 	// Key: jobID, Value: cancellation function.
@@ -109,6 +111,7 @@ func NewJobService(store JobStore, engine *Engine) *JobService {
 	return &JobService{
 		store:  store,
 		engine: engine,
+		logger: engine.logger.With().Str("component", "job_service").Logger(),
 	}
 }
 
@@ -178,28 +181,73 @@ func (s *JobService) CreateJob(ctx context.Context, req CreateJobRequest) (*Job,
 // StartJob runs the backtest in a background goroutine.
 // It updates job status to "running", executes the backtest, then
 // marks it "completed" with the result or "failed" with the error.
-func (s *JobService) StartJob(ctx context.Context, jobID string) {
-	jobCtx, cancel := context.WithCancel(ctx)
-	s.cancelFuncs.Store(jobID, cancel)
+//
+// Context handling strategy:
+// - Uses context.Background() as base to ensure the job continues running
+//   even after the HTTP request that started it has completed.
+// - Monitors the parent context for cancellation signals to allow graceful shutdown.
+// - For explicit cancellation, use CancelJob() method instead.
+func (s *JobService) StartJob(parentCtx context.Context, jobID string) {
+	s.logger.Info().Str("job_id", jobID).Msg("Starting backtest job")
+
+	// Use Background context so the goroutine isn't cancelled when HTTP request ends
+	// This ensures long-running backtests complete even if client disconnects.
+	jobCtx, jobCancel := context.WithCancel(context.Background())
+	s.cancelFuncs.Store(jobID, jobCancel)
+
+	// Monitor parent context for cancellation signal
+	// This allows callers to propagate cancellation if needed (e.g., server shutdown)
+	go func() {
+		select {
+		case <-parentCtx.Done():
+			s.logger.Warn().
+				Str("job_id", jobID).
+				Err(parentCtx.Err()).
+				Msg("Parent context cancelled, initiating graceful job shutdown")
+			jobCancel()
+		case <-jobCtx.Done():
+			// Job already completed or cancelled via CancelJob()
+		}
+	}()
 
 	go func() {
-		defer cancel()
+		defer jobCancel()
+		startTime := time.Now()
+
+		s.logger.Info().Str("job_id", jobID).Msg("Updating job status to 'running'")
 
 		if err := s.store.UpdateJobStarted(jobCtx, jobID); err != nil {
-			s.store.UpdateJobFailed(jobCtx, jobID, fmt.Sprintf("failed to mark started: %v", err))
+			s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to mark job as started")
+			if dbErr := s.store.UpdateJobFailed(jobCtx, jobID, fmt.Sprintf("failed to mark started: %v", err)); dbErr != nil {
+				s.logger.Error().Err(dbErr).Str("job_id", jobID).Msg("Failed to mark job as failed after start error")
+			}
 			s.cancelFuncs.Delete(jobID)
 			return
 		}
 
+		s.logger.Info().Str("job_id", jobID).Msg("Loading job record from database")
+
 		recordMap, err := s.store.GetBacktestJob(jobCtx, jobID)
 		if err != nil || recordMap == nil {
-			s.store.UpdateJobFailed(jobCtx, jobID, fmt.Sprintf("job not found: %v", err))
+			s.logger.Error().Err(err).Str("job_id", jobID).Msg("Job not found in database")
+			if dbErr := s.store.UpdateJobFailed(jobCtx, jobID, fmt.Sprintf("job not found: %v", err)); dbErr != nil {
+				s.logger.Error().Err(dbErr).Str("job_id", jobID).Msg("Failed to mark job as failed")
+			}
 			s.cancelFuncs.Delete(jobID)
 			return
 		}
 
 		record := mapToJobRecord(recordMap)
 		stockPool := parseUniverse(record.Universe)
+
+		s.logger.Info().
+			Str("job_id", jobID).
+			Str("strategy", record.StrategyID).
+			Str("universe", record.Universe).
+			Int("stock_count", len(stockPool)).
+			Str("start_date", record.StartDate).
+			Str("end_date", record.EndDate).
+			Msg("Executing backtest")
 
 		backtestReq := BacktestRequest{
 			Strategy:  record.StrategyID,
@@ -209,21 +257,45 @@ func (s *JobService) StartJob(ctx context.Context, jobID string) {
 		}
 
 		result, err := s.engine.RunBacktest(jobCtx, backtestReq)
+		elapsed := time.Since(startTime)
+
 		if err != nil {
-			s.store.UpdateJobFailed(jobCtx, jobID, err.Error())
+			s.logger.Error().
+				Err(err).
+				Str("job_id", jobID).
+				Dur("elapsed", elapsed).
+				Msg("Backtest execution failed")
+
+			if dbErr := s.store.UpdateJobFailed(jobCtx, jobID, err.Error()); dbErr != nil {
+				s.logger.Error().Err(dbErr).Str("job_id", jobID).Msg("Failed to update job status to failed")
+			}
 			s.cancelFuncs.Delete(jobID)
 			return
 		}
 
+		s.logger.Info().
+			Str("job_id", jobID).
+			Dur("elapsed", elapsed).
+			Float64("total_return", result.TotalReturn).
+			Float64("sharpe_ratio", result.SharpeRatio).
+			Float64("max_drawdown", result.MaxDrawdown).
+			Int("trade_count", len(result.Trades)).
+			Msg("Backtest completed successfully")
+
 		resultJSON, err := json.Marshal(result)
 		if err != nil {
-			s.store.UpdateJobFailed(jobCtx, jobID, fmt.Sprintf("failed to marshal result: %v", err))
+			s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to marshal backtest result")
+			if dbErr := s.store.UpdateJobFailed(jobCtx, jobID, fmt.Sprintf("failed to marshal result: %v", err)); dbErr != nil {
+				s.logger.Error().Err(dbErr).Str("job_id", jobID).Msg("Failed to mark job as failed")
+			}
 			s.cancelFuncs.Delete(jobID)
 			return
 		}
 
 		if err := s.store.UpdateJobCompleted(jobCtx, jobID, resultJSON); err != nil {
-			s.engine.logger.Error().Err(err).Str("job_id", jobID).Msg("failed to persist job result")
+			s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to persist job result to database")
+		} else {
+			s.logger.Info().Str("job_id", jobID).Msg("Job result persisted successfully")
 		}
 		s.cancelFuncs.Delete(jobID)
 	}()

@@ -926,6 +926,50 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		}
 	}
 
+	// Force close all remaining positions at end of backtest
+	// This ensures we capture exit trades for PnL calculation and complete trade records
+	lastTradingDay := tradingDays[len(tradingDays)-1]
+	for symbol, pos := range state.Tracker.GetAllPositions() {
+		if abs(pos.Quantity) > 1e-8 {
+			price, priceExists := pricesCache[symbol]
+			if !priceExists {
+				logger.Warn().
+					Str("symbol", symbol).
+					Float64("qty", pos.Quantity).
+					Time("date", lastTradingDay).
+					Msg("Skipping force close: no price data for symbol at backtest end")
+				continue
+			}
+			if price <= 0 {
+				logger.Warn().
+					Str("symbol", symbol).
+					Float64("price", price).
+					Float64("qty", pos.Quantity).
+					Time("date", lastTradingDay).
+					Msg("Skipping force close: invalid price (<= 0) for symbol at backtest end")
+				continue
+			}
+			closeTrade, err := state.Tracker.ClosePosition(symbol, price, lastTradingDay)
+			if err != nil {
+				logger.Warn().
+					Str("symbol", symbol).
+					Err(err).
+					Time("date", lastTradingDay).
+					Msg("Failed to force close position at backtest end")
+			} else if closeTrade != nil {
+				logger.Info().
+					Str("symbol", symbol).
+					Float64("qty", closeTrade.Quantity).
+					Float64("price", closeTrade.Price).
+					Time("date", lastTradingDay).
+					Msg("Force closed position at backtest end")
+			}
+		}
+	}
+
+	// Record final portfolio value after forced closing
+	state.Tracker.RecordDailyValue(lastTradingDay, pricesCache)
+
 	// Generate final results
 	portfolioValues := state.Tracker.GetPortfolioValues()
 	trades := state.Tracker.GetTrades()
