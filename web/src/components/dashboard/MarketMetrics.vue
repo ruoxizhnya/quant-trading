@@ -40,6 +40,7 @@
 import { computed } from 'vue'
 import { NCard, NSpace, NDatePicker, NSelect, NButton, NSpin, NIcon } from 'naive-ui'
 import { RefreshOutline } from '@vicons/ionicons5'
+import { fmtVolume, fmtAmount } from '@/utils/format'
 
 const props = defineProps<{
   selectedDate: string
@@ -66,18 +67,6 @@ const greeting = computed(() => {
   if (h < 14) return '中午好 ☀️'
   return '下午好 🌤'
 })
-
-function formatVolume(v: any): string {
-  if (!v) return '-'
-  const num = Number(v)
-  if (num >= 1e8) return (num / 1e8).toFixed(1) + '亿'
-  return (num / 1e4).toFixed(0) + '万'
-}
-
-function formatAmount(a: any): string {
-  if (!a) return '-'
-  return (Number(a) / 1e8).toFixed(1)
-}
 </script>
 
 <style scoped>

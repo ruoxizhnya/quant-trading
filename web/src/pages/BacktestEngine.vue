@@ -73,7 +73,7 @@ import { NEmpty, NAlert, NButton, NButtonGroup, useMessage } from 'naive-ui'
 import { useBacktestStore } from '@/stores/backtest'
 import { runBacktest as apiRunBacktest, getBacktestReport } from '@/api/backtest'
 import { getStrategies } from '@/api/strategy'
-import { fmtPercent } from '@/utils/format'
+import { fmtPercent, fmtNumber } from '@/utils/format'
 import type { BacktestResult, PortfolioPoint, Trade } from '@/types/api'
 import BacktestForm from '@/components/backtest/BacktestForm.vue'
 import MetricsCards from '@/components/backtest/MetricsCards.vue'
@@ -111,11 +111,6 @@ const fromQuickRun = ref(!!route.query.id)
 const asyncBacktest = useAsyncBacktest()
 const asyncState = computed(() => asyncBacktest.state.value)
 
-function formatNum(v: any, digits: number): string {
-  if (v == null || isNaN(Number(v))) return '-'
-  return Number(v).toFixed(digits)
-}
-
 const isRunning = computed(() => btRunning.value || ['pending', 'running'].includes(asyncState.value.status))
 
 const safeTrades = computed<Trade[]>(() => result.value?.trades || [])
@@ -127,9 +122,9 @@ const resultMetrics = computed(() => {
   return [
     { label: '总收益率', value: fmtPercent(r.total_return), cls: (r.total_return ?? 0) >= 0 ? 'positive' : 'negative' },
     { label: '年化收益', value: fmtPercent(r.annual_return), cls: (r.annual_return ?? 0) >= 0 ? 'positive' : 'negative' },
-    { label: '夏普比率', value: formatNum(r.sharpe_ratio, 2), cls: '' },
+    { label: '夏普比率', value: fmtNumber(r.sharpe_ratio, 2), cls: '' },
     { label: '最大回撤', value: fmtPercent(r.max_drawdown), cls: 'negative' },
-    { label: 'Calmar 比率', value: formatNum(r.calmar_ratio, 2), cls: '' },
+    { label: 'Calmar 比率', value: fmtNumber(r.calmar_ratio, 2), cls: '' },
   ]
 })
 

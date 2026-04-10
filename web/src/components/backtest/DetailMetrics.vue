@@ -10,12 +10,10 @@
 </template>
 
 <script setup lang="ts">
+import { fmtMetric } from '@/utils/format'
+
 defineProps<{ metrics: Record<string, number> | null }>()
 
-function formatMetric(v: any): string {
-  if (v == null || isNaN(Number(v))) return String(v ?? '-')
-  return Math.abs(Number(v)) > 1 ? Number(v).toFixed(4) : (Number(v) * 100).toFixed(2) + '%'
-}
 </script>
 
 <style scoped>
