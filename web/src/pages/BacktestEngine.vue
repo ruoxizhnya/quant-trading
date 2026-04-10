@@ -8,7 +8,7 @@
       :initial-capital="form.initialCapital"
       :commission-rate="form.commissionRate"
       :slippage-rate="form.slippageRate"
-      :loading="loading"
+      :loading="isRunning"
       :strategies="strategiesCache"
       @update:strategy="form.strategy = $event"
       @update:stock-pool="form.stockPool = $event"
@@ -20,22 +20,36 @@
       @submit="runBacktest"
     />
 
+    <div class="mode-toggle">
+      <n-button-group size="tiny">
+        <n-button :type="asyncMode ? 'default' : 'primary'" size="tiny" @click="asyncMode = false">同步</n-button>
+        <n-button :type="asyncMode ? 'primary' : 'default'" size="tiny" @click="asyncMode = true">异步</n-button>
+      </n-button-group>
+    </div>
+
+    <BacktestProgress
+      v-if="asyncMode && asyncState.status !== 'idle'"
+      :visible="true"
+      :status="asyncState.status"
+      :progress="asyncState.progress"
+      :error="asyncState.error"
+      :cancellable="asyncState.status === 'running' || asyncState.status === 'pending'"
+      @cancel="asyncBacktest.cancel()"
+    />
+
     <div v-if="result" class="results-section">
       <MetricsCards :metrics="resultMetrics" />
-
       <EquityChart
         :portfolio-values="result.portfolio_values || []"
         :trades="safeTrades"
         :show-trades="showTrades"
         @toggle-trades="showTrades = !showTrades"
       />
-
       <TradeTable v-if="showTrades && safeTrades.length > 0" :trades="safeTrades" />
-
       <DetailMetrics :metrics="safeMetrics" />
     </div>
 
-    <n-empty v-else-if="!loading && !fromQuickRun && !loadError" description="配置参数后运行回测" class="empty-state"></n-empty>
+    <n-empty v-else-if="!isRunning && !fromQuickRun && !loadError && asyncState.status === 'idle'" description="配置参数后运行回测" class="empty-state"></n-empty>
 
     <n-alert v-if="loadError" type="warning" title="报告加载失败" closable @close="loadError = ''">
       {{ loadError }}
@@ -53,9 +67,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, nextTick, shallowRef, triggerRef } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick, shallowRef, triggerRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { NEmpty, NAlert, NButton, useMessage } from 'naive-ui'
+import { NEmpty, NAlert, NButton, NButtonGroup, useMessage } from 'naive-ui'
 import { useBacktestStore } from '@/stores/backtest'
 import { runBacktest as apiRunBacktest, getBacktestReport } from '@/api/backtest'
 import { getStrategies } from '@/api/strategy'
@@ -67,6 +81,8 @@ import EquityChart from '@/components/backtest/EquityChart.vue'
 import TradeTable from '@/components/backtest/TradeTable.vue'
 import DetailMetrics from '@/components/backtest/DetailMetrics.vue'
 import BacktestHistory from '@/components/backtest/BacktestHistory.vue'
+import BacktestProgress from '@/components/backtest/BacktestProgress.vue'
+import { useAsyncBacktest } from '@/composables/useAsyncBacktest'
 
 const route = useRoute()
 const message = useMessage()
@@ -77,6 +93,7 @@ const btRunning = ref(false)
 const loadError = ref('')
 const showTrades = ref(false)
 const result = shallowRef<BacktestResult | null>(null)
+const asyncMode = ref(true)
 
 const form = reactive({
   strategy: (route.query.strategy as string) || 'momentum',
@@ -91,10 +108,15 @@ const form = reactive({
 const strategiesCache = ref<string[]>([])
 const fromQuickRun = ref(!!route.query.id)
 
+const asyncBacktest = useAsyncBacktest()
+const asyncState = computed(() => asyncBacktest.state.value)
+
 function formatNum(v: any, digits: number): string {
   if (v == null || isNaN(Number(v))) return '-'
   return Number(v).toFixed(digits)
 }
+
+const isRunning = computed(() => btRunning.value || ['pending', 'running'].includes(asyncState.value.status))
 
 const safeTrades = computed<Trade[]>(() => result.value?.trades || [])
 const safeMetrics = computed(() => result.value?.metrics || null)
@@ -111,6 +133,15 @@ const resultMetrics = computed(() => {
   ]
 })
 
+watch(() => asyncState.value.result, (newResult) => {
+  if (newResult) {
+    result.value = newResult
+    triggerRef(result)
+    backtestStore.addToHistory(newResult)
+    fromQuickRun.value = false
+  }
+}, { immediate: true })
+
 onMounted(async () => {
   backtestStore.loadHistory()
   backtestStore.loadHistoryFromDB()
@@ -125,14 +156,23 @@ onMounted(async () => {
 })
 
 async function runBacktest() {
-  if (btRunning.value) return
+  if (isRunning.value) return
   if (!form.stockPool) { message.warning('请输入股票代码'); return }
-  btRunning.value = true
-  loading.value = true
   loadError.value = ''
   showTrades.value = false
   result.value = null
   triggerRef(result)
+
+  if (asyncMode.value) {
+    runAsyncBacktest()
+  } else {
+    await runSyncBacktest()
+  }
+}
+
+async function runSyncBacktest() {
+  btRunning.value = true
+  loading.value = true
   try {
     const res = await apiRunBacktest({
       strategy: form.strategy,
@@ -153,6 +193,16 @@ async function runBacktest() {
     loading.value = false
     btRunning.value = false
   }
+}
+
+function runAsyncBacktest() {
+  loading.value = true
+  asyncBacktest.submit({
+    strategy_id: form.strategy,
+    universe: form.stockPool,
+    start_date: form.startDate,
+    end_date: form.endDate,
+  })
 }
 
 async function loadReport(id: string) {
@@ -182,4 +232,5 @@ async function loadReport(id: string) {
 }
 .results-section { display: flex; flex-direction: column; gap: 16px; }
 .empty-state { padding: 60px 0; }
+.mode-toggle { display: flex; justify-content: flex-end; }
 </style>

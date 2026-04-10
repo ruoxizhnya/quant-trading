@@ -1,8 +1,27 @@
 import api from './client'
 import type { BacktestRequest, BacktestResult, BacktestJob } from '@/types/api'
 
+export interface CreateJobRequest {
+  strategy_id: string
+  universe: string
+  start_date: string
+  end_date: string
+  initial_capital?: number
+  commission_rate?: number
+  slippage_rate?: number
+}
+
+export interface JobResponse {
+  job_id: string
+  status: string
+}
+
 export function runBacktest(req: BacktestRequest): Promise<BacktestResult> {
   return api.post<BacktestResult>('/backtest', req, { timeout: 300000 })
+}
+
+export function createBacktestJob(req: CreateJobRequest): Promise<JobResponse> {
+  return api.post<JobResponse>('/backtest', req)
 }
 
 export function getBacktestReport(id: string): Promise<BacktestResult> {
