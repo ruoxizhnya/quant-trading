@@ -2,13 +2,10 @@
 package plugins
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -17,11 +14,11 @@ import (
 
 // ValueScreeningConfig holds configuration for the value screening strategy.
 type ValueScreeningConfig struct {
-	PEMax            float64
-	PBMax            float64
-	ROEMin           float64
-	MomentumDays     int
-	TopN             int
+	PEMax              float64
+	PBMax              float64
+	ROEMin             float64
+	MomentumDays       int
+	TopN               int
 	RebalanceFrequency string
 }
 
@@ -31,19 +28,15 @@ type valueScreeningStrategy struct {
 	name   string
 	params ValueScreeningConfig
 
-	// HTTP client for data service calls
-	httpClient *http.Client
-
-	// Cache: date string -> screening results
-	// Avoids repeated API calls within the same backtest day
-	cache      sync.Map
-	cacheLimit int // max cached dates (default 30, set in init)
+	httpClient     *http.Client
+	screenCache    *strategy.ScreenCache
+	dataServiceURL string
 }
 
 // Configure sets the strategy parameters.
 func (s *valueScreeningStrategy) Configure(params map[string]any) error {
-	if s.cacheLimit == 0 {
-		s.cacheLimit = 30
+	if s.screenCache == nil {
+		s.screenCache = strategy.NewScreenCache(30)
 	}
 	if v, ok := params["pe_max"]; ok {
 		switch val := v.(type) {
@@ -109,10 +102,7 @@ func (s *valueScreeningStrategy) Weight(signal strategy.Signal, portfolioValue f
 
 // Cleanup releases resources (cache, HTTP client).
 func (s *valueScreeningStrategy) Cleanup() {
-	s.cache.Range(func(key, value interface{}) bool {
-		s.cache.Delete(key)
-		return true
-	})
+	s.screenCache = nil
 	s.httpClient = nil
 	s.params = ValueScreeningConfig{}
 }
@@ -132,155 +122,69 @@ func (s *valueScreeningStrategy) Parameters() []strategy.Parameter {
 	return []strategy.Parameter{
 		{
 			Name:        "pe_max",
-			Type:       "float",
+			Type:        "float",
 			Default:     30.0,
 			Description: "Maximum PE ratio to include",
-			Min:        1.0,
-			Max:        100.0,
+			Min:         1.0,
+			Max:         100.0,
 		},
 		{
 			Name:        "pb_max",
-			Type:       "float",
+			Type:        "float",
 			Default:     3.0,
 			Description: "Maximum PB ratio to include",
-			Min:        0.1,
-			Max:        20.0,
+			Min:         0.1,
+			Max:         20.0,
 		},
 		{
 			Name:        "roe_min",
-			Type:       "float",
+			Type:        "float",
 			Default:     0.1,
 			Description: "Minimum ROE to include (e.g., 0.1 = 10%)",
-			Min:        -1.0,
-			Max:        1.0,
+			Min:         -1.0,
+			Max:         1.0,
 		},
 		{
 			Name:        "momentum_days",
-			Type:       "int",
+			Type:        "int",
 			Default:     60,
 			Description: "Number of days for momentum lookback",
-			Min:        5,
-			Max:        250,
+			Min:         5,
+			Max:         250,
 		},
 		{
 			Name:        "top_n",
-			Type:       "int",
+			Type:        "int",
 			Default:     10,
 			Description: "Number of top stocks to buy",
-			Min:        1,
-			Max:        50,
+			Min:         1,
+			Max:         50,
 		},
 		{
 			Name:        "rebalance_frequency",
-			Type:       "string",
+			Type:        "string",
 			Default:     "monthly",
 			Description: "Rebalance frequency: daily, weekly, monthly",
 		},
 	}
 }
 
-// isRebalanceDay checks if the given date is a rebalance day per the configured frequency.
-func (s *valueScreeningStrategy) isRebalanceDay(date time.Time) bool {
-	switch s.params.RebalanceFrequency {
-	case "weekly":
-		if date.Weekday() == time.Monday {
-			return true
-		}
-		prevDay := date.AddDate(0, 0, -1)
-		if prevDay.Weekday() == time.Sunday && date.Weekday() == time.Tuesday {
-			return true
-		}
-		if prevDay.Weekday() == time.Saturday && date.Weekday() == time.Monday {
-			return true
-		}
-		return false
-	case "monthly":
-		if date.Day() == 1 {
-			return true
-		}
-		if date.Day() <= 3 {
-			prevDay := date.AddDate(0, 0, -1)
-			if prevDay.Month() != date.Month() {
-				return true
-			}
-		}
-		return false
-	case "daily", "":
-		return true
-	default:
-		return true
-	}
-}
-
 // callScreenAPI calls the /screen endpoint and returns filtered stock results.
 func (s *valueScreeningStrategy) callScreenAPI(dateStr string) ([]domain.ScreenResult, error) {
-	// Check cache first
-	if cached, ok := s.cache.Load(dateStr); ok {
-		return cached.([]domain.ScreenResult), nil
-	}
-
 	peMax := s.params.PEMax
 	roeMin := s.params.ROEMin
 	pbMax := s.params.PBMax
 
-	reqBody := domain.ScreenRequest{
+	req := domain.ScreenRequest{
 		Filters: domain.ScreenFilters{
-			PE_max: &peMax,
-			PB_max: &pbMax,
+			PE_max:  &peMax,
+			PB_max:  &pbMax,
 			ROE_min: &roeMin,
 		},
 		Date:  dateStr,
-		Limit: 500, // Get up to 500 candidates for momentum ranking
+		Limit: 500,
 	}
-
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal screen request: %w", err)
-	}
-
-	url := "http://data-service:8081/screen"
-	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create screen request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.httpClient.Do(httpReq.WithContext(context.Background()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to call screen API: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("screen API returned status %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Count   int                   `json:"count"`
-		Results []domain.ScreenResult `json:"results"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode screen response: %w", err)
-	}
-
-	// Cache the result
-	s.cache.Store(dateStr, result.Results)
-
-	// Simple cache size limit: evict oldest if over limit
-	count := 0
-	s.cache.Range(func(key, value any) bool {
-		count++
-		return true
-	})
-	if count > s.cacheLimit {
-		// Evict the oldest entry (first key found)
-		s.cache.Range(func(key, value any) bool {
-			s.cache.Delete(key)
-			return false
-		})
-	}
-
-	return result.Results, nil
+	return strategy.CallScreenAPI(s.httpClient, s.dataServiceURL, s.screenCache, req)
 }
 
 // GenerateSignals generates buy/sell signals based on value screening + momentum ranking.
@@ -325,7 +229,7 @@ func (s *valueScreeningStrategy) GenerateSignals(
 	screenDateStr := screenDate.Format("20060102")
 
 	// Check rebalance frequency
-	if !s.isRebalanceDay(screenDate) {
+	if !strategy.IsRebalanceDay(screenDate, s.params.RebalanceFrequency) {
 		// Not a rebalance day: return sell signals only for positions that
 		// should be exited (momentum turned negative), no new buys
 		sellSignals, err := s.generateSellSignals(bars, portfolio, momentumDays)
@@ -514,17 +418,18 @@ func (s *valueScreeningStrategy) generateSellSignals(
 
 func init() {
 	s := &valueScreeningStrategy{
-		name:   "value_screening",
+		name: "value_screening",
 		params: ValueScreeningConfig{
-			PEMax:             30.0,
-			PBMax:             3.0,
-			ROEMin:            0.1,
-			MomentumDays:      60,
-			TopN:              10,
+			PEMax:              30.0,
+			PBMax:              3.0,
+			ROEMin:             0.1,
+			MomentumDays:       60,
+			TopN:               10,
 			RebalanceFrequency: "monthly",
 		},
-		httpClient: &http.Client{Timeout: 10 * time.Second},
-		cacheLimit: 30, // Cache up to 30 dates
+		httpClient:     &http.Client{Timeout: 10 * time.Second},
+		screenCache:    strategy.NewScreenCache(30),
+		dataServiceURL: "http://data-service:8081",
 	}
 	strategy.GlobalRegister(s)
 }

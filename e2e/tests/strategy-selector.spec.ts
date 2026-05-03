@@ -41,7 +41,7 @@ test.describe('Strategy Lab Page (Vue SPA)', () => {
     await page.goto('/strategy-lab');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('.strategy-lab-page', { timeout: 15000 });
-    await page.waitForTimeout(3000);
+    await page.waitForSelector('.strategy-card, .n-empty', { timeout: 10000 });
 
     const cards = page.locator('.strategy-card');
     const count = await cards.count();
@@ -52,7 +52,7 @@ test.describe('Strategy Lab Page (Vue SPA)', () => {
     await page.goto('/strategy-lab');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('.strategy-lab-page', { timeout: 15000 });
-    await page.waitForTimeout(2000);
+    await page.waitForSelector('.strategy-card, .n-empty', { timeout: 10000 });
 
     const cards = page.locator('.strategy-card');
     const cardCount = await cards.count();

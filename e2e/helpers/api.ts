@@ -23,11 +23,11 @@ export const API = {
   },
 
   async stocksCount(ctx: APIRequestContext) {
-    return ctx.get('/stocks/count');
+    return ctx.get('/api/stocks/count');
   },
 
   async marketIndex(ctx: APIRequestContext) {
-    return ctx.get('/market/index');
+    return ctx.get('/api/market/index');
   },
 
   async strategies(ctx: APIRequestContext) {
@@ -35,27 +35,27 @@ export const API = {
   },
 
   async runBacktest(ctx: APIRequestContext, payload: any) {
-    return ctx.post('/backtest', { data: payload });
+    return ctx.post('/api/backtest', { data: payload });
   },
 
   async getBacktestReport(ctx: APIRequestContext, id: string) {
-    return ctx.get(`/backtest/${id}/report`);
+    return ctx.get(`/api/backtest/${id}/report`);
   },
 
   async listBacktestJobs(ctx: APIRequestContext, limit = 20) {
-    return ctx.get(`/backtest?limit=${limit}`);
+    return ctx.get(`/api/backtest?limit=${limit}`);
   },
 
   async getBacktestJob(ctx: APIRequestContext, id: string) {
-    return ctx.get(`/backtest/${id}`);
+    return ctx.get(`/api/backtest/${id}`);
   },
 
   async getBacktestTrades(ctx: APIRequestContext, id: string) {
-    return ctx.get(`/backtest/${id}/trades`);
+    return ctx.get(`/api/backtest/${id}/trades`);
   },
 
   async getBacktestEquity(ctx: APIRequestContext, id: string) {
-    return ctx.get(`/backtest/${id}/equity`);
+    return ctx.get(`/api/backtest/${id}/equity`);
   },
 
   async copilotGenerate(ctx: APIRequestContext, prompt: string) {
@@ -63,11 +63,11 @@ export const API = {
   },
 
   async screen(ctx: APIRequestContext, params: Record<string, number>) {
-    return ctx.post('/screen', { data: params });
+    return ctx.post('/api/screen', { data: params });
   },
 
   async ohlcv(ctx: APIRequestContext, symbol: string, start: string, end: string) {
-    return ctx.get(`/ohlcv/${symbol}?start_date=${start}&end_date=${end}`);
+    return ctx.get(`/api/ohlcv/${symbol}?start_date=${start}&end_date=${end}`);
   },
 };
 

@@ -31,11 +31,11 @@ const (
 	// DefaultInitialCapital is the default starting capital for backtests (¥1M)
 	DefaultInitialCapital = 1_000_000.0
 
-	// DefaultCommissionRate is the default broker commission rate (0.025%)
-	DefaultCommissionRate = 0.00025
+	// DefaultCommissionRate is the default broker commission rate (0.03%)
+	DefaultCommissionRate = 0.0003
 
-	// DefaultSlippageRate is the default slippage assumption (0.1%)
-	DefaultSlippageRate = 0.001
+	// DefaultSlippageRate is the default slippage assumption (0.01%)
+	DefaultSlippageRate = 0.0001
 
 	// DefaultRiskFreeRate is the annual risk-free rate (3%, approx. Chinese bond yield)
 	DefaultRiskFreeRate = 0.03

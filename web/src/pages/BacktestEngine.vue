@@ -75,7 +75,7 @@ import { useBacktestStore } from '@/stores/backtest'
 import { runBacktest as apiRunBacktest, getBacktestReport, getOHLCV, type OHLCVAPIResponse, type OHLCVDataPoint } from '@/api/backtest'
 import { getStrategies } from '@/api/strategy'
 import { fmtPercent, fmtNumber } from '@/utils/format'
-import type { BacktestResult, PortfolioPoint, Trade } from '@/types/api'
+import type { BacktestResult, PortfolioPoint, Trade, Strategy } from '@/types/api'
 import BacktestForm from '@/components/backtest/BacktestForm.vue'
 import MetricsCards from '@/components/backtest/MetricsCards.vue'
 import EquityChart from '@/components/backtest/EquityChart.vue'
@@ -154,14 +154,9 @@ async function fetchStockPrices() {
   }
   const symbol = r.stock_pool[0]
 
-  console.log('[fetchStockPrices] Fetching price data for', symbol, r.start_date, 'to', r.end_date)
-
-  // Try OHLCV API first
   try {
     const res: OHLCVAPIResponse = await getOHLCV(symbol, r.start_date, r.end_date)
-    console.log('[fetchStockPrices] OHLCV API response:', res)
 
-    // Handle different response formats from backend
     let ohlcvData: OHLCVDataPoint[] = []
     if (res.ohlcv && Array.isArray(res.ohlcv)) {
       ohlcvData = res.ohlcv
@@ -176,7 +171,6 @@ async function fetchStockPrices() {
           price: Number(d.close) || 0,
         }))
         .filter((p: StockPricePoint) => p.date && p.price > 0)
-      console.log('[fetchStockPrices] Loaded', stockPrices.value.length, 'price points from OHLCV API')
       return
     } else {
       console.warn('[fetchStockPrices] OHLCV API returned empty data')
@@ -187,7 +181,6 @@ async function fetchStockPrices() {
 
   // Fallback: Extract price points from trades
   if (r.trades?.length) {
-    console.log('[fetchStockPrices] Falling back to trade extraction, trades count:', r.trades.length)
     const priceMap = new Map<string, number>()
     // Use trade execution prices as data points
     r.trades.forEach((t: Trade) => {
@@ -202,7 +195,6 @@ async function fetchStockPrices() {
       stockPrices.value = Array.from(priceMap.entries())
         .map(([date, price]) => ({ date, price }))
         .sort((a: StockPricePoint, b: StockPricePoint) => a.date.localeCompare(b.date))
-      console.log('[fetchStockPrices] Extracted', stockPrices.value.length, 'price points from trades')
       return
     }
   }
@@ -216,7 +208,7 @@ onMounted(async () => {
   backtestStore.loadHistoryFromDB()
   try {
     const res = await getStrategies()
-    strategiesCache.value = (res.strategies || []).map((s: any) => s.name || s.id || s.description)
+    strategiesCache.value = (res.strategies || []).map((s: Strategy) => (s.name || s.id || s.description))
   } catch {}
   if (route.query.id) {
     await nextTick()
@@ -252,13 +244,16 @@ async function runSyncBacktest() {
       commission_rate: form.commissionRate,
       slippage_rate: form.slippageRate,
     })
+    if (!res || !res.id) {
+      throw new Error('回测返回结果无效：缺少ID')
+    }
     result.value = res
     triggerRef(result)
     backtestStore.addToHistory(res)
     fromQuickRun.value = false
     fetchStockPrices()
-  } catch (e: any) {
-    message.error('回测失败: ' + (e.message || e))
+  } catch (e: unknown) {
+    message.error('回测失败: ' + (e instanceof Error ? e.message : String(e)))
   } finally {
     loading.value = false
     btRunning.value = false
@@ -272,6 +267,9 @@ function runAsyncBacktest() {
     universe: form.stockPool,
     start_date: form.startDate,
     end_date: form.endDate,
+    initial_capital: form.initialCapital,
+    commission_rate: form.commissionRate,
+    slippage_rate: form.slippageRate,
   })
 }
 
@@ -280,17 +278,22 @@ async function loadReport(id: string) {
   loadError.value = ''
   try {
     const res = await getBacktestReport(id)
+    if (!res) {
+      throw new Error('报告数据为空')
+    }
+    if (!res.id) {
+      res.id = id
+    }
     result.value = res
     triggerRef(result)
     fromQuickRun.value = false
     showTrades.value = false
 
-    // Sync trades to store for history display
     backtestStore.addToHistory(res)
 
     fetchStockPrices()
-  } catch (e: any) {
-    loadError.value = '加载失败: ' + (e.message || '未知错误')
+  } catch (e: unknown) {
+    loadError.value = '加载失败: ' + (e instanceof Error ? e.message : '未知错误')
   } finally {
     loading.value = false
   }

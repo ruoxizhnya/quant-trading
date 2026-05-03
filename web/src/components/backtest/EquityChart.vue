@@ -29,18 +29,19 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { NCard, NSpace, NTag, NCheckbox } from 'naive-ui'
-import { Chart, registerables, type TooltipItem } from 'chart.js'
+import { Chart, registerables, type TooltipItem, type ChartDataset } from 'chart.js'
 import type { PortfolioPoint, Trade } from '@/types/api'
 import { buildTradeMarkers, type TradeMarker } from '@/utils/tradeMarkers'
+import { sampleData, type DateValuePoint } from '@/utils/format'
 
 Chart.register(...registerables)
-
-const MAX_CHART_POINTS = 150
 
 interface PricePoint {
   date: string
   price: number
 }
+
+const MAX_CHART_POINTS = 150
 
 const props = defineProps<{
   portfolioValues: PortfolioPoint[]
@@ -63,20 +64,6 @@ const tradeMarkers = ref<TradeMarker[]>([])
 const buyCount = computed(() => tradeMarkers.value.filter(t => t.direction === 'long').length)
 const sellCount = computed(() => tradeMarkers.value.filter(t => t.direction !== 'long').length)
 
-function sampleData(raw: { date: string; value: number }[]) {
-  if (raw.length <= MAX_CHART_POINTS) return raw
-  const step = Math.ceil(raw.length / MAX_CHART_POINTS)
-  const sampled: { date: string; value: number }[] = []
-  for (let i = 0; i < raw.length; i += step) {
-    sampled.push(raw[i])
-  }
-  const last = raw[raw.length - 1]
-  if (!sampled.length || sampled[sampled.length - 1].date !== last.date) {
-    sampled.push(last)
-  }
-  return sampled
-}
-
 async function renderChart() {
   if (!props.portfolioValues?.length) return
   if (!canvasEl.value) return
@@ -91,7 +78,7 @@ async function renderChart() {
 
     if (rawData.length === 0) return
 
-    const data = sampleData(rawData)
+    const data = sampleData(rawData, MAX_CHART_POINTS)
 
     const ctx = canvasEl.value.getContext('2d')
     if (!ctx) return
@@ -99,17 +86,11 @@ async function renderChart() {
     const markers = buildTradeMarkers(props.portfolioValues, props.trades)
   tradeMarkers.value = markers
 
-  console.log('[EquityChart] Total trades:', props.trades.length)
-  console.log('[EquityChart] Markers after filter:', markers.length)
-  console.log('[EquityChart] Buy markers:', markers.filter(m => m.direction === 'long').length)
-  console.log('[EquityChart] Sell markers:', markers.filter(m => m.direction === 'close').length)
-  if (props.stockPrices?.length) {
-    console.log('[EquityChart] Stock prices loaded:', props.stockPrices.length, 'points')
-  } else {
+  if (!props.stockPrices?.length) {
     console.warn('[EquityChart] No stock prices data')
   }
 
-    const datasets: any[] = []
+    const datasets: ChartDataset[] = []
 
     // Build date index for marker alignment
     const dateIndex = new Map<string, number>()

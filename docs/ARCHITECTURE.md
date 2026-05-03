@@ -1,6 +1,17 @@
 # 量化交易系统架构文档
 
-_最后更新: 2026-04-08 (Phase 3)_
+> **Status**: Active (Reference)
+> **Version:** 2.0.0 (AGENTS Template v2.0 Migration)
+> **Last Updated:** 2026-04-11
+> **Owner:** 龙少 (Longshao) — AI Assistant
+> **Related:** [VISION.md](VISION.md) (principles), [SPEC.md](SPEC.md) (API), [ROADMAP.md](ROADMAP.md) (progress)
+>
+> **Changelog v2.0 (Migration):**
+> - 添加标准元数据头部（Status, Owner, Related）
+> - 统一文档格式与 AGENTS Template v2.0 对齐
+> - 添加前端架构章节（Vue SPA + Legacy HTML 双轨制）
+
+_原最后更新: 2026-04-08 (Phase 3)_
 
 **Phase 3 更新:**
 - Event-Driven 数据管道 (pkg/marketdata/eventbus.go + provider 接口)
@@ -77,9 +88,9 @@ _最后更新: 2026-04-08 (Phase 3)_
 | data-service | 8081 | 8081 | 数据同步 + 选股 API | ✅ 运行中 |
 | strategy-service | 8082 | - | 外部策略服务（备用）| 🔄 备用 |
 | postgres | 5432 | - | 数据库 | ✅ 运行中 |
-| redis | 6379 | - | 缓存层 | ✅ 运行中 |
-| risk-service | — | 8083 | 风控服务 (Phase 3) | 🔲 规划中 |
-| execution-service | — | 8084 | 执行服务 (Phase 3) | 🔲 规划中 |
+| redis | 6377 | - | 缓存层 | ✅ 运行中 |
+| risk-service | — | 8083 | 风控服务 | 🔲 Planned |
+| execution-service | — | 8084 | 执行服务 | 🔲 Planned |
 
 ---
 
@@ -87,36 +98,57 @@ _最后更新: 2026-04-08 (Phase 3)_
 
 ### Analysis Service (8085)
 
-```
-GET  /                     — 回测首页 (index.html)
-GET  /dashboard            — 控制台 (dashboard.html)
-GET  /screen               — 选股器 (screen.html)
-GET  /index.html           — 回测首页 (别名)
+> 完整 API 定义见 [SPEC.md](SPEC.md)
 
+```
 GET  /health              — 健康检查
      → {"status": "healthy", "service": "analysis-service"}
 
-GET  /api/strategies       — 可用策略列表
-     → {"strategies": [{"name": "momentum", ...}, ...]}
+GET  /api/v1              — API 信息和端点列表
 
-POST /screen               — 选股请求 (proxy → data-service)
-     Body: {"filters": {"pe_max": 30, "roe_min": 0.1}, "limit": 10}
-     → {"count": 5, "results": [...]}
-
-GET  /ohlcv/:symbol        — K 线数据 (proxy → data-service)
-     Query: ?start_date=YYYYMMDD&end_date=YYYYMMDD
-
+# Backtest
 POST /backtest             — 发起回测（同步或异步）
-     Body: BacktestRequest
-     → BacktestResponse (含 id, strategy, total_return 等)
+GET  /backtest?limit=20    — 回测任务列表
+GET  /backtest/:id         — 回测任务状态
+GET  /backtest/:id/report  — 回测报告
+GET  /backtest/:id/trades  — 交易记录
+GET  /backtest/:id/equity  — 净值曲线数据
 
-GET  /backtest?limit=20    — 回测任务列表（从 DB 加载）
-     → {"jobs": [...], "total": N}
+# Data Proxies (→ data-service :8081)
+GET  /ohlcv/:symbol        — K 线数据
+POST /screen               — 选股请求
+GET  /stocks/count         — 股票计数
+GET  /market/index         — 市场指数
+POST /sync/calendar        — 交易日历同步
+GET  /api/v1/trading/calendar — 交易日历查询
 
-GET  /backtest/:id          — 回测任务状态（内存优先，DB 回退）
-GET  /backtest/:id/report   — 回测报告（含 portfolio_values, trades）
-GET  /backtest/:id/trades   — 交易记录
-GET  /backtest/:id/equity   — 净值曲线数据
+# Strategy Management
+GET    /api/strategies     — 策略列表
+POST   /api/strategies     — 创建策略
+GET    /api/strategies/:id — 策略详情
+PUT    /api/strategies/:id — 更新策略
+DELETE /api/strategies/:id — 删除策略
+
+# AI Copilot
+POST /api/copilot/generate        — AI 策略生成
+GET  /api/copilot/generate/:job_id — 轮询生成结果
+GET  /api/copilot/stats           — Copilot 统计
+POST /api/copilot/save            — 保存策略代码
+
+# Data Source Management
+GET  /api/datasource/status       — 数据源状态
+POST /api/datasource/switch       — 切换数据源
+GET  /api/datasource/health       — 数据源健康检查
+
+# Factor Analysis
+GET  /api/factor/returns/:factor  — 因子收益时间序列
+GET  /api/factor/ic/:factor       — 因子 IC 时间序列
+POST /api/factor/compute-returns  — 计算因子收益
+POST /api/factor/compute-ic       — 计算因子 IC
+GET  /api/factor/list             — 列出可用因子
+
+# Legacy HTML (deprecated — use Vue SPA instead)
+GET  /, /screen, /dashboard, /copilot, /strategy-selector
 ```
 
 ### Data Service (8081)
@@ -216,6 +248,58 @@ started_at TIMESTAMPTZ                      -- 开始执行时间
 completed_at TIMESTAMPTZ                    -- 完成时间
 Indexes: idx_bj_status, idx_bj_created_at
 ```
+
+---
+
+## 缓存设计 (Redis)
+
+> **来源**: 整合自 CACHE.md (2026-04-11)
+
+采用两层 cache-aside 架构，将回测延迟从分钟级降至 <5s。
+
+```
+Backtest Engine
+    │
+    ▼
+pkg/data/cache.go  ← cache-aside facade
+    │
+    ├── Redis (pkg/storage/cache.go)   ← L1: hot data
+    └── PostgreSQL (pkg/storage/postgres.go) ← L2: source of truth
+```
+
+### Redis Key 设计
+
+| 数据 | Key Pattern | TTL |
+|------|-------------|-----|
+| OHLCV bars | `ohlcv:{symbol}:{start}:{end}` | 1h (recent), 24h (historical) |
+| Fundamentals | `fund:{symbol}:{date}` | 24h |
+| Stock list | `stocks:all` | 24h |
+
+- Keys 使用 YYYYMMDD 日期格式
+- OHLCV TTL 对近期数据（最近 7 天）较短，保持实时性；历史数据较长
+
+### L1 — Redis (`pkg/storage/cache.go`)
+
+底层 Redis 封装，使用 `go-redis/v9`：
+- `Get` / `SetEX` — 带 TTL 的原始字节操作
+- `CacheOHLCV` / `GetCachedOHLCV` — 领域级 OHLCV 缓存
+- `CacheStocks` / `GetCachedStocks` — 股票列表缓存
+- `Ping` — 健康检查
+
+### L2 — Cache-Aside Facade (`pkg/data/cache.go`)
+
+`DataCache` 封装 Redis + PostgreSQL：
+
+```go
+// 先查 Redis → miss 时查 PostgreSQL → 缓存结果
+func (dc *DataCache) GetOHLCV(ctx, symbol, start, end string) ([]domain.OHLCV, error)
+func (dc *DataCache) SetOHLCV(ctx, symbol, start, end string, bars []domain.OHLCV) error
+func (dc *DataCache) GetFundamentals(ctx, symbol, date string) ([]domain.Fundamental, error)
+```
+
+TTL 自动选择：
+- 最近 7 天数据 → 1h TTL
+- 更早数据 → 24h TTL
 
 ---
 

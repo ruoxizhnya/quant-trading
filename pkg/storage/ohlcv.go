@@ -41,6 +41,12 @@ func (s *PostgresStore) SaveOHLCVBatch(ctx context.Context, records []*domain.OH
 		return nil
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	batch := &pgx.Batch{}
 	for _, o := range records {
 		batch.Queue(`
@@ -53,13 +59,17 @@ func (s *PostgresStore) SaveOHLCVBatch(ctx context.Context, records []*domain.OH
 		`, o.Symbol, o.Date, o.Open, o.High, o.Low, o.Close, o.Volume, o.Turnover, o.TradeDays)
 	}
 
-	results := s.pool.SendBatch(ctx, batch)
+	results := tx.SendBatch(ctx, batch)
 	defer results.Close()
 
 	for i := 0; i < len(records); i++ {
 		if _, err := results.Exec(); err != nil {
 			return fmt.Errorf("batch insert failed at index %d: %w", i, err)
 		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	s.logger.Info().Int("count", len(records)).Msg("Batch OHLCV saved")

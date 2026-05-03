@@ -207,9 +207,9 @@ func OldInit(logger zerolog.Logger) {
 
 // Register registers a strategy factory with the given name.
 // This is the old API for backward compatibility with cmd/strategy service.
-func Register(name string, factory StrategyFactory) {
+func Register(name string, factory StrategyFactory) error {
 	if DefaultOldRegistry == nil {
-		panic("old registry not initialized, call OldInit first")
+		return fmt.Errorf("old registry not initialized, call OldInit first")
 	}
 	DefaultOldRegistry.mu.Lock()
 	defer DefaultOldRegistry.mu.Unlock()
@@ -222,6 +222,7 @@ func Register(name string, factory StrategyFactory) {
 
 	DefaultOldRegistry.factories[name] = factory
 	DefaultOldRegistry.instances[name] = factory()
+	return nil
 }
 
 // GetStrategy retrieves a strategy by name.

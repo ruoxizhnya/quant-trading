@@ -38,6 +38,12 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: () => import('@/pages/NotFound.vue'),
+    meta: { title: '页面不存在' },
+  },
 ]
 
 const router = createRouter({

@@ -38,6 +38,7 @@ services:
       - "8081:8081"
     environment:
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
       REDIS_URL: redis://redis:6379
       LOG_LEVEL: info
@@ -128,6 +129,11 @@ services:
       - "8085:8085"
     environment:
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: postgres
+      DATABASE_DATABASE: quant_trading
       REDIS_URL: redis://redis:6379
       DATA_SERVICE_URL: http://data-service:8081
       STRATEGY_SERVICE_URL: http://strategy-service:8082

@@ -208,6 +208,141 @@ func TestRiskManager_RegimeDetector_BasicTrend(t *testing.T) {
 	}
 }
 
+func TestRiskManager_CalculatePositionsBatch_Basic(t *testing.T) {
+	logger := zerolog.Nop()
+	cfg := RiskManagerConfig{
+		TargetVolatility:  0.15,
+		MaxPositionWeight: 0.10,
+		ATRPeriod:         14,
+		BaseMultiplier:   2.0,
+		TakeProfitMult:   3.0,
+		VolLookbackDays:  60,
+	}
+	rm, _ := NewRiskManager(cfg, logger)
+
+	signals := []domain.Signal{
+		{Symbol: "600000.SH", Direction: domain.DirectionLong, Strength: 0.8},
+		{Symbol: "000001.SZ", Direction: domain.DirectionLong, Strength: 0.6},
+		{Symbol: "600519.SH", Direction: domain.DirectionLong, Strength: 0.4},
+	}
+
+	prices := map[string]float64{
+		"600000.SH": 12.5,
+		"000001.SZ":  15.0,
+		"600519.SH": 1800.0,
+	}
+
+	ohlcvData := map[string][]domain.OHLCV{
+		"600000.SH": generateTestOHLCV(30, 12.5, 0.02),
+		"000001.SZ": generateTestOHLCV(30, 15.0, 0.02),
+		"600519.SH": generateTestOHLCV(30, 1800.0, 0.01),
+	}
+
+	portfolio := &domain.Portfolio{TotalValue: 1000000}
+	regime := &domain.MarketRegime{Trend: "bull", Volatility: "medium"}
+
+	results, err := rm.CalculatePositionsBatch(context.Background(), signals, portfolio, regime, prices, ohlcvData)
+	require.NoError(t, err)
+	require.NotNil(t, results)
+	assert.Len(t, results, 3)
+
+	for symbol, ps := range results {
+		assert.Greater(t, ps.Size, float64(0), "symbol %s should have positive size", symbol)
+		assert.Greater(t, ps.Weight, 0.0, "symbol %s should have positive weight", symbol)
+		assert.LessOrEqual(t, ps.Weight, rm.GetConfig().MaxPositionWeight, "symbol %s weight within max", symbol)
+	}
+}
+
+func TestRiskManager_CalculatePositionsBatch_EmptySignals(t *testing.T) {
+	logger := zerolog.Nop()
+	rm, _ := NewRiskManager(RiskManagerConfig{ATRPeriod: 14}, logger)
+	portfolio := &domain.Portfolio{TotalValue: 1000000}
+
+	results, err := rm.CalculatePositionsBatch(context.Background(), nil, portfolio, nil, nil, nil)
+	require.NoError(t, err)
+	assert.Nil(t, results)
+}
+
+func TestRiskManager_CalculatePositionsBatch_NilPortfolio(t *testing.T) {
+	logger := zerolog.Nop()
+	rm, _ := NewRiskManager(RiskManagerConfig{ATRPeriod: 14}, logger)
+
+	_, err := rm.CalculatePositionsBatch(context.Background(), []domain.Signal{
+		{Symbol: "600000.SH"},
+	}, nil, nil, nil, nil)
+	assert.Error(t, err)
+}
+
+func TestRiskManager_CalculatePositionsBatch_ConsistencyWithSingle(t *testing.T) {
+	logger := zerolog.Nop()
+	cfg := RiskManagerConfig{
+		TargetVolatility:  0.15,
+		MaxPositionWeight: 0.10,
+		ATRPeriod:         14,
+		BaseMultiplier:   2.0,
+		TakeProfitMult:   3.0,
+		VolLookbackDays:  60,
+	}
+	rm, _ := NewRiskManager(cfg, logger)
+
+	signal := domain.Signal{Symbol: "600000.SH", Direction: domain.DirectionLong, Strength: 0.7}
+	prices := map[string]float64{"600000.SH": 50.0}
+	ohlcvData := map[string][]domain.OHLCV{"600000.SH": generateTestOHLCV(30, 50.0, 0.02)}
+	portfolio := &domain.Portfolio{TotalValue: 1000000}
+	regime := &domain.MarketRegime{Trend: "bull", Volatility: "medium"}
+
+	singleResult, err := rm.CalculatePosition(context.Background(), signal, portfolio, regime, 50.0, ohlcvData["600000.SH"])
+	require.NoError(t, err)
+
+	batchResults, err := rm.CalculatePositionsBatch(
+		context.Background(), []domain.Signal{signal}, portfolio, regime, prices, ohlcvData,
+	)
+	require.NoError(t, err)
+	batchPS := batchResults["600000.SH"]
+
+	assert.Equal(t, singleResult.Size, batchPS.Size, "batch size should match single")
+	assert.Equal(t, singleResult.Weight, batchPS.Weight, "batch weight should match single")
+}
+
+func TestInferRegimeFromMarket_Bull(t *testing.T) {
+	positions := []domain.Position{
+		{Symbol: "600000.SH", AvgCost: 10.0, Quantity: 100},
+	}
+	prices := map[string]float64{"600000.SH": 10.6}
+
+	regime := InferRegimeFromMarket(positions, prices)
+	require.NotNil(t, regime)
+	assert.Equal(t, "bull", regime.Trend)
+}
+
+func TestInferRegimeFromMarket_Bear(t *testing.T) {
+	positions := []domain.Position{
+		{Symbol: "600000.SH", AvgCost: 10.0, Quantity: 100},
+	}
+	prices := map[string]float64{"600000.SH": 9.3}
+
+	regime := InferRegimeFromMarket(positions, prices)
+	require.NotNil(t, regime)
+	assert.Equal(t, "bear", regime.Trend)
+}
+
+func TestInferRegimeFromMarket_Sideways(t *testing.T) {
+	positions := []domain.Position{
+		{Symbol: "600000.SH", AvgCost: 10.0, Quantity: 100},
+	}
+	prices := map[string]float64{"600000.SH": 10.05}
+
+	regime := InferRegimeFromMarket(positions, prices)
+	require.NotNil(t, regime)
+	assert.Equal(t, "sideways", regime.Trend)
+}
+
+func TestInferRegimeFromMarket_EmptyPositions(t *testing.T) {
+	regime := InferRegimeFromMarket(nil, nil)
+	require.NotNil(t, regime)
+	assert.Equal(t, "sideways", regime.Trend)
+}
+
 func TestRiskManager_RegimeDetector_SidewaysMarket(t *testing.T) {
 	logger := zerolog.Nop()
 	rd := NewRegimeDetector(RegimeConfig{

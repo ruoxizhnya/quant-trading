@@ -1,10 +1,15 @@
 # Quant Trading System — Roadmap
 
-> **Status:** Active
-> **Version:** 1.0.0
+> **Status**: Active (Reference - Progress Tracking)
+> **Version:** 1.1.0 (AGENTS Template v2.0 Migration)
+> **Last Updated:** 2026-04-11
 > **Created:** 2026-03-24
 > **Owner:** 龙少 (Longshao) — AI Assistant / Product Manager
-> **Related:** VISION.md (product), TEST.md (quality)
+> **Related:** [VISION.md](VISION.md) (product), [TEST.md](TEST.md) (quality), [PHASE3-PLAN.md](PHASE3-PLAN.md) (current phase)
+>
+> **Changelog v1.1 (Migration):**
+> - 添加标准元数据头部（Status, Last Updated, Related）
+> - 添加 PHASE3-PLAN.md 链接
 
 ---
 
@@ -86,7 +91,7 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 
 ## Phase 2 — Sprint Breakdown
 
-**Status: Phase 2 IN PROGRESS**
+**Status: Phase 2 COMPLETE**
 
 ### Sprint 4: Data Layer & Strategy Foundation
 **Duration:** 7 days | **Owner:** Backend Dev + DevOps | **Depends on:** Phase Gate ✅
@@ -154,7 +159,7 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 
 ## Phase 3 — 融合发展 (Event-Driven + 多数据源 + 批量回测)
 
-**Status: Phase 3 IN PROGRESS**
+**Status: Phase 3 IN PROGRESS — Core Complete, Quality Optimization**
 
 ### Phase 3 已完成项
 

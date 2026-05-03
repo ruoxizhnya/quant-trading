@@ -1,10 +1,14 @@
 # Test Plan & Quality Assurance (TEST.md)
 
-> **Location:** Quality assurance and testing methodology for the quant trading system
+> **Status**: Active (Reference - Testing Strategy)
+> **Version:** 1.1.0 (AGENTS Template v2.0 Migration)
+> **Last Updated:** 2026-04-11
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Version:** 1.0.0
-> **Created:** 2026-03-24
-> **Related:** VISION.md (product), ADR.md (architecture)
+> **Related:** [VISION.md](VISION.md) (product), [ADR.md](ADR.md) (architecture), [SPEC.md](SPEC.md) (implementation)
+>
+> **Changelog v1.1 (Migration):**
+> - 添加标准元数据头部（Status, Last Updated, Related）
+> - 统一文档链接格式
 
 ---
 

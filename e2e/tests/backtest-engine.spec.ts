@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { waitForBackendReady } from '../helpers/api';
+import { isolateTestEnvironment } from '../helpers/isolation';
 
 async function navigateToBacktest(page: any) {
   await page.goto('/');
@@ -15,6 +16,10 @@ test.describe('Backtest Engine Page (Vue SPA)', () => {
   test.beforeAll(async () => {
     const ready = await waitForBackendReady(60000);
     expect(ready).toBe(true);
+  });
+
+  test.beforeEach(async ({ page }) => {
+    await isolateTestEnvironment(page);
   });
 
   test('page loads successfully', async ({ page }) => {
@@ -67,7 +72,7 @@ test.describe('Backtest Engine Page (Vue SPA)', () => {
 
   test('history section renders at bottom', async ({ page }) => {
     await navigateToBacktest(page);
-    await page.waitForTimeout(1000);
+    await page.waitForSelector('.history-section', { timeout: 10000 });
 
     const historySection = page.locator('.history-section');
     await expect(historySection).toBeVisible({ timeout: 10000 });
@@ -93,6 +98,10 @@ test.describe('Backtest Engine — Interaction Tests', () => {
   test.beforeAll(async () => {
     const ready = await waitForBackendReady(60000);
     expect(ready).toBe(true);
+  });
+
+  test.beforeEach(async ({ page }) => {
+    await isolateTestEnvironment(page);
   });
 
   test('sync/async mode toggle exists and is interactive', async ({ page }) => {
@@ -176,7 +185,7 @@ test.describe('Backtest Engine — Interaction Tests', () => {
 
   test('history list view-report button navigates with query param', async ({ page }) => {
     await navigateToBacktest(page);
-    await page.waitForTimeout(1500);
+    await page.waitForSelector('.history-section .n-list-item', { timeout: 10000 }).catch(() => {});
 
     const historyItems = page.locator('.history-section .n-list-item');
     const count = await historyItems.count();
@@ -197,7 +206,7 @@ test.describe('Backtest Engine — Interaction Tests', () => {
     const progressCard = page.locator('.progress-card');
     await expect(progressCard).toBeVisible({ timeout: 5000 });
 
-    await runBtn.click({ timeout: 2000 });
+    await expect(runBtn).toBeDisabled({ timeout: 2000 });
     const progressCount = await progressCard.count();
     expect(progressCount).toBe(1);
   });
@@ -208,6 +217,10 @@ test.describe('Backtest Engine — Complete Workflow Tests', () => {
   test.beforeAll(async () => {
     const ready = await waitForBackendReady(60000);
     expect(ready).toBe(true);
+  });
+
+  test.beforeEach(async ({ page }) => {
+    await isolateTestEnvironment(page);
   });
 
   test('complete backtest workflow: run → view results → check trades', async ({ page }) => {
@@ -273,7 +286,7 @@ test.describe('Backtest Engine — Complete Workflow Tests', () => {
 
   test('expandable trade details in history', async ({ page }) => {
     await navigateToBacktest(page);
-    await page.waitForTimeout(2000);
+    await page.waitForSelector('.history-section .n-collapse-item', { timeout: 10000 }).catch(() => {});
 
     const collapseItems = page.locator('.history-section .n-collapse-item');
     const count = await collapseItems.count();
@@ -292,8 +305,7 @@ test.describe('Backtest Engine — Complete Workflow Tests', () => {
 
   test('view report button loads historical result', async ({ page }) => {
     await navigateToBacktest(page);
-    await page.waitForTimeout(1500);
-
+    await page.waitForSelector('.history-section', { timeout: 10000 });
     const historySection = page.locator('.history-section');
     const viewBtns = historySection.locator('.n-button:has-text("查看报告")');
     const btnCount = await viewBtns.count();
@@ -308,7 +320,7 @@ test.describe('Backtest Engine — Complete Workflow Tests', () => {
 
   test('clear history removes all items', async ({ page }) => {
     await navigateToBacktest(page);
-    await page.waitForTimeout(1000);
+    await page.waitForSelector('.history-section', { timeout: 10000 });
 
     const clearBtn = page.locator('.history-section .n-button:has-text("清除")');
     const btnCount = await clearBtn.count();
@@ -324,9 +336,8 @@ test.describe('Backtest Engine — Complete Workflow Tests', () => {
       }
     }
 
-    await page.waitForTimeout(500);
     const emptyState = page.locator('.history-section .n-empty');
-    await expect(emptyState).toBeVisible({ timeout: 3000 });
+    await expect(emptyState).toBeVisible({ timeout: 5000 });
   });
 
   test('equity chart renders with dual axes when data available', async ({ page }) => {
@@ -379,7 +390,7 @@ test.describe('Backtest Engine — Complete Workflow Tests', () => {
 
     const errorToast = page.locator('.n-message--error, [class*="error"]');
     const toastExists = await errorToast.count().then(c => c > 0);
-    expect(toastExists || true).toBeTruthy();
+    expect(typeof toastExists).toBe('boolean');
   });
 
   test('responsive layout on different viewport sizes', async ({ page }) => {
@@ -406,7 +417,7 @@ test.describe('Backtest Engine — Complete Workflow Tests', () => {
     await page.keyboard.press('Enter');
 
     const progressCard = page.locator('.progress-card');
-    await expect(progressCard).toBeVisible({ timeout: 5000 }).catch(() => {});
+    await expect(progressCard).toBeVisible({ timeout: 5000 });
   });
 });
 
@@ -415,6 +426,10 @@ test.describe('Backtest Engine — Error Handling & Edge Cases', () => {
   test.beforeAll(async () => {
     const ready = await waitForBackendReady(60000);
     expect(ready).toBe(true);
+  });
+
+  test.beforeEach(async ({ page }) => {
+    await isolateTestEnvironment(page);
   });
 
   test('shows loading state during async backtest', async ({ page }) => {
@@ -460,6 +475,6 @@ test.describe('Backtest Engine — Error Handling & Edge Cases', () => {
     await navigateToBacktest(page);
 
     const restoredValue = await page.inputValue('[placeholder="600000.SH,600036.SH"]');
-    expect(restoredValue).toBeDefined();
+    expect(restoredValue).toContain('600000.SH');
   });
 });

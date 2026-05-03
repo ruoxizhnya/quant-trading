@@ -81,8 +81,8 @@ onMounted(async () => {
   try {
     const res = await getStrategies()
     strategies.value = res.strategies || []
-  } catch (e: any) {
-    message.error('加载失败: ' + e.message)
+  } catch (e: unknown) {
+    message.error('加载失败: ' + (e instanceof Error ? e.message : String(e)))
   } finally {
     loading.value = false
   }

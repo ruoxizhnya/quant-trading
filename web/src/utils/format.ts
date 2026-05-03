@@ -30,19 +30,38 @@ export function formatTime(d: string): string {
   return new Date(d).toLocaleTimeString('zh-CN')
 }
 
-export function fmtVolume(v: any): string {
+export function fmtVolume(v: number | string | null | undefined): string {
   if (!v) return '-'
   const num = Number(v)
   if (num >= 1e8) return (num / 1e8).toFixed(1) + '亿'
   return (num / 1e4).toFixed(0) + '万'
 }
 
-export function fmtAmount(a: any): string {
+export function fmtAmount(a: number | string | null | undefined): string {
   if (!a) return '-'
   return (Number(a) / 1e8).toFixed(1)
 }
 
-export function fmtMetric(v: any): string {
+export function fmtMetric(v: number | string | null | undefined): string {
   if (v == null || isNaN(Number(v))) return String(v ?? '-')
   return Math.abs(Number(v)) > 1 ? Number(v).toFixed(4) : (Number(v) * 100).toFixed(2) + '%'
+}
+
+export interface DateValuePoint {
+  date: string
+  value: number
+}
+
+export function sampleData(raw: DateValuePoint[], maxPoints = 500): DateValuePoint[] {
+  if (raw.length <= maxPoints) return raw
+  const step = Math.ceil(raw.length / maxPoints)
+  const sampled: DateValuePoint[] = []
+  for (let i = 0; i < raw.length; i += step) {
+    sampled.push(raw[i])
+  }
+  const last = raw[raw.length - 1]
+  if (!sampled.length || sampled[sampled.length - 1].date !== last.date) {
+    sampled.push(last)
+  }
+  return sampled
 }

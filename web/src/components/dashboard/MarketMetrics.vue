@@ -15,12 +15,12 @@
       <div class="metrics-row">
         <div class="metric-item">
           <span class="metric-label">收盘价</span>
-          <span class="metric-val">{{ metrics.close?.toFixed(2) || '-' }}</span>
+          <span class="metric-val">{{ fmtNumber(metrics.close, 2) }}</span>
         </div>
         <div class="metric-item">
           <span class="metric-label">涨跌幅</span>
           <span class="metric-val" :class="(metrics.change_pct ?? 0) >= 0 ? 'up' : 'down'">
-            {{ (metrics.change_pct ?? 0) > 0 ? '+' : '' }}{{ (metrics.change_pct ?? 0).toFixed(2) }}%
+            {{ fmtPercent(metrics.change_pct) }}
           </span>
         </div>
         <div class="metric-item">
@@ -40,7 +40,7 @@
 import { computed } from 'vue'
 import { NCard, NSpace, NDatePicker, NSelect, NButton, NSpin, NIcon } from 'naive-ui'
 import { RefreshOutline } from '@vicons/ionicons5'
-import { fmtVolume, fmtAmount } from '@/utils/format'
+import { fmtVolume, fmtAmount, fmtNumber, fmtPercent } from '@/utils/format'
 
 const props = defineProps<{
   selectedDate: string

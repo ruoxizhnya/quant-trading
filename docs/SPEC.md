@@ -1,7 +1,18 @@
 # Quant Trading System - System Specification
 
-> **Version:** 1.2.0 (Phase 2.5 Updated)
-> **Last Updated:** 2026-04-08
+> **Status**: Active (Canonical)
+> **Version:** 1.3.0 (AGENTS Template v2.0 Migration)
+> **Last Updated:** 2026-04-11
+> **Owner:** 龙少 (Longshao) — AI Assistant
+> **Related:** [VISION.md](VISION.md) (design), [ARCHITECTURE.md](ARCHITECTURE.md) (layout), [TEST.md](TEST.md) (quality)
+>
+> **Changelog v1.3 (Migration):**
+> - 添加标准元数据头部（Status, Owner, Related）
+> - 标注未实现服务 (Risk/Execution) 为 "Planned"
+> - 统一 Strategy Interface 为实际代码签名
+> - 添加文档导航链接
+
+---
 
 ## Overview
 
@@ -372,32 +383,86 @@ GET  /positions                   - Get current positions
 
 ### 5. Analysis Service (port 8085)
 **Responsibilities**:
+- API Gateway (proxies to data-service and strategy-service)
 - Backtesting engine
+- Strategy CRUD management
+- AI Copilot strategy generation
+- Data source management
+- Factor analysis (IC, quintile returns)
 - Performance metrics calculation
 - Report generation
 
 **Endpoints**:
+
+#### Health & Info
 ```
 GET  /health                      - Health check
+GET  /api/v1                      - API info and endpoint listing
+```
+
+#### Backtest
+```
 GET  /backtest?limit=20           - List recent backtest jobs
-POST /backtest                    - Run backtest
+POST /backtest                    - Run backtest (sync or async)
      {
        "strategy": "value_momentum",
        "start_date": "2020-01-01",
        "end_date": "2024-12-31",
-       "universe": "all",  // or ["000001.SZ", ...]
+       "stock_pool": ["000001.SZ", ...],
        "initial_capital": 1000000,
-       "commission": 0.0003
+       "commission_rate": 0.0003,
+       "slippage_rate": 0.0001
      }
-GET  /backtest/:id                - Get backtest job status (async)
+GET  /backtest/:id                - Get backtest job status/result (async)
 GET  /backtest/:id/report         - Get backtest report (checks DB if not in memory)
 GET  /backtest/:id/trades         - Get backtest trades (checks DB if not in memory)
 GET  /backtest/:id/equity         - Get equity curve data (checks DB if not in memory)
-GET  /ohlcv/:symbol               - Get OHLCV data for symbol (proxied to data-service)
+```
+
+#### Data Proxies (→ data-service :8081)
+```
+GET  /ohlcv/:symbol               - Get OHLCV data for symbol
      ?start_date=2024-01-01
      &end_date=2024-12-31
-     Response: { "ohlcv": [{ "trade_date": "2024-01-02", "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2, "volume": 1000000 }] }
-POST /analyze                     - Analyze existing portfolio
+POST /screen                      - Screen stocks by criteria (proxied)
+GET  /stocks/count                - Get stock count (proxied)
+GET  /market/index                - Get market index data (proxied)
+     ?symbol=000001.SH&date=2024-01-01
+POST /sync/calendar               - Sync trading calendar (proxied)
+GET  /api/v1/trading/calendar     - Get trading calendar (proxied)
+```
+
+#### Strategy Management
+```
+GET    /api/strategies            - List strategies (supports ?type=&active= filters)
+POST   /api/strategies            - Create/update strategy config
+GET    /api/strategies/:id        - Get strategy details
+PUT    /api/strategies/:id        - Update strategy config
+DELETE /api/strategies/:id        - Soft-delete strategy
+```
+
+#### AI Copilot
+```
+POST /api/copilot/generate        - Start AI strategy generation task
+GET  /api/copilot/generate/:job_id - Poll generation task result
+GET  /api/copilot/stats           - Get Copilot usage statistics
+POST /api/copilot/save            - Save generated strategy code to file
+```
+
+#### Data Source Management
+```
+GET  /api/datasource/status       - Get current data source status
+POST /api/datasource/switch       - Switch active data source
+GET  /api/datasource/health       - Check data source connectivity
+```
+
+#### Factor Analysis
+```
+GET  /api/factor/returns/:factor  - Get factor quintile returns time series
+GET  /api/factor/ic/:factor       - Get factor IC time series
+POST /api/factor/compute-returns  - Compute factor quintile returns for date
+POST /api/factor/compute-ic       - Compute factor IC for date
+GET  /api/factor/list             - List available factor types
 ```
 
 ---

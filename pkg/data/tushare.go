@@ -581,7 +581,7 @@ func (c *TushareClient) fieldFloat(item []any, idx int) float64 {
 
 func (c *TushareClient) extractExchange(tsCode string) string {
 	if len(tsCode) >= 4 {
-		suffix := tsCode[len(tsCode)-2:]
+		suffix := tsCode[len(tsCode)-3:]
 		switch suffix {
 		case ".SH":
 			return "SSE"

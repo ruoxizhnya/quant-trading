@@ -1,24 +1,18 @@
-// Package main is the entry point for the Analysis Service.
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
-	"regexp"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -29,7 +23,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-// strategyEngineAdapter adapts *backtest.Engine to strategy.BacktestRunner.
+var httpClient = &http.Client{
+	Timeout: 30 * time.Second,
+}
+
 type strategyEngineAdapter struct {
 	engine *backtest.Engine
 }
@@ -66,10 +63,8 @@ func (a *strategyEngineAdapter) RunBacktest(
 }
 
 func main() {
-	// Initialize logger
 	logger := initLogger()
 
-	// Load configuration
 	v := viper.New()
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
@@ -77,12 +72,13 @@ func main() {
 	}
 	v.SetConfigFile(configPath)
 	v.SetConfigType("yaml")
+	v.AutomaticEnv()
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	if err := v.ReadInConfig(); err != nil {
 		logger.Fatal().Err(err).Msg("Failed to read config file")
 	}
 
-	// Configure zerolog from config
 	logLevel := v.GetString("logging.level")
 	level, err := zerolog.ParseLevel(logLevel)
 	if err != nil {
@@ -90,43 +86,64 @@ func main() {
 	}
 	zerolog.SetGlobalLevel(level)
 
-	// Initialize market data provider
 	dataServiceURL := v.GetString("data_service.url")
 	if dataServiceURL == "" {
 		dataServiceURL = "http://localhost:8081"
 	}
-	dataProvider := marketdata.NewHTTPProvider(dataServiceURL, logger)
+	httpProvider := marketdata.NewHTTPProvider(dataServiceURL, logger)
 
-	// Initialize backtest engine
-	engine, err := backtest.NewEngine(v, dataProvider, logger)
+	engine, err := backtest.NewEngine(v, httpProvider, logger)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize backtest engine")
 	}
 
-	// Initialize Postgres store and job service
 	dbURL := v.GetString("database.url")
-	if dbURL == "" {
-		logger.Fatal().Msg("database.url not configured")
+	if dbURL == "" || strings.Contains(dbURL, "${") {
+		dbUser := v.GetString("database.user")
+		dbPassword := v.GetString("database.password")
+		dbHost := v.GetString("database.host")
+		dbPort := v.GetInt("database.port")
+		dbName := v.GetString("database.database")
+		dbSSLMode := v.GetString("database.sslmode")
+		if dbHost == "" {
+			dbHost = "localhost"
+		}
+		if dbPort == 0 {
+			dbPort = 5432
+		}
+		if dbName == "" {
+			dbName = "quant_trading"
+		}
+		if dbSSLMode == "" {
+			dbSSLMode = "disable"
+		}
+		dbURL = fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+			url.PathEscape(dbUser), url.PathEscape(dbPassword), dbHost, dbPort, dbName, dbSSLMode)
 	}
 	store, err := storage.NewPostgresStore(context.Background(), dbURL)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize postgres store")
 	}
+	engine.SetStore(store)
+
+	pgProvider := marketdata.NewPostgresProvider(store, logger)
+	dataAdapter := marketdata.NewDataAdapter(nil, pgProvider, httpProvider, logger)
+	engine.SetDataAdapter(dataAdapter)
+
 	jobService := backtest.NewJobService(store, engine)
 	logger.Info().Msg("Job service initialized")
 
-	// Initialize Factor Attribution service
+	wfEngine := backtest.NewWalkForwardEngine(engine, store)
+	logger.Info().Msg("Walk-forward engine initialized")
+
 	factorAttributor := data.NewFactorAttributor(store)
 	logger.Info().Msg("Factor attribution service initialized")
 
-	// Initialize Strategy Copilot service
 	copilotService := strategy.NewCopilotService()
 	logger.Info().Bool("ai_configured", copilotService.IsConfigured()).Msg("Copilot service initialized")
 
-	// Wrap engine in BacktestRunner adapter for copilot
 	copilotRunner := &strategyEngineAdapter{engine: engine}
 
-	// Initialize StrategyDB and seed built-in strategies
 	strategyDB := strategy.NewStrategyDB(store)
 	if err := store.SeedStrategies(context.Background()); err != nil {
 		logger.Warn().Err(err).Msg("failed to seed built-in strategies")
@@ -134,23 +151,21 @@ func main() {
 		logger.Info().Msg("strategy DB seeded")
 	}
 
-	// Setup Gin router
 	if v.GetString("logging.format") == "json" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(corsMiddleware())
+	router.Use(newRateLimiter(100, time.Minute).middleware())
 	router.Use(requestLogger(logger))
 
-	// Register routes
-	registerRoutes(router, engine, jobService, strategyDB, copilotService, copilotRunner, factorAttributor, logger)
+	registerRoutes(router, engine, jobService, wfEngine, strategyDB, copilotService, copilotRunner, factorAttributor, logger)
 
-	// Get server config
 	host := v.GetString("server.host")
 	port := v.GetInt("server.port")
 	addr := fmt.Sprintf("%s:%d", host, port)
 
-	// Create HTTP server
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      router,
@@ -159,7 +174,6 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Start server in goroutine
 	go func() {
 		logger.Info().
 			Str("address", addr).
@@ -169,14 +183,12 @@ func main() {
 		}
 	}()
 
-	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	logger.Info().Msg("Shutting down server...")
 
-	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -187,380 +199,67 @@ func main() {
 	logger.Info().Msg("Server exited")
 }
 
-// ── Copilot Handlers ──────────────────────────────────────────
-
-const copilotSystemPrompt = `You are an expert Go programmer specializing in quantitative trading strategies. Your task is to generate a valid Go file that implements a trading Strategy.
-
-## Strategy Interface
-The Strategy interface (from github.com/ruoxizhnya/quant-trading/pkg/strategy) is:
-
-type Strategy interface {
-    Name() string
-    Description() string
-    Parameters() []Parameter
-    GenerateSignals(ctx context.Context, bars map[string][]domain.OHLCV, portfolio *domain.Portfolio) ([]Signal, error)
-}
-
-type Parameter struct {
-    Name        string
-    Type        string  // "int", "float", "string", "bool"
-    Default     any
-    Description string
-    Min        float64
-    Max        float64
-}
-
-type Signal struct {
-    Symbol   string
-    Action   string  // "buy", "sell", "hold"
-    Strength float64 // 0.0-1.0
-    Price    float64
-}
-
-## Key Types (from github.com/ruoxizhnya/quant-trading/pkg/domain)
-- type OHLCV struct { Symbol, Date time.Time, Open, High, Low, Close, Volume float64 }
-- type Portfolio struct { Cash float64; Positions map[string]Position }
-- type Position struct { Symbol string; Quantity float64; CurrentPrice, AvgCost float64 }
-
-## Requirements for the generated code:
-1. Package name: plugins
-2. Use package-level struct with exported config and strategy structs
-3. Implement ALL interface methods: Name(), Description(), Parameters(), GenerateSignals()
-4. Include Configure(map[string]any) method for parameter injection
-5. Include init() that calls strategy.GlobalRegister(&yourStrategy{})
-6. Add Chinese comments explaining the strategy logic (use // comments)
-7. Validate parameters in GenerateSignals() (check nil bars, bounds, etc.)
-8. Return "hold" signals by default; only "buy" or "sell" when clear signal
-9. Use meaningful variable names in Chinese pinyin or English
-10. Output ONLY the Go code in a code block, no explanations before or after
-
-## File structure template:
-package plugins
-
-import (
-    "context"
-    "sort"
-    "time"
-
-    "github.com/ruoxizhnya/quant-trading/pkg/domain"
-    "github.com/ruoxizhnya/quant-trading/pkg/strategy"
-)
-
-// StrategyConfig holds configuration for this strategy.
-type StrategyConfig struct {
-    // Add your parameters here
-}
-
-// strategyImpl implements the Strategy interface.
-type strategyImpl struct {
-    name        string
-    description string
-    params      StrategyConfig
-}
-
-func (s *strategyImpl) Name() string { return "your_strategy_name" }
-func (s *strategyImpl) Description() string { return "中文描述" }
-func (s *strategyImpl) Parameters() []strategy.Parameter { /* return params */ }
-func (s *strategyImpl) Configure(params map[string]any) { /* inject params */ }
-func (s *strategyImpl) GenerateSignals(ctx context.Context, bars map[string][]domain.OHLCV, portfolio *domain.Portfolio) ([]strategy.Signal, error) { /* implement logic */ }
-
-func init() {
-    strategy.GlobalRegister(&strategyImpl{name: "your_strategy_name", description: "中文描述"})
-}
-
-## IMPORTANT:
-- Output only the complete Go code block, nothing else
-- The code must compile and be syntactically valid
-- Strategy name should be slug-style lowercase (e.g., "rsi_mean_reversion")
-- Include proper imports
-- Use time.Time for dates
-`
-
-type copilotRequest struct {
-	Prompt string `json:"prompt" binding:"required"`
-}
-
-type copilotResponse struct {
-	Code         string `json:"code"`
-	StrategyName string `json:"strategy_name"`
-	Description  string `json:"description"`
-}
-
-type saveRequest struct {
-	Code         string `json:"code" binding:"required"`
-	StrategyName string `json:"strategy_name" binding:"required"`
-}
-
-func generateStrategyHandler(c *gin.Context) {
-	var req copilotRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "prompt is required"})
-		return
-	}
-
-	apiKey := os.Getenv("AI_API_KEY")
-	if apiKey == "" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
-	}
-	if apiKey == "" {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "AI_API_KEY or OPENAI_API_KEY environment variable not set"})
-		return
-	}
-
-	// Build OpenAI-compatible request
-	payload := map[string]any{
-		"model": "gpt-4o-mini",
-		"messages": []map[string]string{
-			{"role": "system", "content": copilotSystemPrompt},
-			{"role": "user", "content": req.Prompt},
-		},
-		"max_tokens": 2000,
-	}
-
-	payloadBytes, _ := json.Marshal(payload)
-	aiURL := os.Getenv("AI_API_URL")
-	if aiURL == "" {
-		aiURL = "https://api.openai.com/v1/chat/completions"
-	}
-
-	reqCtx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-	defer cancel()
-
-	httpReq, err := http.NewRequestWithContext(reqCtx, "POST", aiURL, bytes.NewReader(payloadBytes))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create request: " + err.Error()})
-		return
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := http.DefaultClient.Do(httpReq)
-	if err != nil {
-		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "AI request failed: " + err.Error()})
-		return
-	}
-	defer resp.Body.Close()
-
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to parse AI response: " + err.Error()})
-		return
-	}
-
-	// Extract content from OpenAI-style response
-	choices, ok := result["choices"].([]any)
-	if !ok || len(choices) == 0 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "empty response from AI model"})
-		return
-	}
-
-	choice0, ok := choices[0].(map[string]any)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "malformed AI response"})
-		return
-	}
-
-	msg, ok := choice0["message"].(map[string]any)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "malformed AI message"})
-		return
-	}
-
-	content, ok := msg["content"].(string)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "AI returned non-text content"})
-		return
-	}
-
-	// Parse strategy name from code
-	strategyName := extractStrategyName(content)
-	description := extractDescription(content)
-
-	c.JSON(http.StatusOK, copilotResponse{
-		Code:         content,
-		StrategyName: strategyName,
-		Description:  description,
-	})
-}
-
-func extractStrategyName(code string) string {
-	// Try to extract Name() return value
-	for _, line := range strings.Split(code, "\n") {
-		if strings.Contains(line, "func (s *") && strings.Contains(line, "Name()") {
-			continue
-		}
-		if strings.Contains(line, `return "`) {
-			name := strings.TrimSpace(line)
-			name = strings.TrimPrefix(name, "return \"")
-			name = strings.TrimSuffix(name, "\"")
-			if len(name) > 0 && len(name) < 60 {
-				return name
-			}
-		}
-	}
-	// Try GlobalRegister
-	re := regexp.MustCompile(`GlobalRegister\s*\(\s*&[a-zA-Z]+\{\s*name:\s*"([^"]+)"`)
-	m := re.FindStringSubmatch(code)
-	if len(m) > 1 {
-		return m[1]
-	}
-	return "generated_strategy"
-}
-
-func extractDescription(code string) string {
-	for _, line := range strings.Split(code, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.Contains(line, "Description()") || strings.Contains(line, "description") {
-			continue
-		}
-		if strings.Contains(line, `return "`) {
-			desc := strings.TrimSpace(line)
-			desc = strings.TrimPrefix(desc, "return \"")
-			desc = strings.TrimSuffix(desc, "\"")
-			if len(desc) > 5 && len(desc) < 200 {
-				return desc
-			}
-		}
-	}
-	return ""
-}
-
-func saveStrategyHandler(c *gin.Context) {
-	var req saveRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "code and strategy_name are required"})
-		return
-	}
-
-	// Sanitize filename
-	safeName := strings.Map(func(r rune) rune {
-		if r == '/' || r == '\\' || r == ':' || r == 0 {
-			return '_'
-		}
-		return r
-	}, req.StrategyName)
-
-	filename := safeName + ".go"
-	dir := "./generated_strategies"
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create directory: " + err.Error()})
-		return
-	}
-
-	filepath := dir + "/" + filename
-	if _, err := os.Stat(filepath); err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "strategy file already exists: " + filepath})
-		return
-	}
-	if err := os.WriteFile(filepath, []byte(req.Code), 0600); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write file: " + err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message":       "strategy saved successfully",
-		"strategy_name": req.StrategyName,
-		"file":          filepath,
-	})
-}
-
-// initLogger initializes the zerolog logger.
 func initLogger() zerolog.Logger {
-	zerolog.TimeFieldFormat = time.RFC3339Nano
-	return log.Output(zerolog.ConsoleWriter{
-		Out:        os.Stdout,
-		TimeFormat: "2006-01-02 15:04:05.000",
-	})
+	return zerolog.New(os.Stdout).With().Timestamp().Logger()
 }
 
-// requestLogger returns a Gin middleware for logging requests.
 func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
-		path := c.Request.URL.Path
-		query := c.Request.URL.RawQuery
-
 		c.Next()
-
-		latency := time.Since(start)
-		status := c.Writer.Status()
-
-		event := logger.Info()
-		if status >= 400 && status < 500 {
-			event = logger.Warn()
-		} else if status >= 500 {
-			event = logger.Error()
-		}
-
-		event.
+		logger.Info().
 			Str("method", c.Request.Method).
-			Str("path", path).
-			Str("query", query).
-			Int("status", status).
-			Dur("latency", latency).
-			Str("client_ip", c.ClientIP()).
-			Int("body_size", c.Writer.Size()).
-			Msg("Request")
+			Str("path", c.Request.URL.Path).
+			Int("status", c.Writer.Status()).
+			Dur("latency", time.Since(start)).
+			Msg("request")
 	}
 }
 
-// registerRoutes registers all HTTP routes.
-func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, logger zerolog.Logger) {
-	// Serve static files (CSS, JS, etc.)
+func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, wfEngine *backtest.WalkForwardEngine, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, logger zerolog.Logger) {
 	router.Static("/static", "./cmd/analysis/static")
 
-	// Serve UI
 	router.GET("/", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./cmd/analysis/static/index.html")
 	})
-
 	router.GET("/screen", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./cmd/analysis/static/screen.html")
 	})
-
 	router.GET("/screen.html", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./cmd/analysis/static/screen.html")
 	})
-
 	router.GET("/dashboard", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./cmd/analysis/static/dashboard.html")
 	})
-
 	router.GET("/dashboard.html", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./cmd/analysis/static/dashboard.html")
 	})
-
 	router.GET("/copilot", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./cmd/analysis/static/copilot.html")
 	})
-
 	router.GET("/copilot.html", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./cmd/analysis/static/copilot.html")
 	})
-
 	router.GET("/strategy-selector", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./cmd/analysis/static/strategy-selector.html")
 	})
-
 	router.GET("/strategy-selector.html", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./cmd/analysis/static/strategy-selector.html")
 	})
-
 	router.GET("/index.html", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.File("./cmd/analysis/static/index.html")
 	})
 
-	// Health check
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":    "healthy",
@@ -569,400 +268,6 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 		})
 	})
 
-	// OHLCV proxy for UI (avoids CORS issues)
-	router.GET("/ohlcv/:symbol", func(c *gin.Context) {
-		symbol := c.Param("symbol")
-		startDate := c.Query("start_date")
-		endDate := c.Query("end_date")
-		if startDate == "" || endDate == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date required (YYYYMMDD)"})
-			return
-		}
-		// Proxy to data service
-		dataURL := fmt.Sprintf("http://data-service:8081/ohlcv/%s?start_date=%s&end_date=%s", symbol, startDate, endDate)
-		resp, err := http.Get(dataURL)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "data service unavailable: " + err.Error()})
-			return
-		}
-		defer resp.Body.Close()
-		var result map[string]interface{}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "invalid response from data service"})
-			return
-		}
-		c.JSON(resp.StatusCode, result)
-	})
-
-	// Screen proxy for UI (proxies to data service)
-	router.POST("/screen", func(c *gin.Context) {
-		var reqBody map[string]interface{}
-		if err := json.NewDecoder(c.Request.Body).Decode(&reqBody); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-			return
-		}
-		bodyBytes, _ := json.Marshal(reqBody)
-		dataURL := "http://data-service:8081/screen"
-		resp, err := http.Post(dataURL, "application/json", bytes.NewReader(bodyBytes))
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "data service unavailable: " + err.Error()})
-			return
-		}
-		defer resp.Body.Close()
-		var result map[string]interface{}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "invalid response from data service"})
-			return
-		}
-		c.JSON(resp.StatusCode, result)
-	})
-
-	// Proxy: stocks/count → data-service
-	router.GET("/stocks/count", func(c *gin.Context) {
-		resp, err := http.Get("http://data-service:8081/stocks/count")
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "data service unavailable"})
-			return
-		}
-		defer resp.Body.Close()
-		var result map[string]interface{}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "invalid response from data service"})
-			return
-		}
-		c.JSON(resp.StatusCode, result)
-	})
-
-	// Proxy: market/index → data-service
-	router.GET("/market/index", func(c *gin.Context) {
-		resp, err := http.Get("http://data-service:8081/market/index")
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "data service unavailable"})
-			return
-		}
-		defer resp.Body.Close()
-		var result map[string]interface{}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "invalid response from data service"})
-			return
-		}
-		c.JSON(resp.StatusCode, result)
-	})
-
-	// Strategy list endpoint (merged DB + registry)
-	router.GET("/api/strategies", func(c *gin.Context) {
-		strategyType := c.Query("type")
-		activeOnly := c.Query("active") == "true"
-		if strategyType != "" || activeOnly {
-			// Filtered list from DB
-			configs, err := strategyDB.List(c.Request.Context(), strategyType, activeOnly)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"strategies": configs})
-			return
-		}
-		// Full merged list
-		infos, err := strategyDB.ListWithDB(c.Request.Context())
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"strategies": infos})
-	})
-
-	// POST /api/strategies — create/update a strategy config
-	router.POST("/api/strategies", func(c *gin.Context) {
-		var req struct {
-			StrategyID   string `json:"strategy_id" binding:"required"`
-			Name         string `json:"name" binding:"required"`
-			Description  string `json:"description"`
-			StrategyType string `json:"strategy_type" binding:"required"`
-			Params       any    `json:"params"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		paramsJSON := "{}"
-		if req.Params != nil {
-			bytes, _ := json.Marshal(req.Params)
-			paramsJSON = string(bytes)
-		}
-		cfg := &domain.StrategyConfig{
-			StrategyID:   req.StrategyID,
-			Name:         req.Name,
-			Description:  req.Description,
-			StrategyType: req.StrategyType,
-			Params:       paramsJSON,
-			IsActive:     true,
-		}
-		if err := strategyDB.Create(c.Request.Context(), cfg); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "strategy saved", "strategy_id": req.StrategyID})
-	})
-
-	// GET /api/strategies/:id — get strategy details
-	router.GET("/api/strategies/:id", func(c *gin.Context) {
-		id := c.Param("id")
-		cfg, err := strategyDB.Get(c.Request.Context(), id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if cfg == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "strategy not found"})
-			return
-		}
-		c.JSON(http.StatusOK, cfg)
-	})
-
-	// PUT /api/strategies/:id — update strategy config
-	router.PUT("/api/strategies/:id", func(c *gin.Context) {
-		id := c.Param("id")
-		var req struct {
-			Name         string `json:"name"`
-			Description  string `json:"description"`
-			StrategyType string `json:"strategy_type"`
-			Params       any    `json:"params"`
-			IsActive     *bool  `json:"is_active"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		cfg, err := strategyDB.Get(c.Request.Context(), id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if cfg == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "strategy not found"})
-			return
-		}
-		if req.Name != "" {
-			cfg.Name = req.Name
-		}
-		if req.Description != "" {
-			cfg.Description = req.Description
-		}
-		if req.StrategyType != "" {
-			cfg.StrategyType = req.StrategyType
-		}
-		if req.Params != nil {
-			bytes, _ := json.Marshal(req.Params)
-			cfg.Params = string(bytes)
-		}
-		if req.IsActive != nil {
-			cfg.IsActive = *req.IsActive
-		}
-		if err := strategyDB.Create(c.Request.Context(), cfg); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "strategy updated", "strategy_id": id})
-	})
-
-	// DELETE /api/strategies/:id — soft delete
-	router.DELETE("/api/strategies/:id", func(c *gin.Context) {
-		id := c.Param("id")
-		if err := strategyDB.Delete(c.Request.Context(), id); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "strategy deleted", "strategy_id": id})
-	})
-
-	// Backtest endpoints
-	api := router.Group("/backtest")
-	{
-		// List recent backtest jobs
-		api.GET("", func(c *gin.Context) {
-			limit := 20
-			if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 100 {
-				limit = l
-			}
-			jobs, err := jobService.ListJobs(c.Request.Context(), limit)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"jobs": jobs, "total": len(jobs)})
-		})
-
-		// Run a backtest — supports both old (synchronous) and new (async job) format
-		api.POST("", func(c *gin.Context) {
-			bodyBytes, err := io.ReadAll(c.Request.Body)
-			if err != nil || len(bodyBytes) == 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "empty request body"})
-				return
-			}
-
-			// Try new async format first (CreateJobRequest)
-			var jobReq backtest.CreateJobRequest
-			if json.Unmarshal(bodyBytes, &jobReq) == nil && jobReq.StrategyID != "" && jobReq.Universe != "" {
-				logger.Info().
-					Str("strategy", jobReq.StrategyID).
-					Str("start_date", jobReq.StartDate).
-					Str("end_date", jobReq.EndDate).
-					Str("universe", jobReq.Universe).
-					Msg("Creating backtest job")
-
-				job, err := jobService.CreateJob(c.Request.Context(), jobReq)
-				if err != nil {
-					logger.Error().Err(err).Msg("Failed to create job")
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create job", "details": err.Error()})
-					return
-				}
-				c.JSON(http.StatusAccepted, gin.H{"job_id": job.ID, "status": job.Status})
-				return
-			}
-
-			// Fallback: old synchronous format (BacktestRequest)
-			var req backtest.BacktestRequest
-			if json.Unmarshal(bodyBytes, &req) == nil && req.Strategy != "" {
-				ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Minute)
-				defer cancel()
-				result, err := engine.RunBacktest(ctx, req)
-				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "backtest failed", "details": err.Error()})
-					return
-				}
-				if saveErr := jobService.SaveSyncResult(c.Request.Context(), result); saveErr != nil {
-					logger.Warn().Err(saveErr).Str("backtest_id", result.ID).Msg("Failed to persist backtest result to DB")
-				}
-				c.JSON(http.StatusOK, result)
-				return
-			}
-
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: must provide strategy+stock_pool (old format) or strategy_id+universe (new format)"})
-		})
-
-		// Get backtest job status and result
-		api.GET("/:id", func(c *gin.Context) {
-			jobID := c.Param("id")
-
-			job, err := jobService.GetJob(c.Request.Context(), jobID)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			if job == nil {
-				c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
-				return
-			}
-
-			c.JSON(http.StatusOK, job)
-		})
-
-		// Get backtest report
-		api.GET("/:id/report", func(c *gin.Context) {
-			backtestID := c.Param("id")
-
-			status, err := engine.GetBacktestStatus(backtestID)
-			if err == nil && status == "completed" {
-				result, err := engine.GetBacktestResult(backtestID)
-				if err == nil {
-					c.JSON(http.StatusOK, result)
-					return
-				}
-			}
-
-			job, err := jobService.GetJob(c.Request.Context(), backtestID)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			if job == nil || job.Status != "completed" {
-				c.JSON(http.StatusNotFound, gin.H{"error": "backtest not found or not completed"})
-				return
-			}
-
-			var report map[string]any
-			if err := json.Unmarshal(job.Result, &report); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse stored result"})
-				return
-			}
-			c.JSON(http.StatusOK, report)
-		})
-
-		// Get backtest trades
-		api.GET("/:id/trades", func(c *gin.Context) {
-			backtestID := c.Param("id")
-
-			trades, err := engine.GetBacktestTrades(backtestID)
-			if err == nil {
-				c.JSON(http.StatusOK, gin.H{
-					"backtest_id": backtestID,
-					"total":       len(trades),
-					"trades":      trades,
-				})
-				return
-			}
-
-			job, err := jobService.GetJob(c.Request.Context(), backtestID)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			if job == nil || job.Status != "completed" {
-				c.JSON(http.StatusNotFound, gin.H{"error": "backtest not found or not completed"})
-				return
-			}
-
-			var stored backtest.BacktestResponse
-			if err := json.Unmarshal(job.Result, &stored); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse stored result"})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"backtest_id": backtestID,
-				"total":       len(stored.Trades),
-				"trades":      stored.Trades,
-			})
-		})
-
-		// Get backtest equity curve
-		api.GET("/:id/equity", func(c *gin.Context) {
-			backtestID := c.Param("id")
-
-			equity, err := engine.GetBacktestEquity(backtestID)
-			if err == nil {
-				c.JSON(http.StatusOK, gin.H{
-					"backtest_id":  backtestID,
-					"total_points": len(equity),
-					"equity_curve": equity,
-				})
-				return
-			}
-
-			job, err := jobService.GetJob(c.Request.Context(), backtestID)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			if job == nil || job.Status != "completed" {
-				c.JSON(http.StatusNotFound, gin.H{"error": "backtest not found or not completed"})
-				return
-			}
-
-			var stored backtest.BacktestResponse
-			if err := json.Unmarshal(job.Result, &stored); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse stored result"})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"backtest_id":  backtestID,
-				"total_points": len(stored.PortfolioValues),
-				"equity_curve": stored.PortfolioValues,
-			})
-		})
-	}
-
-	// API info
 	router.GET("/api/v1", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"service": "analysis-service",
@@ -977,371 +282,11 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 		})
 	})
 
-	// ── Strategy Copilot (async job-based) ─────────────────────
-	copilot := router.Group("/api/copilot")
-	{
-		// POST /api/copilot/generate — start generation job, return job_id immediately
-		copilot.POST("/generate", func(c *gin.Context) {
-			if !copilotService.IsConfigured() {
-				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI not configured (set AI_API_KEY and AI_API_URL)"})
-				return
-			}
-			var req strategy.GenerateParams
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
-				return
-			}
-			result := copilotService.Generate(c.Request.Context(), req, copilotRunner)
-			c.JSON(http.StatusAccepted, gin.H{
-				"job_id": result.JobID,
-				"status": result.Status,
-			})
-		})
-
-		// GET /api/copilot/generate/:job_id — poll for job result
-		copilot.GET("/generate/:job_id", func(c *gin.Context) {
-			jobID := c.Param("job_id")
-			result := copilotService.GetJob(jobID)
-			if result == nil {
-				c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
-				return
-			}
-			result.Lock()
-			status := result.Status
-			code := result.Code
-			buildErr := result.BuildErr
-			btResult := result.BacktestResult
-			btErr := result.BacktestErr
-			strategyName := result.StrategyName
-			result.Unlock()
-
-			resp := gin.H{
-				"job_id": jobID,
-				"status": status,
-			}
-			if code != "" {
-				resp["generated_code"] = code
-			}
-			if buildErr != "" {
-				resp["build_error"] = buildErr
-			}
-			if strategyName != "" {
-				resp["strategy_name"] = strategyName
-			}
-			if btErr != "" {
-				resp["backtest_error"] = btErr
-			}
-			if btResult != nil {
-				resp["backtest_result"] = btResult
-			}
-			c.JSON(http.StatusOK, resp)
-		})
-
-		// GET /api/copilot/stats — return acceptance-rate statistics
-		copilot.GET("/stats", func(c *gin.Context) {
-			generated, buildable, backtested := copilotService.Stats()
-			rate := copilotService.AcceptanceRate()
-			c.JSON(http.StatusOK, gin.H{
-				"generated":       generated,
-				"buildable":       buildable,
-				"backtest_valid":  backtested,
-				"acceptance_rate": rate,
-			})
-		})
-
-		// Legacy synchronous endpoints
-		copilot.POST("/save", saveStrategyHandler)
-	}
-
-	ds := router.Group("/api/datasource")
-	{
-		ds.GET("/status", func(c *gin.Context) {
-			adapter := engine.DataAdapter()
-			if adapter == nil {
-				c.JSON(http.StatusOK, gin.H{
-					"enabled": false,
-					"mode":    "direct",
-					"source":  "http",
-				})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"enabled": true,
-				"primary": adapter.Primary(),
-				"stopped": adapter.Stopped(),
-			})
-		})
-
-		ds.POST("/switch", func(c *gin.Context) {
-			var req struct {
-				Name  string `json:"name" binding:"required"`
-				Type  string `json:"type" binding:"required"`
-				URL   string `json:"url"`
-				Token string `json:"token"`
-			}
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-
-			var newProvider marketdata.Provider
-			var createErr error
-
-			switch req.Type {
-			case "http":
-				if req.URL == "" {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "url required for http type"})
-					return
-				}
-				newProvider = marketdata.NewHTTPProvider(req.URL, logger)
-			case "inmemory":
-				newProvider = marketdata.NewInMemoryProvider()
-			default:
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("unsupported runtime switch type: %q (only http/inmemory)", req.Type)})
-				return
-			}
-
-			if createErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": createErr.Error()})
-				return
-			}
-
-			if err := engine.SwitchDataSource(c.Request.Context(), req.Name, newProvider); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-
-			logger.Info().
-				Str("name", req.Name).
-				Str("type", req.Type).
-				Msg("Data source switched via API")
-
-			c.JSON(http.StatusOK, gin.H{
-				"message": "data source switched",
-				"name":    req.Name,
-				"type":    req.Type,
-			})
-		})
-
-		ds.GET("/health", func(c *gin.Context) {
-			adapter := engine.DataAdapter()
-			if adapter == nil {
-				c.JSON(http.StatusOK, gin.H{
-					"status": "ok",
-					"mode":   "direct (no adapter)",
-				})
-				return
-			}
-			err := adapter.CheckConnectivity(c.Request.Context())
-			if err != nil {
-				c.JSON(http.StatusServiceUnavailable, gin.H{
-					"status": "unhealthy",
-					"error":  err.Error(),
-				})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"status":  "healthy",
-				"primary": adapter.Primary(),
-			})
-		})
-	}
-
-	// ── Factor Attribution & IC Analysis ──────────────────────
-	factorAPI := router.Group("/api/factor")
-	{
-		// GET /api/factor/returns/:factor — get factor quintile returns time series
-		factorAPI.GET("/returns/:factor", func(c *gin.Context) {
-			factorStr := c.Param("factor")
-			factorType, ok := domain.ParseFactorType(factorStr)
-			if !ok {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid factor type: %s", factorStr)})
-				return
-			}
-
-			startDateStr := c.Query("start_date")
-			endDateStr := c.Query("end_date")
-			if startDateStr == "" || endDateStr == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date required (YYYY-MM-DD)"})
-				return
-			}
-
-			startDate, err := time.Parse("2006-01-02", startDateStr)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format"})
-				return
-			}
-			endDate, err := time.Parse("2006-01-02", endDateStr)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format"})
-				return
-			}
-
-			returns, err := factorAttributor.GetFactorReturnsTimeSeries(c.Request.Context(), factorType, startDate, endDate)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-
-			c.JSON(http.StatusOK, gin.H{
-				"factor":     factorStr,
-				"start_date": startDateStr,
-				"end_date":   endDateStr,
-				"total":      len(returns),
-				"data":       returns,
-			})
-		})
-
-		// GET /api/factor/ic/:factor — get IC time series for a factor
-		factorAPI.GET("/ic/:factor", func(c *gin.Context) {
-			factorStr := c.Param("factor")
-			factorType, ok := domain.ParseFactorType(factorStr)
-			if !ok {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid factor type: %s", factorStr)})
-				return
-			}
-
-			startDateStr := c.Query("start_date")
-			endDateStr := c.Query("end_date")
-			if startDateStr == "" || endDateStr == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date required (YYYY-MM-DD)"})
-				return
-			}
-
-			startDate, err := time.Parse("2006-01-02", startDateStr)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format"})
-				return
-			}
-			endDate, err := time.Parse("2006-01-02", endDateStr)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format"})
-				return
-			}
-
-			icEntries, err := factorAttributor.GetICTimeSeries(c.Request.Context(), factorType, startDate, endDate)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-
-			c.JSON(http.StatusOK, gin.H{
-				"factor":     factorStr,
-				"start_date": startDateStr,
-				"end_date":   endDateStr,
-				"total":      len(icEntries),
-				"data":       icEntries,
-			})
-		})
-
-		// POST /api/factor/compute-returns — compute factor quintile returns for a specific date
-		factorAPI.POST("/compute-returns", func(c *gin.Context) {
-			var req struct {
-				Factor    string `json:"factor" binding:"required"`
-				TradeDate string `json:"trade_date" binding:"required"`
-			}
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-
-			factorType, ok := domain.ParseFactorType(req.Factor)
-			if !ok {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid factor type: %s", req.Factor)})
-				return
-			}
-
-			tradeDate, err := time.Parse("2006-01-02", req.TradeDate)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid trade_date format (YYYY-MM-DD)"})
-				return
-			}
-
-			logger.Info().
-				Str("factor", req.Factor).
-				Time("date", tradeDate).
-				Msg("Computing factor quintile returns")
-
-			if err := factorAttributor.ComputeFactorReturns(c.Request.Context(), factorType, tradeDate); err != nil {
-				logger.Error().Err(err).Msg("Failed to compute factor returns")
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-
-			c.JSON(http.StatusOK, gin.H{
-				"message":    "factor returns computed successfully",
-				"factor":     req.Factor,
-				"trade_date": req.TradeDate,
-			})
-		})
-
-		// POST /api/factor/compute-ic — compute IC for a specific date
-		factorAPI.POST("/compute-ic", func(c *gin.Context) {
-			var req struct {
-				Factor      string `json:"factor" binding:"required"`
-				TradeDate   string `json:"trade_date" binding:"required"`
-				ForwardDays int    `json:"forward_days"`
-			}
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-
-			factorType, ok := domain.ParseFactorType(req.Factor)
-			if !ok {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid factor type: %s", req.Factor)})
-				return
-			}
-
-			tradeDate, err := time.Parse("2006-01-02", req.TradeDate)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid trade_date format (YYYY-MM-DD)"})
-				return
-			}
-
-			forwardDays := req.ForwardDays
-			if forwardDays <= 0 {
-				forwardDays = 20 // default 20-day forward return
-			}
-
-			logger.Info().
-				Str("factor", req.Factor).
-				Time("date", tradeDate).
-				Int("forward_days", forwardDays).
-				Msg("Computing factor IC")
-
-			icEntry, err := factorAttributor.ComputeIC(c.Request.Context(), factorType, tradeDate, forwardDays)
-			if err != nil {
-				logger.Error().Err(err).Msg("Failed to compute IC")
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-
-			c.JSON(http.StatusOK, gin.H{
-				"message":      "IC computed successfully",
-				"factor":       req.Factor,
-				"trade_date":   req.TradeDate,
-				"forward_days": forwardDays,
-				"ic":           icEntry.IC,
-				"p_value":      icEntry.PValue,
-				"top_ic":       icEntry.TopIC,
-			})
-		})
-
-		// GET /api/factor/list — list available factor types
-		factorAPI.GET("/list", func(c *gin.Context) {
-			factors := []string{
-				string(domain.FactorMomentum),
-				string(domain.FactorValue),
-				string(domain.FactorQuality),
-				string(domain.FactorVolatility),
-				string(domain.FactorSize),
-				string(domain.FactorGrowth),
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"total":   len(factors),
-				"factors": factors,
-			})
-		})
-	}
+	registerProxyRoutes(router, httpClient, logger)
+	registerBacktestRoutes(router, engine, jobService, logger)
+	registerWalkForwardRoutes(router, wfEngine, logger)
+	registerStrategyRoutes(router, strategyDB)
+	registerCopilotRoutes(router, copilotService, copilotRunner)
+	registerDatasourceRoutes(router, engine, logger)
+	registerFactorRoutes(router, factorAttributor, logger)
 }

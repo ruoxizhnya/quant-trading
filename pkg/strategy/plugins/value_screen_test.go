@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 
@@ -19,12 +18,12 @@ import (
 func TestValueScreenParameters(t *testing.T) {
 	s := &valueScreeningStrategy{
 		params: ValueScreeningConfig{
-			PEMax:               30.0,
-			PBMax:               3.0,
-			ROEMin:              0.1,
-			MomentumDays:        60,
-			TopN:                10,
-			RebalanceFrequency:  "monthly",
+			PEMax:              30.0,
+			PBMax:              3.0,
+			ROEMin:             0.1,
+			MomentumDays:       60,
+			TopN:               10,
+			RebalanceFrequency: "monthly",
 		},
 	}
 
@@ -144,8 +143,6 @@ func TestValueScreenMomentumRanking(t *testing.T) {
 		return bars
 	}
 
-	// A: +10%, B: +5%, C: +1%
-	// TopN=2 → A and B should get buy signals
 	bars := map[string][]domain.OHLCV{
 		"A": makeBars("A", basePrice*1.10),
 		"B": makeBars("B", basePrice*1.05),
@@ -161,10 +158,9 @@ func TestValueScreenMomentumRanking(t *testing.T) {
 			TopN:               2,
 			RebalanceFrequency: "daily",
 		},
-		httpClient: httpClient,
-		cacheLimit: 10,
+		httpClient:  httpClient,
+		screenCache: strategy.NewScreenCache(10),
 	}
-	s.cache = sync.Map{}
 
 	portfolio := &domain.Portfolio{
 		UpdatedAt: now,
@@ -196,7 +192,6 @@ func TestValueScreenMomentumRanking(t *testing.T) {
 		t.Error("stock C (lowest momentum) should NOT get buy signal when topN=2")
 	}
 
-	// Verify A's strength > B's strength
 	var strengthA, strengthB float64
 	for _, sig := range signals {
 		if sig.Symbol == "A" {
@@ -236,7 +231,6 @@ func TestValueScreenTopN(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	// Build bars: higher index = higher momentum (S09 best, S00 worst)
 	makeBars := func(symbol string, endPrice float64) []domain.OHLCV {
 		startPrice := basePrice
 		bars := make([]domain.OHLCV, momentumDays+2)
@@ -251,10 +245,8 @@ func TestValueScreenTopN(t *testing.T) {
 		return bars
 	}
 
-	// Build a RoundTripper that redirects localhost:8081 to srv.URL
 	transport := &http.Transport{
 		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
-			// Redirect any connection to our test server
 			_, _, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, err
@@ -278,7 +270,7 @@ func TestValueScreenTopN(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			bars := map[string][]domain.OHLCV{}
 			for i := 0; i < 10; i++ {
-				ret := 1.0 + float64(10-i)*0.01 // S00 highest return, S09 lowest
+				ret := 1.0 + float64(10-i)*0.01
 				bars[fmt.Sprintf("S%02d", i)] = makeBars(fmt.Sprintf("S%02d", i), basePrice*ret)
 			}
 
@@ -291,10 +283,9 @@ func TestValueScreenTopN(t *testing.T) {
 					TopN:               tc.topN,
 					RebalanceFrequency: "daily",
 				},
-				httpClient: httpClient,
-				cacheLimit: 10,
+				httpClient:  httpClient,
+				screenCache: strategy.NewScreenCache(10),
 			}
-			s.cache = sync.Map{}
 
 			portfolio := &domain.Portfolio{UpdatedAt: now, Positions: map[string]domain.Position{}}
 			signals, err := s.GenerateSignals(context.Background(), bars, portfolio)
@@ -359,8 +350,6 @@ func TestValueScreenSellSignal(t *testing.T) {
 		return bars
 	}
 
-	// A: +10%, B: +5%, C: +1%
-	// TopN=2 → C should get sell signal (not in top N)
 	bars := map[string][]domain.OHLCV{
 		"A": makeBars("A", basePrice*1.10),
 		"B": makeBars("B", basePrice*1.05),
@@ -385,10 +374,9 @@ func TestValueScreenSellSignal(t *testing.T) {
 			TopN:               2,
 			RebalanceFrequency: "daily",
 		},
-		httpClient: httpClient,
-		cacheLimit: 10,
+		httpClient:  httpClient,
+		screenCache: strategy.NewScreenCache(10),
 	}
-	s.cache = sync.Map{}
 
 	signals, err := s.GenerateSignals(context.Background(), bars, portfolio)
 	if err != nil {
@@ -459,10 +447,9 @@ func TestValueScreenCache(t *testing.T) {
 			TopN:               10,
 			RebalanceFrequency: "daily",
 		},
-		httpClient: httpClient,
-		cacheLimit: 10,
+		httpClient:  httpClient,
+		screenCache: strategy.NewScreenCache(10),
 	}
-	s.cache = sync.Map{}
 
 	bars := map[string][]domain.OHLCV{"A": makeBars(), "B": makeBars()}
 	dateStr := now.Format("20060102")
@@ -476,13 +463,12 @@ func TestValueScreenCache(t *testing.T) {
 		t.Errorf("first call: expected 1 request, got %d", reqCount)
 	}
 
-	cached, ok := s.cache.Load(dateStr)
+	cached, ok := s.screenCache.Get(dateStr)
 	if !ok {
 		t.Fatal("cache should be populated after first call")
 	}
-	results := cached.([]domain.ScreenResult)
-	if len(results) != 2 {
-		t.Errorf("expected 2 cached results, got %d", len(results))
+	if len(cached) != 2 {
+		t.Errorf("expected 2 cached results, got %d", len(cached))
 	}
 
 	_, err = s.GenerateSignals(context.Background(), bars, portfolio)
@@ -550,8 +536,8 @@ func TestValueScreenZeroMomentum(t *testing.T) {
 	}
 
 	bars := map[string][]domain.OHLCV{
-		"A": makeFlatBars("A"), // zero momentum
-		"B": makeFlatBars("B"), // zero momentum
+		"A": makeFlatBars("A"),
+		"B": makeFlatBars("B"),
 	}
 
 	s := &valueScreeningStrategy{
@@ -563,10 +549,9 @@ func TestValueScreenZeroMomentum(t *testing.T) {
 			TopN:               10,
 			RebalanceFrequency: "daily",
 		},
-		httpClient: httpClient,
-		cacheLimit: 10,
+		httpClient:  httpClient,
+		screenCache: strategy.NewScreenCache(10),
 	}
-	s.cache = sync.Map{}
 
 	portfolio := &domain.Portfolio{UpdatedAt: now, Positions: map[string]domain.Position{}}
 	signals, err := s.GenerateSignals(context.Background(), bars, portfolio)
@@ -574,7 +559,6 @@ func TestValueScreenZeroMomentum(t *testing.T) {
 		t.Fatalf("GenerateSignals failed: %v", err)
 	}
 
-	// Zero or negative momentum stocks should not get buy signals
 	for _, sig := range signals {
 		if sig.Action == "buy" && sig.Strength <= 0 {
 			t.Errorf("stock %s has zero/negative momentum, should not get buy signal", sig.Symbol)
@@ -591,20 +575,19 @@ func TestValueScreenImplementsStrategyInterface(t *testing.T) {
 }
 
 func TestValueScreenAutoRegister(t *testing.T) {
-	// Register directly (init already ran, so we use GlobalRegister)
 	strategy.DefaultRegistry = strategy.NewRegistry()
 
 	s := &valueScreeningStrategy{
 		params: ValueScreeningConfig{
-			PEMax:               30.0,
-			PBMax:               3.0,
-			ROEMin:              0.1,
-			MomentumDays:        60,
-			TopN:                10,
-			RebalanceFrequency:  "monthly",
+			PEMax:              30.0,
+			PBMax:              3.0,
+			ROEMin:             0.1,
+			MomentumDays:       60,
+			TopN:               10,
+			RebalanceFrequency: "monthly",
 		},
-		httpClient: &http.Client{Timeout: 10 * time.Second},
-		cacheLimit: 30,
+		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		screenCache: strategy.NewScreenCache(30),
 	}
 	if err := strategy.GlobalRegister(s); err != nil {
 		t.Fatalf("failed to register value_screening: %v", err)

@@ -1,9 +1,14 @@
 # Quant Trading System — Vision & Features
 
-> **Status:** Canonical source of truth
-> **Version:** 1.2.0
-> **Last Updated:** 2026-04-08
+> **Status**: Active (Canonical - Design Principles)
+> **Version:** 1.3.0 (AGENTS Template v2.0 Migration)
+> **Last Updated:** 2026-04-11
 > **Owner:** 龙少 (Longshao) — AI Assistant
+> **Related:** [SPEC.md](SPEC.md) (implementation), [ARCHITECTURE.md](ARCHITECTURE.md) (layout), [TEST.md](TEST.md) (quality)
+>
+> **Changelog v1.3 (Migration):**
+> - 添加标准元数据头部（Status, Owner, Related）
+> - 统一版本号与 AGENTS.md v3.0 对齐
 >
 > **Changelog v1.2 (Phase 2.5):**
 > - Unified error handling framework (pkg/errors) with structured error codes
@@ -393,17 +398,20 @@ type Position struct {
 
 ### E. User Interface
 
+> **Architecture**: Vue 3 SPA (Composition API + TypeScript + Naive UI) — replaces legacy HTML pages.
+> Dev server at `:5173` (Vite proxy → `:8085`), production build served by Nginx.
+
 | Feature | Description | Priority | Status | Dependencies |
 |---------|-------------|----------|--------|--------------|
-| Backtest UI (index.html) | Run backtest: select strategy, dates, universe, capital | P0 | ✅ Done | Analysis service API |
-| Backtest results display | Equity curve chart, metrics table, trade log | P0 | ✅ Done | — |
-| Dashboard (dashboard.html) | Portfolio overview, P&L, positions, risk indicators | P0 | 🔄 In Progress | Execution service |
-| Stock screener (screen.html) | Filter by factors; rank and export | P1 | ✅ Done | Data service `/screen` |
-| Strategy selector UI | Dropdown + config panel for available strategies | P1 | ⬜ Planned | Strategy registry API |
+| Vue SPA — BacktestEngine | Run backtest: select strategy, dates, universe, capital; equity curve, metrics, trade log | P0 | ✅ Done | Analysis service API |
+| Vue SPA — Dashboard | Portfolio overview, quick backtest, market metrics, console history | P0 | ✅ Done | Analysis service API |
+| Vue SPA — Screener | Filter by factors; rank and export | P1 | ✅ Done | Data service `/screen` |
+| Vue SPA — Copilot | AI-assisted strategy creation with code generation and backtest validation | P1 | ✅ Done | AI integration, code generation |
+| Vue SPA — StrategyLab | Strategy management (CRUD) + configuration | P1 | ✅ Done | Strategy registry API |
 | Backtest comparison UI | Compare two or more backtest runs side by side | P1 | ⬜ Planned | Backtest runs storage |
-| Strategy Copilot | Chat interface with 龙少 for strategy creation | P1 | ⬜ Planned | AI integration, code generation |
 | Visual strategy editor | Drag-drop factor builder | P3 | ⬜ Planned | Strategy Copilot |
 | Real-time paper trading UI | Live positions, orders, P&L update throughout trading day | P3 | ⬜ Planned | Execution service |
+| Legacy HTML (deprecated) | `cmd/analysis/static/*.html` — superseded by Vue SPA | — | ⚠️ Deprecated | — |
 
 ### F. Infrastructure
 
@@ -447,7 +455,7 @@ The phases below define the build order. All P0 items must be fully done (not "i
 
 **Phase Gate Review:** Before advancing to Phase 2, run the full Phase 1 acceptance test suite (see `docs/TEST.md`). All tests must pass. Record results in `docs/phase-gate-reviews.md`.
 
-### Phase 2 — Reliability & Copilot (Current)
+### Phase 2 — Reliability & Copilot ✅ DONE
 **Goal:** Make the system robust enough for daily use and introduce AI assistance.
 
 | Category | Deliverables |

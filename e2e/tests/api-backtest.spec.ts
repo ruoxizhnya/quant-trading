@@ -43,7 +43,7 @@ test.describe('Backend API — Backtest Engine', () => {
 
     // API should respond (200 with result/job, or 400 if data unavailable)
     expect([200, 201, 202, 400]).toContain(res.status());
-    expect(body).toBeDefined();
+    expect(body).not.toBeNull();
     await ctx.dispose();
   });
 
@@ -78,7 +78,7 @@ test.describe('Backend API — Backtest Engine', () => {
     // Accept both success and data-unavailable responses
     expect([200, 201, 202, 400]).toContain(res.status());
     const body = await res.json();
-    expect(body).toBeDefined();
+    expect(body).not.toBeNull();
     await ctx.dispose();
   });
 });
@@ -192,6 +192,170 @@ test.describe('Backend API — Backtest Result Persistence', () => {
     if (report.initial_capital !== undefined) {
       expect(report.initial_capital).toBe(QUICK_BACKTEST.initial_capital);
     }
+
+    await ctx.dispose();
+  });
+});
+
+test.describe('Backend API — Backtest Result Comparison', () => {
+
+  test.beforeAll(async () => {
+    const ready = await waitForBackendReady(60000);
+    expect(ready).toBe(true);
+  });
+
+  test('same parameters produce consistent results (idempotency)', async () => {
+    const ctx = await apiRequest();
+
+    const payload = {
+      strategy: 'momentum',
+      stock_pool: ['600000.SH'],
+      start_date: '2024-01-02',
+      end_date: '2024-03-31',
+      initial_capital: 1000000,
+      commission_rate: 0.0003,
+      slippage_rate: 0.001,
+    };
+
+    const res1 = await API.runBacktest(ctx, payload);
+    expect(res1.status()).toBe(200);
+    const body1 = await res1.json();
+
+    const res2 = await API.runBacktest(ctx, payload);
+    expect(res2.status()).toBe(200);
+    const body2 = await res2.json();
+
+    expect(body1.total_return).toBeDefined();
+    expect(body2.total_return).toBeDefined();
+    expect(body1.total_return).toEqual(body2.total_return);
+    expect(body1.sharpe_ratio).toEqual(body2.sharpe_ratio);
+    expect(body1.total_trades).toEqual(body2.total_trades);
+    expect(body1.max_drawdown).toEqual(body2.max_drawdown);
+
+    await ctx.dispose();
+  });
+
+  test('different strategies produce different results', async () => {
+    const ctx = await apiRequest();
+
+    const basePayload = (strategy: string) => ({
+      strategy,
+      stock_pool: ['600000.SH'],
+      start_date: '2024-01-02',
+      end_date: '2024-06-30',
+      initial_capital: 1000000,
+      commission_rate: 0.0003,
+      slippage_rate: 0.001,
+    });
+
+    const r1 = await API.runBacktest(ctx, basePayload('momentum'));
+    expect(r1.status()).toBe(200);
+    const b1 = await r1.json();
+
+    const r2 = await API.runBacktest(ctx, basePayload('value'));
+    const b2Status = r2.status();
+    if ([200, 201, 202].includes(b2Status)) {
+      const b2 = await r2.json();
+      const returnsDiffer = Math.abs((b1.total_return || 0) - (b2.total_return || 0)) > 0.001
+        || Math.abs((b1.sharpe_ratio || 0) - (b2.sharpe_ratio || 0)) > 0.001;
+      expect(returnsDiffer || b1.total_trades !== b2.total_trades).toBeTruthy();
+    }
+
+    await ctx.dispose();
+  });
+
+  test('different date ranges produce different trade counts', async () => {
+    const ctx = await apiRequest();
+
+    const shortRange = {
+      strategy: 'momentum',
+      stock_pool: ['600000.SH'],
+      start_date: '2024-01-02',
+      end_date: '2024-02-29',
+      initial_capital: 1000000,
+      commission_rate: 0.0003,
+      slippage_rate: 0.001,
+    };
+
+    const longRange = {
+      ...shortRange,
+      end_date: '2024-06-30',
+    };
+
+    const rShort = await API.runBacktest(ctx, shortRange);
+    expect(rShort.status()).toBe(200);
+    const bShort = await rShort.json();
+
+    const rLong = await API.runBacktest(ctx, longRange);
+    expect(rLong.status()).toBe(200);
+    const bLong = await rLong.json();
+
+    expect(bLong.total_trades).toBeGreaterThanOrEqual(bShort.total_trades);
+
+    await ctx.dispose();
+  });
+
+  test('higher commission rate reduces net return', async () => {
+    const ctx = await apiRequest();
+
+    const lowCommission = {
+      strategy: 'momentum',
+      stock_pool: ['600000.SH'],
+      start_date: '2024-01-02',
+      end_date: '2024-06-30',
+      initial_capital: 1000000,
+      commission_rate: 0.0001,
+      slippage_rate: 0.0001,
+    };
+
+    const highCommission = {
+      ...lowCommission,
+      commission_rate: 0.005,
+    };
+
+    const rLow = await API.runBacktest(ctx, lowCommission);
+    expect(rLow.status()).toBe(200);
+    const bLow = await rLow.json();
+
+    const rHigh = await API.runBacktest(ctx, highCommission);
+    expect(rHigh.status()).toBe(200);
+    const bHigh = await rHigh.json();
+
+    if ((bLow.total_trades || 0) > 5) {
+      expect(bLow.total_return).toBeGreaterThanOrEqual(bHigh.total_return);
+    }
+
+    await ctx.dispose();
+  });
+
+  test('larger initial capital produces proportionally larger absolute PnL', async () => {
+    const ctx = await apiRequest();
+
+    const smallCapital = {
+      strategy: 'momentum',
+      stock_pool: ['600000.SH'],
+      start_date: '2024-01-02',
+      end_date: '2024-06-30',
+      initial_capital: 500000,
+      commission_rate: 0.0003,
+      slippage_rate: 0.001,
+    };
+
+    const largeCapital = {
+      ...smallCapital,
+      initial_capital: 2000000,
+    };
+
+    const rSmall = await API.runBacktest(ctx, smallCapital);
+    expect(rSmall.status()).toBe(200);
+    const bSmall = await rSmall.json();
+
+    const rLarge = await API.runBacktest(ctx, largeCapital);
+    expect(rLarge.status()).toBe(200);
+    const bLarge = await rLarge.json();
+
+    expect(bSmall.total_return).toEqual(bLarge.total_return);
+    expect(bSmall.sharpe_ratio).toEqual(bLarge.sharpe_ratio);
 
     await ctx.dispose();
   });

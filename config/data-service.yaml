@@ -10,7 +10,7 @@ database:
   host: "postgres"
   port: 5432
   user: "postgres"
-  password: "postgres"
+  password: "${DATABASE_PASSWORD}"
   database: "quant_trading"
   sslmode: "disable"
 
@@ -18,6 +18,6 @@ redis:
   url: "redis://redis:6379"
 
 tushare:
-  token: "704d112dd1d5f203b88d86228eb9ea43c4b5a03862218c845ad89f20"
+  token: "${TUSHARE_TOKEN}"
   base_url: "https://api.tushare.pro"
   max_retries: 3

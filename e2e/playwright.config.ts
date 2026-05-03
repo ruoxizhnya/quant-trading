@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { isolateTestEnvironment } from './helpers/isolation';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
 const DATA_SERVICE_URL = process.env.DATA_SERVICE_URL || 'http://localhost:8081';

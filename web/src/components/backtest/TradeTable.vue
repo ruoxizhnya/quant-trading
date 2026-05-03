@@ -14,7 +14,7 @@
 <script setup lang="ts">
 import { h } from 'vue'
 import { NCard, NDataTable, NTag } from 'naive-ui'
-import { fmtPercent } from '@/utils/format'
+import { fmtPercent, fmtNumber } from '@/utils/format'
 import type { Trade } from '@/types/api'
 
 defineProps<{ trades: Trade[] }>()
@@ -34,9 +34,9 @@ const columns = [
   },
   { title: '股票', key: 'symbol', width: 110 },
   { title: '入场日期', key: 'entry_date', width: 110 },
-  { title: '入场价', key: 'entry_price', width: 85, render: (r: Trade) => r.entry_price?.toFixed(2) },
+  { title: '入场价', key: 'entry_price', width: 85, render: (r: Trade) => fmtNumber(r.entry_price, 2) },
   { title: '出场日期', key: 'exit_date', width: 110 },
-  { title: '出场价', key: 'exit_price', width: 85, render: (r: Trade) => r.exit_price?.toFixed(2) },
+  { title: '出场价', key: 'exit_price', width: 85, render: (r: Trade) => fmtNumber(r.exit_price, 2) },
   { title: '数量', key: 'quantity', width: 65 },
   { title: 'PnL', key: 'pnl', width: 90,
     render: (r: Trade) => h('span', { class: (r.pnl ?? 0) >= 0 ? 'pnl-pos' : 'pnl-neg' }, () => fmtPercent(r.pnl ?? 0)),

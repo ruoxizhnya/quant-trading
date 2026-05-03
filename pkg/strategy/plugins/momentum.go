@@ -4,7 +4,6 @@ package plugins
 import (
 	"context"
 	"sort"
-	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
@@ -12,8 +11,8 @@ import (
 
 // MomentumConfig holds configuration for the momentum strategy.
 type MomentumConfig struct {
-	LookbackDays        int
-	TopN                int
+	LookbackDays       int
+	TopN               int
 	RebalanceFrequency string
 }
 
@@ -37,23 +36,23 @@ func (s *momentumStrategy) Parameters() []strategy.Parameter {
 	return []strategy.Parameter{
 		{
 			Name:        "lookback_days",
-			Type:       "int",
+			Type:        "int",
 			Default:     20,
 			Description: "Number of days to calculate momentum",
-			Min:        5,
-			Max:        100,
+			Min:         5,
+			Max:         100,
 		},
 		{
 			Name:        "top_n",
-			Type:       "int",
+			Type:        "int",
 			Default:     5,
 			Description: "Number of top stocks to buy",
-			Min:        1,
-			Max:        20,
+			Min:         1,
+			Max:         20,
 		},
 		{
 			Name:        "rebalance_frequency",
-			Type:       "string",
+			Type:        "string",
 			Default:     "weekly",
 			Description: "Rebalance frequency: daily, weekly, monthly",
 		},
@@ -220,46 +219,13 @@ func (s *momentumStrategy) Cleanup() {
 	s.params = MomentumConfig{}
 }
 
-// isRebalanceDay returns true if today is a rebalance day based on frequency.
-func isRebalanceDay(date time.Time, frequency string) bool {
-	switch frequency {
-	case "weekly":
-		if date.Weekday() == time.Monday {
-			return true
-		}
-		prevDay := date.AddDate(0, 0, -1)
-		if prevDay.Weekday() == time.Sunday && date.Weekday() == time.Tuesday {
-			return true
-		}
-		if prevDay.Weekday() == time.Saturday && date.Weekday() == time.Monday {
-			return true
-		}
-		return false
-	case "monthly":
-		if date.Day() == 1 {
-			return true
-		}
-		if date.Day() <= 3 {
-			prevDay := date.AddDate(0, 0, -1)
-			if prevDay.Month() != date.Month() {
-				return true
-			}
-		}
-		return false
-	case "daily", "":
-		return true
-	default:
-		return true
-	}
-}
-
 func init() {
 	strategy.GlobalRegister(&momentumStrategy{
 		name:        "momentum",
 		description: "Momentum strategy: buy stocks with strongest N-day returns, sell weakest",
 		params: MomentumConfig{
-			LookbackDays:        20,
-			TopN:                5,
+			LookbackDays:       20,
+			TopN:               5,
 			RebalanceFrequency: "weekly",
 		},
 	})

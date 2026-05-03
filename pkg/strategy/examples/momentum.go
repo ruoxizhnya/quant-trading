@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
 // MomentumConfig holds configuration for the momentum strategy.
@@ -77,7 +78,7 @@ func (s *momentumStrategy) Signals(ctx context.Context, stocks []domain.Stock, o
 	}
 
 	// Check if today is a rebalance day
-	if !isRebalanceDay(date, s.config.RebalanceFrequency) {
+	if !strategy.IsRebalanceDay(date, s.config.RebalanceFrequency) {
 		return nil, nil // no signals on non-rebalance days
 	}
 
@@ -199,46 +200,6 @@ func (s *momentumStrategy) Weight(sig domain.Signal, portfolioValue float64) flo
 }
 
 func (s *momentumStrategy) Cleanup() {}
-
-// isRebalanceDay returns true if today is a rebalance day based on frequency.
-// - "daily": every trading day is a rebalance day
-// - "weekly": Monday of each week (or first trading day if Monday is a holiday)
-// - "monthly": first trading day of each month
-func isRebalanceDay(date time.Time, frequency string) bool {
-	switch frequency {
-	case "weekly":
-		// Rebalance on Monday (or first trading day after weekend if Monday was holiday)
-		if date.Weekday() == time.Monday {
-			return true
-		}
-		prevDay := date.AddDate(0, 0, -1)
-		// Monday was holiday, today is first trading day of week
-		if prevDay.Weekday() == time.Sunday && date.Weekday() == time.Tuesday {
-			return true
-		}
-		if prevDay.Weekday() == time.Saturday && date.Weekday() == time.Monday {
-			return true
-		}
-		return false
-	case "monthly":
-		// First trading day of month
-		if date.Day() == 1 {
-			return true
-		}
-		// First trading day after month boundary (if day 1-3 was holiday)
-		if date.Day() <= 3 {
-			prevDay := date.AddDate(0, 0, -1)
-			if prevDay.Month() != date.Month() {
-				return true
-			}
-		}
-		return false
-	case "daily", "":
-		return true
-	default:
-		return true
-	}
-}
 
 // NewMomentumStrategy creates a new momentum strategy instance.
 func NewMomentumStrategy() domain.Strategy {

@@ -117,11 +117,14 @@ func NewJobService(store JobStore, engine *Engine) *JobService {
 
 // CreateJobRequest is the API request to create a backtest job.
 type CreateJobRequest struct {
-	StrategyID string         `json:"strategy_id" binding:"required"`
-	Params     map[string]any `json:"params"`
-	Universe   string         `json:"universe" binding:"required"`
-	StartDate  string         `json:"start_date" binding:"required"`
-	EndDate    string         `json:"end_date" binding:"required"`
+	StrategyID      string         `json:"strategy_id" binding:"required"`
+	Params          map[string]any `json:"params"`
+	Universe        string         `json:"universe" binding:"required"`
+	StartDate       string         `json:"start_date" binding:"required"`
+	EndDate         string         `json:"end_date" binding:"required"`
+	InitialCapital  float64        `json:"initial_capital"`
+	CommissionRate  float64        `json:"commission_rate"`
+	SlippageRate    float64        `json:"slippage_rate"`
 }
 
 // Job is the public API response for a job.
@@ -144,7 +147,21 @@ type Job struct {
 func (s *JobService) CreateJob(ctx context.Context, req CreateJobRequest) (*Job, error) {
 	jobID := uuid.New().String()
 
-	paramsJSON, err := json.Marshal(req.Params)
+	params := req.Params
+	if params == nil {
+		params = make(map[string]any)
+	}
+	if req.InitialCapital > 0 {
+		params["initial_capital"] = req.InitialCapital
+	}
+	if req.CommissionRate > 0 {
+		params["commission_rate"] = req.CommissionRate
+	}
+	if req.SlippageRate > 0 {
+		params["slippage_rate"] = req.SlippageRate
+	}
+
+	paramsJSON, err := json.Marshal(params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal params: %w", err)
 	}
@@ -254,6 +271,14 @@ func (s *JobService) StartJob(parentCtx context.Context, jobID string) {
 			StockPool: stockPool,
 			StartDate: record.StartDate,
 			EndDate:   record.EndDate,
+		}
+
+		var jobParams map[string]any
+		if len(record.Params) > 0 {
+			_ = json.Unmarshal(record.Params, &jobParams)
+		}
+		if v, ok := jobParams["initial_capital"].(float64); ok && v > 0 {
+			backtestReq.InitialCapital = v
 		}
 
 		result, err := s.engine.RunBacktest(jobCtx, backtestReq)

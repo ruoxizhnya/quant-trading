@@ -1,7 +1,7 @@
 import { API_TIMEOUT, API_RETRY_DELAY } from '@/constants/api'
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public body?: any) {
+  constructor(public status: number, message: string, public body?: Record<string, unknown>) {
     super(message)
     this.name = 'ApiError'
   }
@@ -71,21 +71,21 @@ class ApiClient {
 
       if (!res.ok) {
         let errMsg: string
-        let errBody: any
-        try {
-          errBody = await res.json()
-          errMsg = errBody.error || errBody.message || res.statusText
-        } catch {
-          errMsg = res.statusText
-        }
-        const message = getStatusMessage(res.status, errMsg)
-        throw new ApiError(res.status, message, errBody)
+      let errBody: Record<string, unknown> | undefined
+      try {
+        errBody = await res.json()
+        errMsg = (errBody?.error as string) || (errBody?.message as string) || res.statusText
+      } catch {
+        errMsg = res.statusText
+      }
+      const message = getStatusMessage(res.status, errMsg)
+      throw new ApiError(res.status, message, errBody)
       }
 
       return await res.json()
-    } catch (e: any) {
+    } catch (e: unknown) {
       clearTimeout(timer)
-      if (e?.name === 'AbortError' || e instanceof DOMException) {
+      if (e instanceof DOMException || (e instanceof Error && e.name === 'AbortError')) {
         throw new ApiError(0, '请求已取消')
       }
       if (e instanceof ApiError) throw e
@@ -93,7 +93,7 @@ class ApiClient {
         await new Promise(r => setTimeout(r, API_RETRY_DELAY * (4 - retry)))
         return this.request<T>(path, { ...options, retry: retry - 1 })
       }
-      throw new ApiError(0, e?.message || '网络连接失败')
+      throw new ApiError(0, e instanceof Error ? e.message : '网络连接失败')
     }
   }
 

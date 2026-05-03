@@ -1,0 +1,191 @@
+version: '3.8'
+
+services:
+  # ============================================================
+  # Analysis Service (API Gateway) - :8085
+  # ============================================================
+  analysis-service:
+    build:
+      context: .
+      dockerfile: cmd/analysis/Dockerfile
+      args:
+        BUILD_VERSION: ${VERSION:-dev}
+        BUILD_COMMIT: ${COMMIT:-local}
+        BUILD_TIME: ${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+    image: quant-trading/analysis:${VERSION:-latest}
+    container_name: analysis-service
+    restart: unless-stopped
+    ports:
+      - "8085:8085"
+    environment:
+      - GIN_MODE=release
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-quant_trading}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6377
+      - LOG_LEVEL=info
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./config:/app/config:ro
+      - ./cmd/analysis/static:/app/static:ro
+      - ./generated_strategies:/app/generated_strategies:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - trading-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # ============================================================
+  # Data Service - :8081
+  # ============================================================
+  data-service:
+    build:
+      context: .
+      dockerfile: cmd/data/Dockerfile
+      args:
+        BUILD_VERSION: ${VERSION:-dev}
+        BUILD_COMMIT: ${COMMIT:-local}
+    image: quant-trading/data:${VERSION:-latest}
+    container_name: data-service
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-quant_trading}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - TUSHARE_TOKEN=${TUSHARE_TOKEN:-}
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - trading-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # ============================================================
+  # Strategy Service - :8082
+  # ============================================================
+  strategy-service:
+    build:
+      context: .
+      dockerfile: cmd/strategy/Dockerfile
+      args:
+        BUILD_VERSION: ${VERSION:-dev}
+        BUILD_COMMIT: ${COMMIT:-local}
+    image: quant-trading/strategy:${VERSION:-latest}
+    container_name: strategy-service
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    environment:
+      - STRATEGY_DIR=/app/generated_strategies
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./config:/app/config:ro
+      - ./generated_strategies:/app/generated_strategies:rw
+    networks:
+      - trading-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/strategies"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # ============================================================
+  # Execution Service - :8083
+  # ============================================================
+  execution-service:
+    build:
+      context: .
+      dockerfile: cmd/execution/Dockerfile
+      args:
+        BUILD_VERSION: ${VERSION:-dev}
+        BUILD_COMMIT: ${COMMIT:-local}
+    image: quant-trading/execution:${VERSION:-latest}
+    container_name: execution-service
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-quant_trading}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6377
+      - TRADER_TYPE=mock
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - trading-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/api/orders"]
+      interval: 15s
+      timeout: 2s
+      retries: 5
+
+  # ============================================================
+  # Risk Service - :8084
+  # ============================================================
+  risk-service:
+    build:
+      context: .
+      dockerfile: cmd/risk/Dockerfile
+      args:
+        BUILD_VERSION: ${VERSION:-dev}
+        BUILD_COMMIT: ${COMMIT:-local}
+    image: quant-trading/risk:${VERSION:-latest}
+    container_name: risk-service
+    restart: unless-stopped
+    ports:
+      - "8084:8084"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-quant_trading}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - trading-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/risk/health"]
+      interval: 20s
+      timeout: 2s
+      retries: 3
+
+networks:
+  trading-net:
+    driver: bridge

@@ -25,6 +25,16 @@ func NewWalkForwardEngine(engine *Engine, store *storage.PostgresStore) *WalkFor
 	}
 }
 
+// GetLatestReport returns the latest walk-forward report for a strategy.
+func (wf *WalkForwardEngine) GetLatestReport(ctx context.Context, strategyID string) (*domain.WalkForwardReport, error) {
+	return wf.store.GetLatestWalkForwardReport(ctx, strategyID)
+}
+
+// ListReports returns all walk-forward reports, limited to n most recent.
+func (wf *WalkForwardEngine) ListReports(ctx context.Context, limit int) ([]*domain.WalkForwardReport, error) {
+	return wf.store.ListAllWalkForwardReports(ctx, limit)
+}
+
 // WalkForwardRequest holds parameters for a walk-forward validation run.
 type WalkForwardRequest struct {
 	Strategy       string   `json:"strategy" binding:"required"`

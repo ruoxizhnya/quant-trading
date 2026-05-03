@@ -7,10 +7,19 @@
 
 ```
 archive/
-└── reports-2026-Q2/          ← Archived on 2026-04-09
-    ├── CLEANUP_REPORT.md     ← Doc cleanup operation record (superseded by ODR-001)
-    ├── DOC_AUDIT_REPORT.md   ← Design doc audit report (superseded by ODR-002)
-    └── MIGRATION_REPORT.md   ← AGENTS.md migration report (superseded by ODR-003)
+├── reports-2026-Q2/              ← Archived on 2026-04-09
+│   ├── CLEANUP_REPORT.md         ← Doc cleanup operation record (superseded by ODR-001)
+│   ├── DOC_AUDIT_REPORT.md       ← Design doc audit report (superseded by ODR-002)
+│   └── MIGRATION_REPORT.md       ← AGENTS.md migration report (superseded by ODR-003)
+│
+└── research-2026-Q2/             ← Archived on 2026-04-11
+    ├── CACHE.md                  ← Redis cache design (integrated into ARCHITECTURE.md)
+    ├── CODE_REVIEW_REPORT.md     ← Full code review findings (tasks migrated to TASKS.md)
+    ├── DOC_MGMT_RESEARCH.md      ← AGENTS.md best practices research (applied to AGENTS.md v3.0)
+    ├── PHASE3-PLAN.md            ← Phase 3 implementation plan (tasks migrated to TASKS.md)
+    ├── phase-gate-reviews.md     ← Phase Gate 1 audit records (tasks migrated to TASKS.md)
+    ├── QUANT_SOFTWARE_DESIGN_ANALYSIS.md ← Quant software design analysis (reference)
+    └── REPORT_ASSESSMENT_AND_GOVERNANCE_PLAN.md ← ODR governance design (integrated into AGENTS.md)
 ```
 
 ## How to Find Archived Content
@@ -27,4 +36,4 @@ archive/
 - Quarterly review: consider removing files archived > 12 months ago (requires maintainer approval)
 
 ---
-_Last updated: 2026-04-09_
+_Last updated: 2026-04-11_

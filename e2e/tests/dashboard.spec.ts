@@ -1,11 +1,16 @@
 import { test, expect } from '@playwright/test';
 import { waitForBackendReady } from '../helpers/api';
+import { isolateTestEnvironment } from '../helpers/isolation';
 
 test.describe('Dashboard Page (Vue SPA)', () => {
 
   test.beforeAll(async () => {
     const ready = await waitForBackendReady(60000);
     expect(ready).toBe(true);
+  });
+
+  test.beforeEach(async ({ page }) => {
+    await isolateTestEnvironment(page);
   });
 
   test('page loads successfully with correct title', async ({ page }) => {
@@ -23,7 +28,7 @@ test.describe('Dashboard Page (Vue SPA)', () => {
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('.dashboard-page', { timeout: 15000 });
-    await page.waitForTimeout(1000);
+    await page.waitForSelector('.nav-item', { timeout: 10000 });
 
     const navItems = page.locator('.nav-item');
     await expect(navItems.first()).toBeVisible({ timeout: 10000 });
@@ -88,7 +93,7 @@ test.describe('Dashboard Page (Vue SPA)', () => {
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('.nav-tile', { timeout: 15000 });
-    await page.waitForTimeout(500);
+    await expect(page.locator('.nav-tile').first()).toBeVisible({ timeout: 5000 });
 
     const tiles = page.locator('.nav-tile');
     const count = await tiles.count();
@@ -127,7 +132,7 @@ test.describe('Dashboard Page (Vue SPA)', () => {
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('.greeting', { timeout: 15000 });
-    await page.waitForTimeout(3000);
+    await page.waitForLoadState('networkidle');
 
     const providerErrors = errors.filter(e =>
       e.includes('n-message-provider') ||

@@ -18,6 +18,12 @@ func (s *PostgresStore) SaveFactorCacheBatch(ctx context.Context, entries []*dom
 		return nil
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	batch := &pgx.Batch{}
 	for _, e := range entries {
 		batch.Queue(`
@@ -30,13 +36,17 @@ func (s *PostgresStore) SaveFactorCacheBatch(ctx context.Context, entries []*dom
 		`, e.Symbol, e.TradeDate, e.FactorName, e.RawValue, e.ZScore, e.Percentile)
 	}
 
-	results := s.pool.SendBatch(ctx, batch)
+	results := tx.SendBatch(ctx, batch)
 	defer results.Close()
 
 	for i := 0; i < len(entries); i++ {
 		if _, err := results.Exec(); err != nil {
 			return fmt.Errorf("batch factor_cache insert failed at index %d: %w", i, err)
 		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	s.logger.Info().Int("count", len(entries)).Msg("Batch factor_cache saved")
@@ -97,6 +107,12 @@ func (s *PostgresStore) SaveFactorReturnBatch(ctx context.Context, records []*do
 		return nil
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	batch := &pgx.Batch{}
 	for _, r := range records {
 		batch.Queue(`
@@ -109,13 +125,17 @@ func (s *PostgresStore) SaveFactorReturnBatch(ctx context.Context, records []*do
 		`, r.FactorName, r.TradeDate, r.Quintile, r.AvgReturn, r.CumulativeReturn, r.TopMinusBot)
 	}
 
-	results := s.pool.SendBatch(ctx, batch)
+	results := tx.SendBatch(ctx, batch)
 	defer results.Close()
 
 	for i := 0; i < len(records); i++ {
 		if _, err := results.Exec(); err != nil {
 			return fmt.Errorf("batch factor_returns insert failed at index %d: %w", i, err)
 		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	s.logger.Info().Int("count", len(records)).Msg("Batch factor_returns saved")
@@ -156,6 +176,12 @@ func (s *PostgresStore) SaveICEntryBatch(ctx context.Context, records []*domain.
 		return nil
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	batch := &pgx.Batch{}
 	for _, r := range records {
 		batch.Queue(`
@@ -168,13 +194,17 @@ func (s *PostgresStore) SaveICEntryBatch(ctx context.Context, records []*domain.
 		`, r.FactorName, r.TradeDate, r.IC, r.PValue, r.TopIC)
 	}
 
-	results := s.pool.SendBatch(ctx, batch)
+	results := tx.SendBatch(ctx, batch)
 	defer results.Close()
 
 	for i := 0; i < len(records); i++ {
 		if _, err := results.Exec(); err != nil {
 			return fmt.Errorf("batch ic_analysis insert failed at index %d: %w", i, err)
 		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	s.logger.Info().Int("count", len(records)).Msg("Batch ic_analysis saved")
@@ -215,6 +245,12 @@ func (s *PostgresStore) SaveDividendBatch(ctx context.Context, records []*domain
 		return nil
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	batch := &pgx.Batch{}
 	for _, d := range records {
 		batch.Queue(`
@@ -230,13 +266,17 @@ func (s *PostgresStore) SaveDividendBatch(ctx context.Context, records []*domain
 		`, d.Symbol, d.AnnDate, d.RecDate, d.PayDate, d.DivAmt, d.StkDiv, d.StkRatio, d.CashRatio)
 	}
 
-	results := s.pool.SendBatch(ctx, batch)
+	results := tx.SendBatch(ctx, batch)
 	defer results.Close()
 
 	for i := 0; i < len(records); i++ {
 		if _, err := results.Exec(); err != nil {
 			return fmt.Errorf("batch dividend insert failed at index %d: %w", i, err)
 		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	s.logger.Info().Int("count", len(records)).Msg("Batch dividends saved")
@@ -300,6 +340,12 @@ func (s *PostgresStore) SaveIndexConstituentBatch(ctx context.Context, records [
 		return nil
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	batch := &pgx.Batch{}
 	for _, c := range records {
 		batch.Queue(`
@@ -312,13 +358,17 @@ func (s *PostgresStore) SaveIndexConstituentBatch(ctx context.Context, records [
 		`, c.IndexCode, c.Symbol, c.InDate, c.OutDate, c.Weight)
 	}
 
-	results := s.pool.SendBatch(ctx, batch)
+	results := tx.SendBatch(ctx, batch)
 	defer results.Close()
 
 	for i := 0; i < len(records); i++ {
 		if _, err := results.Exec(); err != nil {
 			return fmt.Errorf("batch index constituent insert failed at index %d: %w", i, err)
 		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	s.logger.Info().Int("count", len(records)).Msg("Batch index constituents saved")
@@ -386,6 +436,12 @@ func (s *PostgresStore) SaveSplitBatch(ctx context.Context, records []*domain.Sp
 		return nil
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	batch := &pgx.Batch{}
 	for _, r := range records {
 		batch.Queue(`
@@ -399,13 +455,17 @@ func (s *PostgresStore) SaveSplitBatch(ctx context.Context, records []*domain.Sp
 		`, r.Symbol, r.TradeDate, r.AnnDate, r.StkDivRatio, r.CashDivRatio, r.Currency)
 	}
 
-	results := s.pool.SendBatch(ctx, batch)
+	results := tx.SendBatch(ctx, batch)
 	defer results.Close()
 
 	for i := 0; i < len(records); i++ {
 		if _, err := results.Exec(); err != nil {
 			return fmt.Errorf("batch split insert failed at index %d: %w", i, err)
 		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	s.logger.Info().Int("count", len(records)).Msg("Batch splits saved")

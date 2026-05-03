@@ -194,7 +194,7 @@ func loadConfig(logger zerolog.Logger) (*Config, error) {
 // registerStrategies registers all available strategies.
 func registerStrategies(logger zerolog.Logger) {
 	// Register momentum strategy
-	strategy.Register("momentum", func() domain.Strategy {
+	if err := strategy.Register("momentum", func() domain.Strategy {
 		s := examples.NewMomentumStrategy()
 		defaultConfig := map[string]any{
 			"lookback_days":        20,
@@ -208,10 +208,12 @@ func registerStrategies(logger zerolog.Logger) {
 			logger.Error().Err(err).Msg("failed to configure momentum strategy")
 		}
 		return s
-	})
+	}); err != nil {
+		logger.Error().Err(err).Msg("failed to register momentum strategy")
+	}
 
 	// Register value_momentum strategy
-	strategy.Register("value_momentum", func() domain.Strategy {
+	if err := strategy.Register("value_momentum", func() domain.Strategy {
 		s := examples.NewValueMomentumStrategy()
 		// Apply default configuration
 		defaultConfig := map[string]any{
@@ -248,7 +250,9 @@ func registerStrategies(logger zerolog.Logger) {
 			logger.Error().Err(err).Msg("failed to configure value_momentum strategy")
 		}
 		return s
-	})
+	}); err != nil {
+		logger.Error().Err(err).Msg("failed to register value_momentum strategy")
+	}
 
 	logger.Info().Strs("strategies", strategy.ListStrategies()).Msg("strategies registered")
 }

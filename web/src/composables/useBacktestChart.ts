@@ -1,6 +1,7 @@
 import { ref, nextTick, onBeforeUnmount } from 'vue'
 import { Chart, registerables, type ChartData as ChartJSChartData, type TooltipItem } from 'chart.js'
 import type { PortfolioPoint, Trade } from '@/types/api'
+import { sampleData } from '@/utils/format'
 
 Chart.register(...registerables)
 
@@ -22,20 +23,6 @@ export interface ChartData {
 export function useBacktestChart(canvasRef: { value: HTMLCanvasElement | null }) {
   let chartInstance: Chart | null = null
   const chartData = ref<{ date: string; value: number }[]>([])
-
-  function sampleData(raw: { date: string; value: number }[]) {
-    if (raw.length <= MAX_CHART_POINTS) return raw
-    const step = Math.ceil(raw.length / MAX_CHART_POINTS)
-    const sampled: { date: string; value: number }[] = []
-    for (let i = 0; i < raw.length; i += step) {
-      sampled.push(raw[i])
-    }
-    const last = raw[raw.length - 1]
-    if (!sampled.length || sampled[sampled.length - 1].date !== last.date) {
-      sampled.push(last)
-    }
-    return sampled
-  }
 
   function buildTradeMarkers(portfolioValues: PortfolioPoint[], trades: Trade[]): TradeMarker[] {
     if (!portfolioValues?.length || !trades.length) return []
@@ -68,7 +55,7 @@ export function useBacktestChart(canvasRef: { value: HTMLCanvasElement | null })
 
       if (rawData.length === 0) return
 
-      const data = sampleData(rawData)
+      const data = sampleData(rawData, MAX_CHART_POINTS)
       chartData.value = data
 
       await nextTick()

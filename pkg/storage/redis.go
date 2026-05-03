@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 	"github.com/rs/zerolog"
 )
@@ -101,9 +102,9 @@ func (c *RedisCache) Exists(ctx context.Context, keys ...string) (int64, error) 
 
 // InvalidateStocks invalidates stock-related cache entries.
 func (c *RedisCache) InvalidateStocks(ctx context.Context, exchange string) error {
-	pattern := KeyPrefixOHLCV + "*:*"
+	pattern := "stocks:list:*"
 	if exchange != "" && exchange != "all" {
-		pattern = KeyPrefixOHLCV + exchange + ":*"
+		pattern = "stocks:list:" + exchange
 	}
 
 	var cursor uint64
@@ -173,11 +174,24 @@ func (c *RedisCache) GetCachedStock(ctx context.Context, symbol string) (interfa
 
 // CacheStock stores a single stock in Redis with TTL.
 func (c *RedisCache) CacheStock(ctx context.Context, stock interface{}) error {
-	symbol, ok := stock.(map[string]interface{})["symbol"].(string)
-	if !ok {
+	key := ""
+	switch s := stock.(type) {
+	case *domain.Stock:
+		key = "stock:" + s.Symbol
+	case domain.Stock:
+		key = "stock:" + s.Symbol
+	case map[string]interface{}:
+		if sym, ok := s["symbol"].(string); ok {
+			key = "stock:" + sym
+		} else if sym, ok := s["Symbol"].(string); ok {
+			key = "stock:" + sym
+		}
+	default:
+		return fmt.Errorf("invalid stock format: unsupported type %T", stock)
+	}
+	if key == "" {
 		return fmt.Errorf("invalid stock format: missing symbol")
 	}
-	key := "stock:" + symbol
 	data, err := json.Marshal(stock)
 	if err != nil {
 		return fmt.Errorf("failed to marshal stock: %w", err)

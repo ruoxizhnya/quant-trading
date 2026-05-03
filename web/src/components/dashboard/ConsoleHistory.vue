@@ -23,18 +23,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NCard, NList, NListItem, NThing, NTag, NButton, NEmpty } from 'naive-ui'
-import { fmtPercent } from '@/utils/format'
-// Use a minimal interface that matches what the store actually provides
-interface HistoryEntry {
-  id: string
-  strategy?: string
-  stock_pool?: string[]
-  start_date?: string
-  end_date?: string
-  total_return: number
-  sharpe_ratio?: number
-  max_drawdown?: number
-}
+import { fmtPercent, fmtNumber } from '@/utils/format'
+import type { HistoryEntry } from '@/types/api'
 
 const props = defineProps<{ history: HistoryEntry[] }>()
 
@@ -53,7 +43,7 @@ function itemTitle(item: HistoryEntry): string {
 
 function itemDesc(item: HistoryEntry): string {
   const ret = fmtPercent(item.total_return)
-  const sharpe = (item.sharpe_ratio != null && !isNaN(item.sharpe_ratio)) ? item.sharpe_ratio.toFixed(2) : '-'
+  const sharpe = fmtNumber(item.sharpe_ratio, 2)
   return `收益: ${ret} | 夏普: ${sharpe}`
 }
 </script>

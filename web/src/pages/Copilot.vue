@@ -4,7 +4,7 @@
       <div class="chat-container">
         <div class="messages" ref="messagesRef">
           <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.role]">
-            <div class="msg-bubble" v-html="formatMessage(msg.content)"></div>
+            <div class="msg-bubble" style="white-space: pre-wrap">{{ msg.content }}</div>
             <div v-if="msg.code" class="code-block">
               <div class="code-header">
                 <span>{{ msg.language || 'go' }}</span>
@@ -68,18 +68,14 @@ async function sendMessage() {
     lastMsg.content = res.explanation || '策略已生成'
     lastMsg.code = res.code
     lastMsg.language = res.language
-  } catch (e: any) {
+  } catch (e: unknown) {
     const lastMsg = messages.value[messages.value.length - 1]
-    lastMsg.content = `生成失败: ${e.message}`
+    lastMsg.content = `生成失败: ${e instanceof Error ? e.message : String(e)}`
   } finally {
     generating.value = false
     await nextTick()
     scrollToBottom()
   }
-}
-
-function formatMessage(content: string): string {
-  return content.replace(/\n/g, '<br>')
 }
 
 function copyCode(code: string) {

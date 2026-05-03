@@ -21,7 +21,7 @@
         收益 {{ fmtPercent(quickResult.total_return) }}
       </n-tag>
       <n-tag round :bordered="false" size="small">
-        夏普 {{ quickResult.sharpe_ratio?.toFixed(2) || '-' }}
+        夏普 {{ fmtNumber(quickResult.sharpe_ratio, 2) }}
       </n-tag>
       <n-button quaternary size="tiny" type="primary" @click="$emit('view-report', quickResult.id)">查看报告</n-button>
     </div>
@@ -31,7 +31,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NCard, NForm, NFormItem, NSelect, NInput, NDatePicker, NButton, NTag } from 'naive-ui'
-import { fmtPercent } from '@/utils/format'
+import { fmtPercent, fmtNumber } from '@/utils/format'
+import type { BacktestResult } from '@/types/api'
+
+interface QuickResult {
+  id: string
+  total_return?: number
+  sharpe_ratio?: number
+}
 
 const props = defineProps<{
   strategy: string
@@ -40,7 +47,7 @@ const props = defineProps<{
   endDate: string
   running: boolean
   strategies: string[]
-  quickResult: any
+  quickResult: QuickResult | null
 }>()
 
 const emit = defineEmits<{

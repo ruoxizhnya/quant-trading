@@ -38,6 +38,7 @@ import { useBacktestStore } from '@/stores/backtest'
 import { getMarketIndex } from '@/api/market'
 import { getStrategies } from '@/api/strategy'
 import { runBacktest as apiRunBacktest } from '@/api/backtest'
+import type { Strategy, MarketIndex } from '@/types/api'
 import MarketMetrics from '@/components/dashboard/MarketMetrics.vue'
 import QuickBacktest from '@/components/dashboard/QuickBacktest.vue'
 import NavTiles from '@/components/dashboard/NavTiles.vue'
@@ -50,10 +51,16 @@ const backtestStore = useBacktestStore()
 const selectedDate = ref(new Date().toISOString().split('T')[0])
 const selectedIndex = ref('000001.SH')
 const marketLoading = ref(false)
-const marketMetrics = ref<Record<string, any>>({})
+const marketMetrics = ref<MarketIndex | Record<string, unknown>>({})
 const strategiesCache = ref<string[]>([])
 const quickRunning = ref(false)
-const quickResult = ref<any>(null)
+const quickResult = ref<QuickResult | null>(null)
+
+interface QuickResult {
+  id: string
+  total_return?: number
+  sharpe_ratio?: number
+}
 
 const quickForm = reactive({
   strategy: 'momentum',
@@ -67,7 +74,7 @@ onMounted(async () => {
   backtestStore.loadHistoryFromDB()
   try {
     const res = await getStrategies()
-    strategiesCache.value = (res.strategies || []).map((s: any) => s.name || s.id || s.description)
+    strategiesCache.value = (res.strategies || []).map((s: Strategy) => (s.name || s.id || s.description))
   } catch {}
   fetchMarketData()
 })
@@ -78,7 +85,7 @@ async function fetchMarketData() {
     const res = await getMarketIndex(selectedIndex.value, selectedDate.value)
     if (Array.isArray(res.indices) && res.indices.length > 0) {
       const latest = res.indices[res.indices.length - 1]
-      marketMetrics.value = latest as any
+      marketMetrics.value = latest
     }
   } catch (e) {
     console.warn('市场数据获取失败:', e)
@@ -101,10 +108,13 @@ async function runQuickBacktest() {
       commission_rate: 0.0003,
       slippage_rate: 0.0001,
     })
-    quickResult.value = res
+    if (!res || !res.id) {
+      throw new Error('回测返回结果无效：缺少ID')
+    }
+    quickResult.value = { id: res.id, total_return: res.total_return, sharpe_ratio: res.sharpe_ratio }
     backtestStore.addToHistory(res)
-  } catch (e: any) {
-    message.error('快速回测失败: ' + (e.message || e))
+  } catch (e: unknown) {
+    message.error('快速回测失败: ' + (e instanceof Error ? e.message : String(e)))
   } finally {
     quickRunning.value = false
   }

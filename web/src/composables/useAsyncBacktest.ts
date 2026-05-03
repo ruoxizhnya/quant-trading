@@ -12,14 +12,14 @@ export type JobStatus = 'idle' | 'submitting' | 'pending' | 'running' | 'complet
 interface AsyncBacktestState {
   status: JobStatus
   jobId: string | null
-  progress: number // 0-100
+  progress: number
   error: string | null
   result: BacktestResult | null
 }
 
 const POLL_INTERVAL_MS = 2000
-const TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes max wait
-const MAX_POLL_ATTEMPTS = 150 // safety net
+const TIMEOUT_MS = 5 * 60 * 1000
+const MAX_POLL_ATTEMPTS = 150
 
 export function useAsyncBacktest() {
   const state = ref<AsyncBacktestState>({
@@ -39,8 +39,7 @@ export function useAsyncBacktest() {
     if (aborted) return
 
     pollAttempts++
-    
-    // Timeout check
+
     if (startTime && Date.now() - startTime > TIMEOUT_MS) {
       console.warn('[AsyncBacktest] Polling timeout reached', { jobId, elapsed: Date.now() - startTime })
       stopPolling()
@@ -50,7 +49,6 @@ export function useAsyncBacktest() {
       return
     }
 
-    // Max attempts check
     if (pollAttempts > MAX_POLL_ATTEMPTS) {
       console.warn('[AsyncBacktest] Max poll attempts reached', { jobId, attempts: pollAttempts })
       stopPolling()
@@ -60,22 +58,11 @@ export function useAsyncBacktest() {
     }
 
     try {
-      console.log(`[AsyncBacktest] Polling job #${pollAttempts}`, { jobId, status: state.value.status })
-      
       const job = await getBacktestJob(jobId)
-      
-      console.log(`[AsyncBacktest] Job response`, { 
-        id: job?.id, 
-        status: job?.status, 
-        hasResult: !!job?.result,
-        hasError: !!job?.error 
-      })
 
       if (!job || !job.id) {
         console.warn('[AsyncBacktest] Job not found or invalid response', { jobId, job })
-        // Job might have been deleted or DB issue
         if (pollAttempts < 3) {
-          // Retry a few times before giving up
           return
         }
         stopPolling()
@@ -85,24 +72,15 @@ export function useAsyncBacktest() {
       }
 
       state.value.jobId = job.id
-      const prevStatus = state.value.status
       state.value.status = job.status as JobStatus
-
-      // Status transition logging
-      if (prevStatus !== job.status) {
-        console.log(`[AsyncBacktest] Status transition`, { from: prevStatus, to: job.status })
-      }
 
       switch (job.status) {
         case 'completed':
           if (!state.value.result && job.result) {
             try {
-              // Try to get full report first (has more data)
               const report = await getBacktestReport(jobId)
               state.value.result = report
-              console.log(`[AsyncBacktest] Got report`, { keys: Object.keys(report || {}) })
             } catch (e) {
-              // Fallback to job result
               console.warn('[AsyncBacktest] Failed to get report, using job result', e)
               state.value.result = job.result
             }
@@ -122,7 +100,6 @@ export function useAsyncBacktest() {
           break
 
         case 'running':
-          // Estimate progress based on time elapsed (5-90% range)
           if (startTime > 0) {
             const elapsed = Date.now() - startTime
             const estimatedProgress = Math.min(90, Math.floor((elapsed / 120000) * 85) + 5)
@@ -130,29 +107,26 @@ export function useAsyncBacktest() {
           } else {
             state.value.progress = Math.min(state.value.progress + 2, 20)
           }
-          
-          // If running for too long without completion, show warning
-          if (startTime && Date.now() - startTime > 180000) { // 3 min
-            console.warn('[AsyncBacktest] Job running for >3min', { 
-              jobId, 
+
+          if (startTime && Date.now() - startTime > 180000) {
+            console.warn('[AsyncBacktest] Job running for >3min', {
+              jobId,
               elapsed: Date.now() - startTime,
-              progress: state.value.progress 
+              progress: state.value.progress
             })
           }
           break
 
         case 'pending':
-          // Still in queue - show initial progress
           if (state.value.progress < 10) {
             state.value.progress = 5 + Math.min(5, Math.floor(pollAttempts / 2))
           }
-          
-          // If pending for too long (>30s), something might be wrong
+
           if (startTime && Date.now() - startTime > 30000) {
-            console.warn('[AsyncBacktest] Job still pending after 30s', { 
-              jobId, 
+            console.warn('[AsyncBacktest] Job still pending after 30s', {
+              jobId,
               elapsed: Date.now() - startTime,
-              attempts: pollAttempts 
+              attempts: pollAttempts
             })
           }
           break
@@ -161,7 +135,6 @@ export function useAsyncBacktest() {
           console.warn('[AsyncBacktest] Unknown job status', { status: job.status, jobId })
       }
     } catch (e: unknown) {
-      // Don't log 404 as errors during cancellation
       const errorMessage = e instanceof Error ? e.message : String(e)
       const errorStatus = (e as { status?: number })?.status
 
@@ -173,7 +146,6 @@ export function useAsyncBacktest() {
           status: errorStatus
         })
 
-        // After several consecutive errors, mark as failed
         if (pollAttempts % 10 === 0) {
           state.value.error = `网络请求失败 (${errorStatus || 'unknown'})，正在重试...`
         }
@@ -186,6 +158,9 @@ export function useAsyncBacktest() {
     universe: string
     start_date: string
     end_date: string
+    initial_capital?: number
+    commission_rate?: number
+    slippage_rate?: number
   }) {
     reset()
 
@@ -193,27 +168,17 @@ export function useAsyncBacktest() {
     state.value.progress = 1
 
     try {
-      console.log('[AsyncBacktest] Submitting job', req)
-      
       const res: JobResponse = await createBacktestJob(req)
-      
-      console.log('[AsyncBacktest] Job created', { 
-        jobId: res.job_id, 
-        status: res.status 
-      })
 
       state.value.jobId = res.job_id
       state.value.status = res.status as JobStatus
       state.value.progress = 5
 
-      // Start polling
       startTime = Date.now()
       pollAttempts = 0
-      
-      // Initial poll immediately
+
       await pollJob(res.job_id)
 
-      // Then set up interval
       if (!aborted && state.value.status !== 'completed' && state.value.status !== 'failed') {
         pollTimer = setInterval(() => {
           if (!aborted) {
@@ -223,16 +188,15 @@ export function useAsyncBacktest() {
           }
         }, POLL_INTERVAL_MS)
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('[AsyncBacktest] Submit error', e)
       state.value.status = 'failed'
-      state.value.error = e?.message || '提交回测任务失败'
+      state.value.error = e instanceof Error ? e.message : '提交回测任务失败'
       state.value.progress = 0
     }
   }
 
   function cancel() {
-    console.log('[AsyncBacktest] Cancel requested', { jobId: state.value.jobId, status: state.value.status })
     aborted = true
     stopPolling()
     if (state.value.status === 'pending' || state.value.status === 'running' || state.value.status === 'submitting') {
@@ -245,7 +209,6 @@ export function useAsyncBacktest() {
     if (pollTimer) {
       clearInterval(pollTimer)
       pollTimer = null
-      console.log('[AsyncBacktest] Polling stopped', { jobId: state.value.jobId, totalAttempts: pollAttempts })
     }
   }
 

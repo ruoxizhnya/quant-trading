@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 
@@ -16,9 +15,6 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
-// redirectTransport creates an http.Transport that redirects all connections
-// to the given test server's address. This lets us intercept the hardcoded
-// localhost:8081 URL used by the strategies.
 func redirectTransport(srv *httptest.Server) *http.Transport {
 	return &http.Transport{
 		DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
@@ -126,7 +122,7 @@ func TestMultiFactorPercentileRank(t *testing.T) {
 		{
 			name:   "equal values get tied (averaged) rank",
 			input:  []float64{1.0, 1.0, 1.0},
-			output: []float64{2.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0}, // avg of (1+2+3)/3 = 2/3
+			output: []float64{2.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0},
 		},
 		{
 			name:   "two distinct values",
@@ -136,7 +132,7 @@ func TestMultiFactorPercentileRank(t *testing.T) {
 		{
 			name:   "four values with ties at 20.0",
 			input:  []float64{10.0, 20.0, 20.0, 30.0},
-			output: []float64{0.25, 0.625, 0.625, 1.0}, // avg of 2/4+3/4 = 5/8 = 0.625
+			output: []float64{0.25, 0.625, 0.625, 1.0},
 		},
 	}
 
@@ -154,7 +150,6 @@ func TestMultiFactorPercentileRank(t *testing.T) {
 		})
 	}
 
-	// Empty input
 	if r := rankPercentile(nil); r != nil {
 		t.Errorf("expected nil for nil input, got %v", r)
 	}
@@ -171,9 +166,9 @@ func TestMultiFactorCompositeScore(t *testing.T) {
 		}{
 			Count: 3,
 			Results: []domain.ScreenResult{
-				{TsCode: "A", PE: &pe1, ROE: &roe1}, // best PE, best ROE
+				{TsCode: "A", PE: &pe1, ROE: &roe1},
 				{TsCode: "B", PE: &pe2, ROE: &roe2},
-				{TsCode: "C", PE: &pe3, ROE: &roe3}, // worst PE, worst ROE
+				{TsCode: "C", PE: &pe3, ROE: &roe3},
 			},
 		})
 	})
@@ -197,13 +192,10 @@ func TestMultiFactorCompositeScore(t *testing.T) {
 		return bars
 	}
 
-	// A: best fundamentals + highest momentum
-	// B: medium fundamentals + medium momentum
-	// C: worst fundamentals + lowest momentum
 	bars := map[string][]domain.OHLCV{
-		"A": makeBars("A", basePrice*1.10), // +10%
-		"B": makeBars("B", basePrice*1.05), // +5%
-		"C": makeBars("C", basePrice*1.01), // +1%
+		"A": makeBars("A", basePrice*1.10),
+		"B": makeBars("B", basePrice*1.05),
+		"C": makeBars("C", basePrice*1.01),
 	}
 
 	s := &multiFactorStrategy{
@@ -215,10 +207,9 @@ func TestMultiFactorCompositeScore(t *testing.T) {
 			TopN:               10,
 			RebalanceFrequency: "daily",
 		},
-		httpClient: httpClientFor(srv),
-		cacheLimit: 10,
+		httpClient:  httpClientFor(srv),
+		screenCache: strategy.NewScreenCache(10),
 	}
-	s.cache = sync.Map{}
 
 	portfolio := &domain.Portfolio{UpdatedAt: now, Positions: map[string]domain.Position{}}
 	signals, err := s.GenerateSignals(context.Background(), bars, portfolio)
@@ -230,7 +221,6 @@ func TestMultiFactorCompositeScore(t *testing.T) {
 		t.Fatal("expected at least one buy signal")
 	}
 
-	// A should be ranked first (best on all three factors)
 	if signals[0].Symbol != "A" {
 		t.Errorf("expected stock A to be ranked first, got %q (signals: %+v)", signals[0].Symbol, signals)
 	}
@@ -299,8 +289,6 @@ func TestMultiFactorTopN(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			bars := map[string][]domain.OHLCV{}
 			for i := 0; i < 10; i++ {
-				// S00 has highest PE (worst value) but highest ROE and highest momentum
-				// We'll assign momentum in reverse so best momentum aligns with best fundamentals
 				ret := 1.0 + float64(10-i)*0.01
 				bars[fmt.Sprintf("S%02d", i)] = makeBars(fmt.Sprintf("S%02d", i), basePrice*ret)
 			}
@@ -314,10 +302,9 @@ func TestMultiFactorTopN(t *testing.T) {
 					TopN:               tc.topN,
 					RebalanceFrequency: "daily",
 				},
-				httpClient: httpClientFor(srv),
-				cacheLimit: 10,
+				httpClient:  httpClientFor(srv),
+				screenCache: strategy.NewScreenCache(10),
 			}
-			s.cache = sync.Map{}
 
 			portfolio := &domain.Portfolio{UpdatedAt: now, Positions: map[string]domain.Position{}}
 			signals, err := s.GenerateSignals(context.Background(), bars, portfolio)
@@ -351,9 +338,9 @@ func TestMultiFactorZeroPE(t *testing.T) {
 		}{
 			Count: 3,
 			Results: []domain.ScreenResult{
-				{TsCode: "A", PE: &zeroPE, ROE: &roe},         // zero PE — should not crash
+				{TsCode: "A", PE: &zeroPE, ROE: &roe},
 				{TsCode: "B", PE: &positivePE, ROE: &roe},
-				{TsCode: "C", PE: nil, ROE: nil},               // nil PE — should not crash
+				{TsCode: "C", PE: nil, ROE: nil},
 			},
 		})
 	})
@@ -389,14 +376,12 @@ func TestMultiFactorZeroPE(t *testing.T) {
 			TopN:               10,
 			RebalanceFrequency: "daily",
 		},
-		httpClient: httpClientFor(srv),
-		cacheLimit: 10,
+		httpClient:  httpClientFor(srv),
+		screenCache: strategy.NewScreenCache(10),
 	}
-	s.cache = sync.Map{}
 
 	portfolio := &domain.Portfolio{UpdatedAt: now, Positions: map[string]domain.Position{}}
 
-	// Should not crash with zero/nil PE
 	_, err := s.GenerateSignals(context.Background(), bars, portfolio)
 	if err != nil {
 		t.Fatalf("GenerateSignals should not fail with zero/nil PE: %v", err)
@@ -451,14 +436,12 @@ func TestMultiFactorNilPEAndROE(t *testing.T) {
 			TopN:               2,
 			RebalanceFrequency: "daily",
 		},
-		httpClient: httpClientFor(srv),
-		cacheLimit: 10,
+		httpClient:  httpClientFor(srv),
+		screenCache: strategy.NewScreenCache(10),
 	}
-	s.cache = sync.Map{}
 
 	portfolio := &domain.Portfolio{UpdatedAt: now, Positions: map[string]domain.Position{}}
 
-	// Should not crash with all-nil fundamentals
 	_, err := s.GenerateSignals(context.Background(), bars, portfolio)
 	if err != nil {
 		t.Fatalf("GenerateSignals should not fail with nil PE/ROE: %v", err)
@@ -504,8 +487,8 @@ func TestMultiFactorAutoRegister(t *testing.T) {
 			TopN:               10,
 			RebalanceFrequency: "monthly",
 		},
-		httpClient: &http.Client{Timeout: 10 * time.Second},
-		cacheLimit: 30,
+		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		screenCache: strategy.NewScreenCache(30),
 	}
 	if err := strategy.GlobalRegister(s); err != nil {
 		t.Fatalf("failed to register multi_factor: %v", err)
@@ -566,10 +549,9 @@ func TestMultiFactorCache(t *testing.T) {
 			TopN:               10,
 			RebalanceFrequency: "daily",
 		},
-		httpClient: httpClientFor(srv),
-		cacheLimit: 10,
+		httpClient:  httpClientFor(srv),
+		screenCache: strategy.NewScreenCache(10),
 	}
-	s.cache = sync.Map{}
 
 	bars := map[string][]domain.OHLCV{"A": makeBars(), "B": makeBars()}
 	dateStr := now.Format("20060102")
@@ -583,13 +565,12 @@ func TestMultiFactorCache(t *testing.T) {
 		t.Errorf("first call: expected 1 request, got %d", reqCount)
 	}
 
-	cached, ok := s.cache.Load(dateStr)
+	cached, ok := s.screenCache.Get(dateStr)
 	if !ok {
 		t.Fatal("cache should be populated after first call")
 	}
-	results := cached.([]domain.ScreenResult)
-	if len(results) != 2 {
-		t.Errorf("expected 2 cached results, got %d", len(results))
+	if len(cached) != 2 {
+		t.Errorf("expected 2 cached results, got %d", len(cached))
 	}
 
 	_, err = s.GenerateSignals(context.Background(), bars, portfolio)
@@ -601,6 +582,5 @@ func TestMultiFactorCache(t *testing.T) {
 	}
 }
 
-// compile-time interface checks
 var _ strategy.Strategy = (*multiFactorStrategy)(nil)
 var _ strategy.Strategy = (*valueScreeningStrategy)(nil)

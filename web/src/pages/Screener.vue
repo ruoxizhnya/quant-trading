@@ -1,33 +1,53 @@
 <template>
   <div class="screener-page">
     <n-card title="🔍 选股器">
-      <n-form :model="form" inline label-placement="left" :label-width="90">
-        <n-form-item label="PE 上限">
-          <n-input-number v-model:value="form.peMax" placeholder="30" :min="0" style="width:100px" />
-        </n-form-item>
-        <n-form-item label="PB 上限">
-          <n-input-number v-model:value="form.pbMax" placeholder="3" :min="0" style="width:100px" />
-        </n-form-item>
-        <n-form-item label="ROE 下限 (%)">
-          <n-input-number v-model:value="form.roeMin" placeholder="10" style="width:100px" />
-        </n-form-item>
-        <n-form-item label="ROA 下限 (%)">
-          <n-input-number v-model:value="form.roaMin" placeholder="5" style="width:100px" />
-        </n-form-item>
-        <n-form-item label="毛利率 下限 (%)">
-          <n-input-number v-model:value="form.grossMarginMin" placeholder="30" style="width:100px" />
-        </n-form-item>
-        <n-form-item label="净利率 下限 (%)">
-          <n-input-number v-model:value="form.netMarginMin" placeholder="10" style="width:100px" />
-        </n-form-item>
-        <n-form-item label="市值 下限 (亿)">
-          <n-input-number v-model:value="form.marketCapMin" placeholder="100" :min="0" style="width:110px" />
-        </n-form-item>
-        <n-form-item label="最多返回">
-          <n-select v-model:value="form.limit" :options="limitOptions" style="width:100px" />
-        </n-form-item>
-        <n-button type="primary" :loading="loading" @click="runScreen">🔍 开始选股</n-button>
-        <n-button @click="resetForm">重置</n-button>
+      <n-form :model="form" label-placement="left" :label-width="100">
+        <n-grid :cols="4" :x-gap="16" :y-gap="16" responsive="screen">
+          <n-grid-item>
+            <n-form-item label="PE 上限">
+              <n-input-number v-model:value="form.peMax" placeholder="30" :min="0" style="width:100%" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="PB 上限">
+              <n-input-number v-model:value="form.pbMax" placeholder="3" :min="0" style="width:100%" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="ROE 下限 (%)">
+              <n-input-number v-model:value="form.roeMin" placeholder="10" style="width:100%" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="ROA 下限 (%)">
+              <n-input-number v-model:value="form.roaMin" placeholder="5" style="width:100%" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="毛利率 下限 (%)">
+              <n-input-number v-model:value="form.grossMarginMin" placeholder="30" style="width:100%" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="净利率 下限 (%)">
+              <n-input-number v-model:value="form.netMarginMin" placeholder="10" style="width:100%" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="市值 下限 (亿)">
+              <n-input-number v-model:value="form.marketCapMin" placeholder="100" :min="0" style="width:100%" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="最多返回">
+              <n-select v-model:value="form.limit" :options="limitOptions" style="width:100%" />
+            </n-form-item>
+          </n-grid-item>
+        </n-grid>
+        <n-space justify="end" style="margin-top: 16px;">
+          <n-button type="primary" :loading="loading" @click="runScreen">🔍 开始选股</n-button>
+          <n-button @click="resetForm">重置</n-button>
+        </n-space>
       </n-form>
     </n-card>
 
@@ -55,9 +75,9 @@
 import { ref, reactive, computed } from 'vue'
 import {
   NCard, NForm, NFormItem, NInputNumber, NSelect, NButton,
-  NDataTable, NEmpty, NTag, useMessage,
+  NDataTable, NEmpty, NTag, NSpace, NGrid, NGridItem, useMessage,
 } from 'naive-ui'
-import { doScreen } from '@/api/copilot'
+import { screenStocks } from '@/api/market'
 
 const message = useMessage()
 const loading = ref(false)
@@ -84,7 +104,7 @@ const limitOptions = [
 ]
 
 const columns = [
-  { title: '#', key: 'index', width: 50, render: (_: any, i: number) => i + 1 },
+  { title: '#', key: 'index', width: 50, render: (_row: unknown, i: number) => i + 1 },
   { title: '股票代码', key: 'symbol', width: 120 },
   { title: 'PE (TTM)', key: 'pe_ttm', width: 90 },
   { title: 'PB', key: 'pb', width: 80 },
@@ -117,11 +137,11 @@ async function runScreen() {
     if (form.marketCapMin != null) params.market_cap_min = form.marketCapMin
     params.limit = form.limit
 
-    const res = await doScreen(params)
+    const res = await screenStocks(params)
     results.value = res
     message.success(`找到 ${res.total} 只股票`)
-  } catch (e: any) {
-    message.error('选股失败: ' + e.message)
+  } catch (e: unknown) {
+    message.error('选股失败: ' + (e instanceof Error ? e.message : String(e)))
   } finally {
     loading.value = false
   }

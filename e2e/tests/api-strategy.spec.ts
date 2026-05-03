@@ -32,12 +32,11 @@ test.describe('Backend API — Strategy CRUD & Copilot', () => {
 
     // Without AI_API_KEY set, should get an error response
     const body = await res.json();
-    // Either 500 with error message about missing key, or success if key IS set
-    if (res.status() === 500) {
+    expect([200, 202, 500, 503]).toContain(res.status());
+    if (res.status() === 500 || res.status() === 503) {
       expect(body.error).toBeDefined();
-    } else if (res.status() === 200) {
-      expect(body.code).toBeDefined();
-      expect(body.strategy_name).toBeDefined();
+    } else if (res.status() === 200 || res.status() === 202) {
+      expect(body.code || body.job_id).toBeDefined();
     }
     await ctx.dispose();
   });

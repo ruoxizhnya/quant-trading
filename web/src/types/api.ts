@@ -139,3 +139,32 @@ export interface CopilotResponse {
   explanation: string
   strategy_name: string
 }
+
+export interface HistoryEntry {
+  id: string
+  strategy?: string
+  stock_pool?: string[]
+  start_date?: string
+  end_date?: string
+  total_return: number
+  sharpe_ratio?: number
+  max_drawdown?: number
+  created_at?: string
+  trades?: TradeDisplay[]
+}
+
+export interface TradeDisplay {
+  id: string
+  symbol: string
+  direction: string
+  timestamp: string
+  price: number | null
+  quantity: number | null
+  commission?: number
+  pnl?: number
+  pnl_pct?: number
+  entry_date?: string
+  exit_date?: string | null
+  entry_price?: number | null
+  exit_price?: number | null
+}

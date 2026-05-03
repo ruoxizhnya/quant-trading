@@ -2,14 +2,11 @@
 package plugins
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -18,12 +15,12 @@ import (
 
 // MultiFactorConfig holds configuration for the multi-factor strategy.
 type MultiFactorConfig struct {
-	ValueWeight      float64
-	QualityWeight    float64
-	MomentumWeight   float64
-	LookbackDays     int
+	ValueWeight        float64
+	QualityWeight      float64
+	MomentumWeight     float64
+	LookbackDays       int
 	RebalanceFrequency string
-	TopN             int
+	TopN               int
 }
 
 type rankedStock struct {
@@ -40,21 +37,17 @@ type multiFactorStrategy struct {
 	name   string
 	params MultiFactorConfig
 
-	httpClient *http.Client
+	httpClient     *http.Client
+	screenCache    *strategy.ScreenCache
+	dataServiceURL string
 
-	// Cache: date string -> screening results
-	cache      sync.Map
-	cacheLimit int
-
-	// L1 factor cache reader — set via SetFactorCache before backtest.
-	// When nil, falls back to HTTP-based real-time computation.
 	factorReader strategy.FactorZScoreReader
 }
 
 // Configure sets the strategy parameters.
 func (s *multiFactorStrategy) Configure(params map[string]any) error {
-	if s.cacheLimit == 0 {
-		s.cacheLimit = 30
+	if s.screenCache == nil {
+		s.screenCache = strategy.NewScreenCache(30)
 	}
 	if v, ok := params["value_weight"]; ok {
 		switch val := v.(type) {
@@ -120,10 +113,7 @@ func (s *multiFactorStrategy) Weight(signal strategy.Signal, portfolioValue floa
 
 // Cleanup releases resources (cache, HTTP client).
 func (s *multiFactorStrategy) Cleanup() {
-	s.cache.Range(func(key, value interface{}) bool {
-		s.cache.Delete(key)
-		return true
-	})
+	s.screenCache = nil
 	s.httpClient = nil
 	s.params = MultiFactorConfig{}
 	s.factorReader = nil
@@ -152,147 +142,62 @@ func (s *multiFactorStrategy) Parameters() []strategy.Parameter {
 	return []strategy.Parameter{
 		{
 			Name:        "value_weight",
-			Type:       "float",
+			Type:        "float",
 			Default:     0.4,
 			Description: "Weight for value score (1/PE), normalized",
-			Min:        0.0,
-			Max:        1.0,
+			Min:         0.0,
+			Max:         1.0,
 		},
 		{
 			Name:        "quality_weight",
-			Type:       "float",
+			Type:        "float",
 			Default:     0.3,
 			Description: "Weight for quality score (ROE), normalized",
-			Min:        0.0,
-			Max:        1.0,
+			Min:         0.0,
+			Max:         1.0,
 		},
 		{
 			Name:        "momentum_weight",
-			Type:       "float",
+			Type:        "float",
 			Default:     0.3,
 			Description: "Weight for momentum score (return), normalized",
-			Min:        0.0,
-			Max:        1.0,
+			Min:         0.0,
+			Max:         1.0,
 		},
 		{
 			Name:        "lookback_days",
-			Type:       "int",
+			Type:        "int",
 			Default:     60,
 			Description: "Number of days for momentum lookback",
-			Min:        5,
-			Max:        250,
+			Min:         5,
+			Max:         250,
 		},
 		{
 			Name:        "top_n",
-			Type:       "int",
+			Type:        "int",
 			Default:     10,
 			Description: "Number of top stocks to buy",
-			Min:        1,
-			Max:        50,
+			Min:         1,
+			Max:         50,
 		},
 		{
 			Name:        "rebalance_frequency",
-			Type:       "string",
+			Type:        "string",
 			Default:     "monthly",
 			Description: "Rebalance frequency: daily, weekly, monthly",
 		},
 	}
 }
 
-// isRebalanceDay checks if the given date is a rebalance day per the configured frequency.
-func (s *multiFactorStrategy) isRebalanceDay(date time.Time) bool {
-	switch s.params.RebalanceFrequency {
-	case "weekly":
-		if date.Weekday() == time.Monday {
-			return true
-		}
-		prevDay := date.AddDate(0, 0, -1)
-		if prevDay.Weekday() == time.Sunday && date.Weekday() == time.Tuesday {
-			return true
-		}
-		if prevDay.Weekday() == time.Saturday && date.Weekday() == time.Monday {
-			return true
-		}
-		return false
-	case "monthly":
-		if date.Day() == 1 {
-			return true
-		}
-		if date.Day() <= 3 {
-			prevDay := date.AddDate(0, 0, -1)
-			if prevDay.Month() != date.Month() {
-				return true
-			}
-		}
-		return false
-	case "daily", "":
-		return true
-	default:
-		return true
-	}
-}
-
 // callScreenAPI calls the /screen endpoint to get all stocks with fundamental data.
 // An empty filter set returns stocks that have any fundamental data recorded.
 func (s *multiFactorStrategy) callScreenAPI(dateStr string) ([]domain.ScreenResult, error) {
-	// Check cache first
-	if cached, ok := s.cache.Load(dateStr); ok {
-		return cached.([]domain.ScreenResult), nil
-	}
-
-	// Request with no filters to get all stocks with available fundamentals
-	reqBody := domain.ScreenRequest{
-		Filters: domain.ScreenFilters{}, // Empty = no PE/PB/ROE filters
+	req := domain.ScreenRequest{
+		Filters: domain.ScreenFilters{},
 		Date:    dateStr,
-		Limit:   2000, // Get a large universe for proper factor normalization
+		Limit:   2000,
 	}
-
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal screen request: %w", err)
-	}
-
-	url := "http://data-service:8081/screen"
-	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create screen request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.httpClient.Do(httpReq.WithContext(context.Background()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to call screen API: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("screen API returned status %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Count   int                   `json:"count"`
-		Results []domain.ScreenResult `json:"results"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode screen response: %w", err)
-	}
-
-	s.cache.Store(dateStr, result.Results)
-
-	// Simple cache eviction
-	count := 0
-	s.cache.Range(func(key, value any) bool {
-		count++
-		return true
-	})
-	if count > s.cacheLimit {
-		s.cache.Range(func(key, value any) bool {
-			s.cache.Delete(key)
-			return false
-		})
-	}
-
-	return result.Results, nil
+	return strategy.CallScreenAPI(s.httpClient, s.dataServiceURL, s.screenCache, req)
 }
 
 // rankPercentile sorts the input values and returns each element's percentile rank.
@@ -392,7 +297,7 @@ func (s *multiFactorStrategy) GenerateSignals(
 	screenDateStr := screenDate.Format("20060102")
 
 	// Check rebalance frequency
-	if !s.isRebalanceDay(screenDate) {
+	if !strategy.IsRebalanceDay(screenDate, s.params.RebalanceFrequency) {
 		sellSignals, err := s.generateSellSignals(bars, portfolio, lookback)
 		if err != nil {
 			return nil, fmt.Errorf("multi-factor sell signal generation failed: %w", err)
@@ -703,17 +608,18 @@ func (s *multiFactorStrategy) generateSellSignals(
 
 func init() {
 	s := &multiFactorStrategy{
-		name:   "multi_factor",
+		name: "multi_factor",
 		params: MultiFactorConfig{
-			ValueWeight:      0.4,
-			QualityWeight:    0.3,
-			MomentumWeight:   0.3,
-			LookbackDays:     60,
-			TopN:             10,
+			ValueWeight:        0.4,
+			QualityWeight:      0.3,
+			MomentumWeight:     0.3,
+			LookbackDays:       60,
+			TopN:               10,
 			RebalanceFrequency: "monthly",
 		},
-		httpClient: &http.Client{Timeout: 10 * time.Second},
-		cacheLimit: 30,
+		httpClient:     &http.Client{Timeout: 10 * time.Second},
+		screenCache:    strategy.NewScreenCache(30),
+		dataServiceURL: "http://data-service:8081",
 	}
 	strategy.GlobalRegister(s)
 }

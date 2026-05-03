@@ -179,6 +179,89 @@ func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Sign
 	}, nil
 }
 
+// CalculatePositionsBatch calculates position sizes for multiple signals in one pass.
+// This is more efficient than calling CalculatePosition for each signal individually
+// because it shares the regime-based weight calculation and avoids redundant lookups.
+func (rm *RiskManager) CalculatePositionsBatch(
+	ctx context.Context,
+	signals []domain.Signal,
+	portfolio *domain.Portfolio,
+	regime *domain.MarketRegime,
+	currentPrices map[string]float64,
+	ohlcvData map[string][]domain.OHLCV,
+) (map[string]domain.PositionSize, error) {
+	if len(signals) == 0 {
+		return nil, nil
+	}
+	if portfolio == nil || portfolio.TotalValue <= 0 {
+		return nil, errors.InvalidInput("portfolio must be non-nil with positive total value", "CalculatePositionsBatch")
+	}
+
+	baseWeight := rm.calculateBaseWeightFromRegime(regime)
+	precomputedATR, _ := rm.stopLossChecker.ATRFromOHLCV(ohlcvData)
+
+	results := make(map[string]domain.PositionSize, len(signals))
+
+	for _, signal := range signals {
+		if signal.Symbol == "" {
+			continue
+		}
+
+		weight := baseWeight * signal.Strength
+		if weight < rm.config.MinPositionWeight {
+			weight = rm.config.MinPositionWeight
+		}
+		if weight > rm.config.MaxPositionWeight {
+			weight = rm.config.MaxPositionWeight
+		}
+
+		currentPrice := currentPrices[signal.Symbol]
+		if currentPrice <= 0 {
+			currentPrice = 100.0
+		}
+		positionValue := portfolio.TotalValue * weight
+		size := math.Floor(positionValue / currentPrice)
+
+		riskScore := 1.0 - signal.CompositeScore
+
+		var stopLoss, takeProfit float64
+		ohlcv := ohlcvData[signal.Symbol]
+		atr := precomputedATR[signal.Symbol]
+		if atr > 0 {
+			stopLoss = rm.stopLossChecker.CalculateStopLossPrice(currentPrice, atr, regime)
+			takeProfit = rm.stopLossChecker.CalculateTakeProfitPrice(currentPrice, atr, regime)
+		} else if len(ohlcv) >= rm.config.ATRPeriod {
+			calculatedATR, err := rm.stopLossChecker.CalculateATR(ohlcv)
+			if err == nil && calculatedATR > 0 {
+				stopLoss = rm.stopLossChecker.CalculateStopLossPrice(currentPrice, calculatedATR, regime)
+				takeProfit = rm.stopLossChecker.CalculateTakeProfitPrice(currentPrice, calculatedATR, regime)
+			} else {
+				defaultATR := currentPrice * 0.02
+				stopLoss = rm.stopLossChecker.CalculateStopLossPrice(currentPrice, defaultATR, regime)
+				takeProfit = rm.stopLossChecker.CalculateTakeProfitPrice(currentPrice, defaultATR, regime)
+			}
+		} else {
+			defaultATR := currentPrice * 0.02
+			stopLoss = rm.stopLossChecker.CalculateStopLossPrice(currentPrice, defaultATR, regime)
+			takeProfit = rm.stopLossChecker.CalculateTakeProfitPrice(currentPrice, defaultATR, regime)
+		}
+
+		results[signal.Symbol] = domain.PositionSize{
+			Size:       size,
+			Weight:     weight,
+			StopLoss:   stopLoss,
+			TakeProfit: takeProfit,
+			RiskScore:  riskScore,
+		}
+	}
+
+	rm.logger.Debug().
+		Int("signals_processed", len(results)).
+		Msg("batch position sizing completed")
+
+	return results, nil
+}
+
 // calculateBaseWeightFromRegime calculates base weight based on market regime.
 func (rm *RiskManager) calculateBaseWeightFromRegime(regime *domain.MarketRegime) float64 {
 	base := rm.config.TargetVolatility // Start with target volatility as base
@@ -268,7 +351,7 @@ func (rm *RiskManager) CheckStopLoss(ctx context.Context, positions []domain.Pos
 	}
 
 	// Infer regime from positions (simplified)
-	regime := rm.inferRegimeFromMarket(positions, prices)
+	regime := InferRegimeFromMarket(positions, prices)
 
 	events, err := rm.stopLossChecker.CheckStopLossWithRegime(ctx, positions, prices, atrData, regime)
 	if err != nil {
@@ -283,8 +366,8 @@ func (rm *RiskManager) CheckStopLoss(ctx context.Context, positions []domain.Pos
 	return events, nil
 }
 
-// inferRegimeFromMarket infers market regime from position performance.
-func (rm *RiskManager) inferRegimeFromMarket(positions []domain.Position, prices map[string]float64) *domain.MarketRegime {
+// InferRegimeFromMarket infers market regime from position performance.
+func InferRegimeFromMarket(positions []domain.Position, prices map[string]float64) *domain.MarketRegime {
 	totalPnL := 0.0
 	count := 0
 	

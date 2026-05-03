@@ -77,13 +77,13 @@ test.describe('Stock Screener Page (Vue SPA)', () => {
     await page.waitForSelector('.screener-page', { timeout: 15000 });
 
     const apiCall = page.waitForResponse((res) =>
-      res.url().includes('/screen') && res.request().method() === 'POST'
+      res.url().includes('/api/screen') && res.request().method() === 'POST'
     );
 
     await page.locator('.n-button--primary-type').click();
 
     const response = await apiCall;
-    expect(response.status()).toBeDefined();
+    expect(response.status()).toBeLessThan(500);
   });
 
   test('empty state displays before search', async ({ page }) => {

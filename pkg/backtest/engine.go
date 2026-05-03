@@ -82,8 +82,9 @@ type Engine struct {
 	// HTTP client for non-market-data service communication (with retry)
 	httpClient *httpclient.Client
 
-	// Current backtest state
-	currentBacktest *BacktestState
+	// Active backtest states (supports concurrent backtests)
+	btMu      sync.RWMutex
+	backtests map[string]*BacktestState
 
 	// Logger
 	logger zerolog.Logger
@@ -193,16 +194,16 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 
 	// Set defaults
 	if config.InitialCapital == 0 {
-		config.InitialCapital = 1000000.0
+		config.InitialCapital = DefaultInitialCapital
 	}
 	if config.CommissionRate == 0 {
-		config.CommissionRate = 0.0003
+		config.CommissionRate = DefaultCommissionRate
 	}
 	if config.SlippageRate == 0 {
-		config.SlippageRate = 0.0001
+		config.SlippageRate = DefaultSlippageRate
 	}
 	if config.RiskFreeRate == 0 {
-		config.RiskFreeRate = 0.03
+		config.RiskFreeRate = DefaultRiskFreeRate
 	}
 
 	// Load trading rules from config, use defaults if not set
@@ -214,7 +215,7 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 	// If Seed is 0, math/rand is not used (no shuffle operations currently exist).
 	// Document the seed value used in test fixtures for reproducibility.
 	if config.Seed != 0 {
-		rand.Seed(config.Seed)
+		rand.New(rand.NewSource(config.Seed))
 	}
 
 	return &Engine{
@@ -291,9 +292,8 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 	// Pre-check: verify trading calendar has data for the requested date range
 	hasCalendar, err := e.checkCalendarExists(ctx, startDate, endDate)
 	if err != nil {
-		return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, "failed to check trading calendar", "RunBacktest")
-	}
-	if !hasCalendar {
+		e.logger.Warn().Err(err).Msg("Calendar check error, proceeding anyway")
+	} else if !hasCalendar {
 		return nil, apperrors.New(apperrors.ErrCodeInvalidInput, "trading calendar not synced, please run POST /sync/calendar first (with exchange 'SSE' or 'both')").WithOperation("RunBacktest")
 	}
 
@@ -351,9 +351,12 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 		targetPositions: make(map[string]*domain.TargetPosition),
 	}
 
-	e.mu.Lock()
-	e.currentBacktest = state
-	e.mu.Unlock()
+	e.btMu.Lock()
+	if e.backtests == nil {
+		e.backtests = make(map[string]*BacktestState)
+	}
+	e.backtests[backtestID] = state
+	e.btMu.Unlock()
 
 	// Run the backtest
 	result, err := e.runBacktestInternal(ctx, state)
@@ -411,10 +414,6 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 
 	logger.Info().Msg("Starting backtest")
 
-	// Warm the cache before running the backtest — pre-fetch all OHLCV data into
-	// the engine's in-memory cache (e.inMemoryOHLCV) via provider.BulkLoadOHLCV.
-	// After warm-up, getOHLCV serves from memory with zero latency,
-	// eliminating per-symbol-per-day HTTP/DB round-trips during the backtest loop.
 	warmCtx, warmCancel := context.WithTimeout(ctx, 2*time.Minute)
 	if err := e.warmCache(warmCtx, params.StockPool, params.StartDate, params.EndDate); err != nil {
 		warmCancel()
@@ -430,7 +429,6 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		logger.Info().Msg("Factor cache warm-up completed")
 	}
 
-	// Get trading days
 	tradingDays, err := e.getTradingDays(ctx, params.StartDate, params.EndDate)
 	if err != nil {
 		return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, "failed to get trading days", "RunBacktest")
@@ -442,34 +440,10 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 
 	logger.Info().Int("trading_days", len(tradingDays)).Msg("Retrieved trading days")
 
-	marketDataCache := make(map[string][]domain.OHLCV)
-	pricesCache := make(map[string]float64)
-	stockCache := make(map[string]domain.Stock)
+	ca := e.loadCorporateActions(ctx, params.StartDate, params.EndDate, logger)
 	prevCloseCache := make(map[string]float64)
+	var pricesCache map[string]float64
 
-	dividendsByDate := make(map[time.Time][]*domain.Dividend)
-	splitsByDate := make(map[time.Time][]*domain.Split)
-	e.mu.RLock()
-	store := e.store
-	e.mu.RUnlock()
-	if store != nil {
-		if divs, err := store.GetDividendsInRange(ctx, params.StartDate, params.EndDate); err == nil {
-			for _, d := range divs {
-				day := d.PayDate.Truncate(24 * time.Hour)
-				dividendsByDate[day] = append(dividendsByDate[day], d)
-			}
-			logger.Info().Int("dividend_events", len(divs)).Msg("Dividend data loaded")
-		}
-		if splits, err := store.GetSplitsInRange(ctx, params.StartDate, params.EndDate); err == nil {
-			for _, s := range splits {
-				day := s.TradeDate.Truncate(24 * time.Hour)
-				splitsByDate[day] = append(splitsByDate[day], s)
-			}
-			logger.Info().Int("split_events", len(splits)).Msg("Split data loaded")
-		}
-	}
-
-	// Run backtest for each trading day
 	for i, date := range tradingDays {
 		select {
 		case <-ctx.Done():
@@ -485,146 +459,11 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 				Msg("Processing day")
 		}
 
-		// Step 1: Get market data for all stocks in pool.
-		// Parallelism: when parallelWorkers > 1, each stock is fetched concurrently
-		// via a pool of N goroutines (workers). Each worker processes a private copy
-		// of the result maps; results are merged into the shared maps after all workers
-		// complete. This avoids shared-map mutation races entirely.
-		// When parallelWorkers <= 1, stocks are processed sequentially (original behavior).
-		// Thread-safety: workers use only local variables; no shared mutable state.
-		// Determinism: stocks are processed in a fixed order (sorted symbol list),
-		// and within each stock the data fetch is deterministic (same input → same output).
-		var stockWg sync.WaitGroup
-		workers := e.parallelWorkers
-		if workers <= 0 {
-			workers = 1
-		}
+		marketDataCache, pricesCache, _, updatedPrevClose := e.fetchMarketDataForDay(
+			ctx, params.StockPool, params, date, prevCloseCache, logger,
+		)
+		prevCloseCache = updatedPrevClose
 
-		// Partition stocks across workers using a channel.
-		type stockJob struct {
-			symbol    string
-			prevClose float64 // Previous close for price limit detection (0 = use ohlcv fallback)
-		}
-		type stockResult struct {
-			symbol    string
-			stock     domain.Stock
-			ohlcvData []domain.OHLCV
-			price     float64
-			prevClose float64 // Previous close to store for next day's computation
-			limitUp   bool
-			limitDown bool
-			err       error
-		}
-		jobCh := make(chan stockJob, len(params.StockPool))
-		resultCh := make(chan stockResult, len(params.StockPool))
-
-		// Launch N workers. Workers process jobs from jobCh and send results to resultCh.
-		// No shared mutable state in workers — each worker has only local variables.
-		for w := 0; w < workers; w++ {
-			stockWg.Add(1)
-			go func() {
-				defer stockWg.Done()
-				for job := range jobCh {
-					res := stockResult{symbol: job.symbol}
-
-					// --- getStock ---
-					if stock, err := e.getStock(ctx, job.symbol); err == nil {
-						res.stock = stock
-					}
-
-					// --- getOHLCV ---
-					ohlcvData, err := e.getOHLCV(ctx, job.symbol, params.StartDate, date)
-					if err != nil {
-						res.err = apperrors.Wrapf(err, apperrors.ErrCodeDataQuality, "fetch_ohlcv", "symbol %s failed to fetch OHLCV", job.symbol)
-						resultCh <- res
-						continue
-					}
-					res.ohlcvData = ohlcvData
-
-					// --- price limit detection (fully local; uses prevClose from job) ---
-					limitUp, limitDown := false, false
-					limitPrice := 0.0
-					tradeDays := 0
-					stockName := res.stock.Name
-					if !res.stock.ListDate.IsZero() {
-						tradeDays = int(date.Sub(res.stock.ListDate).Hours() / 24 / 7 * 5)
-					}
-					prevClose := job.prevClose
-					if len(ohlcvData) >= 2 {
-						if prevClose <= 0 {
-							prevClose = ohlcvData[len(ohlcvData)-2].Close
-						}
-						if prevClose > 0 {
-							limitRate := e.config.Trading.PriceLimit.Normal
-							if tradeDays < e.config.Trading.NewStockDays {
-								limitRate = e.config.Trading.PriceLimit.New
-							} else if hasSTPrefix(stockName) {
-								limitRate = e.config.Trading.PriceLimit.ST
-							}
-							todayBar := ohlcvData[len(ohlcvData)-1]
-							upperLimit := prevClose * (1 + limitRate)
-							lowerLimit := prevClose * (1 - limitRate)
-							limitUp = todayBar.Close >= upperLimit
-							limitDown = todayBar.Close <= lowerLimit
-							if limitUp {
-								limitPrice = upperLimit
-							} else if limitDown {
-								limitPrice = lowerLimit
-							}
-							todayBar.LimitUp = limitUp
-							todayBar.LimitDown = limitDown
-							ohlcvData[len(ohlcvData)-1] = todayBar
-							res.ohlcvData = ohlcvData
-							// The prevClose for next day is today's close (or limit price)
-							if limitUp || limitDown {
-								res.prevClose = todayBar.Close
-							} else {
-								res.prevClose = ohlcvData[len(ohlcvData)-1].Close
-							}
-						}
-					}
-
-					// --- prices ---
-					if len(ohlcvData) > 0 {
-						if limitPrice > 0 {
-							res.price = limitPrice
-						} else {
-							res.price = ohlcvData[len(ohlcvData)-1].Close
-						}
-					}
-					res.limitUp = limitUp
-					res.limitDown = limitDown
-
-					resultCh <- res
-				}
-			}()
-		}
-		// Feed jobs to workers (prevClose from prevCloseCache for each symbol).
-		for _, s := range params.StockPool {
-			jobCh <- stockJob{symbol: s, prevClose: prevCloseCache[s]}
-		}
-		close(jobCh)
-
-		// Collect results — runs in the main goroutine sequentially.
-		// prevCloseCache updates happen here only, avoiding any concurrent map access.
-		for i := 0; i < len(params.StockPool); i++ {
-			res := <-resultCh
-			if res.err != nil {
-				logger.Warn().Err(res.err).Msg("Failed to get stock data")
-				continue
-			}
-			stockCache[res.symbol] = res.stock
-			marketDataCache[res.symbol] = res.ohlcvData
-			if res.price > 0 {
-				pricesCache[res.symbol] = res.price
-			}
-			if res.prevClose > 0 {
-				prevCloseCache[res.symbol] = res.prevClose
-			}
-		}
-		stockWg.Wait()
-
-		// Step 2: Detect market regime
 		regime, err := e.detectRegime(ctx, marketDataCache)
 		if err != nil {
 			logger.Warn().Err(err).Msg("Failed to detect market regime, using default")
@@ -636,284 +475,23 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 			}
 		}
 
-		// Step 3: Get signals from strategy service
 		signals, err := e.getSignals(ctx, params.StrategyName, params.StockPool, marketDataCache, date, state.Tracker)
 		if err != nil {
 			logger.Warn().
 				Time("date", date).
 				Err(err).
 				Msg("Failed to get signals, skipping day")
-			// Continue with existing positions only
 		}
 
-		// Step 4: Process signals and execute trades
-		for _, signal := range signals {
-			if signal.Date.Before(date) {
-				// Signal generated before this day, skip
-				continue
-			}
+		e.processSignalsAndExecuteTrades(ctx, state, signals, marketDataCache, pricesCache, regime, date, logger)
 
-			// Get today's OHLCV bar (used for limit checks and order execution)
-			var todayBar *domain.OHLCV
-			if ohlcvData, ok := marketDataCache[signal.Symbol]; ok && len(ohlcvData) > 0 {
-				todayBar = &ohlcvData[len(ohlcvData)-1]
-				// Enforce price limit: reject buys on limit-up days, sells on limit-down days
-				if todayBar.LimitUp && (signal.Direction == domain.DirectionLong || signal.Direction == domain.DirectionShort) {
-					logger.Info().
-						Str("symbol", signal.Symbol).
-						Str("direction", string(signal.Direction)).
-						Time("date", date).
-						Msg("Trade blocked: stock hit limit-up (涨停), cannot buy")
-					continue
-				}
-				if todayBar.LimitDown && signal.Direction == domain.DirectionClose {
-					logger.Info().
-						Str("symbol", signal.Symbol).
-						Time("date", date).
-						Msg("Trade blocked: stock hit limit-down (跌停), cannot sell")
-					continue
-				}
-			}
+		e.processStopLosses(state, pricesCache, marketDataCache, date, logger)
 
-			// Build order execution options from signal
-			execOpts := &OrderExecutionOpts{
-				OrderType:  signal.OrderType,
-				LimitPrice: signal.LimitPrice,
-				DayBar:     todayBar,
-			}
+		e.processCorporateActions(state, ca, date, logger)
 
-			// Calculate position size
-			portfolio := state.Tracker.GetPortfolio(pricesCache)
-			currentPrice := pricesCache[signal.Symbol]
-			positionSize, err := e.calculatePosition(ctx, signal, portfolio, regime, currentPrice)
-			if err != nil {
-				logger.Warn().
-					Str("symbol", signal.Symbol).
-					Err(err).
-					Msg("Failed to calculate position size")
-				continue
-			}
-
-			// Target/Actual Position Separation:
-			// Compute effective target by netting pending qty from prior unfilled signals
-			targetQty := positionSize.Size
-			if targetQty <= 0 {
-				continue
-			}
-
-			// Get or create target position record
-			tp, exists := state.targetPositions[signal.Symbol]
-			if !exists {
-				tp = &domain.TargetPosition{
-					Symbol:      signal.Symbol,
-					TargetQty:   0,
-					ActualQty:   0,
-					PendingQty:  0,
-					LastUpdated: date,
-				}
-				state.targetPositions[signal.Symbol] = tp
-			}
-
-			// Compute effective target: reduce by what we already own (ActualQty).
-			// PendingQty represents unfilled shares from a PRIOR signal — it should NOT
-			// reduce a NEW signal's target, as each day's signal is an independent decision.
-			// e.g., Day1 target=1000, fill=300, pending=700. Day2 target=2000.
-			// Correct: buy 2000-300=1700 (not 2000-700=1300, which would leave us 700 short
-			// of the new target and compound the shortfall across days).
-			effectiveTarget := targetQty
-			if tp.PendingQty > 0 && (signal.Direction == domain.DirectionLong || signal.Direction == domain.DirectionShort) {
-				// Reduce new target by what we already own (ActualQty), floor at 0
-				if tp.ActualQty >= targetQty {
-					effectiveTarget = 0
-				} else {
-					effectiveTarget = targetQty - tp.ActualQty
-				}
-				if effectiveTarget <= 0 {
-					logger.Info().
-						Str("symbol", signal.Symbol).
-						Float64("actual_qty", tp.ActualQty).
-						Float64("pending_qty", tp.PendingQty).
-						Float64("new_target", targetQty).
-						Time("date", date).
-						Msg("Signal skipped: already at or above target")
-					continue
-				}
-				if effectiveTarget < targetQty {
-					logger.Info().
-						Str("symbol", signal.Symbol).
-						Float64("actual_qty", tp.ActualQty).
-						Float64("pending_qty", tp.PendingQty).
-						Float64("new_target", targetQty).
-						Float64("effective_target", effectiveTarget).
-						Time("date", date).
-						Msg("Adjusted target: netting actual owned qty")
-				}
-			}
-
-			// Update target position with new target
-			tp.TargetQty = targetQty
-			tp.LastUpdated = date
-
-			// Execute trade if effective target > 0
-			if effectiveTarget > 0 {
-				price := pricesCache[signal.Symbol]
-				if price <= 0 {
-					continue
-				}
-
-				var trade *domain.Trade
-				switch signal.Direction {
-				case domain.DirectionLong:
-					trade, err = state.Tracker.ExecuteTrade(
-						signal.Symbol,
-						domain.DirectionLong,
-						effectiveTarget,
-						price,
-						date,
-						execOpts,
-					)
-					if err != nil {
-						logger.Warn().
-							Str("symbol", signal.Symbol).
-							Err(err).
-							Msg("Failed to execute long trade")
-						// Record unfilled qty as pending
-						tp.PendingQty = targetQty - tp.ActualQty
-						tp.LastUpdated = date
-						continue
-					}
-
-				case domain.DirectionShort:
-					trade, err = state.Tracker.ExecuteTrade(
-						signal.Symbol,
-						domain.DirectionShort,
-						effectiveTarget,
-						price,
-						date,
-						execOpts,
-					)
-					if err != nil {
-						logger.Warn().
-							Str("symbol", signal.Symbol).
-							Err(err).
-							Msg("Failed to execute short trade")
-						tp.PendingQty = targetQty - tp.ActualQty
-						tp.LastUpdated = date
-						continue
-					}
-
-				case domain.DirectionClose:
-					trade, err = state.Tracker.ClosePosition(signal.Symbol, price, date)
-					if err != nil {
-						logger.Warn().
-							Str("symbol", signal.Symbol).
-							Err(err).
-							Msg("Failed to close position")
-						// Don't modify tp on failure — leave it for retry or manual intervention
-						continue
-					}
-					// Close succeeded: position is deleted from t.positions.
-					// Clear tp fields and delete from state.targetPositions.
-					tp.PendingQty = 0
-					tp.TargetQty = 0
-					tp.ActualQty = 0
-					tp.LastUpdated = date
-					trade.PendingQty = 0
-					delete(state.targetPositions, signal.Symbol)
-					continue
-
-				case domain.DirectionHold:
-					// No action needed
-					continue
-				}
-
-				// Update target vs actual gap after trade execution
-				if trade != nil {
-					// Track how much of the target was actually filled
-					if signal.Direction == domain.DirectionLong || signal.Direction == domain.DirectionShort {
-						// For opening positions: actual is the qty that was filled
-						tp.ActualQty += trade.Quantity
-						// Pending = target - actual (what wasn't filled)
-						tp.PendingQty = tp.TargetQty - tp.ActualQty
-						// Record pending qty in the trade for visibility
-						trade.PendingQty = tp.PendingQty
-						if tp.PendingQty > 0 {
-							logger.Info().
-								Str("symbol", signal.Symbol).
-								Float64("target_qty", tp.TargetQty).
-								Float64("actual_qty", tp.ActualQty).
-								Float64("pending_qty", tp.PendingQty).
-								Time("date", date).
-								Msg("Partial fill: target vs actual gap recorded")
-						}
-					} else if signal.Direction == domain.DirectionClose {
-						// Closing resolves any pending buy qty — we're no longer trying to buy
-						tp.PendingQty = 0
-						tp.TargetQty = 0
-						tp.ActualQty = 0
-						trade.PendingQty = 0
-					}
-					tp.LastUpdated = date
-
-					// If pending is resolved, clean up the target position
-					if tp.PendingQty <= 0 && tp.TargetQty <= 0 {
-						delete(state.targetPositions, signal.Symbol)
-					}
-				}
-			}
-		}
-
-		// Step 5: Check stop losses
-		stopLossEvents, err := e.checkStopLosses(ctx, state.Tracker, pricesCache)
-		if err != nil {
-			logger.Warn().Err(err).Msg("Failed to check stop losses")
-		}
-
-		// Execute stop loss trades
-		for _, event := range stopLossEvents {
-			if event.Type == "stop_loss" || event.Type == "take_profit" {
-				_, err := state.Tracker.ExecuteTrade(
-					event.Symbol,
-					domain.DirectionClose,
-					event.Quantity,
-					event.Price,
-					date,
-					nil,
-				)
-				if err != nil {
-					logger.Warn().
-						Str("symbol", event.Symbol).
-						Str("type", event.Type).
-						Err(err).
-						Msg("Failed to execute stop loss")
-				}
-			}
-		}
-
-		truncatedDate := date.Truncate(24 * time.Hour)
-		if divs, ok := dividendsByDate[truncatedDate]; ok {
-			for _, d := range divs {
-				if err := state.Tracker.ProcessDividend(d.Symbol, *d); err != nil {
-					logger.Warn().Str("symbol", d.Symbol).Err(err).Msg("Failed to process dividend")
-				}
-			}
-		}
-		if splits, ok := splitsByDate[truncatedDate]; ok {
-			for _, s := range splits {
-				if err := state.Tracker.ProcessSplit(s.Symbol, *s); err != nil {
-					logger.Warn().Str("symbol", s.Symbol).Err(err).Msg("Failed to process split")
-				}
-			}
-		}
-
-		// Step 6: Record daily portfolio value
 		state.Tracker.RecordDailyValue(date, pricesCache)
-
-		// Step 7: Advance day for T+1 settlement (shift QuantityToday → QuantityYesterday)
 		state.Tracker.AdvanceDay(date)
 
-		// Step 8: Update prevCloseCache for price limit calculation on next trading day
-		// If a stock hit limit-up today, the "previous close" for tomorrow is the limit price
 		for _, symbol := range params.StockPool {
 			if ohlcvData, ok := marketDataCache[symbol]; ok && len(ohlcvData) > 0 {
 				todayBar := ohlcvData[len(ohlcvData)-1]
@@ -926,51 +504,11 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		}
 	}
 
-	// Force close all remaining positions at end of backtest
-	// This ensures we capture exit trades for PnL calculation and complete trade records
 	lastTradingDay := tradingDays[len(tradingDays)-1]
-	for symbol, pos := range state.Tracker.GetAllPositions() {
-		if abs(pos.Quantity) > 1e-8 {
-			price, priceExists := pricesCache[symbol]
-			if !priceExists {
-				logger.Warn().
-					Str("symbol", symbol).
-					Float64("qty", pos.Quantity).
-					Time("date", lastTradingDay).
-					Msg("Skipping force close: no price data for symbol at backtest end")
-				continue
-			}
-			if price <= 0 {
-				logger.Warn().
-					Str("symbol", symbol).
-					Float64("price", price).
-					Float64("qty", pos.Quantity).
-					Time("date", lastTradingDay).
-					Msg("Skipping force close: invalid price (<= 0) for symbol at backtest end")
-				continue
-			}
-			closeTrade, err := state.Tracker.ClosePosition(symbol, price, lastTradingDay)
-			if err != nil {
-				logger.Warn().
-					Str("symbol", symbol).
-					Err(err).
-					Time("date", lastTradingDay).
-					Msg("Failed to force close position at backtest end")
-			} else if closeTrade != nil {
-				logger.Info().
-					Str("symbol", symbol).
-					Float64("qty", closeTrade.Quantity).
-					Float64("price", closeTrade.Price).
-					Time("date", lastTradingDay).
-					Msg("Force closed position at backtest end")
-			}
-		}
-	}
+	e.forceCloseAllPositions(state, pricesCache, lastTradingDay, logger)
 
-	// Record final portfolio value after forced closing
 	state.Tracker.RecordDailyValue(lastTradingDay, pricesCache)
 
-	// Generate final results
 	portfolioValues := state.Tracker.GetPortfolioValues()
 	trades := state.Tracker.GetTrades()
 
@@ -995,7 +533,25 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 
 // checkCalendarExists verifies the trading calendar has entries for the given range.
 func (e *Engine) checkCalendarExists(ctx context.Context, start, end time.Time) (bool, error) {
-	return e.effectiveProvider().CheckCalendarExists(ctx, start, end)
+	e.mu.RLock()
+	store := e.store
+	e.mu.RUnlock()
+
+	if store != nil {
+		days, err := store.GetTradingDates(ctx, start, end)
+		if err != nil {
+			e.logger.Warn().Err(err).Msg("Store calendar check failed, falling back to provider")
+		} else {
+			return len(days) > 0, nil
+		}
+	}
+
+	ok, err := e.effectiveProvider().CheckCalendarExists(ctx, start, end)
+	if err != nil {
+		e.logger.Warn().Err(err).Msg("Provider calendar check failed")
+		return false, nil
+	}
+	return ok, nil
 }
 
 // warmCache pre-fetches all OHLCV data for the stock universe into the L1
@@ -1324,6 +880,35 @@ func (e *Engine) calculatePosition(ctx context.Context, signal domain.Signal, po
 	return positionSize, nil
 }
 
+// calculatePositionsBatch calculates position sizes for multiple signals at once.
+// Uses the RiskManager's batch method when available for better performance.
+func (e *Engine) calculatePositionsBatch(
+	ctx context.Context,
+	signals []domain.Signal,
+	portfolio *domain.Portfolio,
+	regime *domain.MarketRegime,
+	pricesCache map[string]float64,
+	marketDataCache map[string][]domain.OHLCV,
+) (map[string]domain.PositionSize, error) {
+	e.mu.RLock()
+	rm := e.riskManager
+	e.mu.RUnlock()
+
+	if rm != nil {
+		return rm.CalculatePositionsBatch(ctx, signals, portfolio, regime, pricesCache, marketDataCache)
+	}
+
+	results := make(map[string]domain.PositionSize, len(signals))
+	for _, sig := range signals {
+		ps, err := e.calculatePosition(ctx, sig, portfolio, regime, pricesCache[sig.Symbol])
+		if err != nil {
+			continue
+		}
+		results[sig.Symbol] = ps
+	}
+	return results, nil
+}
+
 // checkStopLosses checks and triggers stop losses using risk service.
 // When an in-process RiskManager is set (via SetRiskManager), computes locally
 // without HTTP calls. Otherwise falls back to the external risk-service.
@@ -1382,13 +967,41 @@ func (e *Engine) checkStopLosses(ctx context.Context, tracker *Tracker, prices m
 	return events.Events, nil
 }
 
-// GetBacktestResult retrieves the result of a completed backtest.
-func (e *Engine) GetBacktestResult(backtestID string) (*domain.BacktestResult, error) {
+// checkStopLossesWithATR checks stop losses using pre-computed ATR data.
+// This avoids redundant ATR calculation inside the stop loss checker.
+func (e *Engine) checkStopLossesWithATR(ctx context.Context, tracker *Tracker, prices map[string]float64, precomputedATR map[string]float64) ([]domain.StopLossEvent, error) {
+	positions := tracker.GetAllPositions()
+	if len(positions) == 0 {
+		return nil, nil
+	}
+
 	e.mu.RLock()
-	state := e.currentBacktest
+	rm := e.riskManager
 	e.mu.RUnlock()
 
-	if state == nil || state.ID != backtestID {
+	if rm != nil {
+		var positionsList []domain.Position
+		for _, pos := range positions {
+			positionsList = append(positionsList, pos)
+		}
+		regime := risk.InferRegimeFromMarket(positionsList, prices)
+		events, err := rm.GetStopLossChecker().CheckStopLossWithRegime(ctx, positionsList, prices, precomputedATR, regime)
+		if err != nil {
+			return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, "in-process stop loss check with ATR failed", "checkStopLossesWithATR")
+		}
+		return events, nil
+	}
+
+	return e.checkStopLosses(ctx, tracker, prices)
+}
+
+// GetBacktestResult retrieves the result of a completed backtest.
+func (e *Engine) GetBacktestResult(backtestID string) (*domain.BacktestResult, error) {
+	e.btMu.RLock()
+	state := e.backtests[backtestID]
+	e.btMu.RUnlock()
+
+	if state == nil {
 		return nil, apperrors.NotFound("backtest", backtestID)
 	}
 
@@ -1401,11 +1014,11 @@ func (e *Engine) GetBacktestResult(backtestID string) (*domain.BacktestResult, e
 
 // GetBacktestTrades retrieves trades for a backtest.
 func (e *Engine) GetBacktestTrades(backtestID string) ([]domain.Trade, error) {
-	e.mu.RLock()
-	state := e.currentBacktest
-	e.mu.RUnlock()
+	e.btMu.RLock()
+	state := e.backtests[backtestID]
+	e.btMu.RUnlock()
 
-	if state == nil || state.ID != backtestID {
+	if state == nil {
 		return nil, apperrors.NotFound("backtest", backtestID)
 	}
 
@@ -1414,11 +1027,11 @@ func (e *Engine) GetBacktestTrades(backtestID string) ([]domain.Trade, error) {
 
 // GetBacktestEquity retrieves equity curve for a backtest.
 func (e *Engine) GetBacktestEquity(backtestID string) ([]domain.PortfolioValue, error) {
-	e.mu.RLock()
-	state := e.currentBacktest
-	e.mu.RUnlock()
+	e.btMu.RLock()
+	state := e.backtests[backtestID]
+	e.btMu.RUnlock()
 
-	if state == nil || state.ID != backtestID {
+	if state == nil {
 		return nil, apperrors.NotFound("backtest", backtestID)
 	}
 
@@ -1427,15 +1040,27 @@ func (e *Engine) GetBacktestEquity(backtestID string) ([]domain.PortfolioValue, 
 
 // GetBacktestStatus returns the status of a backtest.
 func (e *Engine) GetBacktestStatus(backtestID string) (string, error) {
-	e.mu.RLock()
-	state := e.currentBacktest
-	e.mu.RUnlock()
+	e.btMu.RLock()
+	state := e.backtests[backtestID]
+	e.btMu.RUnlock()
 
-	if state == nil || state.ID != backtestID {
+	if state == nil {
 		return "", apperrors.NotFound("backtest", backtestID)
 	}
 
 	return state.Status, nil
+}
+
+func (e *Engine) GetBacktestParams(backtestID string) (domain.BacktestParams, error) {
+	e.btMu.RLock()
+	state := e.backtests[backtestID]
+	e.btMu.RUnlock()
+
+	if state == nil {
+		return domain.BacktestParams{}, apperrors.NotFound("backtest", backtestID)
+	}
+
+	return state.Params, nil
 }
 
 // LoadOHLCVInMemory directly populates the L1 in-memory OHLCV cache.

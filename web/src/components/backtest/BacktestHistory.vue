@@ -80,38 +80,7 @@
 import { computed } from 'vue'
 import { NCard, NCollapse, NCollapseItem, NTable, NTag, NSpace, NButton, NEmpty } from 'naive-ui'
 import { fmtPercent, fmtNumber, formatDate } from '@/utils/format'
-
-// Use a minimal interface that matches what the store actually provides
-interface HistoryEntry {
-  id: string
-  strategy?: string
-  stock_pool?: string[]
-  start_date?: string
-  end_date?: string
-  total_return: number
-  sharpe_ratio: number
-  max_drawdown: number
-  created_at?: string
-  trades?: TradeInfo[]
-}
-
-interface TradeInfo {
-  id: string
-  symbol: string
-  direction: string
-  timestamp: string       // backend field name (required)
-  price: number | null    // backend field name (execution price, required)
-  quantity: number | null
-  commission?: number
-  pnl?: number
-  pnl_pct?: number
-
-  // Display aliases (computed from above)
-  entry_date?: string
-  exit_date?: string | null
-  entry_price?: number | null
-  exit_price?: number | null
-}
+import type { HistoryEntry, TradeDisplay } from '@/types/api'
 
 const props = defineProps<{
   history: HistoryEntry[]
@@ -127,12 +96,11 @@ const validHistory = computed(() =>
 )
 
 // Build trade lookup map by result ID
-const itemTrades = computed<Record<string, TradeInfo[]>>(() => {
-  const map: Record<string, TradeInfo[]> = {}
+const itemTrades = computed<Record<string, TradeDisplay[]>>(() => {
+  const map: Record<string, TradeDisplay[]> = {}
   for (const item of props.history || []) {
     if (item && item.id && item.trades?.length) {
       map[item.id] = item.trades
-      console.log(`[BacktestHistory] Item ${item.id}: ${item.trades.length} trades, symbols:`, [...new Set(item.trades.map(t => t.symbol))])
     }
   }
   return map
@@ -145,8 +113,8 @@ function itemTitle(item: HistoryEntry): string {
 
 function itemDesc(item: HistoryEntry): string {
   const ret = fmtPercent(item.total_return)
-  const sharpe = (item.sharpe_ratio != null && !isNaN(item.sharpe_ratio)) ? item.sharpe_ratio.toFixed(2) : '-'
-  const dd = (item.max_drawdown != null && !isNaN(item.max_drawdown)) ? (item.max_drawdown * 100).toFixed(2) + '%' : '-'
+  const sharpe = fmtNumber(item.sharpe_ratio, 2)
+  const dd = fmtPercent(item.max_drawdown)
   let desc = `夏普: ${sharpe} | 最大回撤: ${dd}`
   if (item.created_at) {
     try {
@@ -168,20 +136,7 @@ function directionLabel(dir: string): string {
   }
 }
 
-function formatDate(d: string | null): string {
-  if (!d) return '-'
-  try {
-    const date = new Date(d)
-    return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-  } catch {
-    return d.slice(0, 10)
-  }
-}
 
-function formatPrice(p: number | null): string {
-  if (p == null) return '-'
-  return p.toFixed(2)
-}
 </script>
 
 <style scoped>

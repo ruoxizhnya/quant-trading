@@ -1,42 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { BacktestResult, BacktestJob, Trade } from '@/types/api'
+import type { BacktestResult, BacktestJob, Trade, HistoryEntry, TradeDisplay } from '@/types/api'
 import { listBacktestJobs } from '@/api/backtest'
 
 const MAX_HISTORY = 20
 const STORAGE_KEY = 'qbh'
 
-// HistoryItem is a minimal type for history list display (reduces localStorage size)
-interface HistoryItem {
-  id: string
-  strategy?: string
-  stock_pool?: string[]
-  start_date?: string
-  end_date?: string
-  total_return: number
-  sharpe_ratio: number
-  max_drawdown: number
-  created_at?: string
-}
-
-// TradeInfo stored separately in memory (too large for localStorage)
-interface TradeInfo {
-  id: string
-  symbol: string
-  direction: string
-  timestamp: string       // backend field name (required)
-  price: number | null    // backend field name (execution price, required)
-  quantity: number | null
-  commission?: number
-
-  // Display aliases (computed from backend fields)
-  entry_date?: string
-  exit_date?: string | null
-  entry_price?: number | null
-  exit_price?: number | null
-  pnl?: number
-  pnl_pct?: number
-}
+type HistoryItem = HistoryEntry
 
 function safeSerialize(obj: HistoryItem[]): string {
   try {
@@ -91,7 +61,7 @@ export const useBacktestStore = defineStore('backtest', () => {
   const loading = ref(false)
 
   // In-memory trade cache keyed by result ID (not persisted to localStorage)
-  const tradesMap = ref<Map<string, TradeInfo[]>>(new Map())
+  const tradesMap = ref<Map<string, TradeDisplay[]>>(new Map())
 
   function addToHistory(result: BacktestResult) {
     if (!result || !result.id) return
@@ -106,7 +76,7 @@ export const useBacktestStore = defineStore('backtest', () => {
 
     // Store trades in memory (map backend field names to display format)
     if (result.trades?.length) {
-      tradesMap.value.set(result.id, result.trades.map(t => ({
+      tradesMap.value.set(result.id, result.trades.map((t: Trade): TradeDisplay => ({
         id: t.id,
         symbol: t.symbol,
         direction: t.direction,
@@ -166,7 +136,7 @@ export const useBacktestStore = defineStore('backtest', () => {
 
         // Always load trades from job result if available (ensures fresh data)
         if (job.result?.trades?.length) {
-          tradesMap.value.set(job.id, job.result.trades.map((t: Trade): TradeInfo => ({
+          tradesMap.value.set(job.id, job.result.trades.map((t: Trade): TradeDisplay => ({
             id: t.id,
             symbol: t.symbol,
             direction: t.direction,

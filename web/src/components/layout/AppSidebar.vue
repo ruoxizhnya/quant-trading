@@ -36,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, markRaw } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   HomeOutline,
@@ -58,11 +58,11 @@ function isActive(path: string): boolean {
 }
 
 const navItems = [
-  { path: '/', label: '控制台', icon: HomeOutline },
-  { path: '/backtest', label: '回测引擎', icon: AnalyticsOutline },
-  { path: '/screener', label: '选股器', icon: SearchOutline },
-  { path: '/copilot', label: '策略 Copilot', icon: ChatbubbleEllipsesOutline },
-  { path: '/strategy-lab', label: '策略实验室', icon: BeakerOutline },
+  { path: '/', label: '控制台', icon: markRaw(HomeOutline) },
+  { path: '/backtest', label: '回测引擎', icon: markRaw(AnalyticsOutline) },
+  { path: '/screener', label: '选股器', icon: markRaw(SearchOutline) },
+  { path: '/copilot', label: '策略 Copilot', icon: markRaw(ChatbubbleEllipsesOutline) },
+  { path: '/strategy-lab', label: '策略实验室', icon: markRaw(BeakerOutline) },
 ]
 </script>
 

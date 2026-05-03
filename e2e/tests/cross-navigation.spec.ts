@@ -31,7 +31,6 @@ test.describe('Cross-page Navigation & Integration (Vue SPA)', () => {
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForSelector('.nav-tile', { timeout: 15000 });
-    await page.waitForTimeout(500);
 
     const tiles = page.locator('.nav-tile');
     const count = await tiles.count();
@@ -73,8 +72,7 @@ test.describe('Cross-page Navigation & Integration (Vue SPA)', () => {
 
     for (const url of ['/', '/screener', '/copilot']) {
       await page.goto(url);
-      await page.waitForLoadState('domcontentloaded');
-      await page.waitForTimeout(3000);
+      await page.waitForLoadState('networkidle');
     }
 
     const criticalErrors = errors.filter(e =>
@@ -118,12 +116,12 @@ test.describe('Cross-page Navigation & Integration (Vue SPA)', () => {
     await page.waitForSelector('.nav-item', { timeout: 15000 });
 
     await page.locator('.nav-item').filter({ hasText: '选股器' }).click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('domcontentloaded');
 
     await page.locator('.nav-item').filter({ hasText: '策略 Copilot' }).click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('domcontentloaded');
 
     // Initial page load + possible lazy-loaded component loads
-    expect(loadCount).toBeLessThanOrEqual(3);
+    expect(loadCount).toBeLessThanOrEqual(2);
   });
 });
