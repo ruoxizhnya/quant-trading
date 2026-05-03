@@ -575,6 +575,9 @@ func TestValueScreenImplementsStrategyInterface(t *testing.T) {
 }
 
 func TestValueScreenAutoRegister(t *testing.T) {
+	// Save and restore original registry to avoid affecting other tests
+	origRegistry := strategy.DefaultRegistry
+	defer func() { strategy.DefaultRegistry = origRegistry }()
 	strategy.DefaultRegistry = strategy.NewRegistry()
 
 	s := &valueScreeningStrategy{

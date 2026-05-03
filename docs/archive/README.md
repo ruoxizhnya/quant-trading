@@ -12,6 +12,8 @@ archive/
 │   ├── DOC_AUDIT_REPORT.md       ← Design doc audit report (superseded by ODR-002)
 │   └── MIGRATION_REPORT.md       ← AGENTS.md migration report (superseded by ODR-003)
 │
+├── NEXT_STEPS.md               ← Archived on 2026-05-03 (audit findings archive, tasks migrated to TASKS.md)
+│
 └── research-2026-Q2/             ← Archived on 2026-04-11
     ├── CACHE.md                  ← Redis cache design (integrated into ARCHITECTURE.md)
     ├── CODE_REVIEW_REPORT.md     ← Full code review findings (tasks migrated to TASKS.md)
@@ -19,7 +21,8 @@ archive/
     ├── PHASE3-PLAN.md            ← Phase 3 implementation plan (tasks migrated to TASKS.md)
     ├── phase-gate-reviews.md     ← Phase Gate 1 audit records (tasks migrated to TASKS.md)
     ├── QUANT_SOFTWARE_DESIGN_ANALYSIS.md ← Quant software design analysis (reference)
-    └── REPORT_ASSESSMENT_AND_GOVERNANCE_PLAN.md ← ODR governance design (integrated into AGENTS.md)
+    ├── REPORT_ASSESSMENT_AND_GOVERNANCE_PLAN.md ← ODR governance design (integrated into AGENTS.md)
+    └── STRATEGY_FIXES_2026_05_03.md ← Strategy bug fixes (pure bug fixes, no design changes)
 ```
 
 ## How to Find Archived Content
@@ -36,4 +39,4 @@ archive/
 - Quarterly review: consider removing files archived > 12 months ago (requires maintainer approval)
 
 ---
-_Last updated: 2026-04-11_
+_Last updated: 2026-05-04_

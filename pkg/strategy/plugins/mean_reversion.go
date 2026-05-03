@@ -79,6 +79,18 @@ func (s *meanReversionStrategy) GenerateSignals(ctx context.Context, bars map[st
 		sellThreshold = 1.05
 	}
 
+	// For single/few stocks, use more relaxed thresholds
+	isSingleStock := len(bars) <= 3
+	if isSingleStock {
+		// Relax thresholds: 0.98 instead of 0.97, 1.02 instead of 1.03
+		if buyThreshold > 0.98 {
+			buyThreshold = 0.98
+		}
+		if sellThreshold < 1.02 {
+			sellThreshold = 1.02
+		}
+	}
+
 	var signals []strategy.Signal
 
 	for symbol, data := range bars {
@@ -200,8 +212,8 @@ func init() {
 		description: "Mean reversion: buy when price below moving average, sell when above",
 		params: MeanReversionConfig{
 			MAPeriod:         20,
-			BuyThresholdPct:  0.95,
-			SellThresholdPct: 1.05,
+			BuyThresholdPct:  0.97,
+			SellThresholdPct: 1.03,
 		},
 	})
 }

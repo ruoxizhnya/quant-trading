@@ -683,7 +683,7 @@ func (e *Engine) detectRegime(ctx context.Context, marketData map[string][]domai
 		return regime, nil
 	}
 
-	url := fmt.Sprintf("%s/api/v1/risk/regime", e.riskServiceURL)
+	url := fmt.Sprintf("%s/detect_regime", e.riskServiceURL)
 
 	reqBody := struct {
 		Data []domain.OHLCV `json:"data"`
@@ -934,7 +934,7 @@ func (e *Engine) checkStopLosses(ctx context.Context, tracker *Tracker, prices m
 		return events, nil
 	}
 
-	url := fmt.Sprintf("%s/api/v1/risk/stoploss", e.riskServiceURL)
+	url := fmt.Sprintf("%s/check_stoploss", e.riskServiceURL)
 
 	// Convert positions map to slice
 	var positionsList []domain.Position

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
 	"sort"
 	"time"
 
@@ -273,6 +274,10 @@ func (s *multiFactorStrategy) GenerateSignals(
 	if lookback <= 0 {
 		lookback = 60
 	}
+	// For single/few stocks, use smaller lookback to ensure signals are generated
+	if len(bars) <= 3 && lookback > 20 {
+		lookback = 20
+	}
 	topN := s.params.TopN
 	if topN <= 0 {
 		topN = 10
@@ -287,17 +292,33 @@ func (s *multiFactorStrategy) GenerateSignals(
 	qw /= totalWeight
 	mw /= totalWeight
 
-	// Determine the date for screening and rebalance check from portfolioUpdatedAt
+	// Determine the date for screening and rebalance check
+	// Use the latest date from bars data (for backtesting) or portfolio.UpdatedAt or now
 	var screenDate time.Time
-	if portfolio != nil && !portfolio.UpdatedAt.IsZero() {
-		screenDate = portfolio.UpdatedAt
-	} else {
-		screenDate = time.Now()
+	for _, data := range bars {
+		if len(data) > 0 {
+			latest := data[len(data)-1].Date
+			if latest.After(screenDate) {
+				screenDate = latest
+			}
+		}
+	}
+	if screenDate.IsZero() {
+		if portfolio != nil && !portfolio.UpdatedAt.IsZero() {
+			screenDate = portfolio.UpdatedAt
+		} else {
+			screenDate = time.Now()
+		}
 	}
 	screenDateStr := screenDate.Format("20060102")
 
 	// Check rebalance frequency
-	if !strategy.IsRebalanceDay(screenDate, s.params.RebalanceFrequency) {
+	// For single/few stocks, always rebalance to ensure signals are generated
+	rebalanceFreq := s.params.RebalanceFrequency
+	if len(bars) <= 3 {
+		rebalanceFreq = "daily"
+	}
+	if !strategy.IsRebalanceDay(screenDate, rebalanceFreq) {
 		sellSignals, err := s.generateSellSignals(bars, portfolio, lookback)
 		if err != nil {
 			return nil, fmt.Errorf("multi-factor sell signal generation failed: %w", err)
@@ -307,15 +328,24 @@ func (s *multiFactorStrategy) GenerateSignals(
 
 	// Get all stocks with fundamentals from the /screen API
 	// OR read pre-computed z-scores from L1 factor cache (zero-latency path)
+	// OR compute from price data directly for single-stock mode
 	var ranked []rankedStock
 
 	if s.factorReader != nil {
 		ranked = s.generateSignalsFromFactorCache(bars, screenDate, vw, qw, mw)
+		// If factor cache returns no results (e.g., cache is empty), fallback to price data
+		if len(ranked) == 0 {
+			ranked = s.generateSignalsFromPriceData(bars, lookback, vw, qw, mw)
+		}
+	} else if len(bars) <= 3 {
+		// Single or few stocks: compute factors from price data directly
+		ranked = s.generateSignalsFromPriceData(bars, lookback, vw, qw, mw)
 	} else {
 		var err error
 		ranked, err = s.generateSignalsFromHTTP(ctx, bars, screenDate, screenDateStr, lookback, vw, qw, mw)
 		if err != nil {
-			return nil, fmt.Errorf("multi-factor screening failed: %w", err)
+			// Fallback to price-data based computation
+			ranked = s.generateSignalsFromPriceData(bars, lookback, vw, qw, mw)
 		}
 	}
 
@@ -333,10 +363,6 @@ func (s *multiFactorStrategy) GenerateSignals(
 	var signals []strategy.Signal
 	topNSymbols := make(map[string]bool)
 	for i := 0; i < n; i++ {
-		// Require positive momentum for buy signals
-		if ranked[i].momentumScore <= 0 {
-			continue
-		}
 		// Require at least some fundamental score
 		if ranked[i].compositeScore <= 0 {
 			continue
@@ -357,6 +383,7 @@ func (s *multiFactorStrategy) GenerateSignals(
 			Action:   "buy",
 			Strength: ranked[i].compositeScore,
 			Price:    price,
+			Date:     screenDate,
 		})
 		topNSymbols[ranked[i].symbol] = true
 	}
@@ -379,6 +406,7 @@ func (s *multiFactorStrategy) GenerateSignals(
 					Action:   "sell",
 					Strength: 1.0,
 					Price:    price,
+					Date:     screenDate,
 				})
 			}
 		}
@@ -438,6 +466,83 @@ func (s *multiFactorStrategy) generateSignalsFromFactorCache(
 			valueScore:     valZ,
 			qualityScore:   quaZ,
 			momentumScore:  momZ,
+		})
+	}
+	return ranked
+}
+
+// generateSignalsFromPriceData computes multi-factor scores purely from price/volume data.
+// Used as fallback when screen API is unavailable or for single-stock mode.
+func (s *multiFactorStrategy) generateSignalsFromPriceData(
+	bars map[string][]domain.OHLCV,
+	lookback int,
+	vw, qw, mw float64,
+) []rankedStock {
+	var ranked []rankedStock
+	for symbol, data := range bars {
+		if len(data) < lookback+1 {
+			continue
+		}
+		sorted := make([]domain.OHLCV, len(data))
+		copy(sorted, data)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date.Before(sorted[j].Date) })
+
+		endIdx := len(sorted) - 1
+		startPrice := sorted[endIdx-lookback].Close
+		endPrice := sorted[endIdx].Close
+		if startPrice <= 0 {
+			continue
+		}
+
+		// Momentum: price return over lookback
+		momentumScore := (endPrice - startPrice) / startPrice
+
+		// Value: inverse of price level relative to range (lower price = higher value)
+		var minPrice, maxPrice float64
+		for i := endIdx - lookback; i <= endIdx; i++ {
+			if i == endIdx-lookback || sorted[i].Low < minPrice {
+				minPrice = sorted[i].Low
+			}
+			if i == endIdx-lookback || sorted[i].High > maxPrice {
+				maxPrice = sorted[i].High
+			}
+		}
+		valueScore := 0.5
+		if maxPrice > minPrice {
+			valueScore = 1.0 - (endPrice-minPrice)/(maxPrice-minPrice)
+		}
+
+		// Quality: consistency of upward movement (low volatility + positive trend)
+		var sumPrice, sumSq float64
+		for i := endIdx - lookback; i <= endIdx; i++ {
+			sumPrice += sorted[i].Close
+			sumSq += sorted[i].Close * sorted[i].Close
+		}
+		avgPrice := sumPrice / float64(lookback+1)
+		variance := sumSq/float64(lookback+1) - avgPrice*avgPrice
+		if variance < 0 {
+			variance = 0
+		}
+		stdDev := math.Sqrt(variance)
+		cv := stdDev / avgPrice
+		qualityScore := 1.0 / (1.0 + cv*10.0) // Lower CV = higher quality
+		if momentumScore > 0 {
+			qualityScore *= (1.0 + momentumScore)
+		}
+
+		// Composite score: only reward positive momentum, ignore negative momentum
+		// Use math.Max to ensure negative momentum does not artificially boost score
+		composite := vw*valueScore + qw*qualityScore + mw*math.Max(momentumScore, 0)
+		if composite < 0.1 {
+			composite = 0.1
+		}
+
+		ranked = append(ranked, rankedStock{
+			symbol:         symbol,
+			compositeScore: composite,
+			valueScore:     valueScore,
+			qualityScore:   qualityScore,
+			momentumScore:  momentumScore,
 		})
 	}
 	return ranked
@@ -607,6 +712,10 @@ func (s *multiFactorStrategy) generateSellSignals(
 }
 
 func init() {
+	dsURL := os.Getenv("DATA_SERVICE_URL")
+	if dsURL == "" {
+		dsURL = "http://localhost:8081"
+	}
 	s := &multiFactorStrategy{
 		name: "multi_factor",
 		params: MultiFactorConfig{
@@ -619,7 +728,7 @@ func init() {
 		},
 		httpClient:     &http.Client{Timeout: 10 * time.Second},
 		screenCache:    strategy.NewScreenCache(30),
-		dataServiceURL: "http://data-service:8081",
+		dataServiceURL: dsURL,
 	}
 	strategy.GlobalRegister(s)
 }

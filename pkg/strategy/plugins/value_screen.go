@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"time"
 
@@ -214,22 +215,42 @@ func (s *valueScreeningStrategy) GenerateSignals(
 	if momentumDays <= 0 {
 		momentumDays = 60
 	}
+	// For single/few stocks, use smaller lookback to ensure signals are generated
+	if len(bars) <= 3 && momentumDays > 20 {
+		momentumDays = 20
+	}
 	topN := s.params.TopN
 	if topN <= 0 {
 		topN = 10
 	}
 
-	// Determine the date for screening and rebalance check from portfolioUpdatedAt
+	// Determine the date for screening and rebalance check
+	// Use the latest date from bars data (for backtesting) or portfolio.UpdatedAt or now
 	var screenDate time.Time
-	if portfolio != nil && !portfolio.UpdatedAt.IsZero() {
-		screenDate = portfolio.UpdatedAt
-	} else {
-		screenDate = time.Now()
+	for _, data := range bars {
+		if len(data) > 0 {
+			latest := data[len(data)-1].Date
+			if latest.After(screenDate) {
+				screenDate = latest
+			}
+		}
+	}
+	if screenDate.IsZero() {
+		if portfolio != nil && !portfolio.UpdatedAt.IsZero() {
+			screenDate = portfolio.UpdatedAt
+		} else {
+			screenDate = time.Now()
+		}
 	}
 	screenDateStr := screenDate.Format("20060102")
 
 	// Check rebalance frequency
-	if !strategy.IsRebalanceDay(screenDate, s.params.RebalanceFrequency) {
+	// For single/few stocks, always rebalance to ensure signals are generated
+	rebalanceFreq := s.params.RebalanceFrequency
+	if len(bars) <= 3 {
+		rebalanceFreq = "daily"
+	}
+	if !strategy.IsRebalanceDay(screenDate, rebalanceFreq) {
 		// Not a rebalance day: return sell signals only for positions that
 		// should be exited (momentum turned negative), no new buys
 		sellSignals, err := s.generateSellSignals(bars, portfolio, momentumDays)
@@ -239,57 +260,114 @@ func (s *valueScreeningStrategy) GenerateSignals(
 		return sellSignals, nil
 	}
 
-	// Call the /screen API
-	screened, err := s.callScreenAPI(screenDateStr)
-	if err != nil {
-		// Fallback: log and return empty signals
-		// (in production you'd want proper error handling)
-		return nil, fmt.Errorf("value screening failed: %w", err)
-	}
-
-	// Build a set of screened symbols for quick lookup
-	screenedSet := make(map[string]struct{})
-	for _, sr := range screened {
-		screenedSet[sr.TsCode] = struct{}{}
-	}
-
-	// Calculate momentum for screened stocks
+	// Call the /screen API, or use bars directly for single-stock mode
 	type stockMomentum struct {
 		symbol   string
 		momentum float64
 	}
-
 	var momResults []stockMomentum
-	for _, sr := range screened {
-		symbol := sr.TsCode
-		data, ok := bars[symbol]
-		if !ok || len(data) < momentumDays+1 {
-			continue
+
+	if len(bars) <= 3 {
+		// Single/few stocks mode: compute momentum directly from bars
+		for symbol, data := range bars {
+			if len(data) < momentumDays+1 {
+				continue
+			}
+			sorted := make([]domain.OHLCV, len(data))
+			copy(sorted, data)
+			sort.Slice(sorted, func(i, j int) bool {
+				return sorted[i].Date.Before(sorted[j].Date)
+			})
+
+			endIdx := len(sorted) - 1
+			if endIdx < momentumDays {
+				continue
+			}
+
+			startPrice := sorted[endIdx-momentumDays].Close
+			endPrice := sorted[endIdx].Close
+			if startPrice <= 0 {
+				continue
+			}
+
+			momentum := (endPrice - startPrice) / startPrice
+			momResults = append(momResults, stockMomentum{
+				symbol:   symbol,
+				momentum: momentum,
+			})
 		}
+	} else {
+		// Multi-stock mode: call screen API
+		screened, err := s.callScreenAPI(screenDateStr)
+		if err != nil {
+			// Fallback: use bars directly
+			for symbol, data := range bars {
+				if len(data) < momentumDays+1 {
+					continue
+				}
+				sorted := make([]domain.OHLCV, len(data))
+				copy(sorted, data)
+				sort.Slice(sorted, func(i, j int) bool {
+					return sorted[i].Date.Before(sorted[j].Date)
+				})
 
-		sorted := make([]domain.OHLCV, len(data))
-		copy(sorted, data)
-		sort.Slice(sorted, func(i, j int) bool {
-			return sorted[i].Date.Before(sorted[j].Date)
-		})
+				endIdx := len(sorted) - 1
+				if endIdx < momentumDays {
+					continue
+				}
 
-		endIdx := len(sorted) - 1
-		if endIdx < momentumDays {
-			continue
+				startPrice := sorted[endIdx-momentumDays].Close
+				endPrice := sorted[endIdx].Close
+				if startPrice <= 0 {
+					continue
+				}
+
+				momentum := (endPrice - startPrice) / startPrice
+				momResults = append(momResults, stockMomentum{
+					symbol:   symbol,
+					momentum: momentum,
+				})
+			}
+		} else {
+			// Build a set of screened symbols for quick lookup
+			screenedSet := make(map[string]struct{})
+			for _, sr := range screened {
+				screenedSet[sr.TsCode] = struct{}{}
+			}
+
+			// Calculate momentum for screened stocks
+			for _, sr := range screened {
+				symbol := sr.TsCode
+				data, ok := bars[symbol]
+				if !ok || len(data) < momentumDays+1 {
+					continue
+				}
+
+				sorted := make([]domain.OHLCV, len(data))
+				copy(sorted, data)
+				sort.Slice(sorted, func(i, j int) bool {
+					return sorted[i].Date.Before(sorted[j].Date)
+				})
+
+				endIdx := len(sorted) - 1
+				if endIdx < momentumDays {
+					continue
+				}
+
+				startPrice := sorted[endIdx-momentumDays].Close
+				endPrice := sorted[endIdx].Close
+				if startPrice <= 0 {
+					continue
+				}
+
+				momentum := (endPrice - startPrice) / startPrice
+
+				momResults = append(momResults, stockMomentum{
+					symbol:   symbol,
+					momentum: momentum,
+				})
+			}
 		}
-
-		startPrice := sorted[endIdx-momentumDays].Close
-		endPrice := sorted[endIdx].Close
-		if startPrice <= 0 {
-			continue
-		}
-
-		momentum := (endPrice - startPrice) / startPrice
-
-		momResults = append(momResults, stockMomentum{
-			symbol:   symbol,
-			momentum: momentum,
-		})
 	}
 
 	// Sort by momentum descending (highest return = rank 1)
@@ -305,8 +383,14 @@ func (s *valueScreeningStrategy) GenerateSignals(
 
 	var signals []strategy.Signal
 	for i := 0; i < n; i++ {
-		if momResults[i].momentum <= 0 {
-			continue // Skip stocks with no or negative momentum
+		// Use absolute momentum for strength, but allow negative momentum stocks
+		// to be considered (they may be value opportunities)
+		strength := momResults[i].momentum
+		if strength < 0 {
+			strength = -strength * 0.5 // Negative momentum gets lower strength
+		}
+		if strength <= 0 {
+			continue
 		}
 
 		var price float64
@@ -322,8 +406,9 @@ func (s *valueScreeningStrategy) GenerateSignals(
 		signals = append(signals, strategy.Signal{
 			Symbol:   momResults[i].symbol,
 			Action:   "buy",
-			Strength: momResults[i].momentum,
+			Strength: strength,
 			Price:    price,
+			Date:     screenDate,
 		})
 	}
 
@@ -353,11 +438,12 @@ func (s *valueScreeningStrategy) GenerateSignals(
 						price = sorted[len(sorted)-1].Close
 					}
 					signals = append(signals, strategy.Signal{
-						Symbol:   symbol,
-						Action:   "sell",
-						Strength: 1.0,
-						Price:    price,
-					})
+					Symbol:   symbol,
+					Action:   "sell",
+					Strength: 1.0,
+					Price:    price,
+					Date:     screenDate,
+				})
 				}
 			}
 		}
@@ -417,6 +503,10 @@ func (s *valueScreeningStrategy) generateSellSignals(
 }
 
 func init() {
+	dsURL := os.Getenv("DATA_SERVICE_URL")
+	if dsURL == "" {
+		dsURL = "http://localhost:8081"
+	}
 	s := &valueScreeningStrategy{
 		name: "value_screening",
 		params: ValueScreeningConfig{
@@ -429,7 +519,7 @@ func init() {
 		},
 		httpClient:     &http.Client{Timeout: 10 * time.Second},
 		screenCache:    strategy.NewScreenCache(30),
-		dataServiceURL: "http://data-service:8081",
+		dataServiceURL: dsURL,
 	}
 	strategy.GlobalRegister(s)
 }

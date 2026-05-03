@@ -49,16 +49,23 @@ func (s *tdSequentialStrategy) GenerateSignals(ctx context.Context, bars map[str
 	}
 	var signals []strategy.Signal
 	for symbol, data := range bars {
-		if len(data) < setupN+cancelN+2 {
+		if len(data) < cancelN+setupN+2 {
 			continue
 		}
 		sorted := make([]domain.OHLCV, len(data))
 		copy(sorted, data)
 		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date.Before(sorted[j].Date) })
 
+		// TD Sequential: count closes below/above the close cancelN bars ago
+		// Proper implementation: from the most recent bar backwards,
+		// count bars that satisfy the condition, skipping bars that don't.
+		// This allows finding setups that exist in earlier bars even if
+		// recent bars break the sequence.
 		bearishSetup := 0
 		bullishSetup := 0
-		for i := cancelN; i < len(sorted); i++ {
+
+		// Count from the end backwards
+		for i := len(sorted) - 1; i >= cancelN; i-- {
 			refIdx := i - cancelN
 			if refIdx < 0 {
 				continue
@@ -67,15 +74,13 @@ func (s *tdSequentialStrategy) GenerateSignals(ctx context.Context, bars map[str
 			closeRef := sorted[refIdx].Close
 
 			if closeCurr < closeRef {
+				// Bearish count: current close < close cancelN bars ago
 				bearishSetup++
-				bullishSetup = 0
 			} else if closeCurr > closeRef {
+				// Bullish count: current close > close cancelN bars ago
 				bullishSetup++
-				bearishSetup = 0
-			} else {
-				bearishSetup = 0
-				bullishSetup = 0
 			}
+			// If equal, skip this bar and continue checking earlier bars
 		}
 
 		latestPrice := sorted[len(sorted)-1].Close
@@ -83,17 +88,32 @@ func (s *tdSequentialStrategy) GenerateSignals(ctx context.Context, bars map[str
 			continue
 		}
 
-		if bearishSetup >= setupN {
+		// Buy signal: bearish setup completion (price down-trend exhaustion)
+		// When we have setupN consecutive closes below close cancelN bars ago
+		// Relaxed signal: also generate partial signal when setup reaches threshold
+		setupThreshold := int(math.Ceil(float64(setupN) * 0.7))
+		if setupThreshold < 5 {
+			setupThreshold = 5
+		}
+		if bearishSetup >= setupThreshold {
 			strength := math.Min(float64(bearishSetup)/float64(setupN), 1.0)
+			if bearishSetup < setupN {
+				strength = strength * 0.6 // partial strength for incomplete setup
+			}
 			signals = append(signals, strategy.Signal{
 				Symbol:   symbol,
 				Action:   "buy",
 				Strength: strength,
 				Price:    latestPrice,
-				Factors:  map[string]float64{"bearish_setup": float64(bearishSetup)},
+				Factors:  map[string]float64{"bearish_setup": float64(bearishSetup), "setup_threshold": float64(setupThreshold)},
 			})
-		} else if bullishSetup >= setupN {
+		}
+		// Sell signal: bullish setup completion (price up-trend exhaustion)
+		if bullishSetup >= setupThreshold {
 			strength := math.Min(float64(bullishSetup)/float64(setupN), 1.0)
+			if bullishSetup < setupN {
+				strength = strength * 0.6 // partial strength for incomplete setup
+			}
 			if portfolio != nil {
 				if pos, ok := portfolio.Positions[symbol]; ok && pos.Quantity > 0 {
 					signals = append(signals, strategy.Signal{
@@ -101,7 +121,7 @@ func (s *tdSequentialStrategy) GenerateSignals(ctx context.Context, bars map[str
 						Action:   "sell",
 						Strength: strength,
 						Price:    latestPrice,
-						Factors:  map[string]float64{"bullish_setup": float64(bullishSetup)},
+						Factors:  map[string]float64{"bullish_setup": float64(bullishSetup), "setup_threshold": float64(setupThreshold)},
 					})
 				}
 			}
@@ -170,6 +190,21 @@ func (s *bollingerMRStrategy) GenerateSignals(ctx context.Context, bars map[stri
 	if period <= 0 { period = 20 }
 	stdDev := s.params.StdDev
 	if stdDev <= 0 { stdDev = 2.0 }
+	
+	// For single/few stocks, use more relaxed thresholds to ensure signals
+	isSingleStock := len(bars) <= 3
+	buyZScore := s.params.BuyZScore
+	sellZScore := s.params.SellZScore
+	if isSingleStock {
+		// Relax thresholds: -1.0 instead of -1.5, 1.0 instead of 1.5
+		if buyZScore < -1.0 {
+			buyZScore = -1.0
+		}
+		if sellZScore > 1.0 {
+			sellZScore = 1.0
+		}
+	}
+	
 	var signals []strategy.Signal
 	for symbol, data := range bars {
 		if len(data) < period { continue }
@@ -193,8 +228,8 @@ func (s *bollingerMRStrategy) GenerateSignals(ctx context.Context, bars map[stri
 
 		zScore := (latestPrice - mean) / sd
 
-		if zScore <= s.params.BuyZScore {
-			strength := math.Min(math.Abs(zScore-s.params.BuyZScore)/(math.Abs(s.params.BuyZScore)+1), 1.0)
+		if zScore <= buyZScore {
+			strength := math.Min(math.Abs(zScore-buyZScore)/(math.Abs(buyZScore)+1), 1.0)
 			lowerBand := mean - stdDev*sd
 			signals = append(signals, strategy.Signal{
 				Symbol:    symbol,
@@ -205,8 +240,8 @@ func (s *bollingerMRStrategy) GenerateSignals(ctx context.Context, bars map[stri
 				LimitPrice: lowerBand,
 				Factors:   map[string]float64{"z_score": zScore, "lower_band": lowerBand, "upper_band": mean + stdDev*sd},
 			})
-		} else if zScore >= s.params.SellZScore {
-			strength := math.Min((zScore-s.params.SellZScore)/(s.params.SellZScore+1), 1.0)
+		} else if zScore >= sellZScore {
+			strength := math.Min((zScore-sellZScore)/(sellZScore+1), 1.0)
 			if portfolio != nil {
 				if pos, ok := portfolio.Positions[symbol]; ok && pos.Quantity > 0 {
 					upperBand := mean + stdDev*sd
@@ -245,9 +280,9 @@ func (s *bollingerMRStrategy) Cleanup() {}
 
 func init() {
 	strategy.GlobalRegister(&bollingerMRStrategy{
-		name: "bollinger_mr",
+		name:        "bollinger_mr",
 		description: "Bollinger Mean Reversion: trade band bounces with z-score thresholds",
-		params: BollingerMRConfig{Period: 20, StdDev: 2.0, BuyZScore: -2.0, SellZScore: 2.0},
+		params:      BollingerMRConfig{Period: 20, StdDev: 2.0, BuyZScore: -1.5, SellZScore: 1.5},
 	})
 }
 
@@ -355,8 +390,12 @@ func (s *vptStrategy) GenerateSignals(ctx context.Context, bars map[string][]dom
 		})
 	}
 
-	if portfolio != nil && portfolio.Positions != nil {
-		for _, r := range results[len(results)-topN:] {
+	if portfolio != nil && portfolio.Positions != nil && len(results) > 0 {
+		startIdx := 0
+		if len(results) > topN {
+			startIdx = len(results) - topN
+		}
+		for _, r := range results[startIdx:] {
 			if r.vptSlope < 0 {
 				if pos, ok := portfolio.Positions[r.symbol]; ok && pos.Quantity > 0 {
 					strength := math.Abs(r.vptSlope)
@@ -479,19 +518,30 @@ func (s *volBreakoutStrategy) GenerateSignals(ctx context.Context, bars map[stri
 		upperBand := highMax + atr*atrMult
 		lowerBand := lowMin - atr*atrMult
 
-		if latestClose <= 0 || atr <= 0 { continue }
+		if latestClose <= 0 || atr <= 0 || prevClose <= 0 { continue }
 
-		if prevClose <= upperBand && latestClose > upperBand {
-			rangeVal := upperBand - lowerBand
-			strength := 0.7
-			if rangeVal > 0 { strength = (latestClose - upperBand) / rangeVal + 0.7 }
-			if strength > 1.0 { strength = 1.0 }
+		// Breakout detection: price crossing above/below Donchian channels
+		// Buy: price breaks above recent high channel (momentum breakout)
+		// Sell: price breaks below recent low channel (breakdown)
+		// Also trigger if close is near the channel boundary (within 0.5 ATR)
+		buyThreshold := highMax - atr*0.5
+		sellThreshold := lowMin + atr*0.5
+
+		if latestClose > buyThreshold && latestClose > prevClose {
+			// Price near or above upper channel and rising
+			strength := 0.5
+			if upperBand > lowerBand {
+				strength = math.Min((latestClose-lowerBand)/(upperBand-lowerBand), 1.0)
+			}
+			if strength < 0.3 { strength = 0.3 }
 			results = append(results, breakoutResult{symbol: symbol, breakType: "buy", strength: strength, price: latestClose, atr: atr})
-		} else if prevClose >= lowerBand && latestClose < lowerBand {
-			rangeVal := upperBand - lowerBand
-			strength := 0.7
-			if rangeVal > 0 { strength = (lowerBand - latestClose) / rangeVal + 0.7 }
-			if strength > 1.0 { strength = 1.0 }
+		} else if latestClose < sellThreshold && latestClose < prevClose {
+			// Price near or below lower channel and falling
+			strength := 0.5
+			if upperBand > lowerBand {
+				strength = math.Min((upperBand-latestClose)/(upperBand-lowerBand), 1.0)
+			}
+			if strength < 0.3 { strength = 0.3 }
 			results = append(results, breakoutResult{symbol: symbol, breakType: "sell", strength: strength, price: latestClose, atr: atr})
 		}
 	}

@@ -4,9 +4,16 @@
 > **Version:** 2.0.0
 > **Last Updated:** 2026-04-11
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [PHASE3-PLAN.md](PHASE3-PLAN.md) (implementation details)
+> **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
 >
-> **Purpose**: 本文件是 Quant Lab 项目的**单一任务追踪源**。所有可执行任务必须在此记录，不得散落在其他文档中。
+> **Purpose**: 本文件是 Quant Lab 项目的**唯一活跃任务追踪源**。所有可执行任务必须在此记录，不得散落在其他文档中。
+>
+> **文档使用指南**:
+> | 需求 | 应查阅文档 | 说明 |
+> |------|-----------|------|
+> | **查看当前待办任务** | **本文档** | 唯一活跃的任务追踪源，含 P0-P3 + D1-D7 |
+> | **了解 Sprint 里程碑** | [ROADMAP.md](ROADMAP.md) | Phase/Sprint 级别进度和验收标准 |
+> | **查看历史审查发现** | [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) | 2026-04-09 审查的只读归档 |
 >
 > **整合来源**: CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md
 
@@ -257,6 +264,79 @@
 - [ ] 中文描述 → 30s 内得到回测结果
 - [ ] ≥ 5 种策略描述正确解析
 
+### D7: 数据同步增强 (ADR-013) (Week 7-9)
+
+> **依赖**: ADR-003 (Background Worker), ADR-006 (Job Queue)
+> **设计文档**: [docs/design/pages/data-sync.md](../design/pages/data-sync.md)
+> **ADR**: [docs/adr/adr-013-data-sync-enhancement.md](../adr/adr-013-data-sync-enhancement.md)
+
+#### Phase 1: 后端任务队列 (Week 7)
+
+| ID    | 任务                                                         | 文件                                    | 状态 | 预估   | 依赖 |
+| ----- | ---------------------------------------------------------- | ------------------------------------- | -- | ---- | -- |
+| D7-1  | 创建 `sync_jobs` 表迁移脚本                                    | `migrations/0xx_add_sync_jobs_table.sql` | ⬜  | 0.5d | —  |
+| D7-2  | 创建 `sync_schedules` 表迁移脚本                               | `migrations/0xx_add_sync_schedules_table.sql` | ⬜  | 0.5d | D7-1 |
+| D7-3  | 实现 `pkg/sync/job.go` — 任务模型和状态机                        | `pkg/sync/job.go`                     | ⬜  | 0.5d | D7-1 |
+| D7-4  | 实现 `pkg/sync/queue.go` — PostgreSQL 队列管理                  | `pkg/sync/queue.go`                   | ⬜  | 1d   | D7-3 |
+| D7-5  | 实现 `pkg/sync/worker.go` — Worker goroutine pool              | `pkg/sync/worker.go`                  | ⬜  | 1d   | D7-4 |
+| D7-6  | 改造现有 `/sync/*` 端点为任务创建模式（保持向后兼容）                  | `cmd/data/main.go`                    | ⬜  | 1d   | D7-5 |
+| D7-7  | 新增 `/api/sync/*` REST API 端点                             | `cmd/data/sync_handlers.go` (新建)     | ⬜  | 1d   | D7-6 |
+| D7-8  | 实现 SSE 进度推送端点 `/api/sync/stream`                        | `cmd/data/sync_handlers.go`           | ⬜  | 0.5d | D7-7 |
+| D7-9  | 后端单元测试 (job/queue/worker 覆盖率 ≥ 70%)                     | `pkg/sync/*_test.go`                  | ⬜  | 1d   | D7-5 |
+
+#### Phase 2: 定时调度器 (Week 8)
+
+| ID    | 任务                                                         | 文件                                    | 状态 | 预估   | 依赖 |
+| ----- | ---------------------------------------------------------- | ------------------------------------- | -- | ---- | -- |
+| D7-10 | 集成 `robfig/cron/v3` 库                                    | `go.mod`                              | ⬜  | 0.5d | —  |
+| D7-11 | 实现 `pkg/sync/scheduler.go` — 定时调度器核心                   | `pkg/sync/scheduler.go`               | ⬜  | 1d   | D7-10 |
+| D7-12 | 实现调度配置 CRUD API (`/api/sync/schedules`)                  | `cmd/data/sync_handlers.go`           | ⬜  | 0.5d | D7-11 |
+| D7-13 | 调度器与任务队列集成 (创建任务时关联 schedule_id)                  | `pkg/sync/scheduler.go`               | ⬜  | 0.5d | D7-11 |
+| D7-14 | 调度器持久化与恢复 (服务重启后恢复定时任务)                        | `pkg/sync/scheduler.go`               | ⬜  | 0.5d | D7-13 |
+| D7-15 | 调度器单元测试                                               | `pkg/sync/scheduler_test.go`          | ⬜  | 0.5d | D7-11 |
+
+#### Phase 3: 前端 UI (Week 8-9)
+
+| ID    | 任务                                                         | 文件                                    | 状态 | 预估   | 依赖 |
+| ----- | ---------------------------------------------------------- | ------------------------------------- | -- | ---- | -- |
+| D7-16 | 创建 `web/src/types/sync.ts` — 同步相关 TypeScript 类型        | `web/src/types/sync.ts`               | ⬜  | 0.5d | —  |
+| D7-17 | 创建 `web/src/api/sync.ts` — 同步 API 客户端                  | `web/src/api/sync.ts`                 | ⬜  | 0.5d | D7-16 |
+| D7-18 | 创建 `web/src/stores/sync.ts` — Pinia Store                  | `web/src/stores/sync.ts`              | ⬜  | 0.5d | D7-17 |
+| D7-19 | 创建 `SyncOverviewCards.vue` — 数据概览卡片                    | `web/src/components/sync/SyncOverviewCards.vue` | ⬜  | 0.5d | D7-18 |
+| D7-20 | 创建 `SyncControlPanel.vue` — 同步控制面板                     | `web/src/components/sync/SyncControlPanel.vue` | ⬜  | 1d   | D7-19 |
+| D7-21 | 创建 `SyncJobQueue.vue` — 同步任务队列                         | `web/src/components/sync/SyncJobQueue.vue` | ⬜  | 1d   | D7-20 |
+| D7-22 | 创建 `SyncLogViewer.vue` — 同步日志查看器                      | `web/src/components/sync/SyncLogViewer.vue` | ⬜  | 0.5d | D7-21 |
+| D7-23 | 创建 `DataQualityDashboard.vue` — 数据质量仪表盘                | `web/src/components/sync/DataQualityDashboard.vue` | ⬜  | 1d   | D7-22 |
+| D7-24 | 创建 `pages/DataSync.vue` — 数据同步管理页面                   | `web/src/pages/DataSync.vue`          | ⬜  | 1d   | D7-19~D7-23 |
+| D7-25 | 添加路由 `/data-sync` 和侧边栏导航入口                          | `web/src/router/index.ts`, `AppSidebar.vue` | ⬜  | 0.5d | D7-24 |
+| D7-26 | 集成 SSE 实时进度推送                                        | `web/src/stores/sync.ts`              | ⬜  | 0.5d | D7-24 |
+| D7-27 | 前端 Vitest 单元测试 (组件覆盖率 ≥ 60%)                         | `web/src/components/sync/*.spec.ts`   | ⬜  | 1d   | D7-24 |
+
+#### Phase 4: 集成测试与文档 (Week 9)
+
+| ID    | 任务                                                         | 文件                                    | 状态 | 预估   | 依赖 |
+| ----- | ---------------------------------------------------------- | ------------------------------------- | -- | ---- | -- |
+| D7-28 | E2E 测试：完整同步流程 (创建 → 执行 → 完成 → 验证)                | `e2e/tests/data-sync.spec.ts`         | ⬜  | 1d   | D7-24 |
+| D7-29 | E2E 测试：定时任务配置与触发验证                                  | `e2e/tests/data-sync-schedule.spec.ts` | ⬜  | 0.5d | D7-28 |
+| D7-30 | E2E 测试：失败重试与错误处理                                     | `e2e/tests/data-sync-error.spec.ts`   | ⬜  | 0.5d | D7-28 |
+| D7-31 | 性能测试：批量同步 5000+ 股票 OHLCV                           | `pkg/sync/bench_test.go`              | ⬜  | 0.5d | D7-5  |
+| D7-32 | 故障注入测试：网络中断、Tushare 限流                            | `pkg/sync/fault_test.go`              | ⬜  | 0.5d | D7-5  |
+| D7-33 | 更新 SPEC.md 新增 API 文档                                    | `docs/SPEC.md`                        | ⬜  | 0.5d | D7-7  |
+| D7-34 | 更新 AGENTS.md 数据流架构图                                   | `AGENTS.md`                           | ⬜  | 0.5d | D7-7  |
+| D7-35 | 运行 `go vet ./... && go test ./...` 确保后端质量              | 全项目                                 | ⬜  | 0.5d | D7-9  |
+| D7-36 | 运行 `npm run lint && npm run typecheck` 确保前端质量          | `web/`                                 | ⬜  | 0.5d | D7-27 |
+
+**D7 验收标准**:
+
+- [ ] 定时同步每日 09:00 自动执行 OHLCV 增量同步
+- [ ] 前端 Data Sync 页面可查看所有数据类型的覆盖度和同步状态
+- [ ] 同步任务队列支持创建/取消/重试操作
+- [ ] SSE 实时推送进度，前端进度条平滑更新
+- [ ] 同步成功率 > 99%，失败任务可自动重试(最多3次)
+- [ ] `sync_jobs` 表自动归档(保留30天)，不影响查询性能
+- [ ] 所有新增代码通过 lint + typecheck + 单元测试
+- [ ] E2E 测试覆盖完整同步流程、定时任务、错误恢复
+
 ***
 
 ## �📊 统计
@@ -267,12 +347,21 @@
 | P1              | 2      | 1     | 14     | 0     | 0     | 17     |
 | P2              | 1      | 0     | 17     | 0     | 0     | 18     |
 | P3              | 3      | 0     | 15     | 1     | 0     | 19     |
-| Phase 3 (D1-D6) | 25     | 0     | 3      | 0     | 0     | 28     |
-| **总计**          | **31** | **1** | **55** | **1** | **0** | **88** |
+| Phase 3 (D1-D7) | 61     | 0     | 3      | 0     | 0     | 64     |
+| **总计**          | **67** | **1** | **55** | **1** | **0** | **124** |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-05-03 (v2.4.0)
+
+- **新增**: ADR-013 (Data Synchronization Enhancement) — 数据同步增强架构决策
+- **新增**: D7 数据同步增强实施任务 (36 项, Week 7-9)
+- **新增**: `docs/design/pages/data-sync.md` — 数据同步管理页面 UI 设计规范
+- **更新**: `docs/ARCHITECTURE.md` — 新增数据同步架构章节 (ADR-013)
+- **更新**: `docs/ADR.md` — 添加 ADR-013 到索引
+- 更新统计: 124 项任务 (67 待处理, 1 进行中, 55 已完成, 1 阻塞)
 
 ### 2026-04-12 (v2.3.0)
 
@@ -331,10 +420,10 @@
 | -------------------------------- | -------------- |
 | [ROADMAP.md](ROADMAP.md)         | Sprint 进度和里程碑  |
 | [PHASE3-PLAN.md](PHASE3-PLAN.md) | Phase 3 实施计划详情 |
-| [NEXT\_STEPS.md](NEXT_STEPS.md)  | 审查发现详情         |
+| [archive/NEXT\_STEPS.md](archive/NEXT_STEPS.md)  | 审查发现详情         |
 | [TEST.md](TEST.md)               | 测试策略和覆盖率目标     |
 
 ***
 
-_Last updated: 2026-04-12_
+_Last updated: 2026-05-03_
 _Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md_

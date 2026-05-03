@@ -192,10 +192,12 @@ func TestMultiFactorCompositeScore(t *testing.T) {
 		return bars
 	}
 
+	// Use 4+ stocks to trigger the HTTP path (len(bars) > 3)
 	bars := map[string][]domain.OHLCV{
 		"A": makeBars("A", basePrice*1.10),
 		"B": makeBars("B", basePrice*1.05),
 		"C": makeBars("C", basePrice*1.01),
+		"D": makeBars("D", basePrice*1.03), // Extra stock to trigger HTTP path
 	}
 
 	s := &multiFactorStrategy{
@@ -207,8 +209,9 @@ func TestMultiFactorCompositeScore(t *testing.T) {
 			TopN:               10,
 			RebalanceFrequency: "daily",
 		},
-		httpClient:  httpClientFor(srv),
-		screenCache: strategy.NewScreenCache(10),
+		httpClient:     httpClientFor(srv),
+		screenCache:    strategy.NewScreenCache(10),
+		dataServiceURL: srv.URL,
 	}
 
 	portfolio := &domain.Portfolio{UpdatedAt: now, Positions: map[string]domain.Position{}}
@@ -221,6 +224,7 @@ func TestMultiFactorCompositeScore(t *testing.T) {
 		t.Fatal("expected at least one buy signal")
 	}
 
+	// A should be ranked first (best PE, best ROE, highest momentum)
 	if signals[0].Symbol != "A" {
 		t.Errorf("expected stock A to be ranked first, got %q (signals: %+v)", signals[0].Symbol, signals)
 	}
@@ -476,6 +480,9 @@ func TestMultiFactorImplementsStrategyInterface(t *testing.T) {
 }
 
 func TestMultiFactorAutoRegister(t *testing.T) {
+	// Save and restore original registry to avoid affecting other tests
+	origRegistry := strategy.DefaultRegistry
+	defer func() { strategy.DefaultRegistry = origRegistry }()
 	strategy.DefaultRegistry = strategy.NewRegistry()
 
 	s := &multiFactorStrategy{

@@ -1,15 +1,24 @@
 # Quant Trading System — Roadmap
 
 > **Status**: Active (Reference - Progress Tracking)
-> **Version:** 1.1.0 (AGENTS Template v2.0 Migration)
-> **Last Updated:** 2026-04-11
+> **Version:** 1.2.0 (Consolidation)
+> **Last Updated:** 2026-05-03
 > **Created:** 2026-03-24
 > **Owner:** 龙少 (Longshao) — AI Assistant / Product Manager
-> **Related:** [VISION.md](VISION.md) (product), [TEST.md](TEST.md) (quality), [PHASE3-PLAN.md](PHASE3-PLAN.md) (current phase)
+> **Related:** [VISION.md](VISION.md) (product), [TEST.md](TEST.md) (quality), [TASKS.md](TASKS.md) (current tasks)
 >
-> **Changelog v1.1 (Migration):**
-> - 添加标准元数据头部（Status, Last Updated, Related）
-> - 添加 PHASE3-PLAN.md 链接
+> **文档使用指南**:
+> | 需求 | 应查阅文档 |
+> |------|-----------|
+> | **查看当前待办任务** | [TASKS.md](TASKS.md) |
+> | **了解 Sprint 里程碑** | **本文档** |
+> | **查看历史审查发现** | [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) |
+>
+> **Changelog v1.2 (Consolidation):**
+> - 添加 TASKS.md 链接，明确任务追踪源
+> - 添加"文档使用指南"，澄清三文档分工
+> - Phase 3 待完成项增加"追踪位置"列，指向 TASKS.md
+> - 移除 PHASE3-PLAN.md 链接（内容已整合至 TASKS.md）
 
 ---
 
@@ -161,6 +170,8 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 
 **Status: Phase 3 IN PROGRESS — Core Complete, Quality Optimization**
 
+> **当前任务追踪**: 详见 [TASKS.md](TASKS.md) Phase 3 实施任务 (D1-D7)
+
 ### Phase 3 已完成项
 
 | # | 任务 | 优先级 | 状态 | 说明 |
@@ -175,10 +186,20 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 | P1-D | 文档同步更新 | 中 | ✅ | ARCHITECTURE.md + ROADMAP.md 更新 |
 | P1-E | 回测结果持久化 (DB 写入 + DB 回退查询) | 高 | ✅ | SaveSyncResult() → backtest_jobs 表；GET 端点 DB fallback；5 个 E2E 测试 |
 
+### Phase 3 进行中项
+
+| # | 任务 | 优先级 | 状态 | 说明 | 追踪位置 |
+|---|------|--------|------|------|----------|
+| D1 | 多数据源适配器框架 | 高 | 🔵 | DataAdapter + Provider 接口重构 | TASKS.md D1 |
+| D7 | 数据同步增强 (ADR-013) | 高 | ⬜ | 定时同步 + 任务队列 + 管理页面 | TASKS.md D7 |
+
 ### Phase 3 待完成项 (P2)
 
-| # | 任务 | 优先级 | 状态 | 说明 |
-|---|------|--------|------|------|
-| P2-A | 因子归因 + IC 分析 API | 低 | ⏳ | factor_attribution.go 已有基础设施，需暴露 HTTP API |
-| P2-B | Go Plugin 热加载 | 低 | ⏳ | 需评估替代方案 (Lua/WASM/配置驱动) |
-| P2-C | AI Copilot 深度集成 | 低 | ⏳ | Copilot 已有基础，需 E2E 流程优化 |
+| # | 任务 | 优先级 | 状态 | 说明 | 追踪位置 |
+|---|------|--------|------|------|----------|
+| P2-A | 因子归因 + IC 分析 API | 低 | ⬜ | factor_attribution.go 已有基础设施，需暴露 HTTP API | TASKS.md D1-10 |
+| P2-B | Go Plugin 热加载 | 低 | ⬜ | 需评估替代方案 (Lua/WASM/配置驱动) | TASKS.md D3 |
+| P2-C | AI Copilot 深度集成 | 低 | ⬜ | Copilot 已有基础，需 E2E 流程优化 | TASKS.md D6 |
+| D2 | 批量回测框架 | 中 | ⬜ | BatchEngine + Walk-Forward | TASKS.md D2 |
+| D4 | 实盘交易接口预留 | 中 | ⬜ | LiveTrader 接口 + MockTrader | TASKS.md D4 |
+| D5 | 更多实战策略插件 | 低 | ⬜ | TD Sequential 等 4 个新策略 | TASKS.md D5 |

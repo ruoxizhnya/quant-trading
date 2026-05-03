@@ -689,7 +689,7 @@ This document is the **single source of truth** for what the system is and where
 - `ARCHITECTURE.md` — technical architecture (how it is built)
 - `SPEC.md` — detailed system specification and interfaces
 - `ADR.md` + `docs/adr/` — architectural decision records
-- `NEXT_STEPS.md` — audit findings and development plan
+- `archive/NEXT_STEPS.md` — archived audit findings (read-only)
 
 When this document conflicts with any of the above, this document takes precedence. The roadmap, architecture, and spec should be updated to match this document — not the other way around.
 

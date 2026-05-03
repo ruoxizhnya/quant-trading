@@ -24,6 +24,7 @@
 | [ADR-010](adr/adr-010-speed-architecture.md) | Speed Optimization Architecture — Phase 2 | Draft | 2026-03-25 |
 | [ADR-011](adr/adr-011-vue-spa-frontend.md) | Vue 3 SPA as Official Frontend | Accepted | 2026-04-11 |
 | [ADR-012](adr/adr-012-strategy-service-standby.md) | Strategy-Service Standby Decision | Accepted | 2026-04-11 |
+| [ADR-013](adr/adr-013-data-sync-enhancement.md) | Data Synchronization Enhancement | Proposed | 2026-05-03 |
 
 ---
 
@@ -38,6 +39,7 @@
 | [ODR-005](odr/odr-005-agents-md-v3-migration.md) | AGENTS.md v3.0 Migration to Template v2.0 | Completed | Migration | 2026-04-11 |
 | [ODR-006](odr/odr-006-document-consolidation.md) | Document Consolidation & TASKS.md Creation | Completed | Cleanup | 2026-04-11 |
 | [ODR-007](odr/odr-007-task-consolidation.md) | Task Consolidation & Document Migration | **Completed** | **Migration** | **2026-04-11** |
+| [ODR-008](odr/odr-008-next-steps-archive.md) | NEXT_STEPS.md Archival to docs/archive/ | Completed | Cleanup | 2026-05-03 |
 
 ---
 
@@ -68,10 +70,10 @@
 
 | ADR | Topic | Phase |
 |-----|-------|-------|
-| ADR-011 | Data freshness SLA and Tushare outage fallback | Phase 2 |
-| ADR-013 | Schema migration tooling (Flyway/goose) | Phase 2 |
-| ADR-014 | API authentication and access control | Phase 2 |
-| ADR-015 | Docker networking → Kubernetes service discovery | Phase 4 |
+| ADR-014 | Data freshness SLA and Tushare outage fallback | Phase 2 |
+| ADR-015 | Schema migration tooling (Flyway/goose) | Phase 2 |
+| ADR-016 | API authentication and access control | Phase 2 |
+| ADR-017 | Docker networking → Kubernetes service discovery | Phase 4 |
 
 ---
 
@@ -86,4 +88,4 @@ ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical examp
 
 ---
 
-_Last updated by: AI Assistant — 2026-04-11 (ODR-005 added)_
+_Last updated by: AI Assistant — 2026-05-03 (ADR-013 + ODR-008 added)_

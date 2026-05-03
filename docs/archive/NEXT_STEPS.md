@@ -1,17 +1,30 @@
-# Next Steps Development Plan
+# Next Steps — 审查发现归档
 
-> **Status**: Reference (Audit Findings Archive)
-> **Version:** 2.0.0 (Task Migration)
-> **Last Updated:** 2026-04-11
+> **Status**: Archived (Reference Only — 可执行任务已迁移至 TASKS.md)
+> **Version:** 3.0.0 (Consolidation)
+> **Last Updated:** 2026-05-03
 > **Audit Date:** 2026-04-09
 > **Auditor:** AI Assistant (Code Review Agent)
 > **Scope:** 全栈审查 — 设计文档 / 代码一致性 / 测试有效性 / 代码质量
-> **Related:** [TASKS.md](TASKS.md) (action items), [ROADMAP.md](ROADMAP.md) (progress)
+> **Related:** [TASKS.md](TASKS.md) (当前任务追踪源), [ROADMAP.md](ROADMAP.md) (进度里程碑)
 >
-> **Changelog v2.0 (Migration):**
-> - 所有可执行任务已迁移至 [TASKS.md](TASKS.md)
-> - 本文件保留审查发现详情作为参考
-> - 移除 Phase A-E 任务列表（已在 TASKS.md 中维护）
+> **Changelog v3.0 (Consolidation):**
+> - 明确本文档为**只读归档**，不再维护任务列表
+> - 移除所有可执行任务（已在 TASKS.md 中维护）
+> - 新增"文档使用指南"章节，澄清三文档分工
+> - 保留审查发现详情作为历史参考
+
+---
+
+## 文档使用指南
+
+本文档（NEXT_STEPS.md）**不再包含可执行任务**。如需查看当前待办事项，请访问：
+
+| 需求 | 应查阅文档 | 说明 |
+|------|-----------|------|
+| **查看当前待办任务** | [TASKS.md](TASKS.md) | 唯一活跃的任务追踪源 |
+| **了解项目里程碑** | [ROADMAP.md](ROADMAP.md) | Phase/Sprint 级别进度 |
+| **查看历史审查发现** | **本文档** | 2026-04-09 审查的详细记录 |
 
 ---
 
@@ -26,6 +39,8 @@
 
 **总体评估**: 系统架构设计合理，核心回测引擎实现扎实。主要风险集中在：(1) 文档与代码不同步，(2) 前端测试覆盖不足（尤其是交互逻辑），(3) 前端组件职责过重需要拆分。
 
+> **状态更新**: 以上问题中 P0/P1 级别已全部在 TASKS.md 中跟踪并大部分已完成。详见 TASKS.md P0-P1 章节。
+
 ---
 
 ## 一、设计文档审查结果
@@ -38,6 +53,8 @@
 
 ### ⚠️ 需修复的问题
 
+> **注意**: 以下问题对应的修复任务已在 TASKS.md 中跟踪。本文仅保留发现详情。
+
 #### P0-CRITICAL: 策略接口定义三处不一致
 
 | 来源 | 方法签名 | 参数 |
@@ -47,7 +64,7 @@
 | **实际代码** [strategy.go](../pkg/strategy/strategy.go) | `GenerateSignals(ctx, bars, portfolio)` | 与 VISION 一致 |
 
 **影响**: SPEC.md 是开发者参考的权威接口定义，但与实际代码不一致。新开发者会困惑。
-**修复方案**: 统一为实际代码签名，更新 SPEC.md。→ **任务 P2-1**
+**修复状态**: ✅ 已完成（TASKS.md P2-1）
 
 #### P1-HIGH: 服务架构文档超前于实现
 
@@ -59,8 +76,7 @@
 | **risk-service** | **8083** | ❌ | ❌ | **仅文档** |
 | **execution-service** | **8084** | ❌ | `cmd/execution/` 存在但未接入 compose | **半成品** |
 
-**影响**: SPEC.md 描述了 risk(8083) 和 execution(8084) 服务的完整 API，但这些服务不存在。读者会误以为已实现。
-**修复方案**: 在 SPEC.md 中标注这些服务为 "Planned — Phase 2/3"。→ **任务 P2-4**
+**修复状态**: ✅ 已完成（TASKS.md P2-4）
 
 #### P1-HIGH: Phase 状态标记不准确
 
@@ -69,7 +85,7 @@ ROADMAP.md 标记:
 - ~~P0-A FactorComputer → ✅ Done~~ → 但 factor_cache 表的 HTTP API 未暴露（P2-A 待完成）
 - Walk-forward validation → 标记为 Sprint 6 deliverable → 代码中 `walkforward.go` 存在但未验证
 
-**修复方案**: 更新 ROADMAP.md 状态标记，区分 "接口定义完成" vs "E2E 可用"。→ **任务 P2-5**
+**修复状态**: ✅ 已完成（TASKS.md P2-5）
 
 #### P2-MEDIUM: 前端技术选型未在文档中体现
 
@@ -78,7 +94,7 @@ ROADMAP.md 标记:
 - 两套 UI 并存：legacy HTML 提供基础功能，Vue SPA 提供增强体验
 - **此双轨制未在任何设计文档中说明**
 
-**修复方案**: 在 ARCHITECTURE.md 的 "用户界面" 章节增加 "前端架构" 小节。→ **任务 P2-3, P2-6, P2-7**
+**修复状态**: ✅ 已完成（TASKS.md P2-3, P2-6, P2-7）
 
 ---
 
@@ -88,6 +104,7 @@ ROADMAP.md 标记:
 
 #### C-01 [CRITICAL]: Strategy 接口签名冲突 (同上)
 **文件**: [SPEC.md:130](SPEC.md#L130) vs [strategy.go](../pkg/strategy/strategy.go)
+**修复状态**: ✅ 已完成（TASKS.md P2-1）
 
 #### C-02 [HIGH]: API 端点缺失/多余
 
@@ -100,13 +117,7 @@ ROADMAP.md 标记:
 | Risk Service 全部端点 (8083) | SPEC.md | 服务不存在 |
 | Execution Service 全部端点 (8084) | SPEC.md | 服务半成品 |
 
-**代码有但文档无:**
-| 端点 | 代码位置 | 说明 |
-|------|---------|------|
-| `POST /analyze` | cmd/analysis/main.go | 分析功能（需文档化） |
-| `GET /ohlcv/:symbol` | cmd/analysis/main.go | K线代理（已在 ARCHITECTURE.md） |
-
-→ **任务 P2-2**
+**修复状态**: ✅ 已完成（TASKS.md P2-2）
 
 #### C-03 [HIGH]: 数据库表结构偏差
 
@@ -141,31 +152,17 @@ ROADMAP.md 标记:
 
 ### ⚠️ 关键缺失测试 (MUST FIX)
 
-| # | 缺失测试 | 风险等级 | 对应功能 |
-|---|---------|---------|---------|
-| T-01 | **回测结果渲染** — 指标卡片显示正确数值? 净值曲线绘制? | 🔴 CRITICAL | BacktestEngine.vue |
-| T-02 | **交易信号可视化** — 绿色买入/红色卖出标记出现在图表上? | 🔴 CRITICAL | BacktestEngine.vue Chart.js |
-| T-03 | **交易表格切换** — 点击"显示交易"/"隐藏交易"切换正常? | 🟠 HIGH | BacktestEngine.vue |
-| T-04 | **错误状态处理** — 404 报告过期显示友好提示? | 🟠 HIGH | BacktestEngine.vue loadReport |
-| T-05 | **表单验证** — 空股票代码提示? 无效日期拦截? | 🟠 HIGH | Dashboard + BacktestEngine |
-| T-06 | **防重复提交** — 双击运行回测只触发一次? | 🟠 HIGH | Dashboard runQuick |
-| T-07 | **导航高亮唯一性** — /backtest 页面只有回测引擎高亮? | 🟡 MEDIUM | AppSidebar.vue |
-| T-08 | **NaN/undefined 显示** — 历史记录不显示 undefined/NaN? | 🟡 MEDIUM | Dashboard + BacktestEngine |
-| T-09 | **响应式布局** — 窗口缩小时元素不重叠? | 🟡 MEDIUM | 全局 CSS |
-
-→ **任务 P1-6**
-
-### ⚠️ 测试质量问题
-
-| # | 问题 | 影响 | 建议 |
-|---|------|------|------|
-| Q-01 | **纯存在性断言** — 多数测试只检查 `toBeVisible()`，不验证交互行为 | 假阴性 | 增加 userEvent.click + 结果断言 |
-| Q-02 | **硬编码等待** — `waitForTimeout(2000)` 代替智能等待 | 脆弱慢 | 改为 `waitForSelector` 或 `waitForResponse` |
-| Q-03 | **文本精确匹配** — `toHaveText('控制台')` 会因文案调整而失败 | 维护成本 | 用 `getByText(/控制台/)` 正则 |
-| Q-04 | **无数据清理** — 测试间共享 localStorage（backtestStore.history） | 测试串扰 | 每个 test() 前清空 store |
-| Q-05 | **API 测试无负向** — 不测试 400/500 错误响应 | 盲区 | 增加 malformed body 测试 |
-
-→ **任务 P2-14 ~ P2-17**
+| # | 缺失测试 | 风险等级 | 对应功能 | 修复状态 |
+|---|---------|---------|---------|---------|
+| T-01 | **回测结果渲染** — 指标卡片显示正确数值? 净值曲线绘制? | 🔴 CRITICAL | BacktestEngine.vue | ✅ 已完成 |
+| T-02 | **交易信号可视化** — 绿色买入/红色卖出标记出现在图表上? | 🔴 CRITICAL | BacktestEngine.vue Chart.js | ✅ 已完成 |
+| T-03 | **交易表格切换** — 点击"显示交易"/"隐藏交易"切换正常? | 🟠 HIGH | BacktestEngine.vue | ✅ 已完成 |
+| T-04 | **错误状态处理** — 404 报告过期显示友好提示? | 🟠 HIGH | BacktestEngine.vue loadReport | ✅ 已完成 |
+| T-05 | **表单验证** — 空股票代码提示? 无效日期拦截? | 🟠 HIGH | Dashboard + BacktestEngine | ✅ 已完成 |
+| T-06 | **防重复提交** — 双击运行回测只触发一次? | 🟠 HIGH | Dashboard runQuick | ✅ 已完成 |
+| T-07 | **导航高亮唯一性** — /backtest 页面只有回测引擎高亮? | 🟡 MEDIUM | AppSidebar.vue | ✅ 已完成 |
+| T-08 | **NaN/undefined 显示** — 历史记录不显示 undefined/NaN? | 🟡 MEDIUM | Dashboard + BacktestEngine | ✅ 已完成 |
+| T-09 | **响应式布局** — 窗口缩小时元素不重叠? | 🟡 MEDIUM | 全局 CSS | ✅ 已完成 |
 
 ---
 
@@ -200,17 +197,7 @@ ROADMAP.md 标记:
 
 #### Q-003: 双轨 UI 架构未统一
 
-系统同时存在:
-1. **Legacy HTML UI**: `cmd/analysis/static/{index,dashboard,screen,copilot}.html` — Go 模板渲染
-2. **Vue 3 SPA**: `web/src/` — 独立开发服务器 (Vite :5173)
-
-**问题**:
-- 两套 UI 功能重叠（都有回测、选股器、Copilot）
-- Legacy HTML 通过 `http://localhost:8085` 访问
-- Vue SPA 通过 `http://localhost:5173` 访问（开发模式）或构建后替代 legacy
-- 开发者可能混淆哪套是"正式"UI
-
-**建议**: 明确声明 Vue SPA 为唯一正式前端，legacy HTML 标记为 deprecated。→ **任务 P2-3**
+**修复状态**: ✅ 已完成（TASKS.md P2-3, ADR-011）
 
 #### Q-004: 回测结果不持久化
 
@@ -218,87 +205,51 @@ ROADMAP.md 标记:
 
 #### Q-005: API Client 错误处理不统一
 
-[client.ts](../web/src/api/client.ts) 的 fetch 包装:
-- 部分路径返回原始 response，部分返回 parsed json
-- 无统一错误码映射 (400/401/404/500)
-- 无重试机制
-- 无请求取消 (AbortController)
-
-→ **任务 P1-12**
+**修复状态**: ✅ 已完成（TASKS.md P1-12）
 
 ### 🟡 MEDIUM Issues
 
 #### Q-006: Magic Numbers 散布
-
-| 值 | 出现位置 | 应定义为 |
-|----|---------|---------|
-| `0.0003` | commission_rate 默认值 | `DEFAULT_COMMISSION` 常量 |
-| `1000000` | initial_capital 默认值 | `DEFAULT_CAPITAL` 常量 |
-| `120` | MAX_CHART_POINTS | 已命名但可配置 |
-| `20` | momentum lookback | 策略参数，应在 config |
-| `5` / `0.05` | position limit 5% | 风控参数 |
-
-→ **任务 P3-7**
+**修复状态**: ✅ 已完成（TASKS.md P3-7）
 
 #### Q-007: 格式化函数重复
-
-`fmtPercent()` 在以下文件中重复定义或 import:
-- [format.ts](../web/src/utils/format.ts)
-- [Dashboard.vue](../web/src/pages/Dashboard.vue) (inline)
-- [BacktestEngine.vue](../web/src/pages/BacktestEngine.vue) (inline)
-
-**应统一**: 所有页面从 `utils/format.ts` import，不在组件内重复。→ **任务 P1-11**
+**修复状态**: ✅ 已完成（TASKS.md P1-11）
 
 #### Q-008: TypeScript `any` 类型滥用
-
-[api.ts 类型定义](../web/src/types/api.ts) 中多处使用 `any`:
-- BacktestResult 的 `metrics` 字段: `Record<string, any>`
-- trade 的 `pnl`: `number | any`
-- 组件内 `as any` 强制类型转换 (至少 3 处)
-
-→ **任务 P3-8**
+**修复状态**: ✅ 已完成（TASKS.md P3-8）
 
 #### Q-009: 后端 engine.go 复杂度
-
-[engine.go](../pkg/backtest/engine.go) 主循环函数较长，包含:
-- 因子缓存预热
-- 股息/送股处理  
-- 涨跌停检测
-- 限价单判断
-- 日志记录
-
-建议提取子方法: `processCorporateActions()`, `checkPriceLimits()`, `executeLimitOrders()`
-
-→ **任务 P3-9**
+**修复状态**: ✅ 已完成（TASKS.md P3-9）
 
 ---
 
 ## 五、风险提醒
 
-| 风险 | 概率 | 影响 | 缓解措施 |
-|------|------|------|---------|
-| 回测结果不持久化导致用户体验差 | ~~确定~~ 已解决 | ~~高~~ | ~~Phase B-4 优先实施~~ ✅ 已完成 |
-| 前端组件过大导致维护困难 | ~~确定~~ 已解决 | ~~中~~ | ~~Phase B-1/B-2 尽早执行~~ ✅ 已完成 |
-| 测试不足导致回归 bug | 高 | 高 | 见 TASKS.md P1-6 |
-| 文档与代码不同步导致新人困惑 | 确定 | 中 | 见 TASKS.md P2-1 ~ P2-7 |
+| 风险 | 概率 | 影响 | 缓解措施 | 状态 |
+|------|------|------|---------|------|
+| 回测结果不持久化导致用户体验差 | ~~确定~~ | ~~高~~ | ~~Phase B-4 优先实施~~ | ✅ 已解决 |
+| 前端组件过大导致维护困难 | ~~确定~~ | ~~中~~ | ~~Phase B-1/B-2 尽早执行~~ | ✅ 已解决 |
+| 测试不足导致回归 bug | 高 | 高 | 见 TASKS.md P1-6 | ✅ 已解决 |
+| 文档与代码不同步导致新人困惑 | 确定 | 中 | 见 TASKS.md P2-1 ~ P2-7 | ✅ 已解决 |
 
 ---
 
-## 六、任务迁移说明
+## 六、历史任务迁移记录
 
 > **重要**: 所有可执行任务已迁移至 [TASKS.md](TASKS.md)
 
 ### 迁移映射
 
-| 原 NEXT_STEPS.md 任务 | 新 TASKS.md ID |
-|----------------------|----------------|
-| Phase A: 紧急修复 | P2-1, P1-6 |
-| Phase B: 架构改进 | P1-11 ~ P1-15, P2-3 |
-| Phase C: 测试增强 | P2-14 ~ P2-17 |
-| Phase D: 代码质量 | P3-7 ~ P3-9, P1-12 |
-| Phase E: 文档同步 | P2-1 ~ P2-7 |
+| 原 NEXT_STEPS.md 任务 | 新 TASKS.md ID | 状态 |
+|----------------------|----------------|------|
+| Phase A: 紧急修复 | P2-1, P1-6 | ✅ 已完成 |
+| Phase B: 架构改进 | P1-11 ~ P1-15, P2-3 | ✅ 已完成 |
+| Phase C: 测试增强 | P2-14 ~ P2-17 | ✅ 已完成 |
+| Phase D: 代码质量 | P3-7 ~ P3-9, P1-12 | ✅ 已完成 |
+| Phase E: 文档同步 | P2-1 ~ P2-7 | ✅ 已完成 |
 
 ---
 
 _审计完成。以上所有发现均已记录并可追溯至具体文件和行号。_
 _所有可执行任务已迁移至 [TASKS.md](TASKS.md) 统一维护。_
+_本文档自 2026-05-03 起进入只读归档状态，不再更新任务列表。_

@@ -105,6 +105,106 @@ _原最后更新: 2026-04-08 (Phase 3)_
 
 ---
 
+## 数据同步架构 (ADR-013)
+
+> **状态**: Proposed — 详见 [ADR-013](adr/adr-013-data-sync-enhancement.md)
+
+### 当前架构 (Phase 3 现状)
+
+Data Service (`:8081`) 提供 13 个手动触发的同步端点，直接调用 Tushare API：
+
+```
+Browser ──POST /sync/ohlcv────► Data Service ──► Tushare API
+       ──POST /sync/stocks───►   (direct call)   (200 req/min)
+       ──POST /sync/... ─────►
+```
+
+**问题**: 全手动触发、无任务状态追踪、无定时调度、前端无数据管理界面。
+
+### 目标架构 (ADR-013 提案)
+
+引入统一同步任务队列 + 定时调度器 + 管理页面：
+
+```
+┌─────────────┐     POST /api/sync/jobs   ┌──────────────┐
+│  Data Sync  │ ────────────────────────► │  Data Service│
+│    UI       │  SSE /api/sync/stream     │              │
+│  (Vue SPA)  │ ◄──────────────────────── │              │
+└─────────────┘                           └──────────────┘
+                                                 │
+                    ┌────────────────────────────┘
+                    ▼
+            ┌──────────────┐
+            │  Sync Job    │  ◄── PostgreSQL sync_jobs 表
+            │   Queue      │
+            └──────────────┘
+                    │
+        ┌───────────┼───────────┐
+        ▼           ▼           ▼
+   ┌─────────┐ ┌─────────┐ ┌─────────┐
+   │ Worker  │ │ Worker  │ │ Worker  │  (goroutine pool)
+   │  #1     │ │  #2     │ │  #N     │
+   └────┬────┘ └────┬────┘ └────┬────┘
+        │           │           │
+        └───────────┼───────────┘
+                    ▼
+            ┌──────────────┐
+            │   Tushare    │
+            │     API      │
+            └──────────────┘
+```
+
+### 定时同步调度
+
+| 任务 | 默认 Cron | 说明 |
+|------|-----------|------|
+| OHLCV 增量同步 | `0 9 * * *` | 每日 09:00 同步前一交易日数据 |
+| 财务数据同步 | `0 8 * * 1` | 每周一 08:00 同步 |
+| 股票列表同步 | `0 6 1 * *` | 每月 1 日 06:00 同步 |
+| 交易日历同步 | `0 0 1 1 *` | 每年 1 月 1 日同步 |
+| 因子数据计算 | `0 10 * * *` | 每日 10:00 计算 |
+
+### 新增数据库表
+
+#### sync_jobs (同步任务队列)
+```sql
+id VARCHAR(64) PK                          -- UUID
+job_type VARCHAR(30) NOT NULL              -- ohlcv | fundamental | stocks | ...
+mode VARCHAR(20) NOT NULL DEFAULT 'incremental' -- incremental | full
+status VARCHAR(20) NOT NULL DEFAULT 'pending'   -- pending | running | completed | failed | cancelled
+symbols TEXT                               -- JSON 数组或 NULL(全部)
+start_date DATE
+end_date DATE
+progress INT DEFAULT 0                     -- 0-100
+total_items INT DEFAULT 0
+processed_items INT DEFAULT 0
+error_message TEXT
+retry_count INT DEFAULT 0
+max_retries INT DEFAULT 3
+created_at TIMESTAMPTZ DEFAULT NOW()
+started_at TIMESTAMPTZ
+completed_at TIMESTAMPTZ
+schedule_id VARCHAR(64)                    -- 关联定时任务配置
+Indexes: idx_sj_status, idx_sj_type, idx_sj_created_at
+```
+
+#### sync_schedules (定时同步配置)
+```sql
+id VARCHAR(64) PK                          -- UUID
+name VARCHAR(100) NOT NULL
+job_type VARCHAR(30) NOT NULL
+cron_expression VARCHAR(50) NOT NULL
+is_enabled BOOLEAN DEFAULT TRUE
+symbols TEXT                               -- 股票池配置
+options JSONB DEFAULT '{}'                 -- 额外选项
+last_run_at TIMESTAMPTZ
+next_run_at TIMESTAMPTZ
+created_at TIMESTAMPTZ DEFAULT NOW()
+updated_at TIMESTAMPTZ DEFAULT NOW()
+```
+
+---
+
 ## API 端点
 
 ### Analysis Service (8085)
@@ -497,7 +597,8 @@ web/src/
 │   ├── BacktestEngine.vue — 回测引擎 (编排: BacktestForm + MetricsCards + EquityChart + TradeTable + DetailMetrics + BacktestHistory)
 │   ├── Screener.vue     — 选股器
 │   ├── Copilot.vue      — AI Copilot
-│   └── StrategyLab.vue  — 策略实验室
+│   ├── StrategyLab.vue  — 策略实验室
+│   └── DataSync.vue     — 数据同步管理 (ADR-013)
 ├── components/          — 可复用子组件
 │   ├── backtest/        — 回测引擎子组件
 │   │   ├── BacktestForm.vue      — 回测参数表单
@@ -506,6 +607,12 @@ web/src/
 │   │   ├── TradeTable.vue        — 交易记录表
 │   │   ├── DetailMetrics.vue     — 详细指标
 │   │   └── BacktestHistory.vue   — 历史记录列表
+│   ├── sync/            — 数据同步子组件 (ADR-013)
+│   │   ├── SyncOverviewCards.vue    — 数据概览卡片
+│   │   ├── SyncControlPanel.vue     — 同步控制面板
+│   │   ├── SyncJobQueue.vue         — 同步任务队列
+│   │   ├── SyncLogViewer.vue        — 同步日志查看器
+│   │   └── DataQualityDashboard.vue — 数据质量仪表盘
 │   └── dashboard/       — 控制台子组件
 │       ├── MarketMetrics.vue     — 市场概览 (指数数据)
 │       ├── QuickBacktest.vue     — 快速回测表单
@@ -518,7 +625,8 @@ web/src/
 │   ├── AppSidebar.vue   — 侧边导航
 │   └── AppHeader.vue    — 顶部栏
 ├── stores/              — Pinia stores
-│   └── backtest.ts      — 回测历史 + 结果状态
+│   ├── backtest.ts      — 回测历史 + 结果状态
+│   └── sync.ts          — 数据同步状态 (ADR-013)
 ├── types/               — TypeScript 接口定义
 │   └── api.ts           — API 响应类型
 ├── utils/               — 工具函数
