@@ -96,14 +96,21 @@ type MarketData interface {
 ```
 
 ### Signal
+
+> **Canonical definition** — matches [pkg/strategy/strategy.go](../pkg/strategy/strategy.go)
+
 ```go
 type Signal struct {
-    Symbol      string
-    Date        time.Time
-    Direction   Direction  // Long, Short, Close
-    Strength    float64    // 0.0 - 1.0, confidence in signal
-    Factors     map[string]float64  // Factor contributions
-    Metadata    map[string]interface{}
+    Symbol      string             `json:"symbol"`
+    Action      string             `json:"action"`
+    Strength    float64            `json:"strength"`
+    Price       float64            `json:"price"`
+    Date        interface{}        `json:"date"`
+    Direction   domain.Direction   `json:"direction"`
+    Factors     map[string]float64 `json:"factors"`
+    Metadata    map[string]interface{} `json:"metadata"`
+    OrderType   domain.OrderType   `json:"order_type"`
+    LimitPrice  float64            `json:"limit_price"`
 }
 
 type Direction int

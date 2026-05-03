@@ -27,7 +27,7 @@
 | 数据服务 | Go + Gin | :8081 |
 | 策略服务 | Go + Gin | :8082 (备用) |
 | 数据库 | PostgreSQL | :5432 |
-| 缓存 | Redis | :6377 |
+| 缓存 | Redis | :6379 |
 
 ---
 
@@ -38,13 +38,13 @@
 ```
 Browser (Vue SPA :5173)
   │
-  ├──► GET /health          ──► analysis-service :8085
-  ├──► POST /backtest       ──► analysis-service → engine.go → postgres
+  ├──► GET /api/health      ──► analysis-service :8085
+  ├──► POST /api/backtest   ──► analysis-service → engine.go → postgres
   ├──► GET /ohlcv/:symbol   ──► analysis-service → data-service :8081 (proxy)
-  ├──► GET /strategies      ──► analysis-service → StrategyDB (local, no proxy)
-  ├──► POST /walkforward    ──► analysis-service → WalkForwardEngine → postgres
+  ├──► GET /api/strategies  ──► analysis-service → StrategyDB (local, no proxy)
+  ├──► POST /api/walkforward ──► analysis-service → WalkForwardEngine → postgres
   │
-  └──► Redis (:6377) ◄──── factor_cache, session store
+  └──► Redis (:6379) ◄──── factor_cache, session store
               │
               └──► PostgreSQL (:5432) ◄── stocks, ohlcv, fundamentals, backtest_runs
 
@@ -513,7 +513,7 @@ Please continue from where we left off.
 
 ### 项目健康度
 - **Phase**: 3 (Integration & Scale) — 核心完成，优化中
-- **测试覆盖**: backtest 72.5% | strategy 73.4% | data 26.7% | storage 36.8%
+- **测试覆盖**: backtest 72.5% | strategy 73.4% | data 43.3% | storage 36.8%
 - **关键服务**: 全部运行中 ✅
 
 ### 任务追踪

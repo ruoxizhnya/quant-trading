@@ -143,9 +143,9 @@
 | P3-12 | 修复 Copilot prompt 中 Strategy 接口   | 缺少 3 个方法                         | ✅     | CODE\_REVIEW\_REPORT |
 | P3-13 | 替换废弃的 `rand.Seed()`               | Go 1.20+ 废弃                      | ✅     | CODE\_REVIEW\_REPORT |
 | P3-14 | 移除 `registry.go` 中的 `panic()`     | 改为返回 error                       | ✅     | CODE\_REVIEW\_REPORT |
-| P3-15 | execution-service 订单持久化           | 内存 map → Redis/PG                | ⬜     | CODE\_REVIEW\_REPORT |
-| P3-16 | 引入 golang-migrate 工具              | 替代硬编码迁移                          | ⬜     | CODE\_REVIEW\_REPORT |
-| P3-17 | 为每个服务创建独立 Dockerfile              | 替代单一 Dockerfile                  | ⬜     | CODE\_REVIEW\_REPORT |
+| P3-15 | execution-service 订单持久化           | 内存 map → Redis/PG                | ✅     | CODE\_REVIEW\_REPORT |
+| P3-16 | 引入 golang-migrate 工具              | 替代硬编码迁移                          | ✅     | CODE\_REVIEW\_REPORT |
+| P3-17 | 为每个服务创建独立 Dockerfile              | 替代单一 Dockerfile                  | ✅     | CODE\_REVIEW\_REPORT |
 | P3-18 | 完善 `pkg/live/` 实盘接口集成             | 接口预留                             | ✅     | AGENTS.md            |
 | P3-19 | vnpy drift 对比验证（需要 vnpy 环境）       | 回测结果准确性验证                        | 🔴 阻塞 | PHASE\_GATE          |
 
