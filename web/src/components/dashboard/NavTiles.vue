@@ -21,6 +21,7 @@ import {
   SearchOutline,
   ChatbubblesOutline,
   SettingsOutline,
+  TrendingUpOutline,
 } from '@vicons/ionicons5'
 import { ChevronForward } from '@vicons/ionicons5'
 
@@ -37,6 +38,7 @@ const tiles: NavTile[] = [
   { to: '/screener', icon: h(NIcon, null, () => h(SearchOutline)), title: '因子选股', desc: '多因子筛选与排名', color: '#a371f7' },
   { to: '/strategy-lab', icon: h(NIcon, null, () => h(SettingsOutline)), title: '策略实验室', desc: '策略管理与参数优化', color: '#f78166' },
   { to: '/copilot', icon: h(NIcon, null, () => h(ChatbubblesOutline)), title: 'AI Copilot', desc: '智能策略生成助手', color: '#3fb950' },
+  { to: '/paper-trading', icon: h(NIcon, null, () => h(TrendingUpOutline)), title: '模拟交易', desc: 'Paper Trading 实盘模拟', color: '#ffa657' },
   { to: '/dashboard?tab=batch', icon: h(NIcon, null, () => h(FlashOutline)), title: '批量回测', desc: '多策略多标的对比', color: '#f85149' },
 ]
 </script>

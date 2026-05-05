@@ -1,8 +1,8 @@
 # 量化交易系统架构文档
 
 > **Status**: Active (Reference)
-> **Version:** 2.0.0 (AGENTS Template v2.0 Migration)
-> **Last Updated:** 2026-04-11
+> **Version:** 2.1.0 (Phase 4 AI-Native Update)
+> **Last Updated:** 2026-05-05
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [VISION.md](VISION.md) (principles), [SPEC.md](SPEC.md) (API), [ROADMAP.md](ROADMAP.md) (progress)
 >
@@ -12,6 +12,17 @@
 > - 添加前端架构章节（Vue SPA + Legacy HTML 双轨制）
 
 _原最后更新: 2026-04-08 (Phase 3)_
+
+**Phase 4 更新 (AI-Native Evolution):**
+- AI 研究服务 (port 8086): 因子发现、策略生成、优化、进化、漂移检测
+- 执行服务抽象: BacktestExecutionService 支持固定/浮动/无滑点模型
+- 模拟交易 API: 完整订单生命周期管理 + 模拟券商
+- AI 前端组件: FactorLab、StrategyWorkshop、EvolutionObs、GenealogyTree、FitnessChart
+- 基因池: Factor/Strategy 基因池 + PostgreSQL 持久化
+- 指标计算: IC/RankIC、换手率计算器
+- 搜索优化: TPE 贝叶斯优化、遗传算法、滚动窗口验证
+- 漂移检测: 均值漂移、方差漂移、分布漂移检测
+- 进化算法: 种群管理 + 选择/交叉/变异算子
 
 **Phase 3 更新:**
 - Event-Driven 数据管道 (pkg/marketdata/eventbus.go + provider 接口)

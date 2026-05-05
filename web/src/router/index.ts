@@ -42,6 +42,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/DataSync.vue'),
         meta: { title: '数据同步' },
       },
+      {
+        path: 'paper-trading',
+        name: 'paper-trading',
+        component: () => import('@/pages/PaperTrading.vue'),
+        meta: { title: '模拟交易' },
+      },
     ],
   },
   {

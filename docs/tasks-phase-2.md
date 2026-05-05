@@ -1,8 +1,8 @@
 # Quant Lab — Phase 4 Task Tracker (AI-Native Evolution)
 
-> **Version**: 1.0.0  
-> **Date**: 2026-05-04  
-> **Status**: Proposed  
+> **Version**: 1.1.0  
+> **Date**: 2026-05-05  
+> **Status**: In Progress (85% Complete)  
 > **Related**: IMPLEMENTATION_PLAN.md, ROADMAP.md, ADR-015  
 > **Scope**: Phase 4 — AI Agent Quantitative Research Platform
 
@@ -45,10 +45,10 @@
 | S8-4 | Create `pkg/ai/metrics/turnover.go` — Turnover calculator | New | 0.5d | ✅ |
 | S8-5 | Implement factor mutation operators | New | 1d | ✅ |
 | S8-6 | Create `pkg/ai/agents/validate.go` — Validate Agent MVP (L1-L2) | New | 1d | ✅ |
-| S8-7 | Database migration: `factor_genes` and `strategy_genes` tables | `migrations/` | 0.5d | ⬜ |
-| S8-8 | Create `web/src/components/ai/FactorLab.vue` — Factor Lab UI | New | 1.5d | ⬜ |
-| S8-9 | Create `web/src/components/ai/FactorCard.vue` — Factor card component | New | 0.5d | ⬜ |
-| S8-10 | Integration: Research Agent → Expression Engine → Validate Agent | — | 1d | ⬜ |
+| S8-7 | Database migration: `factor_genes` and `strategy_genes` tables | `migrations/` | 0.5d | ✅ |
+| S8-8 | Create `web/src/components/ai/FactorLab.vue` — Factor Lab UI | New | 1.5d | ✅ |
+| S8-9 | Create `web/src/components/ai/FactorCard.vue` — Factor card component | New | 0.5d | ✅ |
+| S8-10 | Integration: Research Agent → Expression Engine → Validate Agent | — | 1d | ✅ |
 | S8-11 | Run factor discovery batch: target 10+ factors with IC > 0.03 | — | 1d | ⬜ |
 
 **Sprint 8 Milestone**: 10+ factors validated and persisted to gene pool
@@ -66,9 +66,9 @@
 | S9-3 | Create `pkg/ai/prompts/strategy_generate.txt` — Strategy generation prompt | New | 0.5d | ✅ |
 | S9-4 | Create `pkg/ai/validator/code_validator.go` — Code validation (syntax + compile) | New | 1d | ✅ |
 | S9-5 | Extend Validate Agent to L3 (standard backtest) | `pkg/ai/agents/validate.go` | 0.5d | ✅ |
-| S9-6 | Create `web/src/components/ai/StrategyWorkshop.vue` — Strategy Workshop UI | New | 1.5d | ⬜ |
-| S9-7 | Create `web/src/components/ai/StrategyCard.vue` — Strategy card component | New | 0.5d | ⬜ |
-| S9-8 | Create `web/src/pages/AIResearch.vue` — AI Research main page | New | 1d | ⬜ |
+| S9-6 | Create `web/src/components/ai/StrategyWorkshop.vue` — Strategy Workshop UI | New | 1.5d | ✅ |
+| S9-7 | Create `web/src/components/ai/StrategyCard.vue` — Strategy card component | New | 0.5d | ✅ |
+| S9-8 | Create `web/src/pages/AIResearch.vue` — AI Research main page | New | 1d | ✅ |
 | S9-9 | Integration: Generate Agent → Code Validator → Backtest Client | — | 1d | ✅ |
 | S9-10 | Run strategy generation batch: target 5+ compilable strategies | — | 0.5d | ⬜ |
 
@@ -92,9 +92,9 @@
 | S10-8 | Create `pkg/ai/evolution/crossover.go` — Crossover operators | New | 0.5d | ✅ |
 | S10-9 | Create `pkg/ai/evolution/mutation.go` — Mutation operators | New | 0.5d | ✅ |
 | S10-10 | Create `pkg/ai/drift/detector.go` — Concept drift detection | New | 1d | ✅ |
-| S10-11 | Create `web/src/components/ai/EvolutionObs.vue` — Evolution Observatory UI | New | 1d | ⬜ |
-| S10-12 | Create `web/src/components/ai/GenealogyTree.vue` — Genealogy tree | New | 1d | ⬜ |
-| S10-13 | Create `web/src/components/ai/FitnessChart.vue` — Fitness chart | New | 0.5d | ⬜ |
+| S10-11 | Create `web/src/components/ai/EvolutionObs.vue` — Evolution Observatory UI | New | 1d | ✅ |
+| S10-12 | Create `web/src/components/ai/GenealogyTree.vue` — Genealogy tree | New | 1d | ✅ |
+| S10-13 | Create `web/src/components/ai/FitnessChart.vue` — Fitness chart | New | 0.5d | ✅ |
 
 **Sprint 10 Milestone**: 50-strategy population with automatic drift detection
 
@@ -118,8 +118,8 @@
 | ~~S11-D4-2~~ | ~~MockTrader 实现~~ | ~~`pkg/live/mock_trader.go`~~ | ~~—~~ | ✅ |
 | ~~S11-D4-3~~ | ~~Engine 预留实盘接口~~ | ~~`pkg/backtest/engine.go`~~ | ~~—~~ | ✅ |
 | S11-9 | Create `pkg/marketdata/realtime_provider.go` — WebSocket provider | New | 0.5d | ✅ |
-| S11-10 | Add paper trading API endpoints | `cmd/analysis/main.go` | 0.5d | ⬜ |
-| S11-11 | Paper trading dashboard UI | `web/src/components/` | 1d | ⬜ |
+| S11-10 | Add paper trading API endpoints | `cmd/analysis/main.go` | 0.5d | ✅ |
+| S11-11 | Paper trading dashboard UI | `web/src/components/` | 1d | ✅ |
 
 **Sprint 11 Milestone**: Paper trading runs end-to-end with A-share fees
 
@@ -134,12 +134,12 @@
 | S12-1 | Unit tests for all AI Agent components | `pkg/ai/**/*_test.go` | 2d | ✅ |
 | S12-2 | Integration tests for backtest engine with ExecutionService | `pkg/backtest/*_test.go` | 1d | ✅ |
 | S12-3 | Integration tests for LiveEngine | `pkg/live/*_test.go` | 1d | ✅ |
-| S12-4 | Run full regression test suite | All tests | 0.5d | ⬜ |
+| S12-4 | Run full regression test suite | All tests | 0.5d | ✅ |
 | S12-5 | Run E2E tests (Playwright) | `e2e/tests/` | 0.5d | ⬜ |
 | S12-6 | Performance benchmark | Benchmark scripts | 0.5d | ⬜ |
-| S12-7 | Update SPEC.md with AI Service APIs | `docs/SPEC.md` | 0.5d | ⬜ |
-| S12-8 | Update ARCHITECTURE.md | `docs/ARCHITECTURE.md` | 0.5d | ⬜ |
-| S12-9 | Update AGENTS.md with AI patterns | `docs/AGENTS.md` | 0.5d | ⬜ |
+| S12-7 | Update SPEC.md with AI Service APIs | `docs/SPEC.md` | 0.5d | ✅ |
+| S12-8 | Update ARCHITECTURE.md | `docs/ARCHITECTURE.md` | 0.5d | ✅ |
+| S12-9 | Update AGENTS.md with AI patterns | `docs/AGENTS.md` | 0.5d | ✅ |
 | S12-10 | Update VISION.md | `docs/VISION.md` | 0.5d | ⬜ |
 | S12-11 | Create migration guide | `docs/guides/` | 0.5d | ⬜ |
 | S12-12 | Final review: all docs consistent | All docs | 0.5d | ⬜ |

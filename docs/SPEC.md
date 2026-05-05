@@ -1,8 +1,8 @@
 # Quant Trading System - System Specification
 
 > **Status**: Active (Canonical)
-> **Version:** 1.3.0 (AGENTS Template v2.0 Migration)
-> **Last Updated:** 2026-04-11
+> **Version:** 1.4.0 (Phase 4 AI-Native Update)
+> **Last Updated:** 2026-05-05
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [VISION.md](VISION.md) (design), [ARCHITECTURE.md](ARCHITECTURE.md) (layout), [TEST.md](TEST.md) (quality)
 >
@@ -24,6 +24,17 @@ A production-grade quantitative trading system targeting A-share markets with ma
 - Strategy interface finalized: Configure(), Weight(), GenerateSignals(), Cleanup()
 - Signal type enhanced: Direction enum, Factors map, Metadata map
 - Test coverage: 55+ unit tests across core packages
+
+**Phase 4 Changes (AI-Native Evolution):**
+- AI Research Service (port 8086): Factor discovery, strategy generation, optimization
+- Execution Service abstraction: BacktestExecutionService with pluggable slippage models
+- Paper Trading API: Full order lifecycle management with simulated broker
+- AI Components: FactorLab, StrategyWorkshop, EvolutionObs, GenealogyTree, FitnessChart
+- Gene Pool: Factor and strategy gene pool with PostgreSQL persistence
+- Metrics: IC/RankIC calculator, Turnover calculator
+- Search: TPE Bayesian optimization, Genetic Algorithm, Walk-Forward validation
+- Drift Detection: Mean shift, variance shift, distribution shift detection
+- Evolution: Population management with selection, crossover, mutation operators
 
 ---
 
@@ -486,7 +497,31 @@ GET  /positions                   - Get current positions
 GET  /account                     - Get account summary
 ```
 
-### 5. Analysis Service (port 8085)
+### 5. Paper Trading Service (port 8085 /api/paper)
+**Responsibilities**:
+- Simulated trading with real-time market data
+- Order lifecycle management (submit, cancel, query)
+- Position tracking with T+1 settlement
+- Portfolio PnL calculation
+- Trade history recording
+
+**Endpoints**:
+```
+POST /api/paper/start              - Start paper trading session
+     {"symbols": ["000001.SZ", ...], "initial_capital": 1000000}
+POST /api/paper/stop               - Stop paper trading session
+GET  /api/paper/status             - Get session status
+POST /api/paper/orders             - Submit new order
+     {"symbol": "000001.SZ", "direction": "long", "quantity": 100, "order_type": "market"}
+GET  /api/paper/orders             - List all orders
+GET  /api/paper/orders/:id         - Get order by ID
+DELETE /api/paper/orders/:id       - Cancel order
+GET  /api/paper/positions          - Get current positions
+GET  /api/paper/portfolio          - Get portfolio summary
+GET  /api/paper/trades             - Get trade history
+```
+
+### 6. Analysis Service (port 8085)
 **Responsibilities**:
 - API Gateway (proxies to data-service and strategy-service)
 - Backtesting engine
@@ -609,8 +644,8 @@ GET  /api/pipeline/jobs/:id       - Get specific pipeline job result
 4. **Compilation Validation**: Verify generated code compiles successfully
 5. **Backtest Execution**: Run quick backtest to validate strategy performance
 
-### 6. AI Research Service (port 8086) ⚠️ *Planned — Phase 4*
-> **Status**: Architecture defined in ADR-015. Implementation planned for Sprint 7-12.
+### 6. AI Research Service (port 8086) ✅ *Implemented — Phase 4*
+> **Status**: Core implementation complete. Services: factor discovery, strategy generation, optimization, evolution, drift detection.
 > **Design Principle**: AI acts as a senior quantitative researcher, using existing backtest infrastructure for validation.
 
 **Responsibilities**:
