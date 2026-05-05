@@ -3,7 +3,7 @@ package plugins
 
 import (
 	"context"
-	"sort"
+	"fmt"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
@@ -19,9 +19,8 @@ type MeanReversionConfig struct {
 // meanReversionStrategy implements a mean reversion strategy.
 // Buy when price is below moving average, sell when above.
 type meanReversionStrategy struct {
-	name        string
-	description string
-	params      MeanReversionConfig
+	*strategy.BaseStrategy
+	params MeanReversionConfig
 }
 
 func (s *meanReversionStrategy) Name() string {
@@ -98,12 +97,8 @@ func (s *meanReversionStrategy) GenerateSignals(ctx context.Context, bars map[st
 			continue
 		}
 
-		// Sort by date ascending
-		sorted := make([]domain.OHLCV, len(data))
-		copy(sorted, data)
-		sort.Slice(sorted, func(i, j int) bool {
-			return sorted[i].Date.Before(sorted[j].Date)
-		})
+		// Sort by date ascending using shared utility
+		sorted := sortOHLCV(data)
 
 		// Calculate simple moving average
 		var sum float64
@@ -158,30 +153,35 @@ func (s *meanReversionStrategy) GenerateSignals(ctx context.Context, bars map[st
 	return signals, nil
 }
 
-// Configure sets the strategy parameters.
+// Configure sets the strategy parameters with validation.
 func (s *meanReversionStrategy) Configure(params map[string]any) error {
+	s.Lock()
+	defer s.Unlock()
 	if v, ok := params["ma_period"]; ok {
-		switch val := v.(type) {
-		case float64:
-			s.params.MAPeriod = int(val)
-		case int:
+		if val, ok := parseIntParam(v); ok {
+			result := validateIntRange("ma_period", val, 1, 252)
+			if !result.Valid {
+				return fmt.Errorf("invalid parameter: %s", result.Message)
+			}
 			s.params.MAPeriod = val
 		}
 	}
 	if v, ok := params["buy_threshold_pct"]; ok {
-		switch val := v.(type) {
-		case float64:
+		if val, ok := parseFloatParam(v); ok {
+			result := validateFloatRange("buy_threshold_pct", val, -50.0, 0.0)
+			if !result.Valid {
+				return fmt.Errorf("invalid parameter: %s", result.Message)
+			}
 			s.params.BuyThresholdPct = val
-		case int:
-			s.params.BuyThresholdPct = float64(val)
 		}
 	}
 	if v, ok := params["sell_threshold_pct"]; ok {
-		switch val := v.(type) {
-		case float64:
+		if val, ok := parseFloatParam(v); ok {
+			result := validateFloatRange("sell_threshold_pct", val, 0.0, 50.0)
+			if !result.Valid {
+				return fmt.Errorf("invalid parameter: %s", result.Message)
+			}
 			s.params.SellThresholdPct = val
-		case int:
-			s.params.SellThresholdPct = float64(val)
 		}
 	}
 	return nil
@@ -207,13 +207,13 @@ func (s *meanReversionStrategy) Cleanup() {
 
 func init() {
 	// Auto-register with global registry for backward compatibility
-	strategy.GlobalRegister(&meanReversionStrategy{
-		name:        "mean_reversion",
-		description: "Mean reversion: buy when price below moving average, sell when above",
+	s := &meanReversionStrategy{
+		BaseStrategy: strategy.NewBaseStrategy("mean_reversion", "Mean reversion: buy when price below moving average, sell when above"),
 		params: MeanReversionConfig{
 			MAPeriod:         20,
 			BuyThresholdPct:  0.97,
 			SellThresholdPct: 1.03,
 		},
-	})
+	}
+	strategy.GlobalRegister(s)
 }

@@ -3,6 +3,7 @@ package plugins
 
 import (
 	"context"
+	"fmt"
 	"sort"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -19,9 +20,8 @@ type MomentumConfig struct {
 // momentumStrategy implements a price momentum strategy.
 // Buy stocks with strongest N-day returns, sell weakest.
 type momentumStrategy struct {
-	name        string
-	description string
-	params      MomentumConfig
+	*strategy.BaseStrategy
+	params MomentumConfig
 }
 
 func (s *momentumStrategy) Name() string {
@@ -85,12 +85,8 @@ func (s *momentumStrategy) GenerateSignals(ctx context.Context, bars map[string]
 			continue
 		}
 
-		// Sort by date ascending
-		sorted := make([]domain.OHLCV, len(data))
-		copy(sorted, data)
-		sort.Slice(sorted, func(i, j int) bool {
-			return sorted[i].Date.Before(sorted[j].Date)
-		})
+		// Sort by date ascending using shared utility
+		sorted := sortOHLCV(data)
 
 		endIdx := len(sorted) - 1
 
@@ -130,16 +126,8 @@ func (s *momentumStrategy) GenerateSignals(ctx context.Context, bars map[string]
 			continue // Only buy stocks with positive momentum
 		}
 
-		// Get the latest price
-		var price float64
-		if data, ok := bars[results[i].symbol]; ok && len(data) > 0 {
-			sorted := make([]domain.OHLCV, len(data))
-			copy(sorted, data)
-			sort.Slice(sorted, func(i, j int) bool {
-				return sorted[i].Date.Before(sorted[j].Date)
-			})
-			price = sorted[len(sorted)-1].Close
-		}
+		// Get the latest price using shared utility
+		price := getLatestPrice(bars[results[i].symbol])
 
 		signals = append(signals, strategy.Signal{
 			Symbol:   results[i].symbol,
@@ -174,26 +162,34 @@ func (s *momentumStrategy) GenerateSignals(ctx context.Context, bars map[string]
 	return signals, nil
 }
 
-// Configure sets the strategy parameters.
+// Configure sets the strategy parameters with validation.
 func (s *momentumStrategy) Configure(params map[string]any) error {
+	s.Lock()
+	defer s.Unlock()
 	if v, ok := params["lookback_days"]; ok {
-		switch val := v.(type) {
-		case float64:
-			s.params.LookbackDays = int(val)
-		case int:
+		if val, ok := parseIntParam(v); ok {
+			result := validateIntRange("lookback_days", val, 1, 252)
+			if !result.Valid {
+				return fmt.Errorf("invalid parameter: %s", result.Message)
+			}
 			s.params.LookbackDays = val
 		}
 	}
 	if v, ok := params["top_n"]; ok {
-		switch val := v.(type) {
-		case float64:
-			s.params.TopN = int(val)
-		case int:
+		if val, ok := parseIntParam(v); ok {
+			result := validateIntRange("top_n", val, 1, 100)
+			if !result.Valid {
+				return fmt.Errorf("invalid parameter: %s", result.Message)
+			}
 			s.params.TopN = val
 		}
 	}
 	if v, ok := params["rebalance_frequency"]; ok {
-		if val, ok := v.(string); ok {
+		if val, ok := parseStringParam(v); ok {
+			result := validateStringChoice("rebalance_frequency", val, []string{"daily", "weekly", "monthly"})
+			if !result.Valid {
+				return fmt.Errorf("invalid parameter: %s", result.Message)
+			}
 			s.params.RebalanceFrequency = val
 		}
 	}
@@ -220,13 +216,13 @@ func (s *momentumStrategy) Cleanup() {
 }
 
 func init() {
-	strategy.GlobalRegister(&momentumStrategy{
-		name:        "momentum",
-		description: "Momentum strategy: buy stocks with strongest N-day returns, sell weakest",
+	s := &momentumStrategy{
+		BaseStrategy: strategy.NewBaseStrategy("momentum", "Momentum: buy top N stocks with strongest price momentum over lookback period"),
 		params: MomentumConfig{
 			LookbackDays:       20,
 			TopN:               5,
 			RebalanceFrequency: "weekly",
 		},
-	})
+	}
+	strategy.GlobalRegister(s)
 }

@@ -1,7 +1,7 @@
 # Quant Lab — Agentic Coding Configuration
 
 > **版本**: v3.0 (基于 AGENTS Template v2.0 迁移)
-> **最后更新**: 2026-04-11
+> **最后更新**: 2026-05-05
 > **适用项目**: A-share quantitative trading system (Quant Lab)
 >
 > 本文件为 AI 编码助手提供项目上下文。阅读本文件即可快速理解项目全貌。
@@ -13,9 +13,9 @@
 **Quant Lab** 是一个专业的 A 股量化交易平台，采用 Go 后端 + Vue 3 前端 + PostgreSQL + Redis 架构。
 
 - **语言**: Go 1.21+ (后端), TypeScript + Vue 3 (前端)
-- **当前版本**: Phase 3 (Integration & Scale)
-- **状态**: 核心功能已完成，进入质量优化阶段
-- **入口**: `cmd/analysis/main.go` (后端), `web/src/main.ts` (前端)
+- **当前版本**: Phase 3 (Integration & Scale) → Phase 4 (AI-Native Evolution) 进行中
+- **状态**: 核心功能已完成，AI 研究服务已上线运行
+- **入口**: `cmd/analysis/main.go` (后端), `cmd/ai/main.go` (AI 服务), `web/src/main.ts` (前端)
 - **构建**: `go build ./...` (后端), `npm run build` (前端)
 
 ### 技术栈
@@ -25,6 +25,7 @@
 | 后端 API | Go + Gin | :8085 |
 | 前端 SPA | Vue 3 + Naive UI | :5173 (dev) |
 | 数据服务 | Go + Gin | :8081 |
+| **AI 研究服务** | **Go + Gin** | **:8086** |
 | 策略服务 | Go + Gin | :8082 (备用) |
 | 数据库 | PostgreSQL | :5432 |
 | 缓存 | Redis | :6379 |
@@ -38,17 +39,27 @@
 ```
 Browser (Vue SPA :5173)
   │
-  ├──► GET /api/health      ──► analysis-service :8085
-  ├──► POST /api/backtest   ──► analysis-service → engine.go → postgres
-  ├──► GET /ohlcv/:symbol   ──► analysis-service → data-service :8081 (proxy)
-  ├──► GET /api/strategies  ──► analysis-service → StrategyDB (local, no proxy)
-  ├──► POST /api/walkforward ──► analysis-service → WalkForwardEngine → postgres
+  ├──► GET /api/health        ──► analysis-service :8085
+  ├──► POST /api/backtest     ──► analysis-service → engine.go → postgres
+  ├──► GET /ohlcv/:symbol     ──► analysis-service → data-service :8081 (proxy)
+  ├──► GET /api/strategies    ──► analysis-service → StrategyDB (local)
+  ├──► POST /api/walkforward  ──► analysis-service → WalkForwardEngine → postgres
+  ├──► POST /api/batch/backtest ──► analysis-service → BatchEngine → postgres
+  ├──► GET /api/sync/stream   ──► analysis-service → SSE (real-time progress)
+  ├──► GET /api/sync/status   ──► analysis-service → SyncJobManager → postgres
+  ├──► POST /api/sync/jobs    ──► analysis-service → SyncQueue → WorkerPool
+  ├──► GET /api/datasource/status ──► analysis-service → DataAdapter
+  ├──► POST /api/datasource/switch ──► analysis-service → ProviderManager
+  ├──► GET /api/plugins       ──► analysis-service → PluginLoader
   │
-  └──► Redis (:6379) ◄──── factor_cache, session store
+  └──► Redis (:6379) ◄──── factor_cache, session store, sync_job_cache
               │
-              └──► PostgreSQL (:5432) ◄── stocks, ohlcv, fundamentals, backtest_runs
+              └──► PostgreSQL (:5432) ◄── stocks, ohlcv, fundamentals,
+                                          backtest_runs, sync_jobs, sync_schedules
 
+  data-service :8081 (tushare data ingestion)
   strategy-service :8082 (standby — see ADR-012)
+  ai-research-service :8086 (LLM-driven strategy generation)
 ```
 
 ### 关键架构决策
@@ -60,6 +71,8 @@ Browser (Vue SPA :5173)
 | [ADR-003](docs/adr/adr-003-background-worker.md) | 异步任务队列 | 回测不阻塞 API |
 | [ADR-004](docs/adr/adr-004-scoring-method.md) | 多因子评分框架 | 策略通用化 |
 | [ADR-005](docs/adr/adr-005-strategy-config.md) | 策略配置标准化 | 统一参数接口 |
+| [ADR-014](docs/adr/adr-014-strategy-framework-refactor.md) | 策略框架重构 | 消除重复代码，统一接口 |
+| [ADR-015](docs/adr/adr-015-ai-agent-architecture.md) | AI Agent 量化研究架构 | AI 作为资深量化研究员 |
 
 详见: [ADR.md](docs/ADR.md)
 
@@ -70,18 +83,44 @@ Browser (Vue SPA :5173)
 ```
 quant-trading/
 ├── cmd/                    # 服务入口
-│   └── analysis/           # 主服务 (:8085)
+│   ├── analysis/           # 主服务 (:8085)
+│   └── ai/                 # AI 研究服务 (:8086) — Phase 4
 ├── pkg/                    # 业务逻辑包
+│   ├── ai/                 # AI Agent 系统 (Phase 4)
+│   │   ├── intent/         # LLM 意图解析：自然语言 → 结构化策略参数
+│   │   ├── yaml/           # YAML 配置生成器：结构化意图 → 策略配置
+│   │   ├── pipeline/       # 策略生成流水线：意图 → YAML → 代码 → 编译 → 回测
+│   │   ├── agents/         # Research/Generate/Validate/Evolve Agents
+│   │   ├── expression/     # 因子表达式 DSL + AST
+│   │   ├── gene_pool/      # 因子/策略基因池
+│   │   ├── client/         # 回测/因子 HTTP 客户端
+│   │   ├── metrics/        # IC、换手率计算
+│   │   ├── search/         # TPE + 遗传算法
+│   │   ├── evolution/      # 种群管理 + 选择/交叉/变异
+│   │   ├── drift/          # 概念漂移检测
+│   │   ├── validator/      # 代码验证器
+│   │   └── prompts/        # LLM 提示模板
 │   ├── backtest/           # 回测引擎 (engine, job, batch, walkforward)
 │   ├── data/               # 数据管道 (sync, marketdata, factors)
 │   ├── domain/             # 领域模型 (OHLCV, Signal, Portfolio)
 │   ├── storage/            # PostgreSQL 存储
 │   ├── strategy/           # 策略框架 + 插件
-│   └── risk/               # 风控模块 (stoploss, position sizing)
+│   ├── risk/               # 风控模块 (stoploss, position sizing)
+│   └── live/               # 实盘/纸交易引擎 (Phase 4)
 ├── web/src/                # Vue 3 前端
 │   ├── api/                # API 客户端
 │   ├── pages/              # 页面组件
+│   │   └── AIResearch.vue  # AI 研究主页面 — Phase 4
 │   ├── components/         # 可复用组件
+│   │   └── ai/             # AI 模块组件 — Phase 4
+│   │       ├── PipelineDashboard.vue  # AI 策略生成流水线仪表盘
+│   │       ├── FactorLab.vue
+│   │       ├── StrategyWorkshop.vue
+│   │       ├── EvolutionObs.vue
+│   │       ├── FactorCard.vue
+│   │       ├── StrategyCard.vue
+│   │       ├── GenealogyTree.vue
+│   │       └── FitnessChart.vue
 │   └── utils/              # 工具函数
 ├── docs/                   # 文档 (见下方导航)
 ├── e2e/tests/              # Playwright E2E 测试
@@ -96,7 +135,7 @@ quant-trading/
 你是一个全栈开发 Agent，协助进行后端服务、前端页面、API 集成、测试和文档工作。你编写生产级代码，遵循现有模式和约定。
 
 ### 工作范围（What You Work On）
-- **后端**: `cmd/`, `pkg/` (Go modules — backtest, data, domain, storage, strategy)
+- **后端**: `cmd/`, `pkg/` (Go modules — backtest, data, domain, storage, strategy, **ai**, **live**)
 - **前端**: `web/src/` (Vue 3 + TypeScript + Naive UI + Chart.js + Pinia)
 - **测试**: `e2e/tests/` (Playwright E2E tests)
 - **文档**: `docs/` (Markdown design documents)
@@ -224,14 +263,20 @@ async function renderChart() {
 ```
 Browser (Vue SPA :5173)
   │
-  ├──► GET /health          ──► analysis-service :8085
-  ├──► POST /backtest       ──► analysis-service → engine.go → postgres
-  ├──► GET /ohlcv/:symbol   ──► analysis-service → data-service :8081 (proxy)
-  ├──► GET /strategies      ──► analysis-service → strategy-service :8082 (proxy)
+  ├──► GET /health            ──► analysis-service :8085
+  ├──► POST /backtest         ──► analysis-service → engine.go → postgres
+  ├──► GET /ohlcv/:symbol     ──► analysis-service → data-service :8081 (proxy)
+  ├──► GET /strategies        ──► analysis-service → StrategyDB (local)
+  ├──► POST /batch/backtest   ──► analysis-service → BatchEngine → postgres
+  ├──► POST /walkforward      ──► analysis-service → WalkForwardEngine → postgres
+  ├──► GET /sync/stream       ──► analysis-service → SSE (real-time)
+  ├──► GET /datasource/status ──► analysis-service → DataAdapter
+  ├──► GET /plugins           ──► analysis-service → PluginLoader
   │
-  └──► Redis (:6377) ◄──── factor_cache, session store
+  └──► Redis (:6379) ◄──── factor_cache, session store, sync_job_cache
               │
-              └──► PostgreSQL (:5432) ◄── stocks, ohlcv, fundamentals, backtest_runs
+              └──► PostgreSQL (:5432) ◄── stocks, ohlcv, fundamentals,
+                                          backtest_runs, sync_jobs, sync_schedules
 ```
 
 ---
@@ -512,19 +557,21 @@ Please continue from where we left off.
 ## 13. 当前状态
 
 ### 项目健康度
-- **Phase**: 3 (Integration & Scale) — 核心完成，优化中
-- **测试覆盖**: backtest 72.5% | strategy 73.4% | data 43.3% | storage 36.8%
-- **关键服务**: 全部运行中 ✅
+- **Phase**: 3 (Integration & Scale) → 4 (AI-Native Evolution) 进行中
+- **测试覆盖**: backtest 72.5% | strategy 73.4% | **data 70.6%** | storage 36.8% | **ai 75%+** | **live 0%** | **sync 75%+** | **plugins 80.3%**
+- **关键服务**: Analysis ✅ | Data ✅ | **Sync ✅** | **AI Research ✅ (running)** | Strategy (standby) ✅
 
 ### 任务追踪
-> **统一任务追踪源**: [docs/TASKS.md](docs/TASKS.md)
-> 
-> 所有可执行任务（P0-P3 + Phase 3 实施任务）均在 TASKS.md 中维护。
-> 本文件不再维护任务列表，避免信息分散。
+> **Phase 3 任务追踪**: [docs/TASKS.md](docs/TASKS.md)
+> **Phase 4 (AI-Native) 任务追踪**: [docs/tasks-phase-2.md](docs/tasks-phase-2.md)
+>
+> Phase 3 任务（P0-P3 + 实施任务）在 TASKS.md 中维护。
+> Phase 4 任务（AI Agent + Live Trading）在 tasks-phase-2.md 中维护。
 
 ### 技术债
-- 大部分已完成（见 [NEXT_STEPS.md](docs/NEXT_STEPS.md)）
-- 主要剩余：测试覆盖率持续提升、前端交互测试补充
+- Phase 3 大部分已完成（见 [NEXT_STEPS.md](docs/NEXT_STEPS.md)）
+- Phase 4 新增技术债：AI Agent 测试覆盖、表达式引擎性能、LLM 成本优化
+- LiveTrader 已实现接口和 MockTrader，但缺少真实券商对接实现
 
 ---
 
@@ -563,9 +610,13 @@ Please continue from where we left off.
 | 查看页面设计规范 | [docs/design/pages/](docs/design/pages/) |
 | 查看组件使用规范 | [docs/design/components.md](docs/design/components.md) |
 | 查看视觉规范 | [docs/design/visual.md](docs/design/visual.md) |
+| **AI 研究架构** | **[ADR-015](docs/adr/adr-015-ai-agent-architecture.md)** |
+| **Phase 4 实施计划** | **[IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)** |
+| **Phase 4 任务追踪** | **[tasks-phase-2.md](docs/tasks-phase-2.md)** |
 | 使用本模板 | [AGENTS_TEMPLATE.md](docs/AGENTS_TEMPLATE.md) |
 
 ---
-_Last updated: 2026-04-11_
+_Last updated: 2026-05-04_
 _Source: 基于 AGENTS Template v2.0 迁移，融合 quant-trading + Claudeer 最佳实践_
 _Migration ODR: odr-005-agents-md-v3-migration (pending creation)_
+_Phase 4 Update: AI-Native Evolution architecture documented in ADR-015, IMPLEMENTATION_PLAN.md, tasks-phase-2.md_

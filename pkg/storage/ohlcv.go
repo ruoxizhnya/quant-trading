@@ -60,12 +60,16 @@ func (s *PostgresStore) SaveOHLCVBatch(ctx context.Context, records []*domain.OH
 	}
 
 	results := tx.SendBatch(ctx, batch)
-	defer results.Close()
 
 	for i := 0; i < len(records); i++ {
 		if _, err := results.Exec(); err != nil {
+			results.Close()
 			return fmt.Errorf("batch insert failed at index %d: %w", i, err)
 		}
+	}
+
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("failed to close batch results: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

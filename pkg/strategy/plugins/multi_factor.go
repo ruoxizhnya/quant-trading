@@ -4,9 +4,9 @@ package plugins
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
-	"os"
 	"sort"
 	"time"
 
@@ -35,7 +35,7 @@ type rankedStock struct {
 // multiFactorStrategy implements a weighted multi-factor ranking strategy.
 // Factors: value (1/PE), quality (ROE), momentum (price return).
 type multiFactorStrategy struct {
-	name   string
+	*strategy.BaseStrategy
 	params MultiFactorConfig
 
 	httpClient     *http.Client
@@ -47,51 +47,38 @@ type multiFactorStrategy struct {
 
 // Configure sets the strategy parameters.
 func (s *multiFactorStrategy) Configure(params map[string]any) error {
+	s.Lock()
+	defer s.Unlock()
 	if s.screenCache == nil {
 		s.screenCache = strategy.NewScreenCache(30)
 	}
 	if v, ok := params["value_weight"]; ok {
-		switch val := v.(type) {
-		case float64:
+		if val, ok := parseFloatParam(v); ok {
 			s.params.ValueWeight = val
-		case int:
-			s.params.ValueWeight = float64(val)
 		}
 	}
 	if v, ok := params["quality_weight"]; ok {
-		switch val := v.(type) {
-		case float64:
+		if val, ok := parseFloatParam(v); ok {
 			s.params.QualityWeight = val
-		case int:
-			s.params.QualityWeight = float64(val)
 		}
 	}
 	if v, ok := params["momentum_weight"]; ok {
-		switch val := v.(type) {
-		case float64:
+		if val, ok := parseFloatParam(v); ok {
 			s.params.MomentumWeight = val
-		case int:
-			s.params.MomentumWeight = float64(val)
 		}
 	}
 	if v, ok := params["lookback_days"]; ok {
-		switch val := v.(type) {
-		case float64:
-			s.params.LookbackDays = int(val)
-		case int:
+		if val, ok := parseIntParam(v); ok {
 			s.params.LookbackDays = val
 		}
 	}
 	if v, ok := params["top_n"]; ok {
-		switch val := v.(type) {
-		case float64:
-			s.params.TopN = int(val)
-		case int:
+		if val, ok := parseIntParam(v); ok {
 			s.params.TopN = val
 		}
 	}
 	if v, ok := params["rebalance_frequency"]; ok {
-		if val, ok := v.(string); ok {
+		if val, ok := parseStringParam(v); ok {
 			s.params.RebalanceFrequency = val
 		}
 	}
@@ -198,7 +185,15 @@ func (s *multiFactorStrategy) callScreenAPI(dateStr string) ([]domain.ScreenResu
 		Date:    dateStr,
 		Limit:   2000,
 	}
-	return strategy.CallScreenAPI(s.httpClient, s.dataServiceURL, s.screenCache, req)
+
+	results, err := strategy.CallScreenAPI(s.httpClient, s.dataServiceURL, s.screenCache, req)
+	if err != nil {
+		log.Printf("[multi_factor] Screen API call failed for date %s: %v", dateStr, err)
+		return nil, fmt.Errorf("screen API failed for %s: %w", dateStr, err)
+	}
+
+	log.Printf("[multi_factor] Screen API returned %d stocks for date %s", len(results), dateStr)
+	return results, nil
 }
 
 // rankPercentile sorts the input values and returns each element's percentile rank.
@@ -368,15 +363,7 @@ func (s *multiFactorStrategy) GenerateSignals(
 			continue
 		}
 
-		var price float64
-		if data, ok := bars[ranked[i].symbol]; ok && len(data) > 0 {
-			sorted := make([]domain.OHLCV, len(data))
-			copy(sorted, data)
-			sort.Slice(sorted, func(i, j int) bool {
-				return sorted[i].Date.Before(sorted[j].Date)
-			})
-			price = sorted[len(sorted)-1].Close
-		}
+		price := getLatestPrice(bars[ranked[i].symbol])
 
 		signals = append(signals, strategy.Signal{
 			Symbol:   ranked[i].symbol,
@@ -392,15 +379,7 @@ func (s *multiFactorStrategy) GenerateSignals(
 	if portfolio != nil {
 		for symbol := range portfolio.Positions {
 			if !topNSymbols[symbol] {
-				var price float64
-				if data, ok := bars[symbol]; ok && len(data) > 0 {
-					sorted := make([]domain.OHLCV, len(data))
-					copy(sorted, data)
-					sort.Slice(sorted, func(i, j int) bool {
-						return sorted[i].Date.Before(sorted[j].Date)
-					})
-					price = sorted[len(sorted)-1].Close
-				}
+				price := getLatestPrice(bars[symbol])
 				signals = append(signals, strategy.Signal{
 					Symbol:   symbol,
 					Action:   "sell",
@@ -468,6 +447,12 @@ func (s *multiFactorStrategy) generateSignalsFromFactorCache(
 			momentumScore:  momZ,
 		})
 	}
+
+	// Sort by composite score descending
+	sort.Slice(ranked, func(i, j int) bool {
+		return ranked[i].compositeScore > ranked[j].compositeScore
+	})
+
 	return ranked
 }
 
@@ -483,9 +468,8 @@ func (s *multiFactorStrategy) generateSignalsFromPriceData(
 		if len(data) < lookback+1 {
 			continue
 		}
-		sorted := make([]domain.OHLCV, len(data))
-		copy(sorted, data)
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date.Before(sorted[j].Date) })
+		// Sort by date ascending using shared utility
+		sorted := sortOHLCV(data)
 
 		endIdx := len(sorted) - 1
 		startPrice := sorted[endIdx-lookback].Close
@@ -584,9 +568,8 @@ func (s *multiFactorStrategy) generateSignalsFromHTTP(
 			stockList = append(stockList, sd)
 			continue
 		}
-		sorted := make([]domain.OHLCV, len(data))
-		copy(sorted, data)
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date.Before(sorted[j].Date) })
+		// Sort by date ascending using shared utility
+		sorted := sortOHLCV(data)
 		endIdx := len(sorted) - 1
 		if endIdx >= lookback {
 			startPrice := sorted[endIdx-lookback].Close
@@ -680,11 +663,8 @@ func (s *multiFactorStrategy) generateSellSignals(
 			continue
 		}
 
-		sorted := make([]domain.OHLCV, len(data))
-		copy(sorted, data)
-		sort.Slice(sorted, func(i, j int) bool {
-			return sorted[i].Date.Before(sorted[j].Date)
-		})
+		// Sort by date ascending using shared utility
+		sorted := sortOHLCV(data)
 
 		endIdx := len(sorted) - 1
 		if endIdx < lookback {
@@ -711,13 +691,13 @@ func (s *multiFactorStrategy) generateSellSignals(
 	return signals, nil
 }
 
+// defaultDataServiceURL is the fallback URL for the data service.
+// It can be overridden via configuration.
+const defaultDataServiceURL = "http://localhost:8081"
+
 func init() {
-	dsURL := os.Getenv("DATA_SERVICE_URL")
-	if dsURL == "" {
-		dsURL = "http://localhost:8081"
-	}
 	s := &multiFactorStrategy{
-		name: "multi_factor",
+		BaseStrategy: strategy.NewBaseStrategy("multi_factor", "Multi-factor: rank stocks by weighted combination of value, quality, and momentum scores"),
 		params: MultiFactorConfig{
 			ValueWeight:        0.4,
 			QualityWeight:      0.3,
@@ -728,7 +708,7 @@ func init() {
 		},
 		httpClient:     &http.Client{Timeout: 10 * time.Second},
 		screenCache:    strategy.NewScreenCache(30),
-		dataServiceURL: dsURL,
+		dataServiceURL: defaultDataServiceURL,
 	}
 	strategy.GlobalRegister(s)
 }

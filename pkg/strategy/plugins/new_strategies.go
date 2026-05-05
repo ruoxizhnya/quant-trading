@@ -16,9 +16,8 @@ type TDSequentialConfig struct {
 }
 
 type tdSequentialStrategy struct {
-	name        string
-	description string
-	params      TDSequentialConfig
+	*strategy.BaseStrategy
+	params TDSequentialConfig
 }
 
 func (s *tdSequentialStrategy) Name() string { return "td_sequential" }
@@ -52,9 +51,8 @@ func (s *tdSequentialStrategy) GenerateSignals(ctx context.Context, bars map[str
 		if len(data) < cancelN+setupN+2 {
 			continue
 		}
-		sorted := make([]domain.OHLCV, len(data))
-		copy(sorted, data)
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date.Before(sorted[j].Date) })
+		// Sort by date ascending using shared utility
+		sorted := sortOHLCV(data)
 
 		// TD Sequential: count closes below/above the close cancelN bars ago
 		// Proper implementation: from the most recent bar backwards,
@@ -131,9 +129,23 @@ func (s *tdSequentialStrategy) GenerateSignals(ctx context.Context, bars map[str
 }
 
 func (s *tdSequentialStrategy) Configure(params map[string]any) error {
-	if v, ok := params["setup_count"]; ok { switch val := v.(type) { case float64: s.params.SetupCount = int(val); case int: s.params.SetupCount = val } }
-	if v, ok := params["cancel_days"]; ok { switch val := v.(type) { case float64: s.params.CancelDays = int(val); case int: s.params.CancelDays = val } }
-	if v, ok := params["countdown_from"]; ok { switch val := v.(type) { case float64: s.params.CountdownFrom = int(val); case int: s.params.CountdownFrom = val } }
+	s.Lock()
+	defer s.Unlock()
+	if v, ok := params["setup_count"]; ok {
+		if val, ok := parseIntParam(v); ok {
+			s.params.SetupCount = val
+		}
+	}
+	if v, ok := params["cancel_days"]; ok {
+		if val, ok := parseIntParam(v); ok {
+			s.params.CancelDays = val
+		}
+	}
+	if v, ok := params["countdown_from"]; ok {
+		if val, ok := parseIntParam(v); ok {
+			s.params.CountdownFrom = val
+		}
+	}
 	return nil
 }
 
@@ -147,11 +159,11 @@ func (s *tdSequentialStrategy) Weight(signal strategy.Signal, _ float64) float64
 func (s *tdSequentialStrategy) Cleanup() {}
 
 func init() {
-	strategy.GlobalRegister(&tdSequentialStrategy{
-		name: "td_sequential",
-		description: "TD Sequential: Tom DeMark's sequential indicator for trend exhaustion detection",
+	s := &tdSequentialStrategy{
+		BaseStrategy: strategy.NewBaseStrategy("td_sequential", "TD Sequential: Tom DeMark's sequential indicator for trend exhaustion detection"),
 		params: TDSequentialConfig{SetupCount: 9, CancelDays: 4, CountdownFrom: 13},
-	})
+	}
+	strategy.GlobalRegister(s)
 }
 
 type BollingerMRConfig struct {
@@ -162,9 +174,8 @@ type BollingerMRConfig struct {
 }
 
 type bollingerMRStrategy struct {
-	name        string
-	description string
-	params      BollingerMRConfig
+	*strategy.BaseStrategy
+	params BollingerMRConfig
 }
 
 func (s *bollingerMRStrategy) Name() string { return "bollinger_mr" }
@@ -208,22 +219,17 @@ func (s *bollingerMRStrategy) GenerateSignals(ctx context.Context, bars map[stri
 	var signals []strategy.Signal
 	for symbol, data := range bars {
 		if len(data) < period { continue }
-		sorted := make([]domain.OHLCV, len(data))
-		copy(sorted, data)
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date.Before(sorted[j].Date) })
+		// Sort by date ascending using shared utility
+		sorted := sortOHLCV(data)
 
 		window := sorted[len(sorted)-period:]
-		var sum, sumSq float64
-		for _, b := range window {
-			sum += b.Close
-			sumSq += b.Close * b.Close
-		}
-		mean := sum / float64(period)
-		variance := sumSq/float64(period) - mean*mean
-		if variance < 0 { variance = 0 }
+		latestPrice := window[len(window)-1].Close
+
+		prices := extractClosePrices(window)
+		mean := calculateMean(prices)
+		variance := calculateStdDev(prices, mean)
 		sd := math.Sqrt(variance)
 
-		latestPrice := sorted[len(sorted)-1].Close
 		if sd <= 0 || latestPrice <= 0 { continue }
 
 		zScore := (latestPrice - mean) / sd
@@ -262,10 +268,28 @@ func (s *bollingerMRStrategy) GenerateSignals(ctx context.Context, bars map[stri
 }
 
 func (s *bollingerMRStrategy) Configure(params map[string]any) error {
-	if v, ok := params["period"]; ok { switch val := v.(type) { case float64: s.params.Period = int(val); case int: s.params.Period = val } }
-	if v, ok := params["std_dev"]; ok { switch val := v.(type) { case float64: s.params.StdDev = val; case int: s.params.StdDev = float64(val) } }
-	if v, ok := params["buy_zscore"]; ok { switch val := v.(type) { case float64: s.params.BuyZScore = val; case int: s.params.BuyZScore = float64(val) } }
-	if v, ok := params["sell_zscore"]; ok { switch val := v.(type) { case float64: s.params.SellZScore = val; case int: s.params.SellZScore = float64(val) } }
+	s.Lock()
+	defer s.Unlock()
+	if v, ok := params["period"]; ok {
+		if val, ok := parseIntParam(v); ok {
+			s.params.Period = val
+		}
+	}
+	if v, ok := params["std_dev"]; ok {
+		if val, ok := parseFloatParam(v); ok {
+			s.params.StdDev = val
+		}
+	}
+	if v, ok := params["buy_zscore"]; ok {
+		if val, ok := parseFloatParam(v); ok {
+			s.params.BuyZScore = val
+		}
+	}
+	if v, ok := params["sell_zscore"]; ok {
+		if val, ok := parseFloatParam(v); ok {
+			s.params.SellZScore = val
+		}
+	}
 	return nil
 }
 
@@ -279,11 +303,11 @@ func (s *bollingerMRStrategy) Weight(signal strategy.Signal, _ float64) float64 
 func (s *bollingerMRStrategy) Cleanup() {}
 
 func init() {
-	strategy.GlobalRegister(&bollingerMRStrategy{
-		name:        "bollinger_mr",
-		description: "Bollinger Mean Reversion: trade band bounces with z-score thresholds",
-		params:      BollingerMRConfig{Period: 20, StdDev: 2.0, BuyZScore: -1.5, SellZScore: 1.5},
-	})
+	s := &bollingerMRStrategy{
+		BaseStrategy: strategy.NewBaseStrategy("bollinger_mr", "Bollinger Mean Reversion: trade band bounces with z-score thresholds"),
+		params: BollingerMRConfig{Period: 20, StdDev: 2.0, BuyZScore: -1.5, SellZScore: 1.5},
+	}
+	strategy.GlobalRegister(s)
 }
 
 type VPTConfig struct {
@@ -292,9 +316,8 @@ type VPTConfig struct {
 }
 
 type vptStrategy struct {
-	name        string
-	description string
-	params      VPTConfig
+	*strategy.BaseStrategy
+	params VPTConfig
 }
 
 func (s *vptStrategy) Name() string { return "volume_price_trend" }
@@ -329,9 +352,8 @@ func (s *vptStrategy) GenerateSignals(ctx context.Context, bars map[string][]dom
 
 	for symbol, data := range bars {
 		if len(data) < lookback+1 { continue }
-		sorted := make([]domain.OHLCV, len(data))
-		copy(sorted, data)
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date.Before(sorted[j].Date) })
+		// Sort by date ascending using shared utility
+		sorted := sortOHLCV(data)
 
 		vpt := 0.0
 		prevClose := sorted[0].Close
@@ -417,8 +439,18 @@ func (s *vptStrategy) GenerateSignals(ctx context.Context, bars map[string][]dom
 }
 
 func (s *vptStrategy) Configure(params map[string]any) error {
-	if v, ok := params["sma_lookback"]; ok { switch val := v.(type) { case float64: s.params.SMALookback = int(val); case int: s.params.SMALookback = val } }
-	if v, ok := params["top_n"]; ok { switch val := v.(type) { case float64: s.params.TopN = int(val); case int: s.params.TopN = val } }
+	s.Lock()
+	defer s.Unlock()
+	if v, ok := params["sma_lookback"]; ok {
+		if val, ok := parseIntParam(v); ok {
+			s.params.SMALookback = val
+		}
+	}
+	if v, ok := params["top_n"]; ok {
+		if val, ok := parseIntParam(v); ok {
+			s.params.TopN = val
+		}
+	}
 	return nil
 }
 
@@ -432,11 +464,11 @@ func (s *vptStrategy) Weight(signal strategy.Signal, _ float64) float64 {
 func (s *vptStrategy) Cleanup() {}
 
 func init() {
-	strategy.GlobalRegister(&vptStrategy{
-		name: "volume_price_trend",
-		description: "Volume-Price Trend: volume-weighted price momentum indicator",
+	s := &vptStrategy{
+		BaseStrategy: strategy.NewBaseStrategy("volume_price_trend", "Volume-Price Trend: volume-weighted price momentum indicator"),
 		params: VPTConfig{SMALookback: 20, TopN: 5},
-	})
+	}
+	strategy.GlobalRegister(s)
 }
 
 type VolBreakoutConfig struct {
@@ -447,9 +479,8 @@ type VolBreakoutConfig struct {
 }
 
 type volBreakoutStrategy struct {
-	name        string
-	description string
-	params      VolBreakoutConfig
+	*strategy.BaseStrategy
+	params VolBreakoutConfig
 }
 
 func (s *volBreakoutStrategy) Name() string { return "volatility_breakout" }
@@ -492,9 +523,8 @@ func (s *volBreakoutStrategy) GenerateSignals(ctx context.Context, bars map[stri
 	for symbol, data := range bars {
 		n := atrPeriod + lookback + 1
 		if len(data) < n { continue }
-		sorted := make([]domain.OHLCV, len(data))
-		copy(sorted, data)
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Date.Before(sorted[j].Date) })
+		// Sort by date ascending using shared utility
+		sorted := sortOHLCV(data)
 
 		atrSum := 0.0
 		for i := len(sorted) - atrPeriod; i < len(sorted); i++ {
@@ -578,10 +608,28 @@ func (s *volBreakoutStrategy) GenerateSignals(ctx context.Context, bars map[stri
 }
 
 func (s *volBreakoutStrategy) Configure(params map[string]any) error {
-	if v, ok := params["atr_period"]; ok { switch val := v.(type) { case float64: s.params.ATRPeriod = int(val); case int: s.params.ATRPeriod = val } }
-	if v, ok := params["atr_multiplier"]; ok { switch val := v.(type) { case float64: s.params.ATRMultiplier = val; case int: s.params.ATRMultiplier = float64(val) } }
-	if v, ok := params["lookback"]; ok { switch val := v.(type) { case float64: s.params.Lookback = int(val); case int: s.params.Lookback = val } }
-	if v, ok := params["top_n"]; ok { switch val := v.(type) { case float64: s.params.TopN = int(val); case int: s.params.TopN = val } }
+	s.Lock()
+	defer s.Unlock()
+	if v, ok := params["atr_period"]; ok {
+		if val, ok := parseIntParam(v); ok {
+			s.params.ATRPeriod = val
+		}
+	}
+	if v, ok := params["atr_multiplier"]; ok {
+		if val, ok := parseFloatParam(v); ok {
+			s.params.ATRMultiplier = val
+		}
+	}
+	if v, ok := params["lookback"]; ok {
+		if val, ok := parseIntParam(v); ok {
+			s.params.Lookback = val
+		}
+	}
+	if v, ok := params["top_n"]; ok {
+		if val, ok := parseIntParam(v); ok {
+			s.params.TopN = val
+		}
+	}
 	return nil
 }
 
@@ -595,9 +643,9 @@ func (s *volBreakoutStrategy) Weight(signal strategy.Signal, _ float64) float64 
 func (s *volBreakoutStrategy) Cleanup() {}
 
 func init() {
-	strategy.GlobalRegister(&volBreakoutStrategy{
-		name: "volatility_breakout",
-		description: "Volatility Breakout: ATR Donchian channel breakout system",
+	s := &volBreakoutStrategy{
+		BaseStrategy: strategy.NewBaseStrategy("volatility_breakout", "Volatility Breakout: ATR Donchian channel breakout system"),
 		params: VolBreakoutConfig{ATRPeriod: 14, ATRMultiplier: 2.0, Lookback: 20, TopN: 5},
-	})
+	}
+	strategy.GlobalRegister(s)
 }

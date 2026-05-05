@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"sort"
 	"time"
 
@@ -26,7 +25,7 @@ type ValueScreeningConfig struct {
 // valueScreeningStrategy screens stocks by value metrics (PE, PB, ROE)
 // and ranks filtered stocks by price momentum.
 type valueScreeningStrategy struct {
-	name   string
+	*strategy.BaseStrategy
 	params ValueScreeningConfig
 
 	httpClient     *http.Client
@@ -36,51 +35,38 @@ type valueScreeningStrategy struct {
 
 // Configure sets the strategy parameters.
 func (s *valueScreeningStrategy) Configure(params map[string]any) error {
+	s.Lock()
+	defer s.Unlock()
 	if s.screenCache == nil {
 		s.screenCache = strategy.NewScreenCache(30)
 	}
 	if v, ok := params["pe_max"]; ok {
-		switch val := v.(type) {
-		case float64:
+		if val, ok := parseFloatParam(v); ok {
 			s.params.PEMax = val
-		case int:
-			s.params.PEMax = float64(val)
 		}
 	}
 	if v, ok := params["pb_max"]; ok {
-		switch val := v.(type) {
-		case float64:
+		if val, ok := parseFloatParam(v); ok {
 			s.params.PBMax = val
-		case int:
-			s.params.PBMax = float64(val)
 		}
 	}
 	if v, ok := params["roe_min"]; ok {
-		switch val := v.(type) {
-		case float64:
+		if val, ok := parseFloatParam(v); ok {
 			s.params.ROEMin = val
-		case int:
-			s.params.ROEMin = float64(val)
 		}
 	}
 	if v, ok := params["momentum_days"]; ok {
-		switch val := v.(type) {
-		case float64:
-			s.params.MomentumDays = int(val)
-		case int:
+		if val, ok := parseIntParam(v); ok {
 			s.params.MomentumDays = val
 		}
 	}
 	if v, ok := params["top_n"]; ok {
-		switch val := v.(type) {
-		case float64:
-			s.params.TopN = int(val)
-		case int:
+		if val, ok := parseIntParam(v); ok {
 			s.params.TopN = val
 		}
 	}
 	if v, ok := params["rebalance_frequency"]; ok {
-		if val, ok := v.(string); ok {
+		if val, ok := parseStringParam(v); ok {
 			s.params.RebalanceFrequency = val
 		}
 	}
@@ -273,11 +259,8 @@ func (s *valueScreeningStrategy) GenerateSignals(
 			if len(data) < momentumDays+1 {
 				continue
 			}
-			sorted := make([]domain.OHLCV, len(data))
-			copy(sorted, data)
-			sort.Slice(sorted, func(i, j int) bool {
-				return sorted[i].Date.Before(sorted[j].Date)
-			})
+			// Sort by date ascending using shared utility
+			sorted := sortOHLCV(data)
 
 			endIdx := len(sorted) - 1
 			if endIdx < momentumDays {
@@ -305,11 +288,8 @@ func (s *valueScreeningStrategy) GenerateSignals(
 				if len(data) < momentumDays+1 {
 					continue
 				}
-				sorted := make([]domain.OHLCV, len(data))
-				copy(sorted, data)
-				sort.Slice(sorted, func(i, j int) bool {
-					return sorted[i].Date.Before(sorted[j].Date)
-				})
+				// Sort by date ascending using shared utility
+				sorted := sortOHLCV(data)
 
 				endIdx := len(sorted) - 1
 				if endIdx < momentumDays {
@@ -343,11 +323,8 @@ func (s *valueScreeningStrategy) GenerateSignals(
 					continue
 				}
 
-				sorted := make([]domain.OHLCV, len(data))
-				copy(sorted, data)
-				sort.Slice(sorted, func(i, j int) bool {
-					return sorted[i].Date.Before(sorted[j].Date)
-				})
+				// Sort by date ascending using shared utility
+				sorted := sortOHLCV(data)
 
 				endIdx := len(sorted) - 1
 				if endIdx < momentumDays {
@@ -393,15 +370,7 @@ func (s *valueScreeningStrategy) GenerateSignals(
 			continue
 		}
 
-		var price float64
-		if data, ok := bars[momResults[i].symbol]; ok && len(data) > 0 {
-			sorted := make([]domain.OHLCV, len(data))
-			copy(sorted, data)
-			sort.Slice(sorted, func(i, j int) bool {
-				return sorted[i].Date.Before(sorted[j].Date)
-			})
-			price = sorted[len(sorted)-1].Close
-		}
+		price := getLatestPrice(bars[momResults[i].symbol])
 
 		signals = append(signals, strategy.Signal{
 			Symbol:   momResults[i].symbol,
@@ -427,23 +396,14 @@ func (s *valueScreeningStrategy) GenerateSignals(
 			if !inTopN {
 				// Not in top momentum stocks, sell
 				if _, ok := bars[symbol]; ok {
-					var price float64
-					data := bars[symbol]
-					if len(data) > 0 {
-						sorted := make([]domain.OHLCV, len(data))
-						copy(sorted, data)
-						sort.Slice(sorted, func(i, j int) bool {
-							return sorted[i].Date.Before(sorted[j].Date)
-						})
-						price = sorted[len(sorted)-1].Close
-					}
+					price := getLatestPrice(bars[symbol])
 					signals = append(signals, strategy.Signal{
-					Symbol:   symbol,
-					Action:   "sell",
-					Strength: 1.0,
-					Price:    price,
-					Date:     screenDate,
-				})
+						Symbol:   symbol,
+						Action:   "sell",
+						Strength: 1.0,
+						Price:    price,
+						Date:     screenDate,
+					})
 				}
 			}
 		}
@@ -470,11 +430,8 @@ func (s *valueScreeningStrategy) generateSellSignals(
 			continue
 		}
 
-		sorted := make([]domain.OHLCV, len(data))
-		copy(sorted, data)
-		sort.Slice(sorted, func(i, j int) bool {
-			return sorted[i].Date.Before(sorted[j].Date)
-		})
+		// Sort by date ascending using shared utility
+		sorted := sortOHLCV(data)
 
 		endIdx := len(sorted) - 1
 		if endIdx < momentumDays {
@@ -503,12 +460,8 @@ func (s *valueScreeningStrategy) generateSellSignals(
 }
 
 func init() {
-	dsURL := os.Getenv("DATA_SERVICE_URL")
-	if dsURL == "" {
-		dsURL = "http://localhost:8081"
-	}
 	s := &valueScreeningStrategy{
-		name: "value_screening",
+		BaseStrategy: strategy.NewBaseStrategy("value_screening", "Value screening: filter stocks by PE, PB, ROE criteria then rank by momentum"),
 		params: ValueScreeningConfig{
 			PEMax:              30.0,
 			PBMax:              3.0,
@@ -519,7 +472,7 @@ func init() {
 		},
 		httpClient:     &http.Client{Timeout: 10 * time.Second},
 		screenCache:    strategy.NewScreenCache(30),
-		dataServiceURL: dsURL,
+		dataServiceURL: defaultDataServiceURL,
 	}
 	strategy.GlobalRegister(s)
 }

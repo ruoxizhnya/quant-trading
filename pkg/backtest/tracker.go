@@ -414,6 +414,169 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 	return trade, nil
 }
 
+// ApplyTrade applies a pre-computed trade (from ExecutionService) to the portfolio.
+// Unlike ExecuteTrade which calculates slippage/commission internally, ApplyTrade
+// uses the trade's already-computed Price and Commission. This enables pluggable
+// execution models via ExecutionService.
+func (t *Tracker) ApplyTrade(trade domain.Trade) (*domain.Trade, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	symbol := trade.Symbol
+	direction := trade.Direction
+	quantity := trade.Quantity
+	executionPrice := trade.Price
+	commission := trade.Commission
+	transferFee := trade.TransferFee
+	_ = trade.StampTax // may be used in future; referenced to avoid unused var
+	timestamp := trade.Timestamp
+
+	if quantity <= 0 {
+		return nil, fmt.Errorf("invalid trade quantity: %f", quantity)
+	}
+
+	tradeValue := quantity * executionPrice
+
+	switch direction {
+	case domain.DirectionLong:
+		// Cost includes commission + transfer fee (stamp tax does not apply to buy)
+		cost := tradeValue + commission + transferFee
+		if cost > t.cash {
+			return nil, fmt.Errorf("insufficient cash: required %.2f, available %.2f", cost, t.cash)
+		}
+		t.cash -= cost
+
+		tradeDate := timestamp.Truncate(24 * time.Hour)
+
+		if existing, exists := t.positions[symbol]; exists {
+			// Update average cost
+			totalQty := existing.Quantity + quantity
+			existing.AvgCost = (existing.AvgCost*existing.Quantity + executionPrice*quantity) / totalQty
+			existing.Quantity = totalQty
+			existing.EntryDate = timestamp
+
+			// T+1 tracking
+			lastBuyDate := existing.BuyDate.Truncate(24 * time.Hour)
+			if !lastBuyDate.Equal(tradeDate) {
+				existing.QuantityToday = 0
+			}
+			existing.QuantityToday += quantity
+			existing.BuyDate = timestamp
+		} else {
+			t.positions[symbol] = &domain.Position{
+				Symbol:            symbol,
+				Quantity:          quantity,
+				AvgCost:           executionPrice,
+				EntryDate:         timestamp,
+				BuyDate:           timestamp,
+				QuantityToday:     quantity,
+				QuantityYesterday: 0,
+			}
+		}
+
+	case domain.DirectionShort:
+		// Short selling: receive cash, owe shares
+		proceeds := tradeValue - commission - transferFee
+		t.cash += proceeds
+
+		if existing, exists := t.positions[symbol]; exists {
+			existing.Quantity -= quantity
+		} else {
+			t.positions[symbol] = &domain.Position{
+				Symbol:    symbol,
+				Quantity:  -quantity,
+				AvgCost:   executionPrice,
+				EntryDate: timestamp,
+			}
+		}
+
+	case domain.DirectionClose:
+		if pos, exists := t.positions[symbol]; exists {
+			closeQty := abs(pos.Quantity)
+			if closeQty <= 0 {
+				return nil, fmt.Errorf("cannot close position: quantity is zero")
+			}
+
+			if pos.Quantity > 0 {
+				// Closing long position
+				tradeDate := timestamp.Truncate(24 * time.Hour)
+				buyDate := pos.BuyDate.Truncate(24 * time.Hour)
+
+				if buyDate.Equal(tradeDate) && pos.QuantityYesterday == 0 {
+					return nil, fmt.Errorf("T+1 settlement violation: cannot sell shares bought on %s (today: %s)", buyDate.Format("2006-01-02"), tradeDate.Format("2006-01-02"))
+				}
+
+				canSell := pos.QuantityYesterday
+				actualQty := min(canSell, min(quantity, closeQty))
+				if actualQty <= 0 {
+					return nil, fmt.Errorf("T+1 settlement violation: no shares available to sell")
+				}
+
+				actualTradeValue := actualQty * executionPrice
+				actualCommission := max(actualTradeValue*t.commissionRate, t.trading.MinCommission)
+				actualTransferFee := actualTradeValue * t.trading.TransferFeeRate
+				actualStampTax := actualTradeValue * t.trading.StampTaxRate
+
+				// Override trade values with actual
+				trade.Quantity = actualQty
+				trade.Commission = actualCommission
+				trade.TransferFee = actualTransferFee
+				trade.StampTax = actualStampTax
+
+				pos.QuantityYesterday -= actualQty
+				pnl := (executionPrice - pos.AvgCost) * actualQty
+				pos.RealizedPnL += pnl - actualCommission - actualStampTax
+				t.cash += actualQty*executionPrice - actualCommission - actualTransferFee - actualStampTax
+				pos.Quantity -= actualQty
+			} else {
+				// Closing short position
+				actualQty := min(quantity, closeQty)
+				if actualQty <= 0 {
+					return nil, fmt.Errorf("cannot close position: quantity is zero")
+				}
+				actualTradeValue := actualQty * executionPrice
+				actualCommission := max(actualTradeValue*t.commissionRate, t.trading.MinCommission)
+				actualTransferFee := actualTradeValue * t.trading.TransferFeeRate
+
+				trade.Quantity = actualQty
+				trade.Commission = actualCommission
+				trade.TransferFee = actualTransferFee
+
+				pnl := (pos.AvgCost - executionPrice) * actualQty
+				pos.RealizedPnL += pnl - actualCommission - actualTransferFee
+				t.cash += actualQty*executionPrice - actualCommission - actualTransferFee
+				pos.Quantity += actualQty
+			}
+
+			if abs(pos.Quantity) < 1e-8 {
+				delete(t.positions, symbol)
+			}
+		} else {
+			return nil, fmt.Errorf("position not found for symbol %s", symbol)
+		}
+	}
+
+	// Update position market value
+	if pos, exists := t.positions[symbol]; exists {
+		pos.MarketValue = abs(pos.Quantity) * executionPrice
+		pos.CurrentPrice = executionPrice
+		pos.UnrealizedPnL = (executionPrice - pos.AvgCost) * pos.Quantity
+	}
+
+	t.trades = append(t.trades, trade)
+
+	t.logger.Debug().
+		Str("symbol", symbol).
+		Str("direction", string(direction)).
+		Float64("qty", quantity).
+		Float64("price", executionPrice).
+		Float64("commission", commission).
+		Time("timestamp", timestamp).
+		Msg("Trade applied")
+
+	return &trade, nil
+}
+
 // ProcessDividend credits cash when a dividend is paid for a held position.
 // divAmt is the cash dividend per share (e.g. 0.10 means 0.10 CNY per share).
 // The credit is: position.Quantity * dividend.DivAmt
@@ -647,18 +810,4 @@ func abs(x float64) float64 {
 		return -x
 	}
 	return x
-}
-
-func min(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
 }

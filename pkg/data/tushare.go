@@ -20,12 +20,24 @@ const (
 	tushareRateLimitDur  = time.Minute
 )
 
+// TushareStore defines the interface for tushare data operations.
+type TushareStore interface {
+	SaveStockBatch(ctx context.Context, stocks []domain.Stock) error
+	SaveOHLCVBatch(ctx context.Context, records []*domain.OHLCV) error
+	SaveFundamentalBatch(ctx context.Context, records []*domain.Fundamental) error
+	SaveFundamentalDataBatch(ctx context.Context, records []*domain.FundamentalData) error
+	SaveIndexConstituentBatch(ctx context.Context, records []*domain.IndexConstituent) error
+	GetIndexConstituents(ctx context.Context, indexCode string) ([]domain.IndexConstituent, error)
+	SaveDividendBatch(ctx context.Context, records []*domain.Dividend) error
+	SaveSplitBatch(ctx context.Context, records []*domain.Split) error
+}
+
 // TushareClient wraps the tushare.pro HTTP API.
 type TushareClient struct {
 	httpClient *httpclient.Client
 	token     string
 	logger    zerolog.Logger
-	store     *storage.PostgresStore
+	store     TushareStore
 	cache     storage.Cache
 
 	mu           sync.Mutex
@@ -34,11 +46,16 @@ type TushareClient struct {
 }
 
 // NewTushareClient creates a new Tushare API client.
-func NewTushareClient(token, baseURL string, maxRetries int, store *storage.PostgresStore, cache storage.Cache) *TushareClient {
+func NewTushareClient(token, baseURL string, maxRetries int, store TushareStore, cache storage.Cache) *TushareClient {
+	logger := logging.WithContext(map[string]any{"component": "tushare_client"})
+	// Ensure logger is valid (fallback to Nop if global logger not initialized)
+	if logger.GetLevel() == zerolog.Disabled {
+		logger = zerolog.Nop()
+	}
 	return &TushareClient{
 		httpClient: httpclient.New(baseURL, 30*time.Second, maxRetries),
 		token:     token,
-		logger:    logging.WithContext(map[string]any{"component": "tushare_client"}),
+		logger:    logger,
 		store:     store,
 		cache:     cache,
 	}
@@ -254,11 +271,11 @@ func (c *TushareClient) FetchDailyOHLCV(ctx context.Context, symbol string, star
 	}
 
 	// Save to database
-	domainRecords := make([]*domain.OHLCV, len(records))
+	ptrRecords := make([]*domain.OHLCV, len(records))
 	for i := range records {
-		domainRecords[i] = &records[i]
+		ptrRecords[i] = &records[i]
 	}
-	if err := c.store.SaveOHLCVBatch(ctx, domainRecords); err != nil {
+	if err := c.store.SaveOHLCVBatch(ctx, ptrRecords); err != nil {
 		c.logger.Warn().Err(err).Msg("Failed to batch save OHLCV")
 	}
 
@@ -320,11 +337,11 @@ func (c *TushareClient) FetchFundamentals(ctx context.Context, symbol string, da
 		return nil, nil
 	}
 
-	domainRecords := make([]*domain.Fundamental, len(records))
+	ptrRecords := make([]*domain.Fundamental, len(records))
 	for i := range records {
-		domainRecords[i] = &records[i]
+		ptrRecords[i] = &records[i]
 	}
-	if err := c.store.SaveFundamentalBatch(ctx, domainRecords); err != nil {
+	if err := c.store.SaveFundamentalBatch(ctx, ptrRecords); err != nil {
 		c.logger.Warn().Err(err).Msg("Failed to batch save fundamentals")
 	}
 

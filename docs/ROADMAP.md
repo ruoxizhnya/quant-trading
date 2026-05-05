@@ -168,7 +168,7 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 
 ## Phase 3 — 融合发展 (Event-Driven + 多数据源 + 批量回测)
 
-**Status: Phase 3 IN PROGRESS — Core Complete, Quality Optimization**
+**Status: Phase 3 COMPLETE — Core Complete, Quality Optimization**
 
 > **当前任务追踪**: 详见 [TASKS.md](TASKS.md) Phase 3 实施任务 (D1-D7)
 
@@ -185,21 +185,90 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 | P1-C | 实盘接口预留 | 中 | ✅ | pkg/live/ (LiveTrader 接口 + MockTrader) |
 | P1-D | 文档同步更新 | 中 | ✅ | ARCHITECTURE.md + ROADMAP.md 更新 |
 | P1-E | 回测结果持久化 (DB 写入 + DB 回退查询) | 高 | ✅ | SaveSyncResult() → backtest_jobs 表；GET 端点 DB fallback；5 个 E2E 测试 |
+| D1 | 多数据源适配器框架 | 高 | ✅ | DataAdapter + Provider 接口重构 |
+| D5 | 更多实战策略插件 | 低 | ✅ | TD Sequential, Bollinger MR, VPT, Vol Breakout 已实现 |
 
-### Phase 3 进行中项
+### Phase 3 Gate Review (2026-05-04)
 
-| # | 任务 | 优先级 | 状态 | 说明 | 追踪位置 |
-|---|------|--------|------|------|----------|
-| D1 | 多数据源适配器框架 | 高 | 🔵 | DataAdapter + Provider 接口重构 | TASKS.md D1 |
-| D7 | 数据同步增强 (ADR-013) | 高 | ⬜ | 定时同步 + 任务队列 + 管理页面 | TASKS.md D7 |
+**Verdict: APPROVED** — Phase 3 core objectives achieved. See [docs/phase-gate-reviews.md](docs/phase-gate-reviews.md) for details.
 
-### Phase 3 待完成项 (P2)
+---
 
-| # | 任务 | 优先级 | 状态 | 说明 | 追踪位置 |
-|---|------|--------|------|------|----------|
-| P2-A | 因子归因 + IC 分析 API | 低 | ⬜ | factor_attribution.go 已有基础设施，需暴露 HTTP API | TASKS.md D1-10 |
-| P2-B | Go Plugin 热加载 | 低 | ⬜ | 需评估替代方案 (Lua/WASM/配置驱动) | TASKS.md D3 |
-| P2-C | AI Copilot 深度集成 | 低 | ⬜ | Copilot 已有基础，需 E2E 流程优化 | TASKS.md D6 |
-| D2 | 批量回测框架 | 中 | ⬜ | BatchEngine + Walk-Forward | TASKS.md D2 |
-| D4 | 实盘交易接口预留 | 中 | ⬜ | LiveTrader 接口 + MockTrader | TASKS.md D4 |
-| D5 | 更多实战策略插件 | 低 | ⬜ | TD Sequential 等 4 个新策略 | TASKS.md D5 |
+## Phase 4 — AI-Native Evolution (AI Agent 量化研究平台)
+
+**Status: Phase 4 PROPOSED — Awaiting Approval**
+
+> **Vision**: Transform Quant Lab into an AI-native quantitative trading platform where AI acts as a senior quantitative researcher — autonomously discovering alpha factors, generating and evolving trading strategies, and validating hypotheses through the existing backtest infrastructure.
+>
+> **Key Principle**: AI is an augmentation layer, not a replacement. The existing backtest engine, data pipeline, and strategy framework remain the foundational assets.
+>
+> **当前任务追踪**: 详见 [tasks-phase-2.md](tasks-phase-2.md)
+
+### Phase 4 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Phase 4 Architecture                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                      AI Research Service (:8086)                     │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐│   │
+│  │  │  Research   │  │  Generate   │  │  Validate   │  │  Evolve     ││   │
+│  │  │   Agent     │  │   Agent     │  │   Agent     │  │   Agent     ││   │
+│  │  │(Factor      │  │(Strategy    │  │(Backtest    │  │(Genetic     ││   │
+│  │  │ Discovery)  │  │ Code Gen)   │  │ Validation) │  │ Algorithm)  ││   │
+│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘│   │
+│  │         │                │                │                │       │   │
+│  │         └────────────────┴────────────────┘                │       │   │
+│  │                          │                                 │       │   │
+│  │                   ┌──────┴──────┐                  ┌──────┴──────┐│   │
+│  │                   │  Expression │                  │   Gene      ││   │
+│  │                   │   Engine    │                  │   Pool      ││   │
+│  │                   │ (DSL + AST) │                  │ (PG+JSONB)  ││   │
+│  │                   └─────────────┘                  └─────────────┘│   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                              │
+│                              ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                   Analysis Service (:8085) — Existing                 │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐│   │
+│  │  │   Backtest  │  │   Batch     │  │   Factor    │  │  Strategy   ││   │
+│  │  │   Engine    │  │   Engine    │  │  Analyzer   │  │  Registry   ││   │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘│   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                              │
+│                              ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                    Data Service (:8081) — Existing                    │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 4 Sprint Breakdown
+
+| Sprint | Focus | Duration | Key Deliverables | Dependencies |
+|--------|-------|----------|-----------------|-------------|
+| **Sprint 7** | AI Infrastructure | 2 weeks | Expression Engine, Backtest Client, Research Agent MVP | Phase 3 ✅ |
+| **Sprint 8** | AI Factor Discovery | 2 weeks | 10+ factors with IC > 0.03, Gene Pool schema, Factor Lab UI | Sprint 7 |
+| **Sprint 9** | Strategy Generation | 2 weeks | Strategy templates, Code generation pipeline, Strategy Workshop UI | Sprint 8 |
+| **Sprint 10** | Optimization & Evolution | 2 weeks | AutoML parameter tuning, Genetic algorithm, Drift detection | Sprint 9 |
+| **Sprint 11** | Live Trading & Integration | 2 weeks | ExecutionService abstraction, Paper trading, Live Engine | Sprint 7 |
+| **Sprint 12** | Testing & Documentation | 2 weeks | Full test coverage, Documentation, ADR-015, Release | Sprint 10-11 |
+
+### Phase 4 详细实施计划
+
+详见 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) Phase 0-5。
+
+### Phase 4 验收标准
+
+| # | 验收项 | 标准 | 验证方法 |
+|---|--------|------|---------|
+| 1 | AI 因子发现 | 10+ 因子 IC > 0.03 | 自动批量验证 |
+| 2 | 策略生成成功率 | > 80% 可编译 | 10 组测试提示 |
+| 3 | 参数优化效果 | Sharpe 提升 > 20% | 对比基线策略 |
+| 4 | 进化系统 | 50 策略种群，自动漂移检测 | 模拟运行 7 天 |
+| 5 | 纸交易 | 端到端运行，A股费率 | 模拟账户验证 |
+| 6 | 测试覆盖 | pkg/ai ≥ 60%, pkg/live ≥ 60% | go test -cover |
+| 7 | 文档完整 | ADR-015, SPEC.md, ARCHITECTURE.md 更新 | 人工审查 |

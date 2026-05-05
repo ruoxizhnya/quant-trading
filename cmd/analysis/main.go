@@ -136,6 +136,9 @@ func main() {
 	wfEngine := backtest.NewWalkForwardEngine(engine, store)
 	logger.Info().Msg("Walk-forward engine initialized")
 
+	batchEngine := backtest.NewBatchEngine(engine, wfEngine, backtest.DefaultBatchConfig(), logger)
+	logger.Info().Msg("Batch engine initialized")
+
 	factorAttributor := data.NewFactorAttributor(store)
 	logger.Info().Msg("Factor attribution service initialized")
 
@@ -151,6 +154,23 @@ func main() {
 		logger.Info().Msg("strategy DB seeded")
 	}
 
+	strategy.InitPluginLoader(strategy.DefaultRegistry, logger)
+	pluginLoader := strategy.GlobalPluginLoader
+	logger.Info().Msg("Plugin loader initialized")
+
+	pluginDir := v.GetString("plugins.directory")
+	if pluginDir != "" {
+		if err := pluginLoader.SetWatchDir(pluginDir); err != nil {
+			logger.Warn().Err(err).Str("dir", pluginDir).Msg("Failed to set plugin watch directory")
+		} else {
+			loaded, errs := pluginLoader.LoadAll()
+			if len(errs) > 0 {
+				logger.Warn().Int("errors", len(errs)).Msg("Some plugins failed to load")
+			}
+			logger.Info().Int("count", len(loaded)).Str("dir", pluginDir).Msg("Plugins auto-loaded")
+		}
+	}
+
 	if v.GetString("logging.format") == "json" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -160,7 +180,7 @@ func main() {
 	router.Use(newRateLimiter(100, time.Minute).middleware())
 	router.Use(requestLogger(logger))
 
-	registerRoutes(router, engine, jobService, wfEngine, strategyDB, copilotService, copilotRunner, factorAttributor, logger)
+	registerRoutes(router, engine, jobService, wfEngine, batchEngine, strategyDB, copilotService, copilotRunner, factorAttributor, pluginLoader, logger)
 
 	host := v.GetString("server.host")
 	port := v.GetInt("server.port")
@@ -216,7 +236,7 @@ func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 	}
 }
 
-func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, wfEngine *backtest.WalkForwardEngine, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, logger zerolog.Logger) {
+func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, wfEngine *backtest.WalkForwardEngine, batchEngine *backtest.BatchEngine, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, pluginLoader *strategy.PluginLoader, logger zerolog.Logger) {
 	router.Static("/static", "./cmd/analysis/static")
 
 	router.GET("/", func(c *gin.Context) {
@@ -285,8 +305,11 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 	registerProxyRoutes(router, httpClient, logger)
 	registerBacktestRoutes(router, engine, jobService, logger)
 	registerWalkForwardRoutes(router, wfEngine, logger)
+	registerBatchRoutes(router, batchEngine, logger)
 	registerStrategyRoutes(router, strategyDB)
 	registerCopilotRoutes(router, copilotService, copilotRunner)
 	registerDatasourceRoutes(router, engine, logger)
 	registerFactorRoutes(router, factorAttributor, logger)
+	registerPluginRoutes(router, pluginLoader)
+	registerPipelineRoutes(router)
 }

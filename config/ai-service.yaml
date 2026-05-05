@@ -1,0 +1,41 @@
+service:
+  name: ai-research
+  port: 8086
+  version: 0.1.0
+
+llm:
+  provider: openai
+  model: gpt-4
+  temperature: 0.7
+  max_tokens: 2000
+  timeout: 30s
+
+research:
+  max_hypotheses_per_session: 10
+  default_lookback_days: 252
+  min_confidence_threshold: 0.5
+  categories:
+    - momentum
+    - value
+    - quality
+    - volatility
+    - liquidity
+    - growth
+    - custom
+
+backtest:
+  service_url: http://localhost:8085
+  timeout: 120s
+  default_start_date: "2020-01-01"
+  default_end_date: "2024-01-01"
+  default_universe: csi300
+
+factor:
+  service_url: http://localhost:8085
+  timeout: 60s
+  min_ic_threshold: 0.02
+  min_ir_threshold: 0.1
+
+logging:
+  level: info
+  format: json

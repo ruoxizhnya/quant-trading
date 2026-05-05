@@ -2,6 +2,7 @@ package backtest
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -410,16 +411,27 @@ func (e *Engine) executeSignalTrade(
 	var trade *domain.Trade
 	var err error
 
+	// Check if ExecutionService is available for more realistic execution
+	e.mu.RLock()
+	execSvc := e.executionService
+	e.mu.RUnlock()
+
+	useExecutionService := execSvc != nil && signal.Direction != domain.DirectionHold
+
 	switch signal.Direction {
 	case domain.DirectionLong:
-		trade, err = state.Tracker.ExecuteTrade(
-			signal.Symbol,
-			domain.DirectionLong,
-			effectiveTarget,
-			price,
-			date,
-			execOpts,
-		)
+		if useExecutionService {
+			trade, err = e.executeViaExecutionService(state, signal, effectiveTarget, price, date, execOpts, logger)
+		} else {
+			trade, err = state.Tracker.ExecuteTrade(
+				signal.Symbol,
+				domain.DirectionLong,
+				effectiveTarget,
+				price,
+				date,
+				execOpts,
+			)
+		}
 		if err != nil {
 			logger.Warn().
 				Str("symbol", signal.Symbol).
@@ -431,14 +443,18 @@ func (e *Engine) executeSignalTrade(
 		}
 
 	case domain.DirectionShort:
-		trade, err = state.Tracker.ExecuteTrade(
-			signal.Symbol,
-			domain.DirectionShort,
-			effectiveTarget,
-			price,
-			date,
-			execOpts,
-		)
+		if useExecutionService {
+			trade, err = e.executeViaExecutionService(state, signal, effectiveTarget, price, date, execOpts, logger)
+		} else {
+			trade, err = state.Tracker.ExecuteTrade(
+				signal.Symbol,
+				domain.DirectionShort,
+				effectiveTarget,
+				price,
+				date,
+				execOpts,
+			)
+		}
 		if err != nil {
 			logger.Warn().
 				Str("symbol", signal.Symbol).
@@ -450,7 +466,11 @@ func (e *Engine) executeSignalTrade(
 		}
 
 	case domain.DirectionClose:
-		trade, err = state.Tracker.ClosePosition(signal.Symbol, price, date)
+		if useExecutionService {
+			trade, err = e.executeViaExecutionService(state, signal, effectiveTarget, price, date, execOpts, logger)
+		} else {
+			trade, err = state.Tracker.ClosePosition(signal.Symbol, price, date)
+		}
 		if err != nil {
 			logger.Warn().
 				Str("symbol", signal.Symbol).
@@ -462,7 +482,9 @@ func (e *Engine) executeSignalTrade(
 		tp.TargetQty = 0
 		tp.ActualQty = 0
 		tp.LastUpdated = date
-		trade.PendingQty = 0
+		if trade != nil {
+			trade.PendingQty = 0
+		}
 		delete(state.targetPositions, signal.Symbol)
 		return
 
@@ -473,6 +495,81 @@ func (e *Engine) executeSignalTrade(
 	if trade != nil {
 		e.updateTargetPositionAfterTrade(state, trade, signal, tp, date, logger)
 	}
+}
+
+// executeViaExecutionService executes a trade through the ExecutionService.
+// This provides more realistic execution with configurable slippage and commission models.
+func (e *Engine) executeViaExecutionService(
+	state *BacktestState,
+	signal domain.Signal,
+	quantity float64,
+	price float64,
+	date time.Time,
+	execOpts *OrderExecutionOpts,
+	logger zerolog.Logger,
+) (*domain.Trade, error) {
+	e.mu.RLock()
+	execSvc := e.executionService
+	e.mu.RUnlock()
+
+	if execSvc == nil {
+		return nil, fmt.Errorf("execution service not available")
+	}
+
+	// Build order
+	order := domain.Order{
+		Symbol:    signal.Symbol,
+		Direction: signal.Direction,
+		Quantity:  quantity,
+		Timestamp: date,
+	}
+
+	// Set order type and limit price
+	if execOpts != nil {
+		order.OrderType = execOpts.OrderType
+		order.LimitPrice = execOpts.LimitPrice
+	} else {
+		order.OrderType = domain.OrderTypeMarket
+	}
+
+	// Build quote from available data
+	quote := Quote{
+		Symbol: signal.Symbol,
+		Close:  price,
+		Date:   date,
+	}
+
+	// If we have OHLCV data, use it for more accurate execution
+	if execOpts != nil && execOpts.DayBar != nil {
+		quote.Open = execOpts.DayBar.Open
+		quote.High = execOpts.DayBar.High
+		quote.Low = execOpts.DayBar.Low
+		quote.Close = execOpts.DayBar.Close
+		quote.Volume = execOpts.DayBar.Volume
+	}
+
+	// Execute through service
+	trade, err := execSvc.ExecuteOrder(order, quote)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply trade to tracker (update cash and positions)
+	trackerTrade, err := state.Tracker.ApplyTrade(trade)
+	if err != nil {
+		return nil, err
+	}
+
+	logger.Debug().
+		Str("symbol", signal.Symbol).
+		Str("direction", string(signal.Direction)).
+		Float64("qty", trade.Quantity).
+		Float64("price", trade.Price).
+		Float64("commission", trade.Commission).
+		Str("slippage_model", execSvc.GetSlippageModel()).
+		Msg("Trade executed via ExecutionService")
+
+	return trackerTrade, nil
 }
 
 func (e *Engine) updateTargetPositionAfterTrade(

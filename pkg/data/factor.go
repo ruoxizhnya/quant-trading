@@ -5,23 +5,32 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
-	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/rs/zerolog"
 )
+
+// FactorStore defines the interface for factor data operations.
+// This interface allows for easy mocking in tests.
+type FactorStore interface {
+	GetOHLCVForDateRange(ctx context.Context, startDate, endDate time.Time) ([]domain.OHLCV, error)
+	GetFundamentalsSnapshot(ctx context.Context, cutoffDate time.Time) ([]domain.FundamentalData, error)
+	GetTradingDays(ctx context.Context, startDate, endDate time.Time) ([]time.Time, error)
+	SaveFactorCacheBatch(ctx context.Context, entries []*domain.FactorCacheEntry) error
+}
 
 // FactorComputer computes and caches factor z-scores.
 // It reads raw data (OHLCV, fundamentals) from PostgresStore,
 // computes cross-sectional z-scores, and persists to factor_cache table.
 type FactorComputer struct {
-	store  *storage.PostgresStore
+	store  FactorStore
 	logger zerolog.Logger
 }
 
 // NewFactorComputer creates a new FactorComputer.
-func NewFactorComputer(store *storage.PostgresStore) *FactorComputer {
+func NewFactorComputer(store FactorStore) *FactorComputer {
 	return &FactorComputer{
 		store:  store,
 		logger: zerolog.Nop(),
@@ -240,15 +249,56 @@ func (f *FactorComputer) ComputeQualityFactor(ctx context.Context, date time.Tim
 }
 
 // ComputeAllFactors runs all factor computations for a single date.
-func (f *FactorComputer) ComputeAllFactors(ctx context.Context, date time.Time, momentumLookback int) error {
-	if err := f.ComputeMomentumFactor(ctx, date, momentumLookback); err != nil {
-		return fmt.Errorf("momentum: %w", err)
+// When parallel=true, the three factors are computed concurrently using goroutines.
+func (f *FactorComputer) ComputeAllFactors(ctx context.Context, date time.Time, momentumLookback int, parallel bool) error {
+	if !parallel {
+		// Sequential execution (original behavior)
+		if err := f.ComputeMomentumFactor(ctx, date, momentumLookback); err != nil {
+			return fmt.Errorf("momentum: %w", err)
+		}
+		if err := f.ComputeValueFactor(ctx, date); err != nil {
+			return fmt.Errorf("value: %w", err)
+		}
+		if err := f.ComputeQualityFactor(ctx, date); err != nil {
+			return fmt.Errorf("quality: %w", err)
+		}
+		return nil
 	}
-	if err := f.ComputeValueFactor(ctx, date); err != nil {
-		return fmt.Errorf("value: %w", err)
-	}
-	if err := f.ComputeQualityFactor(ctx, date); err != nil {
-		return fmt.Errorf("quality: %w", err)
+
+	// Parallel execution: compute all three factors concurrently
+	var wg sync.WaitGroup
+	errCh := make(chan error, 3)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := f.ComputeMomentumFactor(ctx, date, momentumLookback); err != nil {
+			errCh <- fmt.Errorf("momentum: %w", err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := f.ComputeValueFactor(ctx, date); err != nil {
+			errCh <- fmt.Errorf("value: %w", err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := f.ComputeQualityFactor(ctx, date); err != nil {
+			errCh <- fmt.Errorf("quality: %w", err)
+		}
+	}()
+
+	wg.Wait()
+	close(errCh)
+
+	// Return the first error if any
+	for err := range errCh {
+		return err
 	}
 	return nil
 }
@@ -278,7 +328,7 @@ func (f *FactorComputer) ComputeFactorsForRange(ctx context.Context, startDate, 
 			return count, ctx.Err()
 		default:
 		}
-		if err := f.ComputeAllFactors(ctx, day, momentumLookback); err != nil {
+		if err := f.ComputeAllFactors(ctx, day, momentumLookback, false); err != nil {
 			f.logger.Warn().Time("date", day).Err(err).Msg("Skipping date due to error")
 			continue
 		}

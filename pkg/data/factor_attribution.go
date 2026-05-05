@@ -8,18 +8,28 @@ import (
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
-	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 )
 
 const defaultForwardDays = 20
 
+// AttributionStore defines the interface for factor attribution data operations.
+type AttributionStore interface {
+	GetFactorCacheRange(ctx context.Context, factor domain.FactorType, startDate, endDate time.Time) ([]*domain.FactorCacheEntry, error)
+	GetTradingDays(ctx context.Context, startDate, endDate time.Time) ([]time.Time, error)
+	GetOHLCV(ctx context.Context, symbol string, startDate, endDate time.Time) ([]domain.OHLCV, error)
+	SaveFactorReturnBatch(ctx context.Context, records []*domain.FactorReturn) error
+	SaveICEntryBatch(ctx context.Context, entries []*domain.ICEntry) error
+	GetFactorReturns(ctx context.Context, factor domain.FactorType, startDate, endDate time.Time) ([]*domain.FactorReturn, error)
+	GetICEntries(ctx context.Context, factor domain.FactorType, startDate, endDate time.Time) ([]*domain.ICEntry, error)
+}
+
 // FactorAttributor computes factor quintile returns and IC (Information Coefficient).
 type FactorAttributor struct {
-	store *storage.PostgresStore
+	store AttributionStore
 }
 
 // NewFactorAttributor creates a new FactorAttributor.
-func NewFactorAttributor(store *storage.PostgresStore) *FactorAttributor {
+func NewFactorAttributor(store AttributionStore) *FactorAttributor {
 	return &FactorAttributor{store: store}
 }
 

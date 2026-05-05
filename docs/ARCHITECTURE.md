@@ -98,6 +98,7 @@ _原最后更新: 2026-04-08 (Phase 3)_
 | analysis-service | 8085 | 8085 | 回测 API 网关 | ✅ 运行中 |
 | data-service | 8081 | 8081 | 数据同步 + 选股 API | ✅ 运行中 |
 | strategy-service | 8082 | - | 外部策略服务（备用）| 🔄 备用 |
+| ai-research-service | 8086 | 8086 | AI 研究服务 | ✅ 运行中 |
 | postgres | 5432 | - | 数据库 | ✅ 运行中 |
 | redis | 6379 | - | 缓存层 | ✅ 运行中 |
 | risk-service | 8083 | 8083 | 风控服务 | ✅ 运行中 |
@@ -458,6 +459,7 @@ type Strategy interface {
 - `Engine` — 主引擎，协调各组件
 - `Tracker` — 持仓追踪（T+1、佣金、印花税）
 - `Signal` → `Trade` — 信号转换为交易
+- `LiveTrader` — 实盘/纸交易桥接接口（可选）
 
 ### 回测流程
 ```
@@ -474,6 +476,39 @@ type Strategy interface {
   6. 记录每日组合价值
   7. AdvanceDay (T+1 滚动)
 ```
+
+### 实盘桥接 (Backtest → Paper → Live)
+
+Engine 通过 `LiveTrader` 接口实现回测到实盘的平滑过渡：
+
+```go
+// 纸交易模式：相同的回测引擎，不同的执行后端
+trader := live.NewMockTrader(live.MockTraderConfig{InitialCash: 1e6}, logger)
+engine.SetLiveTrader(trader)
+
+// 单信号执行
+result, err := engine.ExecuteSignalViaLiveTrader(ctx, signal, price)
+
+// 批量信号执行（日终再平衡）
+results := engine.ExecuteSignalsViaLiveTrader(ctx, signals, prices)
+```
+
+**桥接方法** (`engine.go`):
+| 方法 | 说明 |
+|------|------|
+| `SetLiveTrader(trader)` | 附加/ detach LiveTrader |
+| `GetLiveTrader()` | 获取当前 trader |
+| `ExecuteSignalViaLiveTrader(ctx, signal, price)` | 单信号委托 |
+| `ExecuteSignalsViaLiveTrader(ctx, signals, prices)` | 批量委托 |
+| `HealthCheckLiveTrader(ctx)` | 检查 trader 健康状态 |
+
+**执行模式对比**:
+| 模式 | Engine 行为 | 用途 |
+|------|------------|------|
+| 纯回测 (默认) | Tracker 内部模拟 | 策略研发、历史验证 |
+| 纸交易 | Tracker + MockTrader 并行 | 策略上线前实盘模拟 |
+| 混合模式 | Tracker 记录 + LiveTrader 执行 | 小资金实盘验证 |
+| 纯实盘 | 仅 LiveTrader 执行 | 生产环境 |
 
 ### 佣金计算规则
 - 买入：value × 0.0003（最低 5 元）+ value × 0.00001（过户费）
@@ -519,9 +554,16 @@ quant-trading/
 │   │   └── factor_attribution.go — 因子归因分析
 │   ├── domain/
 │   │   └── types.go    — 核心类型（OHLCV, Trade, Position, Signal, OrderType 等）
-│   ├── live/           — 实盘接口预留
-│   │   ├── trader.go    — LiveTrader 接口定义
-│   │   └── mock_trader.go — MockTrader 模拟交易实现
+│   ├── live/           — 实盘交易接口与模拟实现
+│   │   ├── trader.go           — LiveTrader 核心接口定义 (A-share 规则)
+│   │   ├── mock_trader.go      — MockTrader 模拟交易 (T+1/印花税/过户费)
+│   │   ├── trader_advanced.go  — AdvancedTrader 扩展接口 (批量/流式/保证金)
+│   │   ├── advanced_mock_trader.go — AdvancedMockTrader 完整实现
+│   │   ├── persistent_mock_trader.go — 持久化 MockTrader (OrderStore)
+│   │   ├── order_store.go      — OrderStore 接口 (订单持久化)
+│   │   ├── postgres_order_store.go — PostgreSQL 订单存储
+│   │   ├── redis_order_store.go — Redis 订单缓存
+│   │   └── types.go            — 扩展类型 (TradeRecord, MarketData, CashFlow)
 │   ├── marketdata/     — Event-Driven 数据管道
 │   │   ├── eventbus.go  — DataEventBus (pub/sub)
 │   │   ├── provider.go  — Provider 接口
@@ -657,3 +699,160 @@ Browser (:5173)                    Backend (:8085)
 
 `cmd/analysis/static/*.html` 是早期原型，功能已被 Vue SPA 完全替代。
 保留原因: 部分后端测试仍引用这些静态文件。计划在 Phase 3 移除。
+
+---
+
+## AI 研究架构 (pkg/ai/) — Phase 4
+
+> **状态**: Active — 核心组件已实现，服务运行中
+> **定位**: AI 作为资深量化研究员，通过现有回测基础设施验证假设
+> **入口**: `cmd/ai/main.go` (:8086)
+
+### 服务架构
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         AI Research Service (:8086)                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐│
+│  │  Research   │  │  Generate   │  │  Validate   │  │      Evolve         ││
+│  │   Agent     │  │   Agent     │  │   Agent     │  │      Agent          ││
+│  │             │  │             │  │             │  │                     ││
+│  │ • 因子假设   │  │ • 表达式生成 │  │ • 批量回测   │  │ • 遗传算法          ││
+│  │ • 文献理解   │  │ • 代码生成   │  │ • IC 分析   │  │ • 漂移检测          ││
+│  │ • 制度学习   │  │ • 模板填充   │  │ • 过拟合检测 │  │ • 自动重训          ││
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘│
+│         │                │                │                    │          │
+│         └────────────────┴────────────────┘                    │          │
+│                                   │                            │          │
+│                    ┌──────────────┴──────────────┐    ┌────────┴─────────┐│
+│                    │      Expression Engine      │    │     Gene Pool    ││
+│                    │      (DSL + AST)            │    │   (PG + JSONB)   ││
+│                    └──────────────┬──────────────┘    └──────────────────┘│
+│                                   │                                        │
+└───────────────────────────────────┼────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      Analysis Service (:8085) — Existing                     │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐│
+│  │   Backtest  │  │   Batch     │  │   Factor    │  │    Strategy         ││
+│  │   Engine    │  │   Engine    │  │  Analyzer   │  │    Registry         ││
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 核心组件
+
+| 组件 | 文件 | 职责 | 状态 |
+|------|------|------|------|
+| Expression Engine | `pkg/ai/expression/` | 因子表达式 DSL 解析、AST 求值、向量化计算 | ✅ 已实现 |
+| Intent Parser | `pkg/ai/intent/` | 自然语言意图解析：中文/英文 → 结构化策略参数 | ✅ 已实现 |
+| YAML Generator | `pkg/ai/yaml/` | 结构化意图 → YAML 策略配置 | ✅ 已实现 |
+| Pipeline | `pkg/ai/pipeline/` | 完整流水线：意图解析 → YAML → 代码生成 → 编译验证 → 回测 | ✅ 已实现 |
+| Research Agent | `pkg/ai/agents/research.go` | LLM 驱动因子假设生成 | ✅ 已实现 |
+| Generate Agent | `pkg/ai/agents/generate.go` | 自然语言 → 策略代码生成 | 🔄 规划中 |
+| Validate Agent | `pkg/ai/agents/validate.go` | 分层验证：L1 语法 → L2 快速回测 → L3 标准回测 → L4 Walk-Forward | 🔄 规划中 |
+| Evolve Agent | `pkg/ai/agents/evolve.go` | 遗传算法 + 概念漂移检测 | 🔄 规划中 |
+| Gene Pool | `pkg/ai/gene_pool/` | 因子/策略基因库 (PostgreSQL JSONB) | 🔄 规划中 |
+| Backtest Client | `pkg/ai/client/backtest_client.go` | HTTP 客户端调用回测 API | ✅ 已实现 |
+| Factor Client | `pkg/ai/client/factor_client.go` | HTTP 客户端调用因子计算 API | ✅ 已实现 |
+
+### 意图解析引擎 (Intent Parser)
+
+```go
+// 自然语言 → 结构化意图
+type Intent struct {
+    StrategyType    string            // momentum | mean_reversion | breakout | ...
+    StrategyName    string            // snake_case name
+    Parameters      []Parameter       // 提取的参数 (lookback_days, rsi_threshold, ...)
+    Indicators      []string          // 技术指标 (rsi, macd, ma, bollinger, ...)
+    Universe        string            // csi300 | csi500 | csi800 | all
+    Timeframe       string            // 1d | 1w | 1M
+    RiskConstraints *RiskConstraints  // 止损/止盈/最大回撤/最大持仓
+}
+
+// 支持中文/英文混合输入
+// "20日动量策略，在沪深300中选出最强10只股票，止损5%"
+// "RSI mean reversion, oversold 30, csi500, max drawdown 10%"
+```
+
+### YAML 配置生成器 (YAML Generator)
+
+```go
+// 结构化意图 → 完整 YAML 配置
+type Config struct {
+    Strategy    StrategyConfig    // name, type, parameters, indicators
+    Backtest    BacktestConfig    // start_date, end_date, initial_capital, commission
+    Data        DataConfig        // universe, timeframe, providers
+    Risk        RiskConfig        // max_positions, stop_loss, take_profit
+    Execution   ExecutionConfig   // order_type, price_tolerance
+}
+```
+
+### 策略生成流水线 (Pipeline)
+
+```
+用户输入: "20日动量策略，沪深300，止损5%"
+    ↓
+[Intent Parser] 提取结构化参数
+    ↓
+[YAML Generator] 生成策略配置
+    ↓
+[LLM CodeGen] 生成 Go 策略代码
+    ↓
+[Compiler] 验证代码可编译
+    ↓
+[Backtest] 运行快速回测验证
+    ↓
+返回: {intent, yaml, code, backtest_result}
+```
+
+### 表达式引擎 (Factor Expression DSL)
+
+```go
+type FactorExpression struct {
+    ID       string
+    Formula  string      // e.g., "ts_corr(close, volume, 20) / ts_std(returns, 60)"
+    AST      *ExprNode   // Parsed AST
+    Inputs   []string    // Required raw data fields
+    Category string      // "momentum" | "value" | "quality" | "custom"
+}
+
+// Supported operators
+// Time-series: ts_mean, ts_std, ts_corr, ts_delay, ts_rank, ts_delta
+// Cross-section: cs_rank, cs_zscore, cs_percentile
+// Math: log, sqrt, abs, sign
+// Data fields: open, high, low, close, volume, turnover, market_cap, pe, pb, roe
+```
+
+### 验证分层
+
+| 层级 | 目的 | 数据量 | 时间 | 淘汰率 |
+|------|------|--------|------|--------|
+| L1 语法检查 | 确保表达式可解析 | — | < 1s | 10% |
+| L2 快速回测 | 筛选明显劣策略 | 1年/100股 | < 10s | 70% |
+| L3 标准回测 | 全面绩效评估 | 3年/500股 | < 2min | 15% |
+| L4 Walk-Forward | 过拟合检测 | 5年/全市场 | < 10min | 4% |
+| L5 人类审核 | 最终决策 | — | — | 1% |
+
+### 前端 AI 模块
+
+```
+web/src/components/ai/
+├── FactorLab.vue           # 因子实验室：发现、验证、可视化
+├── StrategyWorkshop.vue    # 策略工坊：生成、编辑、回测
+├── EvolutionObs.vue        # 进化观察室：种群、谱系、漂移
+├── FactorCard.vue          # 因子卡片
+├── StrategyCard.vue        # 策略卡片
+├── GenealogyTree.vue       # 策略谱系树
+└── FitnessChart.vue        # 适应度进化曲线
+```
+
+### 新增页面
+
+```
+web/src/pages/
+└── AIResearch.vue          # AI 研究主页面 (整合 FactorLab + StrategyWorkshop + EvolutionObs)
+```

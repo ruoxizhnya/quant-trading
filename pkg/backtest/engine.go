@@ -15,6 +15,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/ruoxizhnya/quant-trading/pkg/httpclient"
+	"github.com/ruoxizhnya/quant-trading/pkg/live"
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	"github.com/ruoxizhnya/quant-trading/pkg/risk"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
@@ -122,6 +123,20 @@ type Engine struct {
 	// When set, the engine pre-loads factor z-scores from DB before backtest,
 	// eliminating per-symbol-per-day HTTP/DB queries for multi-factor strategies.
 	store *storage.PostgresStore
+
+	// Optional LiveTrader for bridging backtest signals to live/paper trading.
+	// When set, the engine can execute signals through a real or simulated broker
+	// instead of only simulating internally. This enables seamless transition from
+	// backtest to paper trading and eventually live trading.
+	// See pkg/live/trader.go for the interface definition.
+	liveTrader live.LiveTrader
+
+	// ExecutionService handles order execution (slippage, commission, limit orders).
+	// When set, the engine routes trade execution through this service instead of
+	// using Tracker's built-in execution logic. This enables pluggable execution
+	// models (fixed slippage, variable slippage, no slippage) and unified
+	// commission calculation.
+	executionService ExecutionService
 }
 
 // BacktestState holds the state of a backtest run.
@@ -218,6 +233,16 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 		rand.New(rand.NewSource(config.Seed))
 	}
 
+	// Initialize default execution service
+	execConfig := domain.ExecutionConfig{
+		OrderType:      domain.OrderTypeMarket,
+		SlippageModel:  "fixed",
+		CommissionRate: config.CommissionRate,
+		MinCommission:  config.Trading.MinCommission,
+		InitialCapital: config.InitialCapital,
+	}
+	executionService := NewBacktestExecutionService(execConfig)
+
 	return &Engine{
 		config:             config,
 		provider:           provider,
@@ -226,6 +251,7 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 		httpClient:         httpclient.New("", 30*time.Second, 3),
 		logger:             logger.With().Str("component", "backtest_engine").Logger(),
 		inMemoryOHLCV:      make(map[string][]domain.OHLCV),
+		executionService:   executionService,
 	}, nil
 }
 
@@ -568,6 +594,11 @@ func (e *Engine) warmCache(ctx context.Context, symbols []string, start, end tim
 
 	e.mu.Lock()
 	for symbol, bars := range data {
+		// Pre-sort OHLCV bars by date ascending to ensure chronological order
+		// This eliminates per-symbol sorting overhead during backtest execution
+		sort.Slice(bars, func(i, j int) bool {
+			return bars[i].Date.Before(bars[j].Date)
+		})
 		e.inMemoryOHLCV[symbol] = bars
 	}
 	e.mu.Unlock()
@@ -1132,4 +1163,159 @@ func hasSTPrefix(name string) bool {
 	}
 	prefix := name[:2]
 	return prefix == "ST" || prefix == "*ST" || prefix == "SST" || prefix == "S*ST"
+}
+
+// SetLiveTrader injects a LiveTrader for bridging backtest signals to live/paper trading.
+// When set, the engine can optionally execute signals through the trader instead of
+// only simulating internally via Tracker. This is the primary hook for transitioning
+// from backtest → paper trading → live trading.
+// Pass nil to disable live trading and use pure simulation.
+func (e *Engine) SetLiveTrader(trader live.LiveTrader) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.liveTrader = trader
+	if trader != nil {
+		e.logger.Info().Str("trader", trader.Name()).Msg("LiveTrader attached to engine")
+	}
+}
+
+// SetExecutionService injects a custom ExecutionService for order execution.
+// When set, the engine uses this service for all trade execution instead of
+// Tracker's built-in logic. Pass nil to fall back to Tracker execution.
+func (e *Engine) SetExecutionService(svc ExecutionService) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.executionService = svc
+	if svc != nil {
+		e.logger.Info().Str("slippage_model", svc.GetSlippageModel()).Msg("ExecutionService attached to engine")
+	}
+}
+
+// GetExecutionService returns the current ExecutionService.
+func (e *Engine) GetExecutionService() ExecutionService {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.executionService
+}
+
+// GetLiveTrader returns the currently attached LiveTrader, or nil if none.
+func (e *Engine) GetLiveTrader() live.LiveTrader {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.liveTrader
+}
+
+// ExecuteSignalViaLiveTrader executes a single trading signal through the attached LiveTrader.
+// This is the bridge between backtest signal generation and live/paper order execution.
+// Returns the order result or nil if no LiveTrader is attached.
+// The signal's Direction determines buy (DirectionLong) or sell (DirectionClose).
+func (e *Engine) ExecuteSignalViaLiveTrader(ctx context.Context, signal domain.Signal, currentPrice float64) (*live.OrderResult, error) {
+	e.mu.RLock()
+	trader := e.liveTrader
+	e.mu.RUnlock()
+
+	if trader == nil {
+		return nil, nil
+	}
+
+	if currentPrice <= 0 {
+		return nil, fmt.Errorf("cannot execute signal: invalid price %.4f for %s", currentPrice, signal.Symbol)
+	}
+
+	// Determine order type from signal
+	orderType := signal.OrderType
+	if orderType == "" {
+		orderType = domain.OrderTypeMarket
+	}
+
+	// Determine price: limit price for limit orders, 0 for market orders
+	price := 0.0
+	if orderType == domain.OrderTypeLimit {
+		price = signal.LimitPrice
+		if price <= 0 {
+			price = currentPrice
+		}
+	}
+
+	// Calculate quantity from position sizing or default to a fixed lot
+	quantity := 100.0 // default lot size; in production this comes from risk/position sizing
+	if signal.Strength > 0 {
+		// Scale quantity by signal strength (capped)
+		quantity = 100.0 * max(1.0, signal.Strength*10)
+		if quantity > 10000 {
+			quantity = 10000
+		}
+	}
+
+	result, err := trader.SubmitOrder(ctx, signal.Symbol, signal.Direction, orderType, quantity, price)
+	if err != nil {
+		e.logger.Warn().
+			Str("symbol", signal.Symbol).
+			Str("direction", string(signal.Direction)).
+			Float64("price", currentPrice).
+			Err(err).
+			Msg("LiveTrader order submission failed")
+		return nil, err
+	}
+
+	e.logger.Info().
+		Str("order_id", result.OrderID).
+		Str("symbol", signal.Symbol).
+		Str("direction", string(signal.Direction)).
+		Str("status", result.Status).
+		Float64("qty", result.FilledQty).
+		Float64("price", result.Price).
+		Msg("Signal executed via LiveTrader")
+
+	return result, nil
+}
+
+// ExecuteSignalsViaLiveTrader executes multiple signals through the LiveTrader in batch.
+// This is useful for daily rebalancing where multiple signals are generated at once.
+// Returns a map of symbol → order result for successful executions.
+func (e *Engine) ExecuteSignalsViaLiveTrader(ctx context.Context, signals []domain.Signal, prices map[string]float64) map[string]*live.OrderResult {
+	e.mu.RLock()
+	trader := e.liveTrader
+	e.mu.RUnlock()
+
+	if trader == nil {
+		return nil
+	}
+
+	results := make(map[string]*live.OrderResult, len(signals))
+	for _, signal := range signals {
+		price, ok := prices[signal.Symbol]
+		if !ok || price <= 0 {
+			e.logger.Warn().Str("symbol", signal.Symbol).Msg("No price available for live execution, skipping")
+			continue
+		}
+
+		result, err := e.ExecuteSignalViaLiveTrader(ctx, signal, price)
+		if err != nil {
+			continue
+		}
+		if result != nil {
+			results[signal.Symbol] = result
+		}
+	}
+
+	e.logger.Info().
+		Int("signals", len(signals)).
+		Int("executed", len(results)).
+		Msg("Batch signal execution via LiveTrader completed")
+
+	return results
+}
+
+// HealthCheckLiveTrader checks the health of the attached LiveTrader.
+// Returns nil if healthy or no trader attached, error otherwise.
+func (e *Engine) HealthCheckLiveTrader(ctx context.Context) error {
+	e.mu.RLock()
+	trader := e.liveTrader
+	e.mu.RUnlock()
+
+	if trader == nil {
+		return nil
+	}
+	return trader.HealthCheck(ctx)
 }

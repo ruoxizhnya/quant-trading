@@ -1,3 +1,26 @@
+// Package live provides interfaces and implementations for live trading execution.
+// It abstracts broker-specific order management, position tracking, and account queries
+// behind the LiveTrader interface, enabling seamless switching between paper trading
+// (MockTrader) and real broker integrations.
+//
+// Architecture:
+//   - LiveTrader: Core interface for order submission, cancellation, and account queries
+//   - AdvancedTrader: Extended interface with batch operations, quote subscription, and margin checks
+//   - MockTrader: In-memory simulation with A-share trading rules (T+1, stamp tax, price limits)
+//   - PersistentMockTrader: MockTrader with OrderStore persistence for audit trails
+//   - AdvancedMockTrader: PersistentMockTrader with quote streaming and batch operations
+//
+// Usage:
+//
+//	trader := live.NewMockTrader(live.MockTraderConfig{InitialCash: 1e6}, logger)
+//	result, err := trader.SubmitOrder(ctx, "000001.SZ", domain.DirectionLong, domain.OrderTypeMarket, 100, 0)
+//
+// A-Share Specifics:
+//   - T+1 settlement: shares bought today cannot be sold today
+//   - Stamp tax: 0.1% on sell trades only
+//   - Commission: min 5 CNY per trade
+//   - Transfer fee: 0.001% of trade value
+//   - Price limits: ±10% for normal stocks, ±5% for ST stocks
 package live
 
 import (
@@ -7,46 +30,97 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
-type OrderResult struct {
-	OrderID    string    `json:"order_id"`
-	Symbol     string    `json:"symbol"`
-	Direction  domain.Direction `json:"direction"`
-	OrderType  domain.OrderType `json:"order_type"`
-	Quantity   float64   `json:"quantity"`
-	FilledQty  float64   `json:"filled_qty"`
-	Price      float64   `json:"price"`
-	Status     string    `json:"status"`
-	SubmittedAt time.Time `json:"submitted_at"`
-	Message    string    `json:"message,omitempty"`
-}
-
-type AccountInfo struct {
-	TotalAssets  float64   `json:"total_assets"`
-	Cash         float64   `json:"cash"`
-	MarketValue  float64   `json:"market_value"`
-	UnrealizedPnL float64  `json:"unrealized_pnl"`
-	RealizedPnL  float64   `json:"realized_pnl"`
-	UpdatedAt    time.Time `json:"updated_at"`
-}
-
-type PositionInfo struct {
-	Symbol           string    `json:"symbol"`
-	Quantity         float64   `json:"quantity"`
-	AvailableQty     float64   `json:"available_qty"`
-	AvgCost          float64   `json:"avg_cost"`
-	CurrentPrice     float64   `json:"current_price"`
-	MarketValue      float64   `json:"market_value"`
-	UnrealizedPnL    float64   `json:"unrealized_pnl"`
-	QuantityToday    float64   `json:"quantity_today"`
-	QuantityYesterday float64  `json:"quantity_yesterday"`
-}
-
+// LiveTrader defines the core interface for live trading execution.
+// All broker implementations (real or simulated) must satisfy this interface.
+//
+// Implementations must be safe for concurrent use by multiple goroutines.
 type LiveTrader interface {
+	// SubmitOrder submits a new order to the broker.
+	// For market orders, set price to 0.
+	// For limit orders, price is the limit price.
+	// Returns the order result with assigned OrderID and fill status.
 	SubmitOrder(ctx context.Context, symbol string, direction domain.Direction, orderType domain.OrderType, quantity float64, price float64) (*OrderResult, error)
+
+	// CancelOrder attempts to cancel a pending or partially filled order.
+	// Returns error if the order is already filled, cancelled, or not found.
 	CancelOrder(ctx context.Context, orderID string) error
+
+	// GetOrder retrieves the current status of an order by ID.
 	GetOrder(ctx context.Context, orderID string) (*OrderResult, error)
+
+	// GetPositions returns all current positions in the account.
 	GetPositions(ctx context.Context) ([]PositionInfo, error)
+
+	// GetAccount returns current account summary (cash, market value, PnL).
 	GetAccount(ctx context.Context) (*AccountInfo, error)
+
+	// Name returns the trader implementation name (e.g., "mock_trader", "interactive_brokers").
 	Name() string
+
+	// HealthCheck verifies connectivity to the broker/exchange.
+	// Returns nil if healthy, error otherwise.
 	HealthCheck(ctx context.Context) error
+}
+
+// OrderResult represents the outcome of an order submission.
+type OrderResult struct {
+	OrderID     string           `json:"order_id"`
+	Symbol      string           `json:"symbol"`
+	Direction   domain.Direction `json:"direction"`
+	OrderType   domain.OrderType `json:"order_type"`
+	Quantity    float64          `json:"quantity"`
+	FilledQty   float64          `json:"filled_qty"`
+	Price       float64          `json:"price"`
+	Status      string           `json:"status"` // "pending" / "filled" / "partial" / "cancelled" / "rejected" / "expired"
+	SubmittedAt time.Time        `json:"submitted_at"`
+	Message     string           `json:"message,omitempty"` // error or informational message
+}
+
+// AccountInfo represents a snapshot of the trading account.
+type AccountInfo struct {
+	TotalAssets   float64   `json:"total_assets"`
+	Cash          float64   `json:"cash"`
+	MarketValue   float64   `json:"market_value"`
+	UnrealizedPnL float64   `json:"unrealized_pnl"`
+	RealizedPnL   float64   `json:"realized_pnl"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// PositionInfo represents a single position in the portfolio.
+type PositionInfo struct {
+	Symbol            string  `json:"symbol"`
+	Quantity          float64 `json:"quantity"`
+	AvailableQty      float64 `json:"available_qty"`
+	AvgCost           float64 `json:"avg_cost"`
+	CurrentPrice      float64 `json:"current_price"`
+	MarketValue       float64 `json:"market_value"`
+	UnrealizedPnL     float64 `json:"unrealized_pnl"`
+	QuantityToday     float64 `json:"quantity_today"`
+	QuantityYesterday float64 `json:"quantity_yesterday"`
+}
+
+// IsFilled returns true if the order is completely filled.
+func (r *OrderResult) IsFilled() bool {
+	return r.Status == "filled" && r.FilledQty >= r.Quantity
+}
+
+// IsActive returns true if the order can still be filled or cancelled.
+func (r *OrderResult) IsActive() bool {
+	return r.Status == "pending" || r.Status == "partial"
+}
+
+// TotalFees returns the estimated total fees for a trade (commission + transfer fee + stamp tax).
+// This is a convenience method for quick fee estimation.
+func (r *OrderResult) TotalFees(commissionRate, stampTaxRate, transferFeeRate float64) float64 {
+	tradeValue := r.FilledQty * r.Price
+	commission := tradeValue * commissionRate
+	if commission < 5.0 {
+		commission = 5.0
+	}
+	transferFee := tradeValue * transferFeeRate
+	stampTax := 0.0
+	if r.Direction == domain.DirectionClose || r.Direction == domain.DirectionShort {
+		stampTax = tradeValue * stampTaxRate
+	}
+	return commission + transferFee + stampTax
 }

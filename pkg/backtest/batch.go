@@ -101,6 +101,11 @@ type BatchEngine struct {
 	wfEng  *WalkForwardEngine
 	config BatchConfig
 	logger zerolog.Logger
+	scorer *Scorer
+
+	// reports stores completed batch reports for retrieval via API
+	reports   map[string]*BatchReport
+	reportsMu sync.RWMutex
 }
 
 func NewBatchEngine(engine *Engine, wfEng *WalkForwardEngine, config BatchConfig, logger zerolog.Logger) *BatchEngine {
@@ -112,7 +117,28 @@ func NewBatchEngine(engine *Engine, wfEng *WalkForwardEngine, config BatchConfig
 		wfEng:  wfEng,
 		config: config,
 		logger: logger.With().Str("component", "batch_engine").Logger(),
+		scorer: NewScorer(),
+		reports: make(map[string]*BatchReport),
 	}
+}
+
+// SetConfig updates the batch engine configuration at runtime.
+func (b *BatchEngine) SetConfig(config BatchConfig) {
+	if config.Concurrency <= 0 {
+		config.Concurrency = 4
+	}
+	b.config = config
+}
+
+// GetReport retrieves a previously run batch report by batch ID.
+func (b *BatchEngine) GetReport(batchID string) (*BatchReport, error) {
+	b.reportsMu.RLock()
+	defer b.reportsMu.RUnlock()
+	report, ok := b.reports[batchID]
+	if !ok {
+		return nil, fmt.Errorf("batch report not found: %s", batchID)
+	}
+	return report, nil
 }
 
 func (b *BatchEngine) Run(ctx context.Context, tasks []BatchTask) (*BatchReport, error) {
@@ -176,6 +202,11 @@ func (b *BatchEngine) Run(ctx context.Context, tasks []BatchTask) (*BatchReport,
 		Int("failed", report.Failed).
 		Int64("duration_ms", report.DurationMs).
 		Msg("Batch backtest complete")
+
+	// Store report for later retrieval
+	b.reportsMu.Lock()
+	b.reports[batchID] = report
+	b.reportsMu.Unlock()
 
 	return report, nil
 }

@@ -143,10 +143,12 @@ func TestValueScreenMomentumRanking(t *testing.T) {
 		return bars
 	}
 
+	// Use 4+ stocks to trigger the HTTP path (len(bars) > 3)
 	bars := map[string][]domain.OHLCV{
 		"A": makeBars("A", basePrice*1.10),
 		"B": makeBars("B", basePrice*1.05),
 		"C": makeBars("C", basePrice*1.01),
+		"D": makeBars("D", basePrice*1.03),
 	}
 
 	s := &valueScreeningStrategy{
@@ -158,8 +160,9 @@ func TestValueScreenMomentumRanking(t *testing.T) {
 			TopN:               2,
 			RebalanceFrequency: "daily",
 		},
-		httpClient:  httpClient,
-		screenCache: strategy.NewScreenCache(10),
+		httpClient:     httpClient,
+		screenCache:    strategy.NewScreenCache(10),
+		dataServiceURL: srv.URL,
 	}
 
 	portfolio := &domain.Portfolio{
@@ -447,12 +450,21 @@ func TestValueScreenCache(t *testing.T) {
 			TopN:               10,
 			RebalanceFrequency: "daily",
 		},
-		httpClient:  httpClient,
-		screenCache: strategy.NewScreenCache(10),
+		httpClient:     httpClient,
+		screenCache:    strategy.NewScreenCache(10),
+		dataServiceURL: srv.URL,
 	}
 
-	bars := map[string][]domain.OHLCV{"A": makeBars(), "B": makeBars()}
-	dateStr := now.Format("20060102")
+	// Use 4+ stocks to trigger the HTTP path (len(bars) > 3)
+	bars := map[string][]domain.OHLCV{
+		"A": makeBars(),
+		"B": makeBars(),
+		"C": makeBars(),
+		"D": makeBars(),
+	}
+	// screenDate is derived from the latest bar date, which is now.AddDate(0, 0, -1)
+	screenDate := now.AddDate(0, 0, -1)
+	dateStr := screenDate.Format("20060102")
 	portfolio := &domain.Portfolio{UpdatedAt: now, Positions: map[string]domain.Position{}}
 
 	_, err := s.GenerateSignals(context.Background(), bars, portfolio)

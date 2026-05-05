@@ -288,14 +288,45 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache storage.C
 	r.GET("/api/v1/trading/calendar", getTradingCalendarHandler(store))
 	r.POST("/sync/calendar", syncCalendarHandler(tc, store))
 
-	// Sync endpoints
-	r.POST("/sync/stocks", syncStocksHandler(tc, store))
-	r.POST("/sync/ohlcv", syncOHLCVHandler(tc, store))
-	r.POST("/sync/ohlcv/all", syncAllOHLCVHandler(tc, store))
+	// Initialize sync handler with job queue and worker pool
+	syncHandler := NewSyncHandler(store, tc, dc)
+	syncHandler.RegisterExecutors()
+	syncHandler.StartWorkerPool()
+
+	// Legacy sync endpoints (transformed to async job creation)
+	r.POST("/sync/stocks", syncHandler.syncStocksHandler)
+	r.POST("/sync/ohlcv", syncHandler.syncOHLCVHandler)
+	r.POST("/sync/ohlcv/all", syncHandler.syncAllOHLCVHandler)
 	r.POST("/sync/fundamental", syncFundamentalHandler(tc))
-	r.POST("/sync/fundamentals", syncFundamentalsHandler(tc, store))
-	r.POST("/sync/dividends", syncDividendsHandler(tc, store))
-	r.POST("/sync/splits", syncSplitsHandler(tc, store))
+	r.POST("/sync/fundamentals", syncHandler.syncFundamentalsHandler)
+	r.POST("/sync/dividends", syncHandler.syncDividendsHandler)
+	r.POST("/sync/splits", syncHandler.syncSplitsHandler)
+
+	// New REST API for sync job management
+	api := r.Group("/api/sync")
+	{
+		// Job management
+		api.GET("/jobs", syncHandler.listJobsHandler)
+		api.GET("/jobs/:id", syncHandler.getJobHandler)
+		api.POST("/jobs/:id/cancel", syncHandler.cancelJobHandler)
+		api.POST("/jobs/:id/retry", syncHandler.retryJobHandler)
+
+		// SSE progress streaming
+		api.GET("/jobs/:id/progress", syncHandler.sseProgressHandler)
+
+		// Worker stats
+		api.GET("/workers", syncHandler.getWorkerStatsHandler)
+
+		// Schedule management
+		api.POST("/schedules", syncHandler.createScheduleHandler)
+		api.GET("/schedules", syncHandler.listSchedulesHandler)
+		api.GET("/schedules/:id", syncHandler.getScheduleHandler)
+		api.PUT("/schedules/:id", syncHandler.updateScheduleHandler)
+		api.DELETE("/schedules/:id", syncHandler.deleteScheduleHandler)
+		api.POST("/schedules/:id/toggle", syncHandler.toggleScheduleHandler)
+		api.POST("/schedules/:id/run", syncHandler.runScheduleNowHandler)
+		api.GET("/scheduler/stats", syncHandler.getSchedulerStatsHandler)
+	}
 
 	// Cache warming (called by backtest engine before a run)
 	r.POST("/api/v1/cache/warm", warmCacheHandler(dc))
@@ -1475,7 +1506,7 @@ func syncAllFactorsHandler(fc *data.FactorComputer) gin.HandlerFunc {
 			return
 		}
 
-		if err := fc.ComputeAllFactors(ctx, date, 20); err != nil {
+		if err := fc.ComputeAllFactors(ctx, date, 20, true); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

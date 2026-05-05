@@ -270,14 +270,20 @@ type Position struct {
 - Output: ranked list with key metrics displayed
 - Export: download as CSV or push to backtest universe
 
-**Strategy Copilot (AI-assisted, future — Phase 2):**
+**Strategy Copilot (AI-assisted, Phase 2 — ✅ DONE):**
 - Chat interface with 龙少
 - Natural language → strategy code generation
 - Edit/refine strategy with AI assistance
 - Validate strategy: AI reviews code for common mistakes
 - One-click backtest after code generation
 
-**Strategy Editor (future — Phase 3):**
+**AI Research Platform (Phase 3/4 — Current):**
+- **Factor Lab**: Discover factors via natural language; visualize IC, Sharpe, turnover; browse gene pool
+- **Strategy Workshop**: Generate strategies from selected factors; edit code; validate via backtest
+- **Evolution Observatory**: Monitor strategy population; view genealogy tree; track fitness evolution
+- **Expression Engine**: Custom DSL for factor definitions; AST-based evaluation; A-share operators
+
+**Strategy Editor (future — Phase 4):**
 - Visual strategy builder: drag factors, set thresholds, define rebalance rules
 - Code view alongside visual view (what you see is what runs)
 - Version history for strategies
@@ -475,19 +481,23 @@ The phases below define the build order. All P0 items must be fully done (not "i
 5. **Background worker:** `POST /backtest` returns `job_id` immediately; worker runs async; client can poll `/backtest/:id`
 5. **Strategy DB config:** `strategies` table with JSONB column operational; YAML import/export functional
 
-### Phase 3 — AI Evolution (Future)
-**Goal:** System discovers and evaluates strategies autonomously.
+### Phase 3 — AI-Native Evolution (Current — Phase 4 Rebranded)
+**Goal:** AI acts as a senior quantitative researcher — autonomously discovering alpha factors, generating trading strategies, and validating hypotheses through the existing backtest infrastructure.
 
 | Category | Deliverables |
 |----------|-------------|
-| AI | Strategy Generator (LLM), Backtest Runner (parallel), Strategy Selector (ranking + monitoring) |
-| Analytics | Factor decay analysis |
-| UI | Strategy Copilot v2, visual strategy editor |
-| Execution | Real broker integration (Futu/Tiger) |
+| AI | **Research Agent** (factor discovery via LLM), **Generate Agent** (strategy code generation), **Validate Agent** (L1-L4 validation pipeline), **Evolve Agent** (genetic algorithm + drift detection) |
+| Expression | **Factor Expression DSL** (custom DSL with AST evaluation, A-share specific operators) |
+| Gene Pool | **Factor/Strategy Gene Pool** (PostgreSQL JSONB, genealogy tracking, performance history) |
+| Analytics | Factor decay analysis, IC time series, Walk-Forward validation |
+| UI | **Factor Lab** (factor discovery & visualization), **Strategy Workshop** (code generation & backtest), **Evolution Observatory** (population & genealogy) |
+| Execution | **ExecutionService abstraction** (backtest/paper/live unified interface), **Paper Trading** (SimulatedBroker with A-share fees) |
 
-**Prerequisites to start Phase 3:** All Phase 1 P0 items complete; all Phase 2 exit criteria passed (see Phase 2 gate); Phase 2 acceptance test suite recorded in `docs/phase-gate-reviews.md`.
+**Key Design Principle:** AI is an augmentation layer, not a replacement. The existing backtest engine, data pipeline, and strategy framework remain the foundational assets. AI Agents call the backtest service for validation, ensuring consistency and leveraging A-share specific rules (T+1, limit up/down).
 
-### Phase 4 — Scale & Production
+**Prerequisites to start Phase 3:** All Phase 1 P0 items complete; all Phase 2 exit criteria passed (see Phase 2 gate); Phase 2 acceptance test suite recorded in `docs/phase-gate-reviews.md`; ADR-015 approved.
+
+### Phase 4 — Scale & Production (Future)
 **Goal:** Make the system institutional-grade.
 
 | Category | Deliverables |
@@ -496,7 +506,8 @@ The phases below define the build order. All P0 items must be fully done (not "i
 | Risk | VaR/CVaR, risk parity strategy, market impact model |
 | Data | News/sentiment data pipeline |
 | Strategy | Risk parity strategy, event-driven, sentiment strategies |
-| UI | Real-time paper trading UI |
+| UI | Real-time paper trading UI (live broker integration) |
+| AI | Multi-modal data fusion (news + price + fundamental), reinforcement learning for execution |
 
 ---
 

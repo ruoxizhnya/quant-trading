@@ -36,6 +36,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/StrategyLab.vue'),
         meta: { title: '策略实验室' },
       },
+      {
+        path: 'data-sync',
+        name: 'data-sync',
+        component: () => import('@/pages/DataSync.vue'),
+        meta: { title: '数据同步' },
+      },
     ],
   },
   {
