@@ -359,10 +359,11 @@ Browser (Vue SPA :5173)
 | 类型 | 目录 | 职责 | 示例 |
 |------|------|------|------|
 | 设计文档 | `docs/` | 解释系统设计原理和架构 | VISION.md, SPEC.md |
-| 决策文档 | `docs/adr/` | 记录架构决策的上下文和影响 | adr-001 ~ adr-010 |
-| 运营决策 | `docs/odr/` | 记录运营/流程/治理决策 | odr-001 ~ odr-006 |
+| 决策文档 | `docs/adr/` | 记录架构决策的上下文和影响 | adr-001 ~ adr-015 |
+| 运营决策 | `docs/odr/` | 记录运营/流程/治理决策 | odr-001 ~ odr-008 |
 | 任务文档 | `docs/TASKS.md` | 统一追踪可执行任务 | — |
 | 参考文档 | `docs/` | 持续维护的状态/进度文档 | ROADMAP.md, NEXT_STEPS.md |
+| 指南文档 | `docs/guides/` | 迁移、部署等操作指南 | migration-phase3-to-phase4.md |
 | 归档文档 | `docs/archive/` | 过时但保留作历史参考 | reports-2026-Q2/ |
 
 ### 文档生命周期
@@ -504,6 +505,8 @@ AGENTS.md 是活文档。以下情况主动更新：
 |------|------|
 | [E2E_TEST_GUIDE.md](docs/E2E_TEST_GUIDE.md) | E2E 测试指南 |
 | [TASKS.md](docs/TASKS.md) | 统一任务追踪（含 Phase 3 实施任务） |
+| [guides/migration-phase3-to-phase4.md](docs/guides/migration-phase3-to-phase4.md) | Phase 3 → Phase 4 迁移指南 |
+| [benchmark-results.md](docs/benchmark-results.md) | 性能基准测试结果 |
 
 ### Decisions (架构决策)
 
@@ -616,7 +619,7 @@ Please continue from where we left off.
 | 使用本模板 | [AGENTS_TEMPLATE.md](docs/AGENTS_TEMPLATE.md) |
 
 ---
-_Last updated: 2026-05-04_
+_Last updated: 2026-05-06_
 _Source: 基于 AGENTS Template v2.0 迁移，融合 quant-trading + Claudeer 最佳实践_
 _Migration ODR: odr-005-agents-md-v3-migration (pending creation)_
 _Phase 4 Update: AI-Native Evolution architecture documented in ADR-015, IMPLEMENTATION_PLAN.md, tasks-phase-2.md_

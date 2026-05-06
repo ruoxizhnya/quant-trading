@@ -1,10 +1,22 @@
 # Quant Trading System — Vision & Features
 
 > **Status**: Active (Canonical - Design Principles)
-> **Version:** 1.3.0 (AGENTS Template v2.0 Migration)
-> **Last Updated:** 2026-04-11
+> **Version:** 1.4.0 (Phase 4 — AI-Native Evolution)
+> **Last Updated:** 2026-05-06
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [SPEC.md](SPEC.md) (implementation), [ARCHITECTURE.md](ARCHITECTURE.md) (layout), [TEST.md](TEST.md) (quality)
+>
+> **Changelog v1.4 (Phase 4 — AI-Native Evolution):**
+> - AI Agent system: Research, Generate, Validate, Evolve agents operational
+> - Factor Expression DSL with AST-based evaluation (`pkg/ai/expression/`)
+> - Gene Pool schema for factor and strategy persistence (`pkg/ai/gene_pool/`)
+> - TPE Bayesian optimization + Genetic algorithm search (`pkg/ai/search/`)
+> - Evolution framework: population management, selection, crossover, mutation (`pkg/ai/evolution/`)
+> - Concept drift detection for strategy monitoring (`pkg/ai/drift/`)
+> - Live trading engine with paper trading support (`pkg/live/`)
+> - ExecutionService abstraction unifying backtest/paper/live execution
+> - AI Research UI: FactorLab, StrategyWorkshop, EvolutionObs, PipelineDashboard
+> - Test coverage: ai package ≥75%, live package interfaces defined
 >
 > **Changelog v1.3 (Migration):**
 > - 添加标准元数据头部（Status, Owner, Related）
@@ -42,10 +54,12 @@ This system solves that gap: a fast, open, self-hosted platform where strategies
 
 **What makes it different?**
 
-Three things set this apart:
+Five things set this apart:
 1. **Go-native performance** — backtests that run in seconds, not minutes
 2. **Hot-swappable strategy plugins** — add a new strategy by dropping a file, no rebuild, no restart
 3. **AI Copilot integration** — describe a strategy in natural language, get working Go code with tests
+4. **AI-Native Evolution** — AI acts as a senior quant researcher: discovers factors, generates strategies, evolves populations, detects drift
+5. **Unified Execution** — same interface for backtest, paper trading, and live trading; swap execution mode without changing strategy code
 
 ---
 
@@ -165,11 +179,19 @@ Strategies live in `pkg/strategy/plugins/` and auto-register via `init()`. A str
 | Risk Parity | Volatility-adjusted equal risk contribution | ⬜ Planned (Phase 4) |
 | Event-Driven | Earnings surprises, analyst upgrades | ⬜ Planned (Phase 3) |
 | Sentiment | News/algo sentiment scoring | ⬜ Planned (Phase 3) |
-| Machine Learning | Factor model + prediction (future) | ⬜ Planned (future) |
+| AI-Generated | LLM-generated strategies from natural language | ✅ Phase 4 — Generate Agent + Code Validator |
+| Evolutionary | Genetic algorithm evolved strategies | ✅ Phase 4 — Evolve Agent + Population framework |
 
 ---
 
 ### C. Execution Layer
+
+**ExecutionService abstraction (Phase 4):**
+- `ExecutionService` interface in `pkg/domain/execution.go` unifies backtest, paper, and live trading
+- `BacktestExecutionService` in `pkg/backtest/execution.go` implements the interface for backtesting
+- `LiveEngine` in `pkg/live/engine.go` orchestrates live trading with Broker, OrderManager, PositionManager, DataFeed
+- `MockTrader` in `pkg/live/mock_trader.go` provides paper trading with A-share rules (T+1, stamp tax, price limits)
+- `SimulatedBroker` in `pkg/live/simulated_broker.go` simulates broker behavior for paper trading
 
 **Order management, position tracking:**
 - `Tracker` struct in `pkg/backtest/tracker.go` is the execution engine within each backtest
@@ -177,6 +199,29 @@ Strategies live in `pkg/strategy/plugins/` and auto-register via `init()`. A str
 - Partial fills modeled: if order quantity > available liquidity, partial fill at limit price
 - Order types: market (executed at close), limit (executed if price crosses threshold)
 - Order log: every attempted order with reason, filled quantity, price, fees
+
+**Live Trading Interfaces:**
+```go
+// LiveTrader — core interface for all broker implementations
+type LiveTrader interface {
+    SubmitOrder(ctx context.Context, symbol string, direction Direction, orderType OrderType, quantity, price float64) (*OrderResult, error)
+    CancelOrder(ctx context.Context, orderID string) error
+    GetOrder(ctx context.Context, orderID string) (*OrderResult, error)
+    GetPositions(ctx context.Context) ([]Position, error)
+    GetAccount(ctx context.Context) (*Account, error)
+}
+
+// Broker — interface for order execution
+ type Broker interface {
+     Connect() error
+     Disconnect() error
+     SubmitOrder(order domain.Order) (string, error)
+     CancelOrder(orderID string) error
+     GetOrderStatus(orderID string) (string, error)
+     GetPositions() ([]domain.Position, error)
+     GetAccountBalance() (float64, error)
+ }
+```
 
 **Position tracking:**
 ```go
@@ -237,9 +282,17 @@ type Position struct {
 **Factor analysis:**
 - Factor returns: measure return of top quintile vs bottom quintile for each factor
 - Factor correlation matrix: prevent stacking correlated factors
-- IC (Information Coefficient): rank correlation between factor value and forward returns
+- IC (Information Coefficient): rank correlation between factor value and forward returns — `pkg/ai/metrics/ic.go`
+- Turnover analysis: factor stability and rebalancing cost estimation — `pkg/ai/metrics/turnover.go`
 - Multi-factor attribution: decompose portfolio return into factor contributions
 - Factor decay analysis: how quickly factor predictive power diminishes (1M, 3M, 6M)
+
+**AI-specific analytics (Phase 4):**
+- Factor gene pool performance tracking: IC history, Sharpe, turnover per factor gene
+- Strategy genealogy: parent-child relationships, generational fitness progression
+- Population diversity metrics: genetic diversity, convergence detection
+- Drift detection: rolling window monitoring for strategy degradation — `pkg/ai/drift/detector.go`
+- Walk-forward validation: train/validate splits for overfitting prevention — `pkg/ai/search/walkforward.go`
 
 ---
 
@@ -277,13 +330,21 @@ type Position struct {
 - Validate strategy: AI reviews code for common mistakes
 - One-click backtest after code generation
 
-**AI Research Platform (Phase 3/4 — Current):**
-- **Factor Lab**: Discover factors via natural language; visualize IC, Sharpe, turnover; browse gene pool
-- **Strategy Workshop**: Generate strategies from selected factors; edit code; validate via backtest
-- **Evolution Observatory**: Monitor strategy population; view genealogy tree; track fitness evolution
-- **Expression Engine**: Custom DSL for factor definitions; AST-based evaluation; A-share operators
+**AI Research Platform (Phase 4 — ✅ Implemented):**
+- **Factor Lab** (`FactorLab.vue`): Discover factors via natural language; visualize IC, Sharpe, turnover; browse gene pool
+- **Strategy Workshop** (`StrategyWorkshop.vue`): Generate strategies from selected factors; edit code; validate via backtest
+- **Evolution Observatory** (`EvolutionObs.vue`): Monitor strategy population; view genealogy tree; track fitness evolution
+- **Expression Engine** (`pkg/ai/expression/`): Custom DSL for factor definitions; AST-based evaluation; A-share operators
+- **Pipeline Dashboard** (`PipelineDashboard.vue`): End-to-end AI pipeline visualization: intent → YAML → code → compile → backtest
 
-**Strategy Editor (future — Phase 4):**
+**AI Components (Backend):**
+- **Research Agent** (`pkg/ai/agents/research.go`): Generates factor hypotheses from research topics via LLM
+- **Generate Agent** (`pkg/ai/agents/generate.go`): Generates strategy code from natural language descriptions
+- **Validate Agent** (`pkg/ai/agents/validate.go`): L1-L4 validation pipeline (syntax → quick eval → backtest → walk-forward)
+- **Evolve Agent** (`pkg/ai/agents/evolve.go`): Genetic algorithm optimization with population management
+- **Optimize Agent** (`pkg/ai/agents/optimize.go`): TPE Bayesian optimization + genetic search hybrid
+
+**Strategy Editor (future — Phase 5):**
 - Visual strategy builder: drag factors, set thresholds, define rebalance rules
 - Code view alongside visual view (what you see is what runs)
 - Version history for strategies
@@ -298,6 +359,7 @@ type Position struct {
 - Strategy service (8082): strategy registry, hot-swap management (backup/external)
 - Risk service (8083): position sizing, VaR/CVaR, regime detection, stop-loss
 - Execution service (8084): order management (stub for v1, real integration later)
+- **AI Research service (8086)**: LLM-driven strategy generation, factor discovery, evolution pipeline — `cmd/ai/main.go`
 - All inter-service communication via HTTP over Docker network
 - REST API with JSON payloads; no message queue dependency for v1
 
@@ -309,9 +371,11 @@ type Position struct {
 - `factor_cache`: (symbol, trade_date, factor_name) PK — pre-computed factors
 - `backtest_runs`: id PK, strategy, start_date, end_date, initial_capital, result_json, created_at
 - `orders`: id PK, backtest_run_id, symbol, date, direction, quantity, price, fees, filled
+- `factor_genes`: id PK, name, formula, category, ic_history JSONB, performance JSONB, genealogy JSONB — AI factor gene pool
+- `strategy_genes`: id PK, name, code, params JSONB, fitness JSONB, genealogy JSONB, generation int — AI strategy gene pool
 
 **Docker / services:**
-- `docker-compose.yml` defines all services: postgres (TimescaleDB image), redis, analysis-service, data-service, strategy-service, risk-service
+- `docker-compose.yml` defines all services: postgres (TimescaleDB image), redis, analysis-service, data-service, strategy-service, risk-service, **ai-research-service**
 - Each Go service is a separate Docker container
 - Volume mounts for data persistence and config
 - `Dockerfile.service` multi-stage build: Go build → minimal distroless image
@@ -481,24 +545,67 @@ The phases below define the build order. All P0 items must be fully done (not "i
 5. **Background worker:** `POST /backtest` returns `job_id` immediately; worker runs async; client can poll `/backtest/:id`
 5. **Strategy DB config:** `strategies` table with JSONB column operational; YAML import/export functional
 
-### Phase 3 — AI-Native Evolution (Current — Phase 4 Rebranded)
+### Phase 3 — AI-Native Evolution ✅ DONE (Rebranded as Phase 4)
 **Goal:** AI acts as a senior quantitative researcher — autonomously discovering alpha factors, generating trading strategies, and validating hypotheses through the existing backtest infrastructure.
 
-| Category | Deliverables |
-|----------|-------------|
-| AI | **Research Agent** (factor discovery via LLM), **Generate Agent** (strategy code generation), **Validate Agent** (L1-L4 validation pipeline), **Evolve Agent** (genetic algorithm + drift detection) |
-| Expression | **Factor Expression DSL** (custom DSL with AST evaluation, A-share specific operators) |
-| Gene Pool | **Factor/Strategy Gene Pool** (PostgreSQL JSONB, genealogy tracking, performance history) |
-| Analytics | Factor decay analysis, IC time series, Walk-Forward validation |
-| UI | **Factor Lab** (factor discovery & visualization), **Strategy Workshop** (code generation & backtest), **Evolution Observatory** (population & genealogy) |
-| Execution | **ExecutionService abstraction** (backtest/paper/live unified interface), **Paper Trading** (SimulatedBroker with A-share fees) |
+| Category | Deliverables | Status |
+|----------|-------------|--------|
+| AI | **Research Agent** (factor discovery via LLM) | ✅ `pkg/ai/agents/research.go` |
+| AI | **Generate Agent** (strategy code generation) | ✅ `pkg/ai/agents/generate.go` |
+| AI | **Validate Agent** (L1-L4 validation pipeline) | ✅ `pkg/ai/agents/validate.go` |
+| AI | **Evolve Agent** (genetic algorithm + drift detection) | ✅ `pkg/ai/agents/evolve.go` |
+| AI | **Optimize Agent** (TPE + genetic search hybrid) | ✅ `pkg/ai/agents/optimize.go` |
+| Expression | **Factor Expression DSL** (custom DSL with AST evaluation, A-share specific operators) | ✅ `pkg/ai/expression/` |
+| Gene Pool | **Factor/Strategy Gene Pool** (PostgreSQL JSONB, genealogy tracking, performance history) | ✅ `pkg/ai/gene_pool/` |
+| Search | **TPE Bayesian optimization** | ✅ `pkg/ai/search/tpe.go` |
+| Search | **Genetic algorithm** | ✅ `pkg/ai/search/genetic.go` |
+| Search | **Walk-Forward validation** | ✅ `pkg/ai/search/walkforward.go` |
+| Evolution | **Population management, selection, crossover, mutation** | ✅ `pkg/ai/evolution/` |
+| Drift | **Concept drift detection** | ✅ `pkg/ai/drift/detector.go` |
+| Analytics | Factor decay analysis, IC time series, Walk-Forward validation | ✅ `pkg/ai/metrics/` |
+| UI | **Factor Lab** (factor discovery & visualization) | ✅ `FactorLab.vue` |
+| UI | **Strategy Workshop** (code generation & backtest) | ✅ `StrategyWorkshop.vue` |
+| UI | **Evolution Observatory** (population & genealogy) | ✅ `EvolutionObs.vue` |
+| UI | **Pipeline Dashboard** (end-to-end pipeline visualization) | ✅ `PipelineDashboard.vue` |
+| Execution | **ExecutionService abstraction** (backtest/paper/live unified interface) | ✅ `pkg/domain/execution.go` |
+| Execution | **Paper Trading** (SimulatedBroker with A-share fees) | ✅ `pkg/live/simulated_broker.go` |
+| Execution | **LiveEngine** (event-driven live trading) | ✅ `pkg/live/engine.go` |
 
 **Key Design Principle:** AI is an augmentation layer, not a replacement. The existing backtest engine, data pipeline, and strategy framework remain the foundational assets. AI Agents call the backtest service for validation, ensuring consistency and leveraging A-share specific rules (T+1, limit up/down).
 
+**Exit criteria — all must pass before Phase 4:**
+1. **AI Agent tests:** All agent components have ≥75% test coverage ✅
+2. **Expression engine:** Can parse and evaluate `ts_mean(close, 20)` and `cs_rank(ts_std(returns, 60))` ✅
+3. **Gene pool persistence:** Factor and strategy genes stored in PostgreSQL with JSONB metadata ✅
+4. **Validation pipeline:** L1-L4 validation operational (syntax → quick eval → backtest → walk-forward) ✅
+5. **Evolution loop:** 50-strategy population with selection, crossover, mutation, and convergence detection ✅
+6. **Paper trading:** End-to-end paper trading with A-share fees and T+1 settlement ✅
+
 **Prerequisites to start Phase 3:** All Phase 1 P0 items complete; all Phase 2 exit criteria passed (see Phase 2 gate); Phase 2 acceptance test suite recorded in `docs/phase-gate-reviews.md`; ADR-015 approved.
 
-### Phase 4 — Scale & Production (Future)
-**Goal:** Make the system institutional-grade.
+### Phase 4 — Scale & Production (Current)
+**Goal:** Make the system institutional-grade with production-ready AI evolution, real-time execution, and comprehensive monitoring.
+
+| Category | Deliverables | Status |
+|----------|-------------|--------|
+| Infrastructure | Kubernetes manifests, Prometheus metrics, alerting | ⬜ Planned |
+| Risk | VaR/CVaR, risk parity strategy, market impact model | ⬜ Planned |
+| Data | News/sentiment data pipeline | ⬜ Planned |
+| Strategy | Risk parity strategy, event-driven, sentiment strategies | ⬜ Planned |
+| UI | Real-time paper trading UI (live broker integration) | ✅ `pkg/live/` + Vue components |
+| AI | Multi-modal data fusion (news + price + fundamental), reinforcement learning for execution | ⬜ Planned |
+| AI | Factor discovery batch automation: target 10+ factors with IC > 0.03 | 🔄 In Progress |
+| AI | Strategy generation batch: target 5+ compilable strategies per run | 🔄 In Progress |
+
+**Exit criteria — all must pass before Phase 5:**
+1. **E2E tests:** All Playwright E2E tests pass (32/32) ✅
+2. **Performance benchmarks:** Documented baseline for expression engine, genetic optimizer, backtest engine ✅
+3. **Documentation:** VISION.md, SPEC.md, ARCHITECTURE.md, AGENTS.md all consistent and up-to-date 🔄
+4. **Batch validation:** 10+ factors with IC > 0.03 discovered and persisted to gene pool 🔄
+5. **Strategy generation:** 5+ compilable strategies generated and validated 🔄
+
+### Phase 5 — Institutional Grade (Future)
+**Goal:** Production deployment at institutional scale.
 
 | Category | Deliverables |
 |----------|-------------|
@@ -506,8 +613,8 @@ The phases below define the build order. All P0 items must be fully done (not "i
 | Risk | VaR/CVaR, risk parity strategy, market impact model |
 | Data | News/sentiment data pipeline |
 | Strategy | Risk parity strategy, event-driven, sentiment strategies |
-| UI | Real-time paper trading UI (live broker integration) |
 | AI | Multi-modal data fusion (news + price + fundamental), reinforcement learning for execution |
+| Compliance | Audit trails, regulatory reporting, trade reconstruction |
 
 ---
 
@@ -708,7 +815,7 @@ When this document conflicts with any of the above, this document takes preceden
 
 ---
 
-_Last updated: 2026-04-09 (document audit pass)_
+_Last updated: 2026-05-06 (Phase 4 AI-Native Evolution update)_
 
 ---
 
