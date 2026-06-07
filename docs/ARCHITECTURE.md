@@ -294,7 +294,13 @@ POST /screen                  — 选股筛选
 
 ## 数据模型
 
-### stocks
+> **状态**: 18 张活跃表 (2026-05-17 清理后，从 24 张减到 18 张，已删除 10 张未使用表: backtest_data, new_share, stk_managers, stk_rewards, stock_company, trade_calendar, daily, trade_cal, market_data, stock_basic。详见 ODR-010)
+>
+> 完整迁移定义见 `migrations/` (12 个 SQL 文件) + `pkg/storage/postgres.go` (inline migrations)。
+
+### 主表（核心 6 张）
+
+#### stocks
 ```sql
 symbol VARCHAR(20) PK
 name VARCHAR(100)
@@ -305,7 +311,7 @@ list_date DATE
 status VARCHAR(20)
 ```
 
-### ohlcv_daily_qfq
+#### ohlcv_daily_qfq
 ```sql
 symbol VARCHAR(20) PK
 trade_date DATE PK
@@ -317,7 +323,7 @@ volume BIGINT
 turnover FLOAT
 ```
 
-### stock_fundamentals
+#### stock_fundamentals
 ```sql
 id SERIAL PK
 ts_code VARCHAR(20) + trade_date DATE → UNIQUE
@@ -334,14 +340,14 @@ revenue_growth FLOAT
 net_profit_growth FLOAT
 ```
 
-### trading_calendar
+#### trading_calendar
 ```sql
 trade_date DATE PK
 exchange VARCHAR(10)
 is_trading_day BOOLEAN
 ```
 
-### strategies
+#### strategies
 ```sql
 id SERIAL PK
 strategy_id VARCHAR(50) UNIQUE NOT NULL  -- 如 "momentum", "value_momentum"
@@ -371,6 +377,27 @@ started_at TIMESTAMPTZ                      -- 开始执行时间
 completed_at TIMESTAMPTZ                    -- 完成时间
 Indexes: idx_bj_status, idx_bj_created_at
 ```
+
+### 辅助表（其余 12 张）
+
+> 以下表用于缓存、分析、AI 研究等场景，详细 schema 见 `migrations/` 和 `pkg/storage/postgres.go`。
+
+| 表名 | 用途 | 主要字段 |
+|------|------|---------|
+| `dividends` | 分红送股数据 | symbol, ex_date, cash_div, share_div |
+| `splits` | 拆股数据 | symbol, ex_date, split_ratio |
+| `fundamentals` | 财务数据（独立接口） | ts_code, trade_date, pe, pb, roe |
+| `factor_cache` | 因子计算结果缓存 | symbol, trade_date, factor_name, value |
+| `factor_returns` | 因子收益分析 | factor_name, period, return |
+| `ic_analysis` | 因子 IC 分析结果 | factor_name, trade_date, ic, rank_ic, top_ic |
+| `index_constituents` | 指数成分股 | index_code, symbol, in_date, out_date |
+| `walk_forward_reports` | Walk-forward 分析报告 | strategy_id, train_start, train_end, metrics |
+| `factor_genes` | AI 因子基因池 (Phase 4) | id, name, formula, ic_history JSONB, performance JSONB, genealogy JSONB, status |
+| `strategy_genes` | AI 策略基因池 (Phase 4) | id, name, code, params JSONB, fitness JSONB, genealogy JSONB, generation, status |
+| `sync_jobs` | 数据同步任务队列 (Phase 3) | id, job_type, status, payload JSONB, scheduled_at |
+| `sync_schedules` | 定时同步调度 (Phase 3) | id, name, cron, job_type, is_active |
+
+> 备注: `fundamentals` 与 `stock_fundamentals` 字段重叠但使用场景不同，未来评估合并。`orders` 表 (migrations/003 定义) 当前未被代码引用，可考虑删除。
 
 ---
 
