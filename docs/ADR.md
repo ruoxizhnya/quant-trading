@@ -2,9 +2,9 @@
 
 > **Location:** `docs/adr/` — architectural ADR files | `docs/odr/` — operational ODR files
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Version:** 2.1.0
+> **Version:** 2.2.0
 > **Created:** 2026-03-24
-> **Updated:** 2026-04-11
+> **Updated:** 2026-05-17
 
 ---
 
@@ -35,7 +35,10 @@
 | [ODR-004](odr/odr-004-verification-standard.md) | Verification Standard Definition | Completed | Process | 2026-04-09 |
 | [ODR-005](odr/odr-005-agents-md-v3-migration.md) | AGENTS.md v3.0 Migration to Template v2.0 | Completed | Migration | 2026-04-11 |
 | [ODR-006](odr/odr-006-document-consolidation.md) | Document Consolidation & TASKS.md Creation | Completed | Cleanup | 2026-04-11 |
-| [ODR-007](odr/odr-007-task-consolidation.md) | Task Consolidation & Document Migration | **Completed** | **Migration** | **2026-04-11** |
+| [ODR-007](odr/odr-007-task-consolidation.md) | Task Consolidation & Document Migration | Completed | Migration | 2026-04-11 |
+| [ODR-008](odr/odr-008-next-steps-archive.md) | NEXT_STEPS.md Archival to docs/archive/ | Completed | Cleanup | 2026-05-03 |
+| [ODR-009](odr/odr-009-code-doc-audit.md) | 代码与文档对齐全面审查 | Completed | Audit | 2026-05-06 |
+| [ODR-010](odr/odr-010-code-doc-audit-2026-05-17.md) | 2026-05-17 全项目代码与文档一致性审查 | Completed | Audit | 2026-05-17 |
 
 ---
 
@@ -84,4 +87,5 @@ ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical examp
 
 ---
 
-_Last updated by: AI Assistant — 2026-04-11 (ODR-005 added)_
+_Last updated by: AI Assistant — 2026-05-17 (ODR-008/009/010 added; index version 2.2.0)_
+_ODR 累计 10 条: Cleanup 3 (ODR-001/006/008) | Audit 3 (ODR-002/009/010) | Migration 3 (ODR-003/005/007) | Process 1 (ODR-004)_
