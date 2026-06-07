@@ -55,7 +55,7 @@ Browser (Vue SPA :5173)
   └──► Redis (:6379) ◄──── factor_cache, session store, sync_job_cache
               │
               └──► PostgreSQL (:5432) ◄── stocks, ohlcv, fundamentals,
-                                          backtest_runs, sync_jobs, sync_schedules
+                                          backtest_jobs, sync_jobs, sync_schedules
 
   data-service :8081 (tushare data ingestion)
   strategy-service :8082 (standby — see ADR-012)
@@ -276,7 +276,7 @@ Browser (Vue SPA :5173)
   └──► Redis (:6379) ◄──── factor_cache, session store, sync_job_cache
               │
               └──► PostgreSQL (:5432) ◄── stocks, ohlcv, fundamentals,
-                                          backtest_runs, sync_jobs, sync_schedules
+                                          backtest_jobs, sync_jobs, sync_schedules
 ```
 
 ---
@@ -561,8 +561,8 @@ Please continue from where we left off.
 
 ### 项目健康度
 - **Phase**: 3 (Integration & Scale) → 4 (AI-Native Evolution) 进行中
-- **测试覆盖**: backtest 72.5% | strategy 73.4% | **data 70.6%** | storage 36.8% | **ai 75%+** | **live 0%** | **sync 75%+** | **plugins 80.3%**
-- **关键服务**: Analysis ✅ | Data ✅ | **Sync ✅** | **AI Research ✅ (running)** | Strategy (standby) ✅
+- **测试覆盖** (2026-05-17 实测): backtest 67.8% | strategy 40.1% (顶层) / plugins 80.3% (子包) | data 70.6% | storage 2.4% (无 DB 时 skip) | ai 0% (顶层) / 子包 16-95% (avg ~67%) | live 52.3% | marketdata 77.8% | risk 59.8%
+- **关键服务**: Analysis ✅ | Data ✅ | **Sync ✅** | **AI Research ✅ (running)** | Strategy ⏸️ (standby per ADR-012, awaiting Phase 3 D3 activation)
 
 ### 任务追踪
 > **Phase 3 任务追踪**: [docs/TASKS.md](docs/TASKS.md)

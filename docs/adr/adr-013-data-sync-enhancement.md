@@ -88,7 +88,7 @@ After (Proposed):
 
 | 组件 | 选型 | 理由 |
 |------|------|------|
-| **任务队列** | PostgreSQL `sync_jobs` 表 + 应用层轮询 | 避免引入新依赖；利用现有 `backtest_runs` 模式；适合中低并发 |
+| **任务队列** | PostgreSQL `sync_jobs` 表 + 应用层轮询 | 避免引入新依赖；利用现有 `backtest_jobs` 模式；适合中低并发 |
 | **定时调度** | `github.com/robfig/cron/v3` | Go 生态标准 cron 库；支持秒级精度；与现有 Go 后端一致 |
 | **进度推送** | Server-Sent Events (SSE) | 比 WebSocket 更轻量；单向推送足够；自动重连支持 |
 | **前端状态** | Pinia + shallowRef | 与现有前端架构一致；大对象避免响应式开销 |

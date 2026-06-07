@@ -103,7 +103,7 @@ Any deviation > 0.01% → FAIL
 **Purpose:** Ensure backtest results are deterministic. Same inputs → same outputs forever.
 
 **Mechanism:**
-- `backtest_runs` table stores `seed` column
+- `backtest_jobs` table stores `seed` column
 - Golden fixtures stored in `testdata/backtest-fixtures/` (JSON files with known-good NAV curves)
 - CI runs: `go test ./pkg/backtest/... -update-fixtures=false` against fixtures
 

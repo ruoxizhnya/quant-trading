@@ -47,7 +47,7 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 | 1.1 | **T+1 tracker position bucket** | Backend Dev | `Position.QuantityYesterday` / `Position.QuantityToday` fields in tracker; `canSell(symbol, date)` returns false for same-day buys; 5 unit tests: (a) buy D → sell D blocked, (b) buy D → sell D+1 succeeds, (c) buy D → partial sell D+1 depletes YD first, (d) sell 100 of 500 held (YD:300, TD:200) → YD depleted, (e) buying power locked for TD buys | 4 |
 | 1.2 | **涨跌停 detection engine** | Backend Dev | `IsLimitUp(prevClose, open, high, low)` and `IsLimitDown(...)` functions in tracker; buy blocked on limit-up, sell blocked on limit-down; ST stocks (±5%) handled; 6 unit tests: (a) non-ST limit-up blocks buy, (b) non-ST limit-down blocks sell, (c) ST stock ±5% enforced, (d) next-day gap model applied, (e) limit-up price equals prev_close × 1.10, (f) limit-down price equals prev_close × 0.90 | 3 |
 | 1.3 | **Redis caching layer** | DevOps + Backend Dev | Redis Docker service in `docker-compose.yml`; `CacheService` with Get/Set for OHLCV bars (key: `ohlcv:{symbol}:{date}`); TTL 24h; cache-aside pattern (check Redis → miss → query DB → populate cache); verified via `redis-cli ping` and manual integration test | 2 |
-| 1.4 | **Determinism: fixed seed + regression scaffold** | Backend Dev | `backtest_runs.seed` column enforced; global `math/rand` seed locked to config value; 3 empty fixture files created in `testdata/backtest-fixtures/` (`fixture-5yr-500stock-momentum.json`, `fixture-1yr-single-stock-value.json`, `fixture-t+1-enforcement.json`); fixture runner prints PASS/FAIL per fixture | 1 |
+| 1.4 | **Determinism: fixed seed + regression scaffold** | Backend Dev | `backtest_jobs.seed` column enforced; global `math/rand` seed locked to config value; 3 empty fixture files created in `testdata/backtest-fixtures/` (`fixture-5yr-500stock-momentum.json`, `fixture-1yr-single-stock-value.json`, `fixture-t+1-enforcement.json`); fixture runner prints PASS/FAIL per fixture | 1 |
 
 **Sprint 1 Exit:** All 11 unit tests pass. Redis caching reduces 500-stock backtest from >30s to ≤15s (pre-5s target — Redis alone is not enough, needs tracker optimization in Sprint 2).
 
@@ -123,7 +123,7 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 | 5.2 | **Partial fill modeling** | Backend Dev | Order quantity > available liquidity → partial fill at limit price; `FilledQty` field updated; fees proportional to filled quantity | 1 |
 | 5.3 | **Factor attribution + IC analysis** | Backend Dev | Factor returns table (top quintile vs bottom quintile per factor per period); IC rank correlation computed; factor attribution chart in dashboard | 2 |
 | 5.4 | **Strategy selector UI** | Frontend Dev | Dropdown of all registered strategies; YAML config panel for parameters; "Run" button wires to backtest API | 1 |
-| 5.5 | **Background backtest worker** | Backend Dev | `POST /backtest` returns `{job_id}` immediately; worker goroutine processes async; `GET /backtest/:id` returns status/result; jobs persisted to `backtest_runs` table | 2 |
+| 5.5 | **Background backtest worker** | Backend Dev | `POST /backtest` returns `{job_id}` immediately; worker goroutine processes async; `GET /backtest/:id` returns status/result; jobs persisted to `backtest_jobs` table | 2 |
 |     | ✅ **同步路径已完成 (2026-04-10)**: 同步回测结果持久化到 `backtest_jobs` 表；GET 端点支持 DB 回退；异步 job 路径已存在（JobService.StartJob）。待完善：前端适配异步模式、job 列表 UI 集成 | — |
 
 ---

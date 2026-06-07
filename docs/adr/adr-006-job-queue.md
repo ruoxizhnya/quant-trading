@@ -7,7 +7,7 @@
 
 Decision 3 says "implement as job queue" but does not specify the technology. Options:
 - **Redis-backed queue** (using LIST/Streams) — leverages existing Redis dependency, lightweight
-- **PostgreSQL-backed queue** — no new dependencies, uses `backtest_runs` table with status
+- **PostgreSQL-backed queue** — no new dependencies, uses `backtest_jobs` table with status
 - **Dedicated queue** (RabbitMQ, NATS) — more robust but adds operational complexity
 
 ## Decision

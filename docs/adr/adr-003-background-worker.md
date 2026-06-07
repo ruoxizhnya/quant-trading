@@ -11,7 +11,7 @@ Should the backtest engine run in-process (same goroutine as the API server), or
 
 **Migrate to Option B — Background worker with job queue.**
 
-Implement via: `backtest_runs` table gets a `status` column; engine gains a `--worker` flag. Redis as job queue backend (see ADR-006).
+Implement via: `backtest_jobs` table gets a `status` column; engine gains a `--worker` flag. Redis as job queue backend (see ADR-006).
 
 **Current state (Phase 1):** In-process is acceptable for single-user, single-backtest scenarios.
 

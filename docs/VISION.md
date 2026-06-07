@@ -369,7 +369,7 @@ type Position struct {
 - `stock_fundamentals`: (symbol, trade_date) PK — fundamental ratios at quarterly frequency
 - `trading_calendar`: (exchange, cal_date) PK — authoritative list of trading days
 - `factor_cache`: (symbol, trade_date, factor_name) PK — pre-computed factors
-- `backtest_runs`: id PK, strategy, start_date, end_date, initial_capital, result_json, created_at
+- `backtest_jobs`: id PK, strategy, start_date, end_date, initial_capital, result_json, created_at
 - `orders`: id PK, backtest_run_id, symbol, date, direction, quantity, price, fees, filled
 - `factor_genes`: id PK, name, formula, category, ic_history JSONB, performance JSONB, genealogy JSONB — AI factor gene pool
 - `strategy_genes`: id PK, name, code, params JSONB, fitness JSONB, genealogy JSONB, generation int — AI strategy gene pool
@@ -693,7 +693,7 @@ Use PostgreSQL's native `PARTITION BY RANGE (trade_date)` — one partition per 
 - ❌ Results must be persisted to DB between steps (cannot keep state in memory)
 - ❌ Polling or WebSocket for status adds complexity
 
-**Recommendation:** **Option B (background worker)** — but not immediately. The current in-process approach is fine for v1 where the target is single backtests under 30 seconds. The migration should happen when the system needs to support: (a) multiple concurrent users, (b) backtests longer than 1 minute, or (c) batch strategy optimization (walk-forward analysis). Implement as: `backtest_runs` table gets a `status` column; engine gains a `--worker` flag.
+**Recommendation:** **Option B (background worker)** — but not immediately. The current in-process approach is fine for v1 where the target is single backtests under 30 seconds. The migration should happen when the system needs to support: (a) multiple concurrent users, (b) backtests longer than 1 minute, or (c) batch strategy optimization (walk-forward analysis). Implement as: `backtest_jobs` table gets a `status` column; engine gains a `--worker` flag.
 
 ---
 
@@ -760,10 +760,10 @@ These are the metrics that matter — not test coverage percentages or lines of 
 | Metric | Definition | Target | How to Measure |
 |--------|------------|--------|----------------|
 | Backtest accuracy | Backtest return vs. actual historical portfolio return (where comparable) | < 5% drift | Compare against vnpy run on same strategy/dates |
-| Strategy count | Number of distinct strategies users have run through the system | 5+ by end of Phase 2 | DB query of `backtest_runs` by strategy name |
+| Strategy count | Number of distinct strategies users have run through the system | 5+ by end of Phase 2 | DB query of `backtest_jobs` by strategy name |
 | Backtest speed | Time from "click Run" to results displayed for 1yr/500 stock backtest | < 5 seconds | Server-side timing in backtest response |
 | Data freshness | Age of latest OHLCV data in DB (business days behind) | < 2 business days | Compare `max(trade_date)` in DB vs. trading calendar |
-| User adoption | Unique users who run a backtest per week | Growing | `backtest_runs.created_by` per week |
+| User adoption | Unique users who run a backtest per week | Growing | `backtest_jobs.created_by` per week |
 | Strategy sharability | Number of custom strategies shared by users (future) | > 0 by Phase 3 | Custom strategy table count |
 
 ### Financial Performance (Backtest Targets)
@@ -925,8 +925,8 @@ Each prerequisite has a concrete definition of "done" and maps to a feature tabl
 | Prerequisite | Concrete Definition of "成熟/Done" | Feature Table Entry |
 |---|---|---|
 | Strategy Copilot 成熟 | User can submit a Chinese strategy description, receive compilable Go code via LLM, run a backtest in the same session, and iterate on the strategy based on backtest results. Requires: AI integration, code generation prompt templates, and Strategy Copilot UI (P2, Phase 2) | Strategy Copilot (UI layer, P2) |
-| 策略数据库 + 版本管理 | `strategies` table exists with JSONB config column, CRUD API implemented, backtest_runs table tracks strategy version per run, YAML import/export functional | Strategy DB config (Strategy layer, P1) |
-| 背景回测服务（独立 worker） | `POST /backtest` returns `job_id` immediately; worker process picks up job and runs async; results persisted to `backtest_runs` table; client can poll status | Background backtest worker (Infrastructure, P1) |
+| 策略数据库 + 版本管理 | `strategies` table exists with JSONB config column, CRUD API implemented, backtest_jobs table tracks strategy version per run, YAML import/export functional | Strategy DB config (Strategy layer, P1) |
+| 背景回测服务（独立 worker） | `POST /backtest` returns `job_id` immediately; worker process picks up job and runs async; results persisted to `backtest_jobs` table; client can poll status | Background backtest worker (Infrastructure, P1) |
 | 策略监控 + 自动触发重训练 | Monitor deployed strategies' rolling Sharpe and drawdown; alert fired when 失效触发条件 met (see Step 6 above); evolution loop can be re-triggered manually or via alert | Strategy monitoring (Analytics layer, future — add as P1 when Phase 3 begins) |
 | Walk-forward validation framework | Backtest engine supports train/validation split by date range; IC analysis and factor decay analysis operational (Factor cache P1 required first) | Factor decay analysis (Analytics, P2); Factor attribution (Analytics, P1) |
 
