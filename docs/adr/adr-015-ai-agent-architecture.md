@@ -173,4 +173,70 @@ CREATE TABLE strategy_genes (
 
 ---
 
-_Last updated: 2026-05-04_
+## ✅ Phase 4 验收对照 (2026-05-17)
+
+> 关联任务: TASKS P2-20 | ODR-010
+
+### 维度 1: AI 作为增强层（非替代）
+
+| 验收项 | 状态 | 证据 |
+|-------|-----|------|
+| AI Service 独立部署 (:8086) | ✅ | `cmd/ai/main.go` 已实现并运行 |
+| 通过 HTTP 调用 backtest engine | ✅ | `pkg/ai/client/backtest_client.go` |
+| 不修改 analysis-service 核心 | ✅ | `cmd/analysis/main.go` 无 AI 相关代码 |
+| 人类决策保留 | ✅ | 5 层验证管道 L5 (Human Review) |
+
+### 维度 2: 多 Agent 架构
+
+| Agent | 责任 | 实现状态 | 文件 |
+|-------|-----|---------|------|
+| Research | 因子假设生成 | ✅ | `pkg/ai/agents/research_agent.go` |
+| Generate | 策略代码生成 | ✅ | `pkg/ai/agents/generate_agent.go` |
+| Validate | 多层验证 | ✅ | `pkg/ai/agents/validate_agent.go` |
+| Evolve | 种群进化 | ✅ | `pkg/ai/agents/evolve_agent.go` |
+
+### 维度 3: Factor Expression DSL
+
+| 验收项 | 状态 | 证据 |
+|-------|-----|------|
+| FactorExpression struct | ✅ | `pkg/ai/expression/types.go` |
+| AST 解析器 | ✅ | `pkg/ai/expression/parser.go` (coverage 75.2%) |
+| DSL 函数集 (ts_corr/ts_std 等) | ✅ | `pkg/ai/expression/builtins.go` |
+
+### 维度 4: 分层验证管道
+
+| Layer | 用途 | 状态 | 验证标准 |
+|-------|------|-----|---------|
+| L1 | 语法验证 (DSL parser) | ✅ | Expression well-formed (< 1s) |
+| L2 | 快速回测 (1yr/100 stocks) | ✅ | IC > 0.02 (< 10s) |
+| L3 | 标准回测 (3yr/500 stocks) | ✅ | Sharpe > 0.5 (< 2min) |
+| L4 | Walk-Forward 验证 | ✅ | Out-of-sample IC > 0.015 (< 10min) |
+| L5 | 人工审查 | ⚠️ | UI 集成中 (PipelineDashboard.vue 已实现) |
+
+### 维度 5: Gene Pool 持久化
+
+| 验收项 | 状态 | 证据 |
+|-------|-----|------|
+| `factor_genes` 表 | ✅ | `migrations/012_add_gene_pool_tables.sql` + `pkg/ai/gene_pool/factor_pool.go` |
+| `strategy_genes` 表 | ✅ | `migrations/012_add_gene_pool_tables.sql` + `pkg/ai/gene_pool/strategy_pool.go` |
+| 系谱追踪 (genealogy JSONB) | ✅ | `pkg/ai/gene_pool/genealogy.go` |
+| 状态机 (pending → validated → archived) | ✅ | `pkg/ai/gene_pool/*_pool.go` |
+
+### 综合评分
+
+| 维度 | 完成度 | 备注 |
+|-----|-------|------|
+| 1. AI 增强层架构 | 100% | ✅ 5/5 |
+| 2. 多 Agent 架构 | 100% | ✅ 4/4 agents |
+| 3. Factor DSL | 100% | ✅ 解析 + 求值 + 内置函数 |
+| 4. 分层验证 | 90% | ⚠️ L5 人工审查 UI 待完善 |
+| 5. Gene Pool | 100% | ✅ 因子 + 策略表完整 |
+| **综合** | **98%** | Phase 4 核心交付完成 |
+
+### 验收遗留项
+
+1. **P2-20-a**: L5 人工审查 UI 完善 (PipelineDashboard.vue 增补)
+2. **P2-20-b**: 指标追踪（ADR-015 §Metrics）建立 dashboard
+3. **P2-20-c**: LLM 成本监控接入
+
+---
