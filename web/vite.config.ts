@@ -24,10 +24,6 @@ export default defineConfig(({ mode }) => ({
         target: 'http://localhost:8085',
         changeOrigin: true,
       },
-      '/backtest': {
-        target: 'http://localhost:8085',
-        changeOrigin: true,
-      },
       '/ohlcv': {
         target: 'http://localhost:8085',
         changeOrigin: true,
