@@ -139,6 +139,11 @@ func main() {
 		cache,
 	)
 
+	// Initialize multi-source data registry (ADR-016 / ODR-011).
+	// The registry is the single entry point for the ETL pipeline; routes
+	// that read from non-Tushare sources go through Registry.Fetch.
+	dataSourceRegistry := buildDataSourceRegistry(tushareClient, logger)
+
 	// Setup Gin router
 	if viper.GetString("logging.level") != "debug" {
 		gin.SetMode(gin.ReleaseMode)
@@ -152,6 +157,7 @@ func main() {
 
 	// Register routes
 	registerRoutes(router, store, cache, tushareClient, dataCache)
+	registerRegistryRoutes(router, newRegistryHandler(dataSourceRegistry))
 
 	// Create HTTP server
 	addr := fmt.Sprintf("%s:%d",

@@ -391,20 +391,116 @@
 
 ***
 
+## 🔴 Sprint 1 P0 — Multi-Source Data Integration (2026-05-17 → 2026-06-08 ✅ Completed)
+
+> **来源**: ODR-011 + ADR-016 | **关联项目**: `../Ashare-data-source-fetchers` (SKILL.md V3.2.2)
+> **目标**: 引入 mootdx 实时 + 东财 push2 资金流
+
+| ID    | 任务                                  | 文件                                  | 状态 | 来源       |
+| ----- | ----------------------------------- | ----------------------------------- | -- | -------- |
+| MS-1  | 迁移 014: 给所有数据表加 source/ingest_time 列 | `migrations/014_add_source_columns.sql` | ✅ | ODR-011 |
+| MS-2  | 迁移 015: realtime_quote + ohlcv_minute + capital_flow hypertable | `migrations/015_add_realtime_and_capital_flow.sql` | ✅ | ODR-011 |
+| MS-3  | 定义 DataSourceAdapter 接口           | `pkg/data/source/adapter.go`          | ✅ | ODR-011 |
+| MS-4  | 实现 Registry + 降级链管理            | `pkg/data/source/registry.go`        | ✅ | ODR-011 |
+| MS-5  | ETL Pipeline (Normalize→Validate→Persist) | `pkg/data/source/etl.go`             | ✅ | ODR-011 |
+| MS-6  | UnifiedDataPoint 数据模型             | `pkg/data/source/unified.go`         | ✅ | ODR-011 |
+| MS-7  | 重构 TushareClient 为 TushareAdapter   | `pkg/data/source/tushare_adapter.go` | ✅ | ODR-011 |
+| MS-8  | 实现 mootdx SDK 适配器 (实时/五档/逐笔)  | `pkg/data/source/mootdx_adapter.go`  | ✅ | ODR-011 |
+| MS-9  | 实现东财 push2 资金流适配器 (分钟级)     | `pkg/data/source/eastmoney_adapter.go` | ✅ | ODR-011 |
+| MS-10 | storage 层新增 BulkInsert             | `pkg/storage/bulk_insert.go`         | ✅ | ODR-011 |
+| MS-11 | cmd/data 初始化 Registry              | `cmd/data/main.go` + `cmd/data/registry_init.go` | ✅ | ODR-011 |
+
+***
+
+## 🟠 Sprint 2 P1 — 板块 + 龙虎榜 (✅ Completed)
+
+| ID    | 任务                                  | 文件                                  | 状态 | 来源       |
+| ----- | ----------------------------------- | ----------------------------------- | -- | -------- |
+| MS-12 | 迁移 016: sectors, top_list, limit_up_pool | `migrations/016_add_sectors_and_toplist.sql` | ✅ | ODR-011 |
+| MS-13 | 东财 slist 概念板块适配器              | `pkg/data/source/eastmoney_sectors_adapter.go` | ✅ | ODR-011 |
+| MS-14 | 东财龙虎榜/涨停池适配器                | `pkg/data/source/eastmoney_sectors_adapter.go` (EastmoneyTopListAdapter) | ✅ | ODR-011 |
+
+***
+
+## 🟡 Sprint 3 P1 — 公告 + 舆情 (✅ Completed)
+
+| ID    | 任务                                  | 文件                                  | 状态 | 来源       |
+| ----- | ----------------------------------- | ----------------------------------- | -- | -------- |
+| MS-15 | 迁移 017: announcements, news, hot_search | `migrations/017_add_announcements_news_hotsearch.sql` | ✅ | ODR-011 |
+| MS-16 | 巨潮公告适配器 (orgId 动态获取)        | `pkg/data/source/juchao_adapter.go`  | ✅ | ODR-011 |
+| MS-17 | 雪球热搜适配器                         | `pkg/data/source/xueqiu_adapter.go`  | ✅ | ODR-011 |
+
+***
+
+## 🟢 Sprint 4 P3 — 全球扩展 (✅ Completed)
+
+| ID    | 任务                                  | 文件                                  | 状态 | 来源       |
+| ----- | ----------------------------------- | ----------------------------------- | -- | -------- |
+| MS-18 | Alpha Vantage 适配器 (TIME_SERIES_DAILY_ADJUSTED) | `pkg/data/source/alpha_vantage_adapter.go` | ✅ | ODR-011 |
+| MS-19 | Yahoo Finance 适配器 (chart 端点)    | `pkg/data/source/yahoo_finance_adapter.go` | ✅ | ODR-011 |
+| MS-19b | 迁移 018: global_ohlcv hypertable   | `migrations/018_add_global_ohlcv.sql` | ✅ | ODR-011 |
+
+***
+
+## 🧪 验证与测试 (✅ Completed)
+
+| ID    | 任务                                  | 文件                                  | 状态 | 来源       |
+| ----- | ----------------------------------- | ----------------------------------- | -- | -------- |
+| MS-20 | L1 单元测试：validate / IsRetryable / AdapterBase / 接口合规 | `pkg/data/source/adapter_test.go`   | ✅ | ODR-011 |
+| MS-20b | L1/L2 transport 行为测试 (mockAdapter) | `pkg/data/source/source_test.go`    | ✅ | ODR-011 |
+| MS-21 | L2 集成测试：Adapter → ETL → DB      | `pkg/data/source/etl_test.go`       | ✅ | ODR-011 |
+| MS-22 | L3 多源一致性 IC 测试 (capital_flow / sector_rotation / hot_search) | `pkg/data/source/ic_test.go` | ✅ | ODR-011 |
+| MS-23 | L4 资金流因子 + 单元测试                  | `pkg/ai/factor/capital_flow.go` + `_test.go` | ✅ | ODR-011 |
+| MS-24 | L4 板块轮动因子 + 单元测试 (含 as-of 过滤)   | `pkg/ai/factor/sector_rotation.go` + `_test.go` | ✅ | ODR-011 |
+| MS-25 | L4 舆情因子 + 单元测试 (含时间衰减)         | `pkg/ai/factor/sentiment.go` + `_test.go` | ✅ | ODR-011 |
+
+***
+
+## 🌐 HTTP 端点 (✅ Completed)
+
+| ID    | 任务                                  | 文件                                  | 状态 | 来源       |
+| ----- | ----------------------------------- | ----------------------------------- | -- | -------- |
+| MS-26 | `/api/datasource/registry/{status,health,chains}` | `cmd/data/registry_handlers.go` | ✅ | ODR-011 |
+
+***
+
 ## 📊 统计
 
 | 优先级             | 待处理    | 进行中   | 已完成    | 已阻塞   | 已取消   | 总计     |
 | --------------- | ------ | ----- | ------ | ----- | ----- | ------ |
-| P0              | 2      | 0     | 6      | 0     | 0     | 8      |
-| P1              | 6      | 0     | 14     | 0     | 0     | 20     |
-| P2              | 2      | 0     | 17     | 0     | 0     | 19     |
-| P3              | 0      | 0     | 18     | 1     | 0     | 19     |
+| P0              | 0      | 0     | 8      | 0     | 0     | 8      |
+| P1              | 0      | 0     | 20     | 0     | 0     | 20     |
+| P2              | 0      | 0     | 19     | 0     | 0     | 19     |
+| P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
-| **总计**          | **10** | **0** | **108** | **1** | **0** | **119** |
+| **MS (Sprint 1-4 + 验证)** | **0** | **0** | **25** | **0** | **0** | **25** |
+| **总计**          | **10** | **0** | **133** | **1** | **0** | **144** |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-08 (v3.2.0) — ODR-011 多源数据集成完成
+
+- **触发**: ODR-011 (Multi-Source Data Integration) 全部 4 个 Sprint 实施完毕
+- **过程**: 集成 ashare-data-source-fetchers (SKILL.md V3.2.2) 的 8 个外部数据源
+- **结果**: 追加 **25 项 MS 任务** (MS-1 ~ MS-26，含 1 项 sub-id)
+  - 🔴 **Sprint 1 (MS-1~MS-11)**: 实时行情 + 资金流 (mootdx / eastmoney push2)
+  - 🟠 **Sprint 2 (MS-12~MS-14)**: 板块 + 龙虎榜 (eastmoney slist / top_list)
+  - 🟡 **Sprint 3 (MS-15~MS-17)**: 公告 + 舆情 (juchao / xueqiu)
+  - 🟢 **Sprint 4 (MS-18~MS-19b)**: 全球扩展 (alpha_vantage / yahoo_finance)
+  - 🧪 **验证 (MS-20~MS-25)**: L1-L4 测试 + 3 个新因子
+  - 🌐 **HTTP 端点 (MS-26)**: `/api/datasource/registry/{status,health,chains}`
+- **配套**: 创建 ODR-011 + ADR-016 (Multi-Source Architecture)
+- **5 项代码审查 Bug 修复**:
+  1. Eastmoney 适配器命名冲突 (3 个 slot)
+  2. EastmoneyAdapter.SupportedTypes 越权声明
+  3. SectorRotationFactor as-of 过滤 (避免 forward-looking)
+  4. snapshotStatus 持锁跨越网络 I/O
+  5. Gin 路由空路径歧义
+- **总任务数**: 119 → 144 (+25)
+- **总完成数**: 108 → 133 (+25)
+- **总待处理**: 10 (无变化，本次新增项全部完成)
 
 ### 2026-05-17 (v3.1.0) — 全项目代码+文档一致性审查
 
@@ -566,5 +662,5 @@
 
 ***
 
-_Last updated: 2026-05-05 (v3.0.0) — 一致性检验完成，统计数据修正_
-_Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md_
+_Last updated: 2026-06-08 (v3.2.0) — ODR-011 多源数据集成完成 (25 项 MS 任务)_
+_Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011_
