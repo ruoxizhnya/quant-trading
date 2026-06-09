@@ -1,11 +1,17 @@
 # ODR-012: Sprint 5 — 全项目综合代码审查
 
-> **Status**: Accepted
+> **Status**: Completed
 > **Date**: 2026-06-08
 > **Category**: Audit
 > **Related ADRs**: N/A
 > **Supersedes**: N/A
 > **Author**: AI Assistant (Trae IDE)
+>
+> **Completion Update (2026-06-08)**: P0 全部 16 项 (CR-01~16) 修复并提交
+> (commit `0c8bfb3`)。验证 `go vet` / `go build` / `go test ./pkg/storage/...
+> ./pkg/data/source/... ./cmd/data/...` / `vue-tsc --noEmit` / `npm test` (78/78) /
+> `npm run build` 全通过。P1 (CR-17~36) / P2 (CR-37~50) / P3 (CR-51~54) 留作
+> 后续 Sprint,已登记在 TASKS.md。
 
 ---
 
@@ -130,5 +136,6 @@
 ---
 
 _Last updated: 2026-06-08_
-_Status: Accepted (待 P0 任务处理后,转为 Completed)_
-_Estimated fix effort: P0 (1-2 周), P1 (2-3 周), P2/P3 (Backlog)_
+_Status: Completed (P0 全部 16 项修复并提交 — commit `0c8bfb3`)_
+_P0: 1-2 周 (实际 ~1 个会话), P1 (2-3 周), P2/P3 (Backlog)_
+_P1/P2/P3 状态: 已登记 TASKS.md,等待下一 Sprint 排期_

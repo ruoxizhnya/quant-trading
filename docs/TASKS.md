@@ -1,8 +1,8 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.1.0
-> **Last Updated:** 2026-05-17
+> **Version:** 3.2.0 (Sprint 5 综合代码审查 落地)
+> **Last Updated:** 2026-06-08
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
 >
@@ -569,8 +569,8 @@
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
-| **CR (Sprint 5 — 综合审查)** | **54** | **0** | **0** | **0** | **0** | **54** |
-| **总计**          | **64** | **0** | **133** | **1** | **0** | **198** |
+| **CR (Sprint 5 — 综合审查)** | **38** | **0** | **16** | **0** | **0** | **54** |
+| **总计**          | **48** | **0** | **149** | **1** | **0** | **198** |
 
 ***
 
