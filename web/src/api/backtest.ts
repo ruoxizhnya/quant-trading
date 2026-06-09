@@ -1,7 +1,20 @@
 import api from './client'
 import type { BacktestRequest, BacktestResult, BacktestJob } from '@/types/api'
 
+/**
+ * CR-04 (ODR-012): The Go backend `POST /api/backtest` (handlers_backtest.go)
+ * dispatches by sniffing the request body — it tries
+ *   1) `backtest.CreateJobRequest` (strategy_id + universe)  → async job
+ *   2) `backtest.BacktestRequest`  (strategy + stock_pool)   → sync run
+ * To make the client-side contract explicit, both flavors below carry a
+ * `mode` discriminator. The backend currently ignores it, but the field
+ * documents intent and lets us split into `/api/backtest` and
+ * `/api/backtest/jobs` in a future PR without breaking clients.
+ */
+export type BacktestMode = 'sync' | 'async'
+
 export interface CreateJobRequest {
+  mode?: BacktestMode
   strategy_id: string
   universe: string
   start_date: string
@@ -17,11 +30,11 @@ export interface JobResponse {
 }
 
 export function runBacktest(req: BacktestRequest): Promise<BacktestResult> {
-  return api.post<BacktestResult>('/api/backtest', req, { timeout: 300000 })
+  return api.post<BacktestResult>('/api/backtest', { ...req, mode: 'sync' }, { timeout: 300000 })
 }
 
 export function createBacktestJob(req: CreateJobRequest): Promise<JobResponse> {
-  return api.post<JobResponse>('/api/backtest', req)
+  return api.post<JobResponse>('/api/backtest', { ...req, mode: 'async' })
 }
 
 export function getBacktestReport(id: string): Promise<BacktestResult> {

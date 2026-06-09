@@ -1,8 +1,8 @@
 # Quant Trading System - System Specification
 
 > **Status**: Active (Canonical)
-> **Version:** 1.4.0 (Phase 4 AI-Native Update)
-> **Last Updated:** 2026-05-05
+> **Version:** 1.4.1 (Phase 4 AI-Native + Documentation Sync)
+> **Last Updated:** 2026-06-08
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [VISION.md](VISION.md) (design), [ARCHITECTURE.md](ARCHITECTURE.md) (layout), [TEST.md](TEST.md) (quality)
 >
@@ -11,6 +11,16 @@
 > - 标注未实现服务 (Risk/Execution) 为 "Planned"
 > - 统一 Strategy Interface 为实际代码签名
 > - 添加文档导航链接
+>
+> **Changelog v1.4.1 (Documentation Sync, ODR-012):**
+> - CR-11: Data Source Management endpoints moved from AI Research section
+>   to Analysis Service section (matches handlers_datasource.go)
+> - CR-12: Backtest endpoints documented with `/api/backtest/*` prefix;
+>   legacy `/backtest/*` aliases added as redirect section
+> - CR-13: Data Service endpoints expanded to include registry views and
+>   the multi-source sync routes (sync/ohlcv, sync/fundamental, etc.)
+> - CR-16: AI Pipeline endpoints updated to `/pipeline/*` (not `/api/pipeline/*`)
+> - Added `mode: 'sync'|'async'` discriminator note for backtest client
 
 ---
 
@@ -395,23 +405,37 @@ SELECT create_hypertable('factor_cache', 'date');
 
 ### 1. Data Service (port 8081)
 **Responsibilities**:
-- Fetch data from tushare.pro
+- Fetch data from multi-source adapters (Tushare, AkShare, Eastmoney, local Postgres)
 - Normalize and store in TimescaleDB
 - Serve data queries via HTTP API
+- Expose adapter registry and fallback chains
 
-**Endpoints**:
+**Endpoints** (registered in `cmd/data/main.go`):
 ```
-GET  /health              - Health check
-GET  /stocks              - List stocks (with filters)
-GET  /stocks/:symbol      - Get single stock
-GET  /ohlcv               - Get OHLCV data
-     ?symbol=000001.SZ
-     &start=2024-01-01
-     &end=2024-12-31
-GET  /fundamentals        - Get fundamental data
-     ?symbol=000001.SZ
-     &date=2024-03-31
-POST /sync                - Trigger data sync from tushare
+GET  /health                       - Health check
+GET  /stocks                       - List stocks (with filters)
+GET  /stocks/:symbol               - Get single stock
+GET  /stocks/count                 - Get total stock count
+GET  /market/index                 - Get market index data
+     ?symbol=000001.SH&date=2024-01-01
+GET  /ohlcv/:symbol                - Get OHLCV data for symbol
+     ?start_date=2024-01-01
+     &end_date=2024-12-31
+POST /api/v1/ohlcv/bulk            - Bulk OHLCV query
+GET  /fundamental/:symbol          - Get fundamental data
+GET  /index/:code/constituents     - Get index constituent stocks
+POST /sync/index-constituents/:index_code - Sync index constituents
+GET  /api/v1/trading/calendar      - Get trading calendar
+POST /sync/calendar                - Sync trading calendar
+POST /sync/stocks                  - Trigger stock-list sync
+POST /sync/ohlcv                   - Trigger OHLCV sync (specific symbols)
+POST /sync/ohlcv/all               - Trigger OHLCV sync for all stocks
+POST /sync/fundamental             - Trigger fundamental sync
+
+# Adapter registry & fallback chain (added in ODR-011)
+GET  /api/datasource/registry/status    - Snapshot of all adapters and chains
+GET  /api/datasource/registry/health    - Run HealthCheck on every adapter
+GET  /api/datasource/registry/chains    - List configured fallback chains
 ```
 
 ### 2. Strategy Service (port 8082)

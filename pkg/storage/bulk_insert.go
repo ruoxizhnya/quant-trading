@@ -238,6 +238,7 @@ func (s *PostgresStore) BulkInsert(ctx context.Context, dataType string, points 
 
 	persisted := 0
 	batch := &pgx.Batch{}
+	queued := 0
 	for _, p := range valid {
 		args, err := buildInsertArgs(p, cols, pk, defaultTableMapper.numericColumns[dataType])
 		if err != nil {
@@ -247,10 +248,11 @@ func (s *PostgresStore) BulkInsert(ctx context.Context, dataType string, points 
 			continue
 		}
 		batch.Queue(buildUpsertSQL(table, cols, pk), args...)
+		queued++
 	}
 
 	results := tx.SendBatch(ctx, batch)
-	for i := 0; i < len(valid); i++ {
+	for i := 0; i < queued; i++ {
 		if _, err := results.Exec(); err != nil {
 			results.Close()
 			return persisted, skipped, fmt.Errorf("bulk insert: row %d: %w", i, err)

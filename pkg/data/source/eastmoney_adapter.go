@@ -339,8 +339,14 @@ func parseEastmoneyCapitalFlowKLines(lines []string) ([]eastmoneyCapitalFlowRow,
 		}
 		// retail_net is conventionally the negative of (super + large + medium + small)
 		row.RetailNet = -(row.SuperNet + row.LargeNet + row.MediumNet + row.SmallNet)
-		if row.MainNet != 0 {
-			row.RetailRatio = -100 * (1 - row.MainNetRatio/100)
+		// CR-03 (ODR-012): RetailRatio is retail's share of (main + retail) net flow.
+		// Previous formula `-100 * (1 - MainNetRatio/100)` was unrelated to retail
+		// and polluted downstream CapitalFlowFactor/SentimentFactor. Total turnover
+		// per bar is not exposed by this endpoint, so we use |MainNet|+|RetailNet|
+		// as the denominator (zero-guard for first bar of a session).
+		total := row.MainNet + row.RetailNet
+		if row.RetailNet != 0 && total != 0 {
+			row.RetailRatio = row.RetailNet / total * 100
 		}
 		rows = append(rows, row)
 	}

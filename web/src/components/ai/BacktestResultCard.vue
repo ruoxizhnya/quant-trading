@@ -2,22 +2,22 @@
   <div class="backtest-result-card">
     <n-descriptions bordered :columns="2" size="small">
       <n-descriptions-item label="总收益率">
-        {{ formatPercent(result?.total_return) }}
+        {{ fmtPercent(result?.total_return) }}
       </n-descriptions-item>
       <n-descriptions-item label="年化收益率">
-        {{ formatPercent(result?.annual_return) }}
+        {{ fmtPercent(result?.annual_return) }}
       </n-descriptions-item>
       <n-descriptions-item label="夏普比率">
-        {{ formatNumber(result?.sharpe_ratio) }}
+        {{ fmtNumber(result?.sharpe_ratio) }}
       </n-descriptions-item>
       <n-descriptions-item label="最大回撤">
-        {{ formatPercent(result?.max_drawdown) }}
+        {{ fmtPercent(result?.max_drawdown) }}
       </n-descriptions-item>
       <n-descriptions-item label="索提诺比率">
-        {{ formatNumber(result?.sortino_ratio) }}
+        {{ fmtNumber(result?.sortino_ratio) }}
       </n-descriptions-item>
       <n-descriptions-item label="卡尔玛比率">
-        {{ formatNumber(result?.calmar_ratio) }}
+        {{ fmtNumber(result?.calmar_ratio) }}
       </n-descriptions-item>
     </n-descriptions>
   </div>
@@ -26,6 +26,7 @@
 <script setup lang="ts">
 import { NDescriptions, NDescriptionsItem } from 'naive-ui'
 import type { BacktestResult } from '@/types/api'
+import { fmtPercent, fmtNumber } from '@/utils/format'
 
 interface Props {
   result?: BacktestResult
@@ -33,13 +34,9 @@ interface Props {
 
 defineProps<Props>()
 
-function formatPercent(value: number | undefined): string {
-  if (value === undefined || value === null) return '-'
-  return `${(value * 100).toFixed(2)}%`
-}
-
-function formatNumber(value: number | undefined): string {
-  if (value === undefined || value === null) return '-'
-  return value.toFixed(2)
-}
+// CR-05 (ODR-012): Local formatPercent/formatNumber replaced by
+// the shared utils/format.ts. fmtPercent includes a `+` sign for
+// positive values; fmtNumber uses zh-CN locale formatting. These
+// differences are intentional (the utilities are the single source
+// of truth per AGENTS.md "Never Do" rule).
 </script>

@@ -45,6 +45,11 @@ type adapterStatusEntry struct {
 // GeneratedAt + cacheTTL re-runs HealthCheck on every adapter.
 // HealthCheck is also available as a separate forced endpoint
 // (/api/datasource/registry/health) that bypasses the cache.
+//
+// CR-02 (ODR-012): snapshotStatus does NOT hold mu across network I/O.
+// The lock is acquired only for cache reads/writes; HealthCheck runs
+// outside the critical section so a slow adapter does not block
+// concurrent reads.
 type registryHandler struct {
 	reg         *source.Registry
 	mu          sync.Mutex
@@ -57,18 +62,30 @@ func newRegistryHandler(reg *source.Registry) *registryHandler {
 
 // snapshotStatus builds a registryStatus from the current registry state.
 // When force is false, the cached snapshot is reused if it is still fresh.
+//
+// Concurrency contract:
+//   - The cache is consulted under h.mu (fast path).
+//   - If the cache is stale/empty, h.mu is RELEASED before HealthCheck
+//     runs. Multiple concurrent callers may all observe a stale cache
+//     and enter the slow path simultaneously; this is acceptable because
+//     (a) HealthCheck is idempotent and (b) the worst case is duplicated
+//     network I/O, not a deadlock or starvation.
 func (h *registryHandler) snapshotStatus(ctx context.Context, force bool) registryStatus {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	fresh := !h.statusCache.GeneratedAt.IsZero() && time.Since(h.statusCache.GeneratedAt) < registryCacheTTL
-	if !force && fresh {
-		return h.statusCache
+	if !force {
+		fresh := !h.statusCache.GeneratedAt.IsZero() && time.Since(h.statusCache.GeneratedAt) < registryCacheTTL
+		if fresh {
+			cached := h.statusCache
+			h.mu.Unlock()
+			return cached
+		}
 	}
+	h.mu.Unlock()
 
+	// Slow path: build a fresh snapshot WITHOUT holding h.mu.
+	health := h.reg.HealthCheck(ctx)
 	names := h.reg.ListAdapters()
 	entries := make([]adapterStatusEntry, 0, len(names))
-	health := h.reg.HealthCheck(ctx)
 	for _, n := range names {
 		a := h.reg.GetAdapter(n)
 		entry := adapterStatusEntry{
@@ -88,12 +105,17 @@ func (h *registryHandler) snapshotStatus(ctx context.Context, force bool) regist
 		entries = append(entries, entry)
 	}
 
-	h.statusCache = registryStatus{
+	fresh_status := registryStatus{
 		Adapters:    entries,
 		Chains:      h.reg.ListChains(),
 		GeneratedAt: time.Now().UTC(),
 	}
-	return h.statusCache
+
+	h.mu.Lock()
+	h.statusCache = fresh_status
+	h.mu.Unlock()
+
+	return fresh_status
 }
 
 // statusHandler — GET /api/datasource/registry

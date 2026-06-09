@@ -64,7 +64,12 @@ export interface BacktestResult {
 export interface BacktestJob {
   id: string
   strategy_id: string
-  params: Record<string, any>
+  // CR-08 (ODR-012): `params: Record<string, any>` is too permissive. Strategy
+  // parameter values are always one of: number, string, boolean, or null
+  // (per pkg/strategy/strategy.go Parameter.Default). Constraining the value
+  // type lets IDEs auto-complete the param map and prevents accidental
+  // embedding of complex objects.
+  params: Record<string, number | string | boolean | null>
   universe: string
   start_date: string
   end_date: string

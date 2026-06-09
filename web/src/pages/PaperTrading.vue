@@ -146,7 +146,7 @@ import {
   getPortfolio,
   getTrades,
 } from '@/api/paper-trading'
-import type { Position, Trade, PaperTradingStatus, Portfolio } from '@/api/paper-trading'
+import type { Position, Trade, Order, PaperTradingStatus, Portfolio } from '@/api/paper-trading'
 
 const message = useMessage()
 
@@ -159,7 +159,7 @@ const starting = ref(false)
 // Data
 const portfolio = ref<Portfolio | null>(null)
 const positions = ref<Position[]>([])
-const orders = ref<unknown[]>([])
+const orders = ref<Order[]>([])
 const trades = ref<Trade[]>([])
 
 // Methods
@@ -176,7 +176,7 @@ async function fetchData() {
     status.value = statusRes
     portfolio.value = portfolioRes
     positions.value = positionsRes
-    orders.value = ordersRes as unknown[]
+    orders.value = ordersRes
     trades.value = tradesRes
   } catch (error) {
     console.error('Failed to fetch paper trading data:', error)
@@ -244,7 +244,7 @@ const positionColumns: DataTableColumns<Position> = [
   { title: '浮动盈亏', key: 'unrealized_pnl' },
 ]
 
-const orderColumns: DataTableColumns<any> = [
+const orderColumns: DataTableColumns<Order> = [
   { title: '订单ID', key: 'id' },
   { title: '股票代码', key: 'symbol' },
   { title: '方向', key: 'direction' },
@@ -270,8 +270,8 @@ async function handleStart() {
     message.success('模拟交易已启动')
     showStartModal.value = false
     await fetchData()
-  } catch (error: any) {
-    message.error(error.response?.data?.error || '启动失败')
+  } catch (error) {
+    message.error(extractErrorMessage(error, '启动失败'))
   } finally {
     starting.value = false
   }
@@ -282,13 +282,18 @@ async function handleStop() {
     await stopPaperTrading()
     message.success('模拟交易已停止')
     await fetchData()
-  } catch (error: any) {
-    message.error(error.response?.data?.error || '停止失败')
+  } catch (error) {
+    message.error(extractErrorMessage(error, '停止失败'))
   }
 }
 
 async function handleSubmitOrder() {
-  await orderFormRef.value?.validate()
+  try {
+    await orderFormRef.value?.validate()
+  } catch {
+    // Form validation errors are surfaced by n-form-item rules; no toast needed.
+    return
+  }
   submitting.value = true
   try {
     await submitOrder({
@@ -303,11 +308,24 @@ async function handleSubmitOrder() {
     orderForm.quantity = 100
     orderForm.limit_price = undefined
     await fetchData()
-  } catch (error: any) {
-    message.error(error.response?.data?.error || '提交失败')
+  } catch (error) {
+    message.error(extractErrorMessage(error, '提交失败'))
   } finally {
     submitting.value = false
   }
+}
+
+// CR-07 (ODR-012): `catch (error: any)` is replaced by typed `unknown` handling.
+// The `any` escape hatch bypasses TypeScript's null/undefined safety net and
+// silently propagates API client errors as `undefined` when axios structure
+// changes. extractErrorMessage narrows the error and preserves the original
+// server-side message when available.
+function extractErrorMessage(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    const e = error as { response?: { data?: { error?: string } }; message?: string }
+    return e.response?.data?.error || e.message || fallback
+  }
+  return fallback
 }
 
 // Polling

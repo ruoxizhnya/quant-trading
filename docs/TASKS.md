@@ -464,6 +464,101 @@
 
 ***
 
+## 🔴 Sprint 5 P0 — 全项目综合代码审查 (2026-06-08 ⏳ Discovered)
+
+> **来源**: 用户请求 (代码质量 + 测试 + 文档一致性 + 任务记录 4 维度)
+> **方法**: 3 个子代理并行审查 (后端 Go / 前端 Vue / 文档一致性),交叉验证关键发现
+> **结果**: 发现 **53 项** 高置信度问题,其中 **P0×16, P1×20, P2×14, P3×4**
+> **配套**: 待创建 ODR-012 综合代码审查
+
+### P0 Critical — 16 项 (2026-06-08 全部修复 ✅)
+
+> 修复验证: `go vet`/`go build`/`go test ./pkg/storage/... ./pkg/data/source/... ./cmd/data/...` 全通过;
+> `vue-tsc --noEmit` 无错; `npm test` 78/78 通过; `npm run build` 成功。
+
+| ID    | 任务                                       | 文件                                                                                  | 状态 | 来源       |
+| ----- | ---------------------------------------- | ----------------------------------------------------------------------------------- | -- | -------- |
+| CR-01 | `BulkInsert` 结果循环使用 `len(valid)` 而实际 batch 较短,导致错误/计数错位            | [pkg/storage/bulk_insert.go:253](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/storage/bulk_insert.go#L253) | ✅ | B-001 |
+| CR-02 | `snapshotStatus` 持锁跨越 `HealthCheck` 网络 I/O — 修复未生效              | [cmd/data/registry_handlers.go:60-71](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/data/registry_handlers.go#L60) | ✅ | B-002 |
+| CR-03 | `RetailRatio` 公式无意义 (`-100 * (1 - MainNetRatio/100)` 与 retail 无关) | [pkg/data/source/eastmoney_adapter.go:342-344](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_adapter.go#L342) | ✅ | B-003 |
+| CR-04 | `api/backtest.ts` 双函数 POST 同一端点但 schema 不同                  | [web/src/api/backtest.ts:20-25](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/backtest.ts#L20) | ✅ | F-001 |
+| CR-05 | `BacktestResultCard.vue` 重复定义 `formatPercent` / `formatNumber`    | [components/ai/BacktestResultCard.vue:36-44](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/components/ai/BacktestResultCard.vue#L36) | ✅ | F-002 |
+| CR-06 | `FactorCard.vue` 重复定义 `formatMetric` / `formatPercent` (行为不一致) | [components/ai/FactorCard.vue:129-137](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/components/ai/FactorCard.vue#L129) | ✅ | F-003 |
+| CR-07 | `PaperTrading.vue` 显式 `DataTableColumns<any>` + 3 个 `catch (error: any)` | [pages/PaperTrading.vue:247](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/PaperTrading.vue#L247) | ✅ | F-004, F-005 |
+| CR-08 | `types/api.ts` `BacktestJob.params: Record<string, any>` (公开类型)     | [web/src/types/api.ts:67](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/types/api.ts#L67) | ✅ | F-006 |
+| CR-09 | `PipelineDashboard.vue` `jobHistory` 累积无上限 (潜在内存泄漏)        | [components/ai/PipelineDashboard.vue:308](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/components/ai/PipelineDashboard.vue#L308) | ✅ | F-007 |
+| CR-10 | ADR.md 索引缺失 6 条已存在的 ADR (ADR-011~016)                       | [docs/ADR.md:13-25](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/ADR.md#L13) | ✅ | D-001 |
+| CR-11 | SPEC.md Backtest API 路径缺少 `/api` 前缀 (与实际 `/api/backtest` 不一致) | [docs/SPEC.md:543-560](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L543) | ✅ | D-002 |
+| CR-12 | SPEC.md 把 `/api/datasource/*` 错误归在 AI Service,实际 Analysis + Data | [docs/SPEC.md:711-715](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L711) | ✅ | D-003 |
+| CR-13 | Data Service 实际 30+ 端点未在 SPEC.md 记录 (sync/factor/screen 全部)   | [docs/SPEC.md:395-435](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L395) | ✅ | D-004 |
+| CR-14 | ARCHITECTURE.md "6 张核心表" 与内部 "18 张活跃表" 自相矛盾              | [docs/ARCHITECTURE.md:297](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/ARCHITECTURE.md#L297) | ✅ | D-005 |
+| CR-15 | ODR-011 Sprint 1-4 新增的 13 张表 (realtime_quote/capital_flow/sectors/...) 未在 ARCHITECTURE.md | [docs/ARCHITECTURE.md:387-398](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/ARCHITECTURE.md#L387) | ✅ | D-006 |
+| CR-16 | SPEC.md AI Research Service 章节列出 35+ 端点但实际只注册 3 个             | [docs/SPEC.md:647-723](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L647) | ✅ | D-011 |
+
+### P1 High — 20 项 (待修复)
+
+| ID    | 任务                                       | 文件                                                                                  | 状态 | 来源       |
+| ----- | ---------------------------------------- | ----------------------------------------------------------------------------------- | -- | -------- |
+| CR-17 | `mootdx.fetchRealtime` 注释承诺"按市场批量"但实际 N 次串行调用            | [pkg/data/source/mootdx_adapter.go:212-234](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/mootdx_adapter.go#L212) | ⬜ | B-004 |
+| CR-18 | `pkg/storage/bulk_insert.go` (13KB) 0 单元测试覆盖 — 新写入路径无保护      | [pkg/storage/bulk_insert.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/storage/bulk_insert.go) | ⬜ | B-005 |
+| CR-19 | `EastmoneyTopListAdapter.fetchLimitUpPool` 4 字段硬编码 1,数据真实性归零  | [pkg/data/source/eastmoney_sectors_adapter.go:463-475](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_sectors_adapter.go#L463) | ⬜ | B-006 |
+| CR-20 | `Registry.HealthCheck` 串行执行,7 adapter × 5s = 最坏 35s 阻塞        | [pkg/data/source/registry.go:191-212](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/registry.go#L191) | ⬜ | B-007 |
+| CR-21 | `etl_test.go` stubStore 接口签名与真实 `PostgresStore.BulkInsert` 不兼容,集成测试零覆盖 | [pkg/data/source/etl_test.go:23-30](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/etl_test.go#L23) | ⬜ | B-008 |
+| CR-22 | `DetailMetrics.vue` `props` 声明但从未使用 (ESLint 警告)              | [components/backtest/DetailMetrics.vue:15-19](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/components/backtest/DetailMetrics.vue#L15) | ⬜ | F-008 |
+| CR-23 | `FitnessChart.vue` `Math.max(...arr)` 在大数组栈溢出 (>200 代)       | [components/ai/FitnessChart.vue:55-60](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/components/ai/FitnessChart.vue#L55) | ⬜ | F-009 |
+| CR-24 | `GenealogyTree.vue` 同样 `Math.max(...arr)` 栈溢出风险                  | [components/ai/GenealogyTree.vue:69-70](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/components/ai/GenealogyTree.vue#L69) | ⬜ | F-010 |
+| CR-25 | `api/client.ts` 每次请求都 `addEventListener('pagehide')` 但从不 remove | [api/client.ts:57](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts#L57) | ⬜ | F-011 |
+| CR-26 | `stores/sync.ts` SSE 重连时旧连接未 close (泄漏)                    | [stores/sync.ts:117-127](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/stores/sync.ts#L117) | ⬜ | F-012 |
+| CR-27 | `FitnessChart.vue` resize 监听器无清理 (组件销毁后仍执行)             | [components/ai/FitnessChart.vue:200-203](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/components/ai/FitnessChart.vue#L200) | ⬜ | F-013 |
+| CR-28 | `TradeTable.vue` (用户核心组件) + `useAsyncBacktest.ts` 0 测试覆盖   | [components/backtest/TradeTable.vue](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/components/backtest/TradeTable.vue) | ⬜ | Test Gap |
+| CR-29 | SPEC.md Analysis Service 章节遗漏 30+ 实际 plugin/paper trading 端点 | [docs/SPEC.md:535-600](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L535) | ⬜ | D-007 |
+| CR-30 | ADR-015 引用 `*_agent.go` 实际文件无后缀 (`research.go` 等)         | [docs/adr/adr-015-ai-agent-architecture.md:193-196](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/adr/adr-015-ai-agent-architecture.md#L193) | ⬜ | D-008 |
+| CR-31 | ADR-016 迁移文件名引用错位 (off-by-one,全部小 1)                     | [docs/adr/adr-016-multi-source-data-architecture.md:351-355](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/adr/adr-016-multi-source-data-architecture.md#L351) | ⬜ | D-009 |
+| CR-32 | ODR-011 声称 "8 个新数据源" 实际注册 9 个 adapter (含 Eastmoney 3 slot) | [docs/odr/odr-011-multi-source-integration.md:158-159](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/odr/odr-011-multi-source-integration.md#L158) | ⬜ | D-010 |
+| CR-33 | Strategy 接口 Signal 类型三处文档 (SPEC/VISION/AGENTS) 未指定包名     | [docs/SPEC.md:160-172](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L160) | ⬜ | D-012 |
+| CR-34 | SPEC.md/VISION.md 声称 "ai 覆盖率 ≥75%" 实际 0% 顶层,16-95% 子包     | [docs/SPEC.md:30-37](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L30) | ⬜ | D-013 |
+| CR-35 | ADR-015/016 Status 仍为 "Proposed" 但实施已 98% 完成                  | [docs/adr/adr-015-ai-agent-architecture.md:3](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/adr/adr-015-ai-agent-architecture.md#L3) | ⬜ | D-014 |
+| CR-36 | AGENTS.md 技术栈表缺失 risk-service(8083)/execution-service(8084) | [AGENTS.md:23-32](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L23) | ⬜ | D-015 |
+
+### P2 Medium — 14 项 (Backlog)
+
+| ID    | 任务                                       | 文件                                                                                  | 状态 | 来源       |
+| ----- | ---------------------------------------- | ----------------------------------------------------------------------------------- | -- | -------- |
+| CR-37 | 多文件 `var _ = io.Discard` 占位语句 (死代码)                  | [pkg/data/source/eastmoney_sectors_adapter.go:579-580](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_sectors_adapter.go#L579) | ⬜ | B-009 |
+| CR-38 | `fetchStockSectors` 只读 f100/f102,未含 f101/f103 概念/地域    | [pkg/data/source/eastmoney_sectors_adapter.go:217-222](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_sectors_adapter.go#L217) | ⬜ | B-010 |
+| CR-39 | `Registry.Fetch` fallback 链无日志,可观测性差                  | [pkg/data/source/registry.go:129-187](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/registry.go#L129) | ⬜ | B-011 |
+| CR-40 | `Registry.Fetch` "adapter 未注册" 与 "上游全炸" 错误未区分       | [pkg/data/source/registry.go:138-152](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/registry.go#L138) | ⬜ | B-012 |
+| CR-41 | `EastmoneyAdapter` 强制 `lmt=1000` 与时间窗口不一致被截断     | [pkg/data/source/eastmoney_adapter.go:264](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_adapter.go#L264) | ⬜ | B-013 |
+| CR-42 | `CapitalFlowFactor` 窗口内停牌日处理未文档化                            | [pkg/ai/factor/capital_flow.go:107-122](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/factor/capital_flow.go#L107) | ⬜ | B-014 |
+| CR-43 | `BacktestEngine.vue` 冗余 `triggerRef(result)` 调用             | [pages/BacktestEngine.vue:140](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L140) | ⬜ | F-014 |
+| CR-44 | `useAsyncBacktest.ts` 进度 90→100 跳跃                          | [composables/useAsyncBacktest.ts:103-109](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/composables/useAsyncBacktest.ts#L103) | ⬜ | F-015 |
+| CR-45 | `BacktestEngine.vue` `strategiesCache` 类型 `string[]` 污染    | [pages/BacktestEngine.vue:211](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L211) | ⬜ | F-016 |
+| CR-46 | `api/client.ts` retry 退避公式不直观                              | [api/client.ts:92-95](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts#L92) | ⬜ | F-017 |
+| CR-47 | AGENTS.md 文档导航说 "6 张表" 与 ARCHITECTURE.md "18 张" 不一致  | [AGENTS.md:492](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L492) | ⬜ | D-016 |
+| CR-48 | AGENTS.md 已知问题表未反映 ODR-011 引入的 5 个新风险 (mootdx SDK/反爬/对账)  | [AGENTS.md:581-587](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L581) | ⬜ | D-017 |
+| CR-49 | SPEC.md §6.4 `SetLiveTrader` 等方法名需对照代码验证 (未直接验证)   | [docs/SPEC.md:856-877](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L856) | ⬜ | D-018 |
+| CR-50 | `api/client.ts` 单元测试缺失 (超时/retry/abort 关键路径)              | [api/client.ts](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts) | ⬜ | Test Gap |
+
+### P3 Low — 4 项 (Backlog)
+
+| ID    | 任务                                       | 文件                                                                                  | 状态 | 来源       |
+| ----- | ---------------------------------------- | ----------------------------------------------------------------------------------- | -- | -------- |
+| CR-51 | `BulkInsert` `defaultTableMapper` 并发风险 (未来加 Register 需加锁)        | [pkg/storage/bulk_insert.go:425-427](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/storage/bulk_insert.go#L425) | ⬜ | B-015 |
+| CR-52 | `EastmoneyClient.GetJSON` 429 应返回 `ErrRateLimited` 而非 Upstream  | [pkg/data/source/eastmoney_adapter.go:39-69](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_adapter.go#L39) | ⬜ | B-016 |
+| CR-53 | `sector_rotation_test.go` / `sentiment_test.go` 缺 NaN/Inf 容错测试 | [pkg/ai/factor/sector_rotation_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/factor/sector_rotation_test.go) | ⬜ | B-017 |
+| CR-54 | `cmd/data/registry_init.go` env/viper key 来源优先级无日志告警 | [cmd/data/registry_init.go:90-95](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/data/registry_init.go#L90) | ⬜ | B-018 |
+
+### 后续行动建议
+
+| 优先级 | 立即 (本周) | 下个 Sprint | Backlog |
+| --- | --- | --- | --- |
+| P0 | ~~CR-01 ~ CR-16 (16 项)~~ ✅ 2026-06-08 完成 | — | — |
+| P1 | CR-17 ~ CR-21 (后端 5 项) | CR-22 ~ CR-28 (前端 7 项) | CR-29 ~ CR-36 (文档 8 项) |
+| P2 | — | CR-37 ~ CR-50 (14 项) | — |
+| P3 | — | — | CR-51 ~ CR-54 (4 项) |
+
+***
+
 ## 📊 统计
 
 | 优先级             | 待处理    | 进行中   | 已完成    | 已阻塞   | 已取消   | 总计     |
@@ -473,8 +568,9 @@
 | P2              | 0      | 0     | 19     | 0     | 0     | 19     |
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
-| **MS (Sprint 1-4 + 验证)** | **0** | **0** | **25** | **0** | **0** | **25** |
-| **总计**          | **10** | **0** | **133** | **1** | **0** | **144** |
+| MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
+| **CR (Sprint 5 — 综合审查)** | **54** | **0** | **0** | **0** | **0** | **54** |
+| **总计**          | **64** | **0** | **133** | **1** | **0** | **198** |
 
 ***
 
@@ -662,5 +758,5 @@
 
 ***
 
-_Last updated: 2026-06-08 (v3.2.0) — ODR-011 多源数据集成完成 (25 项 MS 任务)_
-_Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011_
+_Last updated: 2026-06-08 (v3.3.0) — 全项目综合代码审查 (54 项 CR 任务)_
+_Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查_

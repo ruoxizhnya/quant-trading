@@ -33,6 +33,15 @@ export interface Position {
   unrealized_pnl: number
 }
 
+export interface Order {
+  id: string
+  symbol: string
+  direction: string
+  quantity: number
+  status: string
+  timestamp: string
+}
+
 export interface Trade {
   id: string
   symbol: string
@@ -62,8 +71,8 @@ export async function submitOrder(order: SubmitOrderRequest) {
   return api.post<OrderResponse>('/paper/orders', order)
 }
 
-export async function getOrders() {
-  return api.get('/paper/orders')
+export async function getOrders(): Promise<Order[]> {
+  return api.get<Order[]>('/paper/orders')
 }
 
 export async function getOrder(orderId: string) {

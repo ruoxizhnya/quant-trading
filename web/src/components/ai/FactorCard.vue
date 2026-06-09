@@ -22,7 +22,7 @@
           <div class="metric-item">
             <div class="metric-label">IC</div>
             <div class="metric-value" :class="getMetricClass(factor.ic, 0.03)">
-              {{ formatMetric(factor.ic) }}
+              {{ fmtMetric(factor.ic) }}
             </div>
           </div>
         </n-gi>
@@ -30,20 +30,20 @@
           <div class="metric-item">
             <div class="metric-label">IR</div>
             <div class="metric-value" :class="getMetricClass(factor.ir, 0.3)">
-              {{ formatMetric(factor.ir) }}
+              {{ fmtMetric(factor.ir) }}
             </div>
           </div>
         </n-gi>
         <n-gi>
           <div class="metric-item">
             <div class="metric-label">换手率</div>
-            <div class="metric-value">{{ formatPercent(factor.turnover) }}</div>
+            <div class="metric-value">{{ fmtPercent(factor.turnover) }}</div>
           </div>
         </n-gi>
         <n-gi>
           <div class="metric-item">
             <div class="metric-label">Fitness</div>
-            <div class="metric-value fitness">{{ formatMetric(factor.fitness) }}</div>
+            <div class="metric-value fitness">{{ fmtMetric(factor.fitness) }}</div>
           </div>
         </n-gi>
       </n-grid>
@@ -73,6 +73,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { EyeOutline, TrashOutline, GitBranchOutline } from '@vicons/ionicons5'
+import { fmtPercent, fmtMetric } from '@/utils/format'
 
 interface Factor {
   id: string
@@ -126,22 +127,18 @@ const statusType = computed(() => {
   return types[props.factor.status] || 'default'
 })
 
-function formatMetric(value: number): string {
-  if (value === undefined || value === null) return '-'
-  return value.toFixed(3)
-}
-
-function formatPercent(value: number): string {
-  if (value === undefined || value === null) return '-'
-  return `${(value * 100).toFixed(1)}%`
-}
-
 function getMetricClass(value: number, threshold: number): string {
   if (value >= threshold * 2) return 'excellent'
   if (value >= threshold) return 'good'
   if (value >= threshold * 0.5) return 'fair'
   return 'poor'
 }
+
+// CR-06 (ODR-012): Local formatPercent/formatMetric replaced by the shared
+// fmtPercent/fmtMetric in @/utils/format. fmtPercent now prefixes '+' for
+// positive values; fmtMetric auto-switches between fixed and percentage
+// representation based on magnitude. These are the single source of truth
+// per AGENTS.md "Never Do" rule.
 </script>
 
 <style scoped>

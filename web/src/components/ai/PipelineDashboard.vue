@@ -237,7 +237,12 @@ const strategyDescription = ref('')
 const isProcessing = ref(false)
 const currentJob = ref<string | null>(null)
 const currentResult = ref<PipelineResult | null>(null)
+// CR-09 (ODR-012): jobHistory is now bounded by MAX_HISTORY_ENTRIES to avoid
+// unbounded growth (each PipelineResult may embed a full backtest report —
+// the array previously grew by one entry per "生成策略" click and never
+// shrank, exhausting browser memory after sustained use).
 const jobHistory = ref<PipelineResult[]>([])
+const MAX_HISTORY_ENTRIES = 50
 const currentStep = ref(0)
 const statusMessage = ref('')
 
@@ -306,6 +311,9 @@ async function handleGenerate() {
 
     // Update history
     jobHistory.value.unshift(result)
+    if (jobHistory.value.length > MAX_HISTORY_ENTRIES) {
+      jobHistory.value = jobHistory.value.slice(0, MAX_HISTORY_ENTRIES)
+    }
 
     // Show success/error message
     if (result.status === 'complete') {

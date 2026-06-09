@@ -229,13 +229,20 @@ GET  /health              — 健康检查
 
 GET  /api/v1              — API 信息和端点列表
 
-# Backtest
-POST /backtest             — 发起回测（同步或异步）
-GET  /backtest?limit=20    — 回测任务列表
-GET  /backtest/:id         — 回测任务状态
-GET  /backtest/:id/report  — 回测报告
-GET  /backtest/:id/trades  — 交易记录
-GET  /backtest/:id/equity  — 净值曲线数据
+# Backtest (CR-12, ODR-012: paths now use /api/backtest/* prefix)
+POST /api/backtest          — 发起回测（同步或异步）
+GET  /api/backtest?limit=20 — 回测任务列表
+GET  /api/backtest/:id      — 回测任务状态
+GET  /api/backtest/:id/report — 回测报告
+GET  /api/backtest/:id/trades — 交易记录
+GET  /api/backtest/:id/equity — 净值曲线数据
+# Legacy aliases (registered as 301 redirects to /api/backtest/*)
+POST /backtest              — legacy alias
+GET  /backtest              — legacy alias
+GET  /backtest/:id          — legacy alias
+GET  /backtest/:id/report   — legacy alias
+GET  /backtest/:id/trades   — legacy alias
+GET  /backtest/:id/equity   — legacy alias
 
 # Data Proxies (→ data-service :8081)
 GET  /ohlcv/:symbol        — K 线数据
@@ -294,7 +301,15 @@ POST /screen                  — 选股筛选
 
 ## 数据模型
 
-> **状态**: 18 张活跃表 (2026-05-17 清理后，从 24 张减到 18 张，已删除 10 张未使用表: backtest_data, new_share, stk_managers, stk_rewards, stock_company, trade_calendar, daily, trade_cal, market_data, stock_basic。详见 ODR-010)
+> **状态**: 32 张活跃表 (2026-06-08 同步, 由 ODR-012 综合代码审查核对:
+> 14 张在 `pkg/storage/postgres.go` 内联定义, 18 张在 `migrations/012_*` 之后
+> 通过 SQL 迁移新增 — `factor_genes`, `strategy_genes`, `sync_jobs`, `sync_schedules`,
+> `sectors`, `stock_sector_map`, `top_list`, `limit_up_pool`, `announcements`,
+> `news`, `hot_search`, `global_ohlcv`, `ohlcv_minute`, `capital_flow`,
+> `realtime_quote`, `data_fallback_chain`, `data_source_registry`, `orders`).
+> ODR-010 之前曾清掉 10 张废弃表 (backtest_data, new_share, stk_managers,
+> stk_rewards, stock_company, trade_calendar, daily, trade_cal, market_data,
+> stock_basic)。
 >
 > 完整迁移定义见 `migrations/` (12 个 SQL 文件) + `pkg/storage/postgres.go` (inline migrations)。
 
@@ -378,9 +393,10 @@ completed_at TIMESTAMPTZ                    -- 完成时间
 Indexes: idx_bj_status, idx_bj_created_at
 ```
 
-### 辅助表（其余 12 张）
+### 辅助表（其余 26 张）
 
-> 以下表用于缓存、分析、AI 研究等场景，详细 schema 见 `migrations/` 和 `pkg/storage/postgres.go`。
+> 以下表用于缓存、分析、AI 研究、多数据源接入等场景，详细 schema 见
+> `migrations/` 和 `pkg/storage/postgres.go`。
 
 | 表名 | 用途 | 主要字段 |
 |------|------|---------|
@@ -392,10 +408,24 @@ Indexes: idx_bj_status, idx_bj_created_at
 | `ic_analysis` | 因子 IC 分析结果 | factor_name, trade_date, ic, rank_ic, top_ic |
 | `index_constituents` | 指数成分股 | index_code, symbol, in_date, out_date |
 | `walk_forward_reports` | Walk-forward 分析报告 | strategy_id, train_start, train_end, metrics |
+| `orders` | 实盘/纸交易订单 (Phase 4) | order_id, symbol, direction, status, timestamps |
 | `factor_genes` | AI 因子基因池 (Phase 4) | id, name, formula, ic_history JSONB, performance JSONB, genealogy JSONB, status |
 | `strategy_genes` | AI 策略基因池 (Phase 4) | id, name, code, params JSONB, fitness JSONB, genealogy JSONB, generation, status |
-| `sync_jobs` | 数据同步任务队列 (Phase 3) | id, job_type, status, payload JSONB, scheduled_at |
-| `sync_schedules` | 定时同步调度 (Phase 3) | id, name, cron, job_type, is_active |
+| `sync_jobs` | 数据同步任务队列 (Phase 3) | id, job_type, mode, status, progress, payload JSONB |
+| `sync_schedules` | 定时同步调度 (Phase 3) | id, name, cron, job_type, is_enabled |
+| `sectors` | 行业/板块定义 | sector_code, name, level |
+| `stock_sector_map` | 股票-行业映射 | symbol, sector_code, in_date |
+| `top_list` | 龙虎榜数据 | trade_date, symbol, buyer, seller, net_amount |
+| `limit_up_pool` | 涨停板池 | trade_date, symbol, limit_type, consecutive_days |
+| `announcements` | 公告数据 | symbol, ann_date, title, content |
+| `news` | 财经新闻 | publish_time, title, summary, source |
+| `hot_search` | 热门搜索/概念 | rank, keyword, heat_score, trade_date |
+| `global_ohlcv` | 全球市场 OHLCV (港股/美股) | symbol, trade_date, OHLCV |
+| `ohlcv_minute` | 分钟 K 线 | symbol, trade_time, OHLCV |
+| `capital_flow` | 资金流向 (主力/散户) | symbol, trade_date, super_net, large_net, retail_net |
+| `realtime_quote` | 实时行情快照 | symbol, last_price, bid/ask, volume, ts |
+| `data_source_registry` | 数据源注册表 (ODR-011) | name, kind, base_url, enabled, health_status |
+| `data_fallback_chain` | 降级链配置 (ODR-011) | chain_id, adapter_order JSONB, is_active |
 
 > 备注: `fundamentals` 与 `stock_fundamentals` 字段重叠但使用场景不同，未来评估合并。`orders` 表 (migrations/003 定义) 当前未被代码引用，可考虑删除。
 
