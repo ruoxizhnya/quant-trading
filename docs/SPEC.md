@@ -1,8 +1,8 @@
 # Quant Trading System - System Specification
 
 > **Status**: Active (Canonical)
-> **Version:** 1.4.1 (Phase 4 AI-Native + Documentation Sync)
-> **Last Updated:** 2026-06-08
+> **Version:** 1.4.2 (Phase 4 AI-Native + Documentation Sync)
+> **Last Updated:** 2026-06-10
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [VISION.md](VISION.md) (design), [ARCHITECTURE.md](ARCHITECTURE.md) (layout), [TEST.md](TEST.md) (quality)
 >
@@ -585,15 +585,54 @@ GET  /backtest/:id/equity         - Get equity curve data (checks DB if not in m
 
 #### Data Proxies (→ data-service :8081)
 ```
-GET  /ohlcv/:symbol               - Get OHLCV data for symbol
+GET  /ohlcv/:symbol               - Get OHLCV data for symbol (legacy, no /api prefix)
      ?start_date=2024-01-01
      &end_date=2024-12-31
-POST /screen                      - Screen stocks by criteria (proxied)
-GET  /stocks/count                - Get stock count (proxied)
-GET  /market/index                - Get market index data (proxied)
+GET  /api/ohlcv/:symbol            - Same as above, with /api prefix (preferred)
+POST /screen                      - Screen stocks by criteria (proxied, legacy)
+POST /api/screen                  - Same as above, with /api prefix
+GET  /stocks/count                - Get stock count (proxied, legacy)
+GET  /api/stocks/count            - Same as above, with /api prefix
+GET  /market/index                - Get market index data (proxied, legacy)
      ?symbol=000001.SH&date=2024-01-01
-POST /sync/calendar               - Sync trading calendar (proxied)
+GET  /api/market/index            - Same as above, with /api prefix
+POST /sync/calendar               - Sync trading calendar (proxied, legacy)
+POST /api/sync/calendar           - Same as above, with /api prefix
 GET  /api/v1/trading/calendar     - Get trading calendar (proxied)
+```
+
+#### Batch Backtest (Phase 3)
+```
+POST /api/batch                   - Run batch of backtests (multi-strategy × multi-period)
+     {"runs": [{"strategy": "...", "start_date": "...", "end_date": "..."}, ...]}
+GET  /api/batch/:batch_id         - Get aggregated batch report
+GET  /api/batch/:batch_id/export/:format - Export batch report (json/csv)
+```
+
+#### Walk-Forward Analysis (Phase 3)
+```
+POST /api/walkforward             - Run walk-forward optimization
+     {"strategy_id": "value_momentum", "in_sample_months": 12, "out_of_sample_months": 3}
+GET  /api/walkforward             - List all walk-forward reports
+GET  /api/walkforward/:strategy_id - Get walk-forward report for strategy
+```
+
+#### Data Source Management (Phase 3 — ODR-011 multi-source)
+```
+GET  /api/datasource/status       - Current data adapter status (primary, stopped, mode)
+POST /api/datasource/switch       - Switch primary data source
+     {"source": "tushare|akshare|local|..."}
+GET  /api/datasource/health       - Health check of all registered adapters
+```
+
+#### Factor Analysis
+```
+GET  /api/factor/returns/:factor  - Get factor returns time series
+     ?start_date=2024-01-01&end_date=2024-12-31
+GET  /api/factor/ic/:factor       - Get factor IC time series
+POST /api/factor/compute-returns  - Compute factor returns for given universe
+POST /api/factor/compute-ic       - Compute IC for factor × returns cross-section
+GET  /api/factor/list             - List all available factors
 ```
 
 #### Strategy Management

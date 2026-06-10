@@ -1,10 +1,15 @@
 # Quant Trading System — Vision & Features
 
 > **Status**: Active (Canonical - Design Principles)
-> **Version:** 1.4.0 (Phase 4 — AI-Native Evolution)
-> **Last Updated:** 2026-05-06
+> **Version:** 1.4.1 (Phase 4 — AI-Native Evolution)
+> **Last Updated:** 2026-06-10
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [SPEC.md](SPEC.md) (implementation), [ARCHITECTURE.md](ARCHITECTURE.md) (layout), [TEST.md](TEST.md) (quality)
+>
+> **Changelog v1.4.1 (ODR-012 P1 follow-up, 2026-06-10):**
+> - CR-33: `[]Signal` → `[]domain.Signal` in Signal → Trade pipeline step 2
+> - CR-34: ai package coverage claim corrected: top-level 0% / sub-packages
+>   avg ~67% (range 16-95%); matches actual `go test ./pkg/ai/...` output
 >
 > **Changelog v1.4 (Phase 4 — AI-Native Evolution):**
 > - AI Agent system: Research, Generate, Validate, Evolve agents operational
@@ -16,7 +21,7 @@
 > - Live trading engine with paper trading support (`pkg/live/`)
 > - ExecutionService abstraction unifying backtest/paper/live execution
 > - AI Research UI: FactorLab, StrategyWorkshop, EvolutionObs, PipelineDashboard
-> - Test coverage: ai package ≥75%, live package interfaces defined
+> - Test coverage: ai package top-level 0% / sub-packages avg ~67% (range 16-95%) — Phase 4 子包优先 / 顶层滞后模式为已知技术债 (CR-34, ODR-012)
 >
 > **Changelog v1.3 (Migration):**
 > - 添加标准元数据头部（Status, Owner, Related）
@@ -166,7 +171,7 @@ Strategies live in `pkg/strategy/plugins/` and auto-register via `init()`. A str
 
 **Signal → Trade pipeline:**
 1. Engine iterates to trading day D
-2. `Strategy.GenerateSignals()` returns `[]Signal` for universe
+2. `Strategy.GenerateSignals()` returns `[]domain.Signal` for universe
 3. Risk service adjusts signal weights based on portfolio volatility and regime
 4. `Tracker.ExecuteTrade()` converts signal to trade, respecting T+1, position limits, 涨跌停
 5. Portfolio updated; daily NAV recorded
