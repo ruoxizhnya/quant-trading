@@ -65,8 +65,17 @@ func (m *Mutation) MutateParams(params map[string]interface{}) {
 			}
 			params[key] = v + m.rng.NormFloat64()*std
 		case int:
-			// Integer mutation: add/subtract small random value
-			delta := m.rng.Intn(5) - 2
+			// Integer mutation: add/subtract small non-zero value.
+			// F1-new (ODR-012): the previous `Intn(5) - 2` produced
+			// delta ∈ [-2, 2] with a 1/5 chance of 0, which made
+			// the int param unchanged on every 5th invocation.
+			// TestMutation_MutateParams uses a fixed seed (42) and
+			// would intermittently fail in CI. Re-roll into {-3, -2,
+			// -1, 1, 2, 3} (6 values) so the param is always mutated.
+			delta := m.rng.Intn(3) + 1 // 1..3
+			if m.rng.Intn(2) == 0 {
+				delta = -delta
+			}
 			params[key] = v + delta
 		case string:
 			// String mutation: small chance to append suffix

@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.8.0 (Sprint 5 P2 pickup #5 — CR-42)
+> **Version:** 3.9.0 (Sprint 5 P2 pickup #6 — F1-new mutation 偶发)
 > **Last Updated:** 2026-06-10
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -547,6 +547,8 @@
 | CR-52 | `EastmoneyClient.GetJSON` 429 应返回 `ErrRateLimited` 而非 Upstream  | [pkg/data/source/eastmoney_adapter.go:39-69](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_adapter.go#L39) | ⬜ | B-016 |
 | CR-53 | `sector_rotation_test.go` / `sentiment_test.go` 缺 NaN/Inf 容错测试 | [pkg/ai/factor/sector_rotation_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/factor/sector_rotation_test.go) | ⬜ | B-017 |
 | CR-54 | `cmd/data/registry_init.go` env/viper key 来源优先级无日志告警 | [cmd/data/registry_init.go:90-95](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/data/registry_init.go#L90) | ⬜ | B-018 |
+| **F1-new** | **`mutation.go:69` `Intn(5)-2` 1/5 概率产 0 delta, 偶发测试失败** | [pkg/ai/evolution/mutation.go:69](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/evolution/mutation.go#L69) | ✅ | B-019 |
+| **F2-new** | **vitest `toBe(expected, message)` 误用 2 处 + 缺 CI lint rule** | [web/src/**/*.test.ts](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src) | ⬜ | F-018 |
 
 ### 后续行动建议
 
@@ -569,12 +571,29 @@
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
-| **CR (Sprint 5 — 综合审查)** | **10** | **0** | **44** | **0** | **0** | **54** |
-| **总计**          | **20** | **0** | **177** | **1** | **0** | **198** |
+| **CR (Sprint 5 — 综合审查 + 新发现)** | **11** | **0** | **45** | **0** | **0** | **56** | (新增 F1/F2-new) |
+| **总计**          | **21** | **0** | **178** | **1** | **0** | **200** |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-10 (v3.9.0) — Sprint 5 P2 pickup #6: F1-new mutation 偶发 + 新发现跟踪
+
+- **触发**: 在 CR-42 验证 `go test ./pkg/ai/...` 时, 已登记的 F1-new 偶发测试失败被触发。
+  顺手 fix, 并正式将 F1/F2-new 加入 CR 任务表
+- **过程**:
+  - ✅ **F1-new**: [pkg/ai/evolution/mutation.go:67-79](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/evolution/mutation.go#L67) 原 `delta := m.rng.Intn(5) - 2`
+    在 seed 42 下 1/5 概率产 0, 导致 `TestMutation_MutateParams` 偶发失败。
+    改为 `delta := m.rng.Intn(3) + 1; if m.rng.Intn(2) == 0 { delta = -delta }`,
+    delta ∈ {-3, -2, -1, 1, 2, 3} (6 值, 永不 0)
+  - 📋 **F1/F2-new 入表**: 此前 F1/F2-new 仅在 ODR-012 中提及, 正式入 CR 表追踪 (B-019/F-018)
+- **验证**: 
+  - `go test ./pkg/ai/evolution/... -count=50`  50/50 pass (消除偶发)
+  - `go test ./pkg/ai/... -count=1`  13 packages all pass (整体绿)
+- **总任务数**: 198 → 200 (+2: F1/F2-new)
+- **总完成数**: 177 → 178 (+1: F1-new)
+- **总待处理**: 20 → 21 (+1: F2-new)
 
 ### 2026-06-10 (v3.8.0) — Sprint 5 P2 pickup #5: CR-42 停牌日语义文档化 + 真实 bug 修复
 
@@ -849,5 +868,5 @@
 
 ***
 
-_Last updated: 2026-06-10 (v3.8.0) — Sprint 5 P2 pickup #5: CR-42 停牌日文档化 + closeRef 真实 bug 修复_
+_Last updated: 2026-06-10 (v3.9.0) — Sprint 5 P2 pickup #6: F1-new mutation 偶发修复 + F1/F2 入表_
 _Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查_
