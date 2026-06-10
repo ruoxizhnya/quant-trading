@@ -1,8 +1,8 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.2.0 (Sprint 5 综合代码审查 落地)
-> **Last Updated:** 2026-06-08
+> **Version:** 3.4.0 (Sprint 5 P2 first pickup — CR-50)
+> **Last Updated:** 2026-06-10
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
 >
@@ -537,7 +537,7 @@
 | CR-47 | AGENTS.md 文档导航说 "6 张表" 与 ARCHITECTURE.md "18 张" 不一致  | [AGENTS.md:492](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L492) | ⬜ | D-016 |
 | CR-48 | AGENTS.md 已知问题表未反映 ODR-011 引入的 5 个新风险 (mootdx SDK/反爬/对账)  | [AGENTS.md:581-587](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L581) | ⬜ | D-017 |
 | CR-49 | SPEC.md §6.4 `SetLiveTrader` 等方法名需对照代码验证 (未直接验证)   | [docs/SPEC.md:856-877](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L856) | ⬜ | D-018 |
-| CR-50 | `api/client.ts` 单元测试缺失 (超时/retry/abort 关键路径)              | [api/client.ts](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts) | ⬜ | Test Gap |
+| CR-50 | `api/client.ts` 单元测试缺失 (超时/retry/abort 关键路径)              | [api/client.ts](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts) | ✅ | Test Gap |
 
 ### P3 Low — 4 项 (Backlog)
 
@@ -569,12 +569,24 @@
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
-| **CR (Sprint 5 — 综合审查)** | **18** | **0** | **36** | **0** | **0** | **54** |
-| **总计**          | **28** | **0** | **169** | **1** | **0** | **198** |
+| **CR (Sprint 5 — 综合审查)** | **17** | **0** | **37** | **0** | **0** | **54** |
+| **总计**          | **27** | **0** | **170** | **1** | **0** | **198** |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-10 (v3.4.0) — Sprint 5 P2 first pickup: CR-50 (api/client.ts 测试 + isTimeout bug fix)
+
+- **触发**: ODR-012 P2 Sprint 启动;优先挑选 P2 性价比最高项 (CR-50: api/client.ts 测试覆盖)
+- **过程**:
+  - 🐛 **附带真实 bug 修复**: `ApiError.isTimeout` 原实现 `message.includes('abort')` 与实际抛出的中文消息 `'请求已取消'` 不匹配 → 永远返回 `false`,导致 `createCancellableRequest` (client.ts:142) 和 `useAsyncBacktest` 的 abort 分支判断失效。改为显式 `isAbort` flag
+  - ✅ **CR-50**: 新增 `web/src/api/client.test.ts` (24 测试) — 覆盖 ApiError 5 个 getter、GET/POST/DELETE 短方法、绝对 URL 透传、4xx/5xx 错误映射、timeout 触发 AbortController、手动 AbortSignal 中断、retry 重试预算/不重试 4xx/5xx/transient 恢复、`createCancellableRequest` abort 取消、pagehide 监听器存在性
+  - 📋 **vitest config**: `src/api/**` 加入 coverage include
+- **验证**: `npm test` 8 files, 129 tests ✅ (其中 24 为本次新增) / `npm run build` (vue-tsc) ✅
+- **总任务数**: 198 → 198 (CR-50 状态变更)
+- **总完成数**: 169 → 170 (+1)
+- **总待处理**: 28 → 27 (-1)
 
 ### 2026-06-10 (v3.3.0) — ODR-012 P1 综合审查 20 项修复
 
@@ -771,5 +783,5 @@
 
 ***
 
-_Last updated: 2026-06-08 (v3.3.0) — 全项目综合代码审查 (54 项 CR 任务)_
+_Last updated: 2026-06-10 (v3.4.0) — Sprint 5 P2 first pickup: CR-50 (api/client.ts unit tests) + isTimeout bug fix_
 _Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查_

@@ -12,7 +12,7 @@
 > - 统一 Strategy Interface 为实际代码签名
 > - 添加文档导航链接
 >
-> **Changelog v1.4.1 (Documentation Sync, ODR-012):**
+> **Changelog v1.4.1 (Documentation Sync, ODR-012, 2026-06-08 + 2026-06-10 P1 follow-up):**
 > - CR-11: Data Source Management endpoints moved from AI Research section
 >   to Analysis Service section (matches handlers_datasource.go)
 > - CR-12: Backtest endpoints documented with `/api/backtest/*` prefix;
@@ -21,6 +21,10 @@
 >   the multi-source sync routes (sync/ohlcv, sync/fundamental, etc.)
 > - CR-16: AI Pipeline endpoints updated to `/pipeline/*` (not `/api/pipeline/*`)
 > - Added `mode: 'sync'|'async'` discriminator note for backtest client
+> - CR-29 (2026-06-10): Added 4 sections to Analysis Service API
+>   (Batch Backtest, Walk-Forward, Data Source Management, Factor Analysis)
+>   and the `/api`-prefixed Data Proxy variants
+> - CR-33 (2026-06-10): `Signal` → `domain.Signal` consistency in Vision/SPEC
 
 ---
 

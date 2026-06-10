@@ -1,16 +1,25 @@
 import { API_TIMEOUT, API_RETRY_DELAY } from '@/constants/api'
 
 export class ApiError extends Error {
+  // CR-50 (ODR-012): set explicitly at throw-sites that originate from
+  // an AbortController (timeout / manual signal / pagehide). The
+  // previous `message.includes('abort')` substring check silently
+  // returned `false` for the actual Chinese message ('请求已取消'),
+  // which made `isTimeout` permanently false for cancelled requests
+  // — breaking `createCancellableRequest`'s re-throw decision on
+  // line 142 and any composable that branched on `e.isTimeout`.
+  isAbort: boolean
   constructor(public status: number, message: string, public body?: Record<string, unknown>) {
     super(message)
     this.name = 'ApiError'
+    this.isAbort = false
   }
 
   get isClientError() { return this.status >= 400 && this.status < 500 }
   get isServerError() { return this.status >= 500 }
   get isNotFound() { return this.status === 404 }
-  get isTimeout() { return this.status === 0 && this.message.includes('abort') }
-  get isNetworkError() { return this.status === 0 }
+  get isTimeout() { return this.isAbort }
+  get isNetworkError() { return this.status === 0 && !this.isAbort }
 }
 
 interface RequestOptions extends RequestInit {
@@ -103,7 +112,12 @@ class ApiClient {
     } catch (e: unknown) {
       clearTimeout(timer)
       if (e instanceof DOMException || (e instanceof Error && e.name === 'AbortError')) {
-        throw new ApiError(0, '请求已取消')
+        // CR-50 (ODR-012): mark the error as abort-derived so `isTimeout`
+        // returns true and downstream code (e.g. createCancellableRequest
+        // on line 142, useAsyncBacktest, etc.) can branch correctly.
+        const abortErr = new ApiError(0, '请求已取消')
+        abortErr.isAbort = true
+        throw abortErr
       }
       if (e instanceof ApiError) throw e
       if (retry > 0) {

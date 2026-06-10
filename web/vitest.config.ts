@@ -11,7 +11,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      include: ['src/components/backtest/**', 'src/composables/**', 'src/stores/**', 'src/utils/**'],
+      include: ['src/components/backtest/**', 'src/composables/**', 'src/stores/**', 'src/utils/**', 'src/api/**'],
     },
   },
   resolve: {
