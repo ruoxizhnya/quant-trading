@@ -180,7 +180,7 @@
 P1 实施暴露的 2 个**新发现**(留作 P2):
 
 - **F1-new**: `pkg/ai/evolution/mutation_test.go` `TestMutation_MutateParams` 用 `math/rand` 但 seed 不固定 → 偶发失败 (p≈1/200)。修复: 在 `TestMain` 里 `rand.Seed(time.Now().UnixNano())` 改为 `rand.New(rand.NewSource(42))`,将 flake 变为确定性失败以便调试。
-- **F2-new**: Vue 3.4+ 的 `expect(value, message)` 是合法 vitest 4 签名,但 `expect(value).toBe(expected, message)` 不合法 (`toBe` 自身不接 message)。本会话发现并已修正 2 处。建议在 `web/.eslintrc` 加 `vitest/no-standalone-expect` + 在 CI 加自定义 rule。
+- **F2-new**: Vue 3.4+ 的 `expect(value, message)` 是合法 vitest 4 签名,但 `expect(value).toBe(expected, message)` 不合法 (`toBe` 自身不接 message)。本会话发现并已修正 2 处。**v3.9.1 落地**: 新建 [web/scripts/lint-tests.mjs](file:///Users/ruoxi/longshaosWorld/quant-trading/web/scripts/lint-tests.mjs) 独立 Node 脚本扫描, `package.json` 添加 `lint:tests` 并前置到 `test` 脚本; runtime guard `src/test-lint.test.ts` 保留作为 belt-and-braces。
 
 ---
 

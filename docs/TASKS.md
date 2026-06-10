@@ -548,7 +548,7 @@
 | CR-53 | `sector_rotation_test.go` / `sentiment_test.go` 缺 NaN/Inf 容错测试 | [pkg/ai/factor/sector_rotation_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/factor/sector_rotation_test.go) | ⬜ | B-017 |
 | CR-54 | `cmd/data/registry_init.go` env/viper key 来源优先级无日志告警 | [cmd/data/registry_init.go:90-95](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/data/registry_init.go#L90) | ⬜ | B-018 |
 | **F1-new** | **`mutation.go:69` `Intn(5)-2` 1/5 概率产 0 delta, 偶发测试失败** | [pkg/ai/evolution/mutation.go:69](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/evolution/mutation.go#L69) | ✅ | B-019 |
-| **F2-new** | **vitest `toBe(expected, message)` 误用 2 处 + 缺 CI lint rule** | [web/src/**/*.test.ts](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src) | ⬜ | F-018 |
+| **F2-new** | **vitest `toBe(expected, message)` 误用 2 处 + 缺 CI lint rule** | [web/scripts/lint-tests.mjs](file:///Users/ruoxi/longshaosWorld/quant-trading/web/scripts/lint-tests.mjs) | ✅ | F-018 |
 
 ### 后续行动建议
 
@@ -571,12 +571,38 @@
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
-| **CR (Sprint 5 — 综合审查 + 新发现)** | **11** | **0** | **45** | **0** | **0** | **56** | (新增 F1/F2-new) |
-| **总计**          | **21** | **0** | **178** | **1** | **0** | **200** |
+| **CR (Sprint 5 — 综合审查 + 新发现)** | **10** | **0** | **46** | **0** | **0** | **56** | (新增 F1/F2-new) |
+| **总计**          | **20** | **0** | **179** | **1** | **0** | **200** |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-10 (v3.9.1) — Sprint 5 P2 pickup #7: F2-new CI lint rule 落地
+
+- **触发**: F2-new 任务表中标记 ⬜, 此前仅修了 2 处误用, 缺自动化防护
+- **过程**:
+  - ✅ **新建 [web/scripts/lint-tests.mjs](file:///Users/ruoxi/longshaosWorld/quant-trading/web/scripts/lint-tests.mjs)**:
+    独立 Node 脚本, 与 `src/test-lint.test.ts` 共享同一 regex
+    `expect\([^)]*\)\.toBe\([^)]*,\s*['"`]`, 扫描 7 个 `*.test.ts`。
+    自排除 `test-lint.test.ts` 避免自匹配。
+  - ✅ **[web/package.json](file:///Users/ruoxi/longshaosWorld/quant-trading/web/package.json) 串联**:
+    - 新增 `"lint:tests": "node scripts/lint-tests.mjs"`
+    - `test` 改为 `"npm run lint:tests && vitest run"`,
+      CI 跑 `npm test` 时 lint 必先于 vitest 跑 (fails fast, <100ms)
+  - ✅ **更新 [web/src/test-lint.test.ts](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/test-lint.test.ts) 注释**:
+    明确这是"runtime half of a two-layer guard", 强调 regex 须与脚本保持同步
+  - 📋 **ODR-012 §F2-new 状态**: 误用 2 处已修 + CI lint rule 已落地, F2-new 关闭
+- **为什么不用 ESLint plugin**: 项目未引入 ESLint (package.json 无 eslint 依赖),
+  新增依赖属 AGENTS.md "Ask First" 项; 独立 Node 脚本零依赖、可被
+  pre-commit hook 复用, 与现有 `vue-tsc + vitest` CI 流程无缝集成
+- **验证**:
+  - 正向 (无 misuse): `npm run lint:tests` → exit 0
+  - 反向 (canary 引入 misuse): `npm run lint:tests` → exit 1 + 精确行号定位
+  - 完整 `npm test`: 9 文件 / 137 测试全绿, lint 阶段 7 文件全过
+  - `go vet ./...` exit 0
+- **总待处理**: 21 → 20 (-1: F2-new)
+- **总完成数**: 178 → 179 (+1: F2-new)
 
 ### 2026-06-10 (v3.9.0) — Sprint 5 P2 pickup #6: F1-new mutation 偶发 + 新发现跟踪
 

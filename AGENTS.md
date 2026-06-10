@@ -177,7 +177,8 @@ npm run dev                             # Start Vite dev server (:5173)
 npm run build                           # Production build to dist/
 npm run lint                            # ESLint + Prettier check
 npm run typecheck                       # TypeScript strict mode check
-npm test                                # Run Vitest unit tests
+npm run lint:tests                      # Static scan for vitest toBe(expected, "message") misuse (F2-new)
+npm test                                # Run Vitest unit tests (calls lint:tests first)
 npm run test:watch                      # Vitest watch mode
 npm run test:coverage                   # Vitest with coverage report
 ```
