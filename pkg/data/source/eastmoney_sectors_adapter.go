@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -605,7 +603,3 @@ func parseEastmoneyDate(v interface{}) time.Time {
 	}
 	return time.Now().UTC()
 }
-
-// Ensure http package is imported even if io is only used in helpers.
-var _ = io.Discard
-var _ = http.MethodGet

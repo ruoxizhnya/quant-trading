@@ -138,7 +138,6 @@ const resultMetrics = computed(() => {
 watch(() => asyncState.value.result, (newResult) => {
   if (newResult) {
     result.value = newResult
-    triggerRef(result)
     backtestStore.addToHistory(newResult)
     fromQuickRun.value = false
     fetchStockPrices()

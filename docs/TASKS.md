@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.5.0 (Sprint 5 P2 P2-pickup #2 — CR-47/48)
+> **Version:** 3.6.0 (Sprint 5 P2 pickup #3 — CR-37/43)
 > **Last Updated:** 2026-06-10
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -524,13 +524,13 @@
 
 | ID    | 任务                                       | 文件                                                                                  | 状态 | 来源       |
 | ----- | ---------------------------------------- | ----------------------------------------------------------------------------------- | -- | -------- |
-| CR-37 | 多文件 `var _ = io.Discard` 占位语句 (死代码)                  | [pkg/data/source/eastmoney_sectors_adapter.go:579-580](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_sectors_adapter.go#L579) | ⬜ | B-009 |
+| CR-37 | 多文件 `var _ = io.Discard` 占位语句 (死代码)                  | [pkg/data/source/eastmoney_sectors_adapter.go:610-611](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_sectors_adapter.go#L610) | ✅ | B-009 |
 | CR-38 | `fetchStockSectors` 只读 f100/f102,未含 f101/f103 概念/地域    | [pkg/data/source/eastmoney_sectors_adapter.go:217-222](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_sectors_adapter.go#L217) | ⬜ | B-010 |
 | CR-39 | `Registry.Fetch` fallback 链无日志,可观测性差                  | [pkg/data/source/registry.go:129-187](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/registry.go#L129) | ⬜ | B-011 |
 | CR-40 | `Registry.Fetch` "adapter 未注册" 与 "上游全炸" 错误未区分       | [pkg/data/source/registry.go:138-152](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/registry.go#L138) | ⬜ | B-012 |
 | CR-41 | `EastmoneyAdapter` 强制 `lmt=1000` 与时间窗口不一致被截断     | [pkg/data/source/eastmoney_adapter.go:264](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_adapter.go#L264) | ⬜ | B-013 |
 | CR-42 | `CapitalFlowFactor` 窗口内停牌日处理未文档化                            | [pkg/ai/factor/capital_flow.go:107-122](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/factor/capital_flow.go#L107) | ⬜ | B-014 |
-| CR-43 | `BacktestEngine.vue` 冗余 `triggerRef(result)` 调用             | [pages/BacktestEngine.vue:140](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L140) | ⬜ | F-014 |
+| CR-43 | `BacktestEngine.vue` 冗余 `triggerRef(result)` 调用             | [pages/BacktestEngine.vue:140](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L140) | ✅ | F-014 |
 | CR-44 | `useAsyncBacktest.ts` 进度 90→100 跳跃                          | [composables/useAsyncBacktest.ts:103-109](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/composables/useAsyncBacktest.ts#L103) | ⬜ | F-015 |
 | CR-45 | `BacktestEngine.vue` `strategiesCache` 类型 `string[]` 污染    | [pages/BacktestEngine.vue:211](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L211) | ⬜ | F-016 |
 | CR-46 | `api/client.ts` retry 退避公式不直观                              | [api/client.ts:92-95](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts#L92) | ⬜ | F-017 |
@@ -569,12 +569,28 @@
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
-| **CR (Sprint 5 — 综合审查)** | **14** | **0** | **40** | **0** | **0** | **54** |
-| **总计**          | **24** | **0** | **173** | **1** | **0** | **198** |
+| **CR (Sprint 5 — 综合审查)** | **12** | **0** | **42** | **0** | **0** | **54** |
+| **总计**          | **22** | **0** | **175** | **1** | **0** | **198** |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-10 (v3.6.0) — Sprint 5 P2 pickup #3: CR-37/43 死代码 + 冗余 triggerRef
+
+- **触发**: Sprint 5 P2 继续;挑选 ⭐⭐⭐ 项: 死代码清理 (CR-37) + 冗余 triggerRef (CR-43)
+- **过程**:
+  - ✅ **CR-37**: 删除 [eastmoney_sectors_adapter.go:610-611](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_sectors_adapter.go#L610) 死代码
+    `var _ = io.Discard` / `var _ = http.MethodGet` 及其占位注释。
+    连带删除 import 块中的 `io` 和 `net/http` 两个未使用 import。
+    `go vet` + `go test ./pkg/data/source/...` 全绿
+  - ✅ **CR-43**: 删除 [BacktestEngine.vue:141](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L141) 冗余 `triggerRef(result)`。
+    `result` 是 shallowRef,赋值 `result.value = newResult` 已触发响应式;`triggerRef` 仅在 mutate 嵌套属性时需要。
+    `triggerRef` 仍在 3 处其他位置使用 (lines 224/250/287),保留 import。
+    `npm test` 129/129 ✅, `npm run build` (vue-tsc) ✅
+- **总任务数**: 198 → 198 (2 项状态变更: CR-37/43)
+- **总完成数**: 173 → 175 (+2)
+- **总待处理**: 24 → 22 (-2)
 
 ### 2026-06-10 (v3.5.0) — Sprint 5 P2 pickup #2: CR-47/48 文档一致性
 
@@ -793,5 +809,5 @@
 
 ***
 
-_Last updated: 2026-06-10 (v3.5.0) — Sprint 5 P2 pickup #2: CR-47/48 文档一致性_
+_Last updated: 2026-06-10 (v3.6.0) — Sprint 5 P2 pickup #3: CR-37/43 死代码清理 + 冗余 triggerRef_
 _Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查_
