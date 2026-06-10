@@ -175,3 +175,61 @@ describe('useAsyncBacktest — 404 tolerance', () => {
     expect(state.value.error).toBeNull()
   })
 })
+
+describe('useAsyncBacktest — CR-44 progress interpolation', () => {
+  // CR-44 (ODR-012): the old code jumped from 90 (the cap in the
+  // 'running' branch) directly to 100 the moment status flipped to
+  // 'completed', producing a jarring UI hop. The fix interpolates:
+  //   running  → 90 (capped, estimated)
+  //   completed but no result yet → 95 ('finalising')
+  //   completed + result loaded   → 100
+  // We don't test the 90→95 step here because that path requires
+  // the backend to report 'completed' WITHOUT a result payload, which
+  // is rare. The 95→100 step is what users see when the result is
+  // attached at completion time.
+
+  it('when job.result is present, completed status sets progress to 100', async () => {
+    // The 'completed' branch sets progress to 100 once the result
+    // is available. This is the happy path; it should not regress
+    // when the interpolation logic is in place.
+    mockCreate.mockResolvedValueOnce({ job_id: 'j-9', status: 'pending' })
+    mockGetJob.mockResolvedValue({
+      id: 'j-9',
+      status: 'completed',
+      result: { id: 'j-9', total_return: 0.20, trades: [], equity_curve: [] },
+    })
+    mockGetReport.mockResolvedValueOnce({
+      id: 'j-9',
+      total_return: 0.20,
+      trades: [],
+      equity_curve: [],
+    })
+
+    const { state, submit } = useAsyncBacktest()
+    await submit(baseRequest)
+    expect(state.value.status).toBe('completed')
+    expect(state.value.progress).toBe(100)
+  })
+
+  it('progress never overshoots 100 on completion', async () => {
+    // Defensive: under interpolation, progress can be 100 (after
+    // result loaded). It must NOT be >100 even with edge cases.
+    mockCreate.mockResolvedValueOnce({ job_id: 'j-10', status: 'pending' })
+    mockGetJob.mockResolvedValue({
+      id: 'j-10',
+      status: 'completed',
+      progress: 95, // backend may report intermediate progress
+      result: { id: 'j-10', total_return: 0, trades: [], equity_curve: [] },
+    })
+    mockGetReport.mockResolvedValueOnce({
+      id: 'j-10',
+      total_return: 0,
+      trades: [],
+      equity_curve: [],
+    })
+
+    const { state, submit } = useAsyncBacktest()
+    await submit(baseRequest)
+    expect(state.value.progress).toBeLessThanOrEqual(100)
+  })
+})

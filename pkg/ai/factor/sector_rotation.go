@@ -50,6 +50,10 @@ func SectorRowsFromPoints(points []source.UnifiedDataPoint) []SectorRow {
 // excluded from the cross-section ranking rather than inflated by
 // forward-looking data.
 //
+// NaN/Inf handling: rows with non-finite ChangePct are dropped (they
+// would propagate into the IC pipeline and void the entire
+// cross-section). CR-53 (ODR-012) regression test pins this behaviour.
+//
 // stockToSector maps symbol → sector_code. Missing stocks are simply
 // absent from the output (no signal). Missing sectors default to 0
 // (neutral) so a stock that can't be classified doesn't blow up the
@@ -60,11 +64,17 @@ func SectorRowsFromPoints(points []source.UnifiedDataPoint) []SectorRow {
 // downstream code; keeping the raw value preserves interpretability
 // when feeding into the IC pipeline.
 func SectorRotationFactor(rows []SectorRow, tradeDate time.Time, stockToSector map[string]string) map[string]float64 {
-	// For each sector, pick the LATEST row with TradeTime <= tradeDate.
+	// For each sector, pick the LATEST row with TradeTime <= tradeDate
+	// and a finite ChangePct. NaN/Inf rows are dropped — they have
+	// no meaningful rank in the cross-section and would pollute
+	// downstream IC. (CR-53 ODR-012)
 	byCode := make(map[string]SectorRow, len(rows))
 	for _, r := range rows {
 		if r.TradeTime.After(tradeDate) {
 			continue // forward-looking; skip
+		}
+		if math.IsNaN(r.ChangePct) || math.IsInf(r.ChangePct, 0) {
+			continue // CR-53: drop non-finite values
 		}
 		if existing, ok := byCode[r.SectorCode]; !ok || r.TradeTime.After(existing.TradeTime) {
 			byCode[r.SectorCode] = r
@@ -86,10 +96,18 @@ func SectorRotationFactor(rows []SectorRow, tradeDate time.Time, stockToSector m
 // TopMomentumSectors returns the top-N sectors by ChangePct on the
 // given date. Used by strategies that need a sector-rotation trading
 // universe (long top-N, short bottom-N).
+//
+// NaN/Inf handling: rows with non-finite ChangePct are dropped. CR-53
+// (ODR-012) regression test. Without this filter, a single NaN row
+// could either crash the sort comparator (NaN < x is always false)
+// or end up in the "top N" arbitrarily.
 func TopMomentumSectors(rows []SectorRow, n int) []SectorRow {
-	// Reduce to the latest snapshot per sector.
+	// Reduce to the latest snapshot per sector, dropping NaN/Inf.
 	byCode := make(map[string]SectorRow, len(rows))
 	for _, r := range rows {
+		if math.IsNaN(r.ChangePct) || math.IsInf(r.ChangePct, 0) {
+			continue // CR-53: drop non-finite values
+		}
 		if existing, ok := byCode[r.SectorCode]; !ok || r.TradeTime.After(existing.TradeTime) {
 			byCode[r.SectorCode] = r
 		}

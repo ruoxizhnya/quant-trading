@@ -112,7 +112,20 @@ const form = reactive({
   slippageRate: 0.0001,
 })
 
+// CR-45 (ODR-012): strategiesCache is intentionally typed `string[]`
+// because BacktestForm.vue consumes labels, not full Strategy objects
+// (it only needs a `<n-select>` option list). The previous code stored
+// `s.name || s.id || s.description` directly in a string[] — if ALL
+// three were undefined the result was `undefined` in a `string[]`,
+// which TypeScript couldn't catch (the type widens to `string |
+// undefined` only under strictNullChecks + noUncheckedIndexedAccess).
+// Normalise to '' here so the array is strictly `string[]`, and
+// drop empties so the dropdown doesn't show a blank option.
 const strategiesCache = ref<string[]>([])
+
+function strategyLabel(s: Strategy): string {
+  return s.name ?? s.id ?? s.description ?? ''
+}
 const fromQuickRun = ref(!!route.query.id)
 
 const asyncBacktest = useAsyncBacktest()
@@ -207,7 +220,9 @@ onMounted(async () => {
   backtestStore.loadHistoryFromDB()
   try {
     const res = await getStrategies()
-    strategiesCache.value = (res.strategies || []).map((s: Strategy) => (s.name || s.id || s.description))
+    strategiesCache.value = (res.strategies || [])
+      .map(strategyLabel)
+      .filter((label): label is string => label !== '')
   } catch {}
   if (route.query.id) {
     await nextTick()

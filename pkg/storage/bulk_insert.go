@@ -426,6 +426,22 @@ func toFloat64(v interface{}) (float64, error) {
 // defaultTableMapper is the package-level mapper used by BulkInsert.
 // It is intentionally not configurable at runtime: schema drift is a
 // deploy-time concern, not a runtime knob.
+//
+// CR-51 (ODR-012) concurrency note:
+// defaultTableMapper is read-only after process start. The TableMapper
+// it wraps is itself concurrency-safe (NewTableMapper returns a
+// value that is safe for concurrent map reads), so concurrent
+// BulkInsert calls do NOT need a mutex around the mapper.
+//
+// What this means for future contributors:
+//   - If you add a `Register(dataType, ...)` method that mutates the
+//     underlying map, you MUST add a sync.RWMutex around the
+//     defaultTableMapper and gate the mutation. The current code
+//     path is read-only-by-design precisely so we don't pay for a
+//     mutex on every BulkInsert call.
+//   - If you need schema-different in tests, construct a fresh
+//     TableMapper per test and pass it in via the table-mapper-aware
+//     BulkInsert variant (TBD). Do not mutate defaultTableMapper.
 var defaultTableMapper = NewTableMapper()
 
 // BulkInserter is the persistence contract that any storage backend

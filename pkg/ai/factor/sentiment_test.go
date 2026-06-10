@@ -154,3 +154,73 @@ func TestIsHotSearchRowValid(t *testing.T) {
 		}
 	}
 }
+
+// CR-53 (ODR-012): NaN/Inf tolerance for SentimentFactor.
+// The sentiment pipeline ingests upstream scores (xueqiu, LLM
+// extraction) that can produce NaN/Inf for the Heat/Sentiment
+// fields when the source returns a malformed payload. SentimentFactor
+// must not propagate NaN/Inf downstream: the output is later used in
+// IC computation, where a single NaN entry would void the entire
+// cross-section. The fix has two layers:
+//   1. The function's arithmetic must not turn a NaN input into a
+//      NaN output (or if it does, the row must be skipped).
+//   2. The output range [0, 1] must hold; NaN is by definition
+//      neither, so emitting NaN is a contract violation.
+func TestSentimentFactor_NaNInfTolerance(t *testing.T) {
+	ref := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	rows := []HotSearchRow{
+		{Symbol: "VALID", TradeTime: ref, Rank: 1}, // baseline
+		{Symbol: "NAN_SENT", TradeTime: ref, Title: "weird", Sentiment: math.NaN()},
+		{Symbol: "INF_SENT", TradeTime: ref, Title: "weird", Sentiment: math.Inf(1)},
+		{Symbol: "NEG_INF", TradeTime: ref, Title: "weird", Sentiment: math.Inf(-1)},
+		{Symbol: "NAN_HEAT", TradeTime: ref, Rank: 5, Heat: math.NaN()},
+	}
+	factor := SentimentFactor(rows, ref)
+
+	// VALID (rank 1) is a known-good input — its score must be the
+	// rank-1 = 1.0 value. If the function short-circuits on the NaN
+	// inputs and zeroes everything, we'd see ~0.5 here, which would
+	// be a regression in the rank-based path.
+	v := factor["VALID"]
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		t.Errorf("VALID (rank 1) became %v, must not be NaN/Inf", v)
+	}
+	if v < 0.95 {
+		t.Errorf("VALID (rank 1) = %v, want ~1.0; NaN inputs may be polluting the accumulator", v)
+	}
+	if v > 1.0 {
+		t.Errorf("VALID (rank 1) = %v, want ≤1.0; clip-to-unit-interval is broken", v)
+	}
+
+	// The NaN/Inf inputs must either produce a clipped [0, 1] value
+	// or be absent from the output. They must NEVER be NaN/Inf.
+	for _, sym := range []string{"NAN_SENT", "INF_SENT", "NEG_INF", "NAN_HEAT"} {
+		out, ok := factor[sym]
+		if !ok {
+			continue // acceptable: skipped entirely
+		}
+		if math.IsNaN(out) || math.IsInf(out, 0) {
+			t.Errorf("%s (NaN/Inf input) produced %v; would poison downstream IC", sym, out)
+		}
+		if out < 0 || out > 1 {
+			t.Errorf("%s = %v, must be in [0, 1]", sym, out)
+		}
+	}
+}
+
+func TestSentimentFactor_AllNaNInput(t *testing.T) {
+	// Edge case: ALL rows have NaN sentiment. The function must
+	// not return a map of NaN values; it should either return an
+	// empty map (preferred) or zero-fill, but never NaN.
+	ref := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	rows := []HotSearchRow{
+		{Symbol: "A", TradeTime: ref, Title: "x", Sentiment: math.NaN()},
+		{Symbol: "B", TradeTime: ref, Title: "y", Sentiment: math.NaN()},
+	}
+	factor := SentimentFactor(rows, ref)
+	for sym, v := range factor {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			t.Errorf("symbol %s = %v on all-NaN input — must be skipped or zeroed", sym, v)
+		}
+	}
+}

@@ -87,11 +87,31 @@ func buildDataSourceRegistry(tushareClient *data.TushareClient, logger zerolog.L
 	// adapter is constructed as disabled; it is still registered so
 	// that /api/datasource/registry reports the slot as "configured
 	// but not active".
-	alphaKey := strings.TrimSpace(os.Getenv("ALPHA_VANTAGE_KEY"))
+	//
+	// CR-54 (ODR-012): the precedence between env and viper was
+	// previously silent. Operators setting ALPHA_VANTAGE_KEY in the
+	// environment would be confused when their config file's
+	// alpha_vantage.api_key silently overrode it. We now log a
+	// warning whenever both sources are set, regardless of whether
+	// the values agree, so the precedence is auditable. (Viper wins
+	// in both cases because it is the more specific config layer;
+	// the warning is informational, not a config conflict error.)
+	envAlphaKey := strings.TrimSpace(os.Getenv("ALPHA_VANTAGE_KEY"))
+	viperAlphaKey := ""
 	if viper.IsSet("alpha_vantage.api_key") {
-		if k := strings.TrimSpace(viper.GetString("alpha_vantage.api_key")); k != "" {
-			alphaKey = k
-		}
+		viperAlphaKey = strings.TrimSpace(viper.GetString("alpha_vantage.api_key"))
+	}
+	alphaKey := envAlphaKey
+	if viperAlphaKey != "" {
+		alphaKey = viperAlphaKey
+	}
+	if envAlphaKey != "" && viperAlphaKey != "" && envAlphaKey != viperAlphaKey {
+		logger.Warn().
+			Str("env_value", maskSecret(envAlphaKey)).
+			Str("viper_value", maskSecret(viperAlphaKey)).
+			Msg("ALPHA_VANTAGE_KEY is set in BOTH env and viper config with different values; viper wins (config-file takes precedence over env). Verify this is intended.")
+	} else if envAlphaKey != "" && viperAlphaKey != "" {
+		logger.Info().Msg("ALPHA_VANTAGE_KEY set in both env and viper config with the same value; viper wins silently (no functional difference)")
 	}
 	if !envDisabled("DATA_DISABLE_ALPHA_VANTAGE") {
 		if err := reg.Register(source.NewAlphaVantageAdapter(alphaKey)); err != nil {
@@ -199,4 +219,19 @@ func envDisabled(name string) bool {
 		return true
 	}
 	return false
+}
+
+// maskSecret returns a redacted form of a secret for log output.
+// Keeps the first 4 and last 2 characters visible (if available) so
+// operators can still tell "they are the same value" vs "completely
+// different values" while not leaking the key material. Strings
+// shorter than 8 characters are fully redacted.
+//
+// Used by CR-54 (ODR-012) to log ALPHA_VANTAGE_KEY precedence
+// warnings without putting the actual key in stdout/journald.
+func maskSecret(s string) string {
+	if len(s) <= 8 {
+		return "***"
+	}
+	return s[:4] + "***" + s[len(s)-2:]
 }

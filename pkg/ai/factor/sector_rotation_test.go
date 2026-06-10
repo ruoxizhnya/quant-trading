@@ -104,3 +104,71 @@ func TestSectorRowsFromPoints_FilterByDataType(t *testing.T) {
 		t.Errorf("got %+v, want BK0001", rows[0])
 	}
 }
+
+// CR-53 (ODR-012): NaN/Inf tolerance for SectorRotationFactor.
+// ETL can produce rows with NaN/Inf ChangePct if the upstream (e.g.
+// Eastmoney) returns "0/0" ratios or a divide-by-zero somewhere
+// upstream. The factor must not propagate NaN/Inf into the IC pipeline
+// because the downstream `pkg/ai/metrics.IC()` would then return NaN
+// for the entire cross-section, masking real signals.
+func TestSectorRotationFactor_NaNInfTolerance(t *testing.T) {
+	tradeDate := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	rows := []SectorRow{
+		{SectorCode: "BK0001", TradeTime: tradeDate, ChangePct: 0.05},   // valid
+		{SectorCode: "BK0002", TradeTime: tradeDate, ChangePct: math.NaN()}, // must not poison output
+		{SectorCode: "BK0003", TradeTime: tradeDate, ChangePct: math.Inf(1)}, // must not poison output
+		{SectorCode: "BK0004", TradeTime: tradeDate, ChangePct: math.Inf(-1)},
+	}
+	mapping := map[string]string{
+		"A": "BK0001",
+		"B": "BK0002",
+		"C": "BK0003",
+		"D": "BK0004",
+	}
+	factor := SectorRotationFactor(rows, tradeDate, mapping)
+	// A is the only valid row; it must still return 0.05.
+	if got := factor["A"]; got != 0.05 {
+		t.Errorf("A (valid) = %v, want 0.05", got)
+	}
+	// NaN/Inf rows must be either:
+	//   (a) zeroed out (preferred — they don't influence the cross-section), OR
+	//   (b) absent from the output map (treated as no data).
+	// In either case the value must NOT be NaN/Inf, which would
+	// propagate downstream and poison the IC computation.
+	for _, sym := range []string{"B", "C", "D"} {
+		v, ok := factor[sym]
+		if !ok {
+			continue // option (b) is acceptable
+		}
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			t.Errorf("%s (NaN/Inf input) produced %v, which would poison downstream IC", sym, v)
+		}
+	}
+}
+
+func TestTopMomentumSectors_NaNInfTolerance(t *testing.T) {
+	// Same NaN/Inf concern: TopMomentumSectors sorts by ChangePct
+	// and a NaN sort key would either:
+	//   - Sort the NaN to an arbitrary position (and pollute the
+	//     "top N" pick), or
+	//   - Crash the sort comparator (NaN < x is always false).
+	// Either is a regression risk; verify the function tolerates
+	// them by either skipping or sorting to the end.
+	tradeDate := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+	rows := []SectorRow{
+		{SectorCode: "BK0001", TradeTime: tradeDate, ChangePct: 0.05},
+		{SectorCode: "BK0002", TradeTime: tradeDate, ChangePct: math.NaN()},
+		{SectorCode: "BK0003", TradeTime: tradeDate, ChangePct: math.Inf(1)},
+		{SectorCode: "BK0004", TradeTime: tradeDate, ChangePct: -0.01},
+	}
+	// Top 2 by momentum — must not panic, must not return NaN.
+	top := TopMomentumSectors(rows, 2)
+	if len(top) == 0 {
+		t.Fatal("TopMomentumSectors returned empty for non-empty input")
+	}
+	for _, r := range top {
+		if math.IsNaN(r.ChangePct) || math.IsInf(r.ChangePct, 0) {
+			t.Errorf("TopMomentumSectors returned NaN/Inf row: %+v", r)
+		}
+	}
+}

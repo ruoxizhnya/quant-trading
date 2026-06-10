@@ -4,10 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"time"
 )
+
+// ErrAdapterNotRegistered is returned (wrapped) by Registry.Fetch when a
+// chain references an adapter name that is not currently registered.
+// CR-40 (ODR-012): callers want to distinguish this from "all upstreams
+// are down" (the latter is reported as a generic "all adapters
+// exhausted" error). The distinction drives operator response: a
+// missing-registration error is a deploy/config bug; an exhausted-chain
+// error is a real upstream outage. Both are wrapped via fmt.Errorf("%w:
+// ...") so errors.Is works through the wrapper.
+var ErrAdapterNotRegistered = errors.New("data source: adapter not registered")
 
 // Registry manages a set of DataSourceAdapter instances and per-data-type
 // fallback chains. It is the single entry point used by ETL pipelines.
@@ -146,11 +157,22 @@ func (r *Registry) Fetch(ctx context.Context, req FetchRequest) (*FetchResponse,
 		a := r.adapters[name]
 		r.mu.RUnlock()
 		if a == nil {
-			lastErr = fmt.Errorf("registry: adapter %q not registered", name)
+			// CR-39 (ODR-012): chain references an unregistered name.
+			// This is a deploy/config bug (e.g. SetChain called before
+			// Register) — log loud so it shows up in startup logs.
+			// CR-40: wrap with ErrAdapterNotRegistered so callers can
+			// distinguish from "all upstreams down" via errors.Is.
+			log.Printf("[source.Registry] Fetch[%s]: adapter %q in chain but not registered (chain=%v)", req.DataType, name, chain)
+			lastErr = fmt.Errorf("%w: %q (in chain %v)", ErrAdapterNotRegistered, name, chain)
 			tried = append(tried, name)
 			continue
 		}
 		if !a.Enabled() {
+			// CR-39: silent skip before would hide why a chain
+			// "magically" tried only the secondary. Log it at Info
+			// level so postmortem on "why didn't eastmoney serve
+			// capital_flow" is straightforward.
+			log.Printf("[source.Registry] Fetch[%s]: skip %q (disabled, env kill-switch or config)", req.DataType, name)
 			continue
 		}
 		// Verify the adapter actually claims to support this data type
@@ -163,6 +185,13 @@ func (r *Registry) Fetch(ctx context.Context, req FetchRequest) (*FetchResponse,
 			}
 		}
 		if !supported {
+			// CR-39: chain/SupportedTypes drift is a real production
+			// hazard (we hit it once in ODR-011 with eastmoney listing
+			// sectors in chain but SupportedTypes returning only
+			// capital_flow). Log loud and skip; do NOT fall through
+			// to Fetch because the adapter will return ErrUnsupported
+			// anyway and the chain will look like a successful skip.
+			log.Printf("[source.Registry] Fetch[%s]: skip %q (not in adapter.SupportedTypes — chain drift)", req.DataType, name)
 			continue
 		}
 
@@ -175,6 +204,13 @@ func (r *Registry) Fetch(ctx context.Context, req FetchRequest) (*FetchResponse,
 			resp.FetchedAt = start
 			return resp, nil
 		}
+		// CR-39: per-adapter failure logged at warn level. Without
+		// this line, an operator looking at a backtest that returned
+		// "all adapters exhausted for capital_flow" had no way to
+		// tell which adapter failed and why. The log line carries
+		// enough context (data_type, adapter name, err) to grep for
+		// the exact failure.
+		log.Printf("[source.Registry] Fetch[%s]: %q failed: %v (retryable=%t)", req.DataType, name, err, IsRetryable(err))
 		lastErr = err
 		tried = append(tried, name)
 		if !IsRetryable(err) {

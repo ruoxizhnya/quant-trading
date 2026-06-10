@@ -944,6 +944,13 @@ err := engine.HealthCheckLiveTrader(ctx)
 | `ExecuteSignalsViaLiveTrader(ctx, signals, prices)` | Batch execute signals |
 | `HealthCheckLiveTrader(ctx)` | Verify trader connectivity |
 
+> **CR-49 (ODR-012) verification** — re-grepped `pkg/backtest/engine.go`
+> on 2026-06-10: all 5 methods above are present in
+> `pkg/backtest/engine.go` with matching signatures (lines 1168, 1201,
+> 1208, 1273, 1310). The interface definition in `pkg/live/trader.go`
+> is the canonical source; this table mirrors it. Any future drift
+> must be caught by `go doc pkg/backtest.Engine` diff in CI.
+
 When a LiveTrader is attached, the engine can run in "paper trading" mode where signals are executed through the trader while still tracking performance internally. This enables:
 - **Backtest → Paper Trading**: Same strategy code, different execution backend
 - **Paper Trading → Live Trading**: Swap MockTrader for real broker implementation

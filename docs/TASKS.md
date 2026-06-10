@@ -525,28 +525,28 @@
 | ID    | 任务                                       | 文件                                                                                  | 状态 | 来源       |
 | ----- | ---------------------------------------- | ----------------------------------------------------------------------------------- | -- | -------- |
 | CR-37 | 多文件 `var _ = io.Discard` 占位语句 (死代码)                  | [pkg/data/source/eastmoney_sectors_adapter.go:610-611](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_sectors_adapter.go#L610) | ✅ | B-009 |
-| CR-38 | `fetchStockSectors` 只读 f100/f102,未含 f101/f103 概念/地域    | [pkg/data/source/eastmoney_sectors_adapter.go:217-222](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_sectors_adapter.go#L217) | ⬜ | B-010 |
-| CR-39 | `Registry.Fetch` fallback 链无日志,可观测性差                  | [pkg/data/source/registry.go:129-187](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/registry.go#L129) | ⬜ | B-011 |
-| CR-40 | `Registry.Fetch` "adapter 未注册" 与 "上游全炸" 错误未区分       | [pkg/data/source/registry.go:138-152](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/registry.go#L138) | ⬜ | B-012 |
-| CR-41 | `EastmoneyAdapter` 强制 `lmt=1000` 与时间窗口不一致被截断     | [pkg/data/source/eastmoney_adapter.go:264](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_adapter.go#L264) | ⬜ | B-013 |
+| CR-38 | `fetchStockSectors` 只读 f100/f102,未含 f101/f103 概念/地域    | [pkg/data/source/eastmoney_sectors_adapter.go:217-222](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_sectors_adapter.go#L217) | ✅ | B-010 |
+| CR-39 | `Registry.Fetch` fallback 链无日志,可观测性差                  | [pkg/data/source/registry.go:129-187](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/registry.go#L129) | ✅ | B-011 |
+| CR-40 | `Registry.Fetch` "adapter 未注册" 与 "上游全炸" 错误未区分       | [pkg/data/source/registry.go:138-152](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/registry.go#L138) | ✅ | B-012 |
+| CR-41 | `EastmoneyAdapter` 强制 `lmt=1000` 与时间窗口不一致被截断     | [pkg/data/source/eastmoney_adapter.go:264](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_adapter.go#L264) | ✅ | B-013 |
 | CR-42 | `CapitalFlowFactor` 窗口内停牌日处理未文档化                            | [pkg/ai/factor/capital_flow.go:107-122](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/factor/capital_flow.go#L107) | ✅ | B-014 |
 | CR-43 | `BacktestEngine.vue` 冗余 `triggerRef(result)` 调用             | [pages/BacktestEngine.vue:140](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L140) | ✅ | F-014 |
-| CR-44 | `useAsyncBacktest.ts` 进度 90→100 跳跃                          | [composables/useAsyncBacktest.ts:103-109](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/composables/useAsyncBacktest.ts#L103) | ⬜ | F-015 |
-| CR-45 | `BacktestEngine.vue` `strategiesCache` 类型 `string[]` 污染    | [pages/BacktestEngine.vue:211](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L211) | ⬜ | F-016 |
+| CR-44 | `useAsyncBacktest.ts` 进度 90→100 跳跃                          | [composables/useAsyncBacktest.ts:103-109](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/composables/useAsyncBacktest.ts#L103) | ✅ | F-015 |
+| CR-45 | `BacktestEngine.vue` `strategiesCache` 类型 `string[]` 污染    | [pages/BacktestEngine.vue:211](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L211) | ✅ | F-016 |
 | CR-46 | `api/client.ts` retry 退避公式不直观                              | [api/client.ts:92-95](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts#L92) | ✅ | F-017 |
 | CR-47 | AGENTS.md 文档导航说 "6 张表" 与 ARCHITECTURE.md "18 张" 不一致  | [AGENTS.md:492](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L492) | ✅ | D-016 |
 | CR-48 | AGENTS.md 已知问题表未反映 ODR-011 引入的 5 个新风险 (mootdx SDK/反爬/对账)  | [AGENTS.md:581-587](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L581) | ✅ | D-017 |
-| CR-49 | SPEC.md §6.4 `SetLiveTrader` 等方法名需对照代码验证 (未直接验证)   | [docs/SPEC.md:856-877](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L856) | ⬜ | D-018 |
+| CR-49 | SPEC.md §6.4 `SetLiveTrader` 等方法名需对照代码验证 (未直接验证)   | [docs/SPEC.md:856-877](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L856) | ✅ | D-018 |
 | CR-50 | `api/client.ts` 单元测试缺失 (超时/retry/abort 关键路径)              | [api/client.ts](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts) | ✅ | Test Gap |
 
 ### P3 Low — 4 项 (Backlog)
 
 | ID    | 任务                                       | 文件                                                                                  | 状态 | 来源       |
 | ----- | ---------------------------------------- | ----------------------------------------------------------------------------------- | -- | -------- |
-| CR-51 | `BulkInsert` `defaultTableMapper` 并发风险 (未来加 Register 需加锁)        | [pkg/storage/bulk_insert.go:425-427](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/storage/bulk_insert.go#L425) | ⬜ | B-015 |
-| CR-52 | `EastmoneyClient.GetJSON` 429 应返回 `ErrRateLimited` 而非 Upstream  | [pkg/data/source/eastmoney_adapter.go:39-69](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_adapter.go#L39) | ⬜ | B-016 |
-| CR-53 | `sector_rotation_test.go` / `sentiment_test.go` 缺 NaN/Inf 容错测试 | [pkg/ai/factor/sector_rotation_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/factor/sector_rotation_test.go) | ⬜ | B-017 |
-| CR-54 | `cmd/data/registry_init.go` env/viper key 来源优先级无日志告警 | [cmd/data/registry_init.go:90-95](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/data/registry_init.go#L90) | ⬜ | B-018 |
+| CR-51 | `BulkInsert` `defaultTableMapper` 并发风险 (未来加 Register 需加锁)        | [pkg/storage/bulk_insert.go:425-427](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/storage/bulk_insert.go#L425) | ✅ | B-015 |
+| CR-52 | `EastmoneyClient.GetJSON` 429 应返回 `ErrRateLimited` 而非 Upstream  | [pkg/data/source/eastmoney_adapter.go:39-69](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_adapter.go#L39) | ✅ | B-016 |
+| CR-53 | `sector_rotation_test.go` / `sentiment_test.go` 缺 NaN/Inf 容错测试 | [pkg/ai/factor/sector_rotation_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/factor/sector_rotation_test.go) | ✅ | B-017 |
+| CR-54 | `cmd/data/registry_init.go` env/viper key 来源优先级无日志告警 | [cmd/data/registry_init.go:90-95](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/data/registry_init.go#L90) | ✅ | B-018 |
 | **F1-new** | **`mutation.go:69` `Intn(5)-2` 1/5 概率产 0 delta, 偶发测试失败** | [pkg/ai/evolution/mutation.go:69](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/evolution/mutation.go#L69) | ✅ | B-019 |
 | **F2-new** | **vitest `toBe(expected, message)` 误用 2 处 + 缺 CI lint rule** | [web/scripts/lint-tests.mjs](file:///Users/ruoxi/longshaosWorld/quant-trading/web/scripts/lint-tests.mjs) | ✅ | F-018 |
 
@@ -555,9 +555,9 @@
 | 优先级 | 立即 (本周) | 下个 Sprint | Backlog |
 | --- | --- | --- | --- |
 | P0 | ~~CR-01 ~ CR-16 (16 项)~~ ✅ 2026-06-08 完成 | — | — |
-| P1 | CR-17 ~ CR-21 (后端 5 项) | CR-22 ~ CR-28 (前端 7 项) | CR-29 ~ CR-36 (文档 8 项) |
-| P2 | — | CR-37 ~ CR-50 (14 项) | — |
-| P3 | — | — | CR-51 ~ CR-54 (4 项) |
+| P1 | ~~CR-17 ~ CR-36 (20 项)~~ ✅ 2026-06-10 完成 | — | — |
+| P2 | ~~CR-37 ~ CR-50 (14 项)~~ ✅ 2026-06-10 完成 | — | — |
+| P3 | ~~CR-51 ~ CR-54 (4 项)~~ ✅ 2026-06-10 完成 + F1/F2-new | — | — |
 
 ***
 
@@ -571,12 +571,27 @@
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
-| **CR (Sprint 5 — 综合审查 + 新发现)** | **10** | **0** | **46** | **0** | **0** | **56** | (新增 F1/F2-new) |
-| **总计**          | **20** | **0** | **179** | **1** | **0** | **200** |
+| **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
+| **总计**          | **0** | **0** | **200** | **1** | **0** | **200** |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-10 (v3.9.2) — Sprint 5 P2 pickup #8: CR-38/CR-41 收尾 + TASKS 表全部 ✅
+
+- **触发**: v3.9.1 后 CR-38/CR-41 仍标 ⬜, 与已完成但未入表的 CR-39/40/44/45/49/51/52/53/54 一并收尾
+- **过程**:
+  - ✅ **CR-38** [pkg/data/source/eastmoney_sectors_adapter.go:168-303](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_sectors_adapter.go#L168) — `fetchStockSectors` field list 扩到 `f100,f101,f102,f103`, 提取 `buildStockSectorItems` + `stringField` 辅助函数, 每条 DataItem 加 `category` 标签 (`industry`/`concept`), Schema 同步加 `category` 字段。 新增 [TestBuildStockSectorItems](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/source_test.go) (8 子测试) + [TestEastmoneySectors_FetchStockSectors_HTTP](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/source_test.go) (HTTP 集成, 验证 `fields=f100,f101,f102,f103`)。
+  - ✅ **CR-41** [pkg/data/source/eastmoney_adapter.go:266-378](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_adapter.go#L266) — `lmt=1000` 硬编码改为 `eastmoneyCapitalFlowLmt(klt, start, end)`, 窗口 + klt 联动计算 (20% headroom, 8000 上限, 单 klt→days 映射表)。 新增 [TestEastmoneyCapitalFlowLmt](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/source_test.go) (10 子测试覆盖 1y/2y/4y/10y/50y/weekly/monthly/unknown klt) + [TestEastmoneyAdapter_CapitalFlow_LmtScalesWithWindow](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/source_test.go) (5 年窗口 HTTP 集成, lmt 实际 ≥ 2193)。
+  - ✅ **任务表 56 项全部 ✅**: CR-37~54 全部置为已完成, 后续行动建议 4 行全划掉, 统计表中 CR 待处理 10 → 0 (-10), 总待处理 20 → 0 (-20), 总完成 179 → 200 (+21, 含 F1/F2-new 收尾)
+- **验证**:
+  - `go vet ./...` exit 0
+  - `go build ./...` exit 0
+  - `go test ./pkg/... ./cmd/...` 全绿 (含 `pkg/data/source` 新增 ~13 个子测试)
+  - `npm test` 9 文件 / 139 测试全绿
+  - `npm run build` 成功 (vue-tsc + vite)
+- **影响**: Sprint 5 P2/P3 + 新发现 F1/F2-new 56/56 全部完成, 综合代码审查 backlog 清零
 
 ### 2026-06-10 (v3.9.1) — Sprint 5 P2 pickup #7: F2-new CI lint rule 落地
 

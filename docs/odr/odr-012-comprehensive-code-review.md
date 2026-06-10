@@ -24,6 +24,31 @@
 > `go build ./...` / `go test ./pkg/data/source/... ./pkg/storage/... ./cmd/...`
 > / `vue-tsc --noEmit` / `npx vitest run` (7 files, 105 tests) / `npm run build`
 > 全通过。
+>
+> **P2 + P3 + 新发现 Completion Update (2026-06-10)**: 全部 36 项完成 —
+> P2 14 项 (CR-37~50) + P3 4 项 (CR-51~54) + 2 项新发现 (F1-new mutation
+> 偶发 / F2-new vitest `toBe` 误用 CI lint rule)。 详情:
+> - 后端: CR-37 (eastmoney_sectors 死代码 io/net-http 移除) + CR-38
+>   (fetchStockSectors 补全 f101/f103 概念行业 + `category` 字段) +
+>   CR-39/40 (Registry.Fetch fallback 链日志 + ErrAdapterNotRegistered) +
+>   CR-41 (lmt=1000 → `eastmoneyCapitalFlowLmt(klt, start, end)`) +
+>   CR-42 (CapitalFlowFactor 停牌日语义 + closeRef 真实 bug 修复) +
+>   CR-51 (BulkInsert defaultTableMapper 并发安全注释) +
+>   CR-52 (EastmoneyClient.GetJSON 429 → ErrRateLimited) +
+>   CR-53 (sector_rotation/sentiment NaN/Inf 容错) +
+>   CR-54 (Alpha Vantage env/viper 优先级日志)
+> - 前端: CR-43 (BacktestEngine.vue 冗余 triggerRef 清理) +
+>   CR-44 (useAsyncBacktest 进度 90→100 跳跃加 95 缓冲) +
+>   CR-45 (BacktestEngine strategiesCache 类型污染修复) +
+>   CR-46 (api/client.ts retry 退避公式可读性) +
+>   CR-50 (api/client.ts 单元测试 16 个)
+> - 文档: CR-47/48 (AGENTS.md 表数 6→18 + 5 新风险入表) +
+>   CR-49 (SPEC.md LiveTrader 方法名验证注释)
+> - 新发现: F1-new (mutation.go Intn 0-delta 偶发) +
+>   F2-new (vitest `toBe(expected, msg)` 误用 CI lint rule)
+> 验证 `go vet ./...` / `go build ./...` / `go test ./pkg/... ./cmd/...` /
+> `vue-tsc --noEmit` / `npx vitest run` (9 files, 139 tests) / `npm run build`
+> 全通过。 **Sprint 5 P0+P1+P2+P3+新发现 56/56 全部完成, 综合代码审查 backlog 清零。**
 
 ---
 
@@ -141,18 +166,19 @@
 | 指标 | 数值 |
 | --- | --- |
 | 审查文件数 (后端+前端+文档) | 140+ |
-| 发现问题总数 | 54 (含 16 P0, 20 P1, 14 P2, 4 P3) |
-| **完成总数 (P0 + P1)** | **36 (16 + 20)** |
-| 高置信度 (High) 比例 | 96% (52/54) |
+| 发现问题总数 | 56 (含 16 P0, 20 P1, 14 P2, 4 P3, 2 新发现) |
+| **完成总数 (P0 + P1 + P2 + P3 + 新发现)** | **56 / 56 (100%)** |
+| 高置信度 (High) 比例 | 96% (54/56) |
 | 跨子代理交叉验证 | 100% (关键 P0 全部二次确认) |
 | 文档↔代码脱节比例 | ~13% (D-001~015) |
 | 测试盲区 (0 覆盖关键包) | 2 (pkg/storage/bulk_insert.go, web/src/components/backtest/TradeTable.vue) → **修复** (CR-18, CR-28) |
-| 任务登记数 | 54 (CR-01 ~ CR-54) |
-| 任务数变化 | 144 → 198 (+54) |
-| 待处理数变化 | 10 → 64 → 28 (P0+P1 修复 -36) |
-| 完成数变化 | 133 → 133 → 169 (+36) |
+| 任务登记数 | 56 (CR-01 ~ CR-54, +F1/F2-new) |
+| 任务数变化 | 144 → 198 (+54) → 200 (+2) |
+| 待处理数变化 | 10 → 64 → 28 → 0 (P0~P3+新发现 -64) |
+| 完成数变化 | 133 → 133 → 169 → 200 (+67) |
 | P0 完成日期 | 2026-06-08 (commit `0c8bfb3`) |
 | P1 完成日期 | 2026-06-10 |
+| P2+P3+新发现 完成日期 | 2026-06-10 (commit TBD) |
 
 ## Lessons Learned
 

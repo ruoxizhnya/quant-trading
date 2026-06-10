@@ -58,6 +58,11 @@ func HotSearchFromPoints(points []source.UnifiedDataPoint) []HotSearchRow {
 // when fetching from the registry). Aggregation across multiple
 // records per symbol uses a weighted sum: more recent events count
 // more (linearly decaying weight over 1 / 7 days).
+//
+// NaN/Inf handling: rows with non-finite Sentiment or Heat are dropped
+// before they enter the accumulator. CR-53 (ODR-012) regression test
+// pins this; a single NaN row would otherwise void the entire
+// cross-section's IC computation.
 func SentimentFactor(rows []HotSearchRow, refTime time.Time) map[string]float64 {
 	if len(rows) == 0 {
 		return map[string]float64{}
@@ -73,6 +78,16 @@ func SentimentFactor(rows []HotSearchRow, refTime time.Time) map[string]float64 
 	bySym := make(map[string]*accum, 16)
 	for _, r := range rows {
 		if r.Symbol == "" {
+			continue
+		}
+		// CR-53 (ODR-012): drop non-finite signals before they reach
+		// the accumulator. The Heat field is also checked because
+		// future logic may incorporate it; better to be defensive
+		// now than chase a regression when someone adds that path.
+		if math.IsNaN(r.Sentiment) || math.IsInf(r.Sentiment, 0) {
+			continue
+		}
+		if math.IsNaN(r.Heat) || math.IsInf(r.Heat, 0) {
 			continue
 		}
 		daysOld := refTime.Sub(r.TradeTime).Hours() / 24
@@ -103,6 +118,13 @@ func SentimentFactor(rows []HotSearchRow, refTime time.Time) map[string]float64 
 			hasSignal = true
 		}
 		if !hasSignal {
+			continue
+		}
+		// Belt-and-braces: even with the early filter above, an
+		// upstream parser may one day produce a non-finite `raw`
+		// (e.g. a divide-by-zero in a future weighting tweak). Skip
+		// rather than poison the accumulator.
+		if math.IsNaN(raw) || math.IsInf(raw, 0) {
 			continue
 		}
 		a, ok := bySym[r.Symbol]

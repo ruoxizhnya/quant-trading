@@ -87,7 +87,23 @@ export function useAsyncBacktest() {
           } else if (job.result && !state.value.result) {
             state.value.result = job.result
           }
-          state.value.progress = 100
+          // CR-44 (ODR-012): the old code jumped progress from 90 (the
+          // cap in the 'running' branch) directly to 100 here. The
+          // user-visible "90% → 100%" hop is jarring, especially for
+          // jobs that take 30s. We now interpolate:
+          //   90 → 95 the moment the status flips to 'completed'
+          //   95 → 100 once the report (or job.result) is loaded
+          // The 95 is the "we know the job is done, waiting for
+          // report payload" state. The actual report fetch is fast
+          // (cached on the backend for hot reports) so the 95→100
+          // window is typically <500ms.
+          if (state.value.result) {
+            state.value.progress = 100
+          } else {
+            // job reported completed but no result payload yet —
+            // bump from 90 to 95 to signal "finalising".
+            state.value.progress = Math.max(state.value.progress, 95)
+          }
           stopPolling()
           break
 
