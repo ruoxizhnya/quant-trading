@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.6.0 (Sprint 5 P2 pickup #3 — CR-37/43)
+> **Version:** 3.7.0 (Sprint 5 P2 pickup #4 — CR-46)
 > **Last Updated:** 2026-06-10
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -533,7 +533,7 @@
 | CR-43 | `BacktestEngine.vue` 冗余 `triggerRef(result)` 调用             | [pages/BacktestEngine.vue:140](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L140) | ✅ | F-014 |
 | CR-44 | `useAsyncBacktest.ts` 进度 90→100 跳跃                          | [composables/useAsyncBacktest.ts:103-109](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/composables/useAsyncBacktest.ts#L103) | ⬜ | F-015 |
 | CR-45 | `BacktestEngine.vue` `strategiesCache` 类型 `string[]` 污染    | [pages/BacktestEngine.vue:211](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L211) | ⬜ | F-016 |
-| CR-46 | `api/client.ts` retry 退避公式不直观                              | [api/client.ts:92-95](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts#L92) | ⬜ | F-017 |
+| CR-46 | `api/client.ts` retry 退避公式不直观                              | [api/client.ts:92-95](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts#L92) | ✅ | F-017 |
 | CR-47 | AGENTS.md 文档导航说 "6 张表" 与 ARCHITECTURE.md "18 张" 不一致  | [AGENTS.md:492](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L492) | ✅ | D-016 |
 | CR-48 | AGENTS.md 已知问题表未反映 ODR-011 引入的 5 个新风险 (mootdx SDK/反爬/对账)  | [AGENTS.md:581-587](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L581) | ✅ | D-017 |
 | CR-49 | SPEC.md §6.4 `SetLiveTrader` 等方法名需对照代码验证 (未直接验证)   | [docs/SPEC.md:856-877](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L856) | ⬜ | D-018 |
@@ -569,12 +569,30 @@
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
-| **CR (Sprint 5 — 综合审查)** | **12** | **0** | **42** | **0** | **0** | **54** |
-| **总计**          | **22** | **0** | **175** | **1** | **0** | **198** |
+| **CR (Sprint 5 — 综合审查)** | **11** | **0** | **43** | **0** | **0** | **54** |
+| **总计**          | **21** | **0** | **176** | **1** | **0** | **198** |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-10 (v3.7.0) — Sprint 5 P2 pickup #4: CR-46 retry 退避公式
+
+- **触发**: Sprint 5 P2 继续;挑选 ⭐ 易改项: 文档可读性 (CR-46)
+- **过程**:
+  - ✅ **CR-46**: [api/client.ts:124](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts#L124) 原 `API_RETRY_DELAY * (4 - retry)` 魔数 `4` 来源不明 (实际是 `API_MAX_RETRIES + 1`)。
+    重构为 `API_RETRY_DELAY * (API_MAX_RETRIES + 1 - remainingRetries)`,
+    引入 `API_MAX_RETRIES` import, 提取 `remainingRetries` 局部变量。
+    附 8 行注释,显式列出退避 schedule:
+      remainingRetries=3 (默认) -> 1s
+      remainingRetries=2          -> 2s
+      remainingRetries=1          -> 3s
+  - **行为不变**: 退避时长与原公式完全一致 (API_MAX_RETRIES=3 时);
+    CR-50 测试中 2000ms/3000ms 期望值无需修改
+- **验证**: vitest 24/24 ✅, vue-tsc build ✅
+- **总任务数**: 198 → 198 (1 项状态变更: CR-46)
+- **总完成数**: 175 → 176 (+1)
+- **总待处理**: 22 → 21 (-1)
 
 ### 2026-06-10 (v3.6.0) — Sprint 5 P2 pickup #3: CR-37/43 死代码 + 冗余 triggerRef
 
@@ -809,5 +827,5 @@
 
 ***
 
-_Last updated: 2026-06-10 (v3.6.0) — Sprint 5 P2 pickup #3: CR-37/43 死代码清理 + 冗余 triggerRef_
+_Last updated: 2026-06-10 (v3.7.0) — Sprint 5 P2 pickup #4: CR-46 retry 退避可读性_
 _Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查_

@@ -1,4 +1,4 @@
-import { API_TIMEOUT, API_RETRY_DELAY } from '@/constants/api'
+import { API_TIMEOUT, API_RETRY_DELAY, API_MAX_RETRIES } from '@/constants/api'
 
 export class ApiError extends Error {
   // CR-50 (ODR-012): set explicitly at throw-sites that originate from
@@ -121,7 +121,17 @@ class ApiClient {
       }
       if (e instanceof ApiError) throw e
       if (retry > 0) {
-        await new Promise(r => setTimeout(r, API_RETRY_DELAY * (4 - retry)))
+        // CR-46 (ODR-012): schedule is now derived from API_MAX_RETRIES
+        // instead of a magic "4". Delays are linear in *remaining*
+        // retries so the first retry is the most aggressive and the
+        // last is the most patient — mirrors user behaviour on flaky
+        // networks ("retry quickly, then back off").
+        //   remainingRetries=3 (default) -> 1s
+        //   remainingRetries=2          -> 2s
+        //   remainingRetries=1          -> 3s
+        const remainingRetries = retry
+        const delayMs = API_RETRY_DELAY * (API_MAX_RETRIES + 1 - remainingRetries)
+        await new Promise(r => setTimeout(r, delayMs))
         return this.request<T>(path, { ...options, retry: retry - 1 })
       }
       throw new ApiError(0, e instanceof Error ? e.message : '网络连接失败')
