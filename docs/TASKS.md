@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.4.0 (Sprint 5 P2 first pickup — CR-50)
+> **Version:** 3.5.0 (Sprint 5 P2 P2-pickup #2 — CR-47/48)
 > **Last Updated:** 2026-06-10
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -534,8 +534,8 @@
 | CR-44 | `useAsyncBacktest.ts` 进度 90→100 跳跃                          | [composables/useAsyncBacktest.ts:103-109](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/composables/useAsyncBacktest.ts#L103) | ⬜ | F-015 |
 | CR-45 | `BacktestEngine.vue` `strategiesCache` 类型 `string[]` 污染    | [pages/BacktestEngine.vue:211](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L211) | ⬜ | F-016 |
 | CR-46 | `api/client.ts` retry 退避公式不直观                              | [api/client.ts:92-95](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts#L92) | ⬜ | F-017 |
-| CR-47 | AGENTS.md 文档导航说 "6 张表" 与 ARCHITECTURE.md "18 张" 不一致  | [AGENTS.md:492](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L492) | ⬜ | D-016 |
-| CR-48 | AGENTS.md 已知问题表未反映 ODR-011 引入的 5 个新风险 (mootdx SDK/反爬/对账)  | [AGENTS.md:581-587](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L581) | ⬜ | D-017 |
+| CR-47 | AGENTS.md 文档导航说 "6 张表" 与 ARCHITECTURE.md "18 张" 不一致  | [AGENTS.md:492](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L492) | ✅ | D-016 |
+| CR-48 | AGENTS.md 已知问题表未反映 ODR-011 引入的 5 个新风险 (mootdx SDK/反爬/对账)  | [AGENTS.md:581-587](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md#L581) | ✅ | D-017 |
 | CR-49 | SPEC.md §6.4 `SetLiveTrader` 等方法名需对照代码验证 (未直接验证)   | [docs/SPEC.md:856-877](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md#L856) | ⬜ | D-018 |
 | CR-50 | `api/client.ts` 单元测试缺失 (超时/retry/abort 关键路径)              | [api/client.ts](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts) | ✅ | Test Gap |
 
@@ -569,12 +569,22 @@
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
-| **CR (Sprint 5 — 综合审查)** | **17** | **0** | **37** | **0** | **0** | **54** |
-| **总计**          | **27** | **0** | **170** | **1** | **0** | **198** |
+| **CR (Sprint 5 — 综合审查)** | **14** | **0** | **40** | **0** | **0** | **54** |
+| **总计**          | **24** | **0** | **173** | **1** | **0** | **198** |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-10 (v3.5.0) — Sprint 5 P2 pickup #2: CR-47/48 文档一致性
+
+- **触发**: Sprint 5 P2 继续;挑选文档一致性 2 项 (CR-47/48, 纯 Markdown, ~3 分钟)
+- **过程**:
+  - ✅ **CR-47**: AGENTS.md 文档导航表第 500 行 "DB schema（6 张表）" → "（18 张表）",对齐 ARCHITECTURE.md:305。Count verified by `grep CREATE TABLE` across migrations/ (18) + pkg/storage/postgres.go (14)。附 CR-47 注释 (5 行) 说明 canonical 来源
+  - ✅ **CR-48**: AGENTS.md 已知问题表 (§14) 追加 5 项 ODR-011 多源集成风险 (mootdx SDK/反爬/数值仲裁/实时背压/HealthCheck CI)
+- **总任务数**: 198 → 198 (3 项状态变更: CR-47/48/50)
+- **总完成数**: 170 → 173 (+3)
+- **总待处理**: 27 → 24 (-3)
 
 ### 2026-06-10 (v3.4.0) — Sprint 5 P2 first pickup: CR-50 (api/client.ts 测试 + isTimeout bug fix)
 
@@ -783,5 +793,5 @@
 
 ***
 
-_Last updated: 2026-06-10 (v3.4.0) — Sprint 5 P2 first pickup: CR-50 (api/client.ts unit tests) + isTimeout bug fix_
+_Last updated: 2026-06-10 (v3.5.0) — Sprint 5 P2 pickup #2: CR-47/48 文档一致性_
 _Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查_

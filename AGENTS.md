@@ -497,7 +497,13 @@ AGENTS.md 是活文档。以下情况主动更新：
 |------|---------|-------------|
 | [VISION.md](docs/VISION.md) | 设计原则（Accuracy First, Hot-Swap 等）、领域模型 | 开始新功能、质疑方法时 |
 | [SPEC.md](docs/SPEC.md) | 技术规格、API 定义、数据模型、Strategy 接口 | 实现端点、编写策略时 |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 服务拓扑、DB schema（6 张表）、缓存设计 | 理解系统布局、调试时 |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 服务拓扑、DB schema（18 张表）、缓存设计 | 理解系统布局、调试时 |
+
+> **CR-47 (ODR-012)**: AGENTS.md previously said "6 张表" while
+> ARCHITECTURE.md:305 says 18 tables (14 in `pkg/storage/postgres.go`
+> + 18 in `migrations/`; migrations win after 012_*). Count verified
+> by grepping `CREATE TABLE` across both files: migrations=18,
+> postgres.go=14. The 18-table figure is canonical.
 
 ### Reference (查找状态)
 
@@ -593,6 +599,17 @@ Please continue from where we left off.
 | Legacy HTML UI still exists at `cmd/analysis/static/` | Deprecated; Vue SPA is the official frontend. Do not modify legacy HTML. |
 | `ChatbubbleEllipsisOutline` icon name doesn't exist | Correct name is `ChatbubbleEllipsesOutline` (with 'e' before 's') |
 | Trade markers may not render if portfolio_values is empty | Ensure backtest returns valid data before calling renderChart() |
+| **ODR-011 Multi-Source Risks** (CR-48, ODR-012) | See sub-table below |
+
+### ODR-011 Multi-Source Integration Risks (CR-48, ODR-012)
+
+| # | Risk | Workaround / Status |
+|---|------|---------------------|
+| 1 | **mootdx Go SDK 稳定性** — 反编译协议可能随时失效 | `NewMootdxAdapter(nil)` 模式保留 — SDK 未就绪时 service 仍可启动 (`enabled=false` → Fetch 跳过) |
+| 2 | **东财反爬应对不完整** — 缺 User-Agent / Referer / 随机延时 | Eastmoney 抓取仅用于低频板块/榜单数据，短线无影响；高频补全见后续 PR |
+| 3 | **多源冲突无数值仲裁** — 同 `DataType` 多源返回不同值时无 reconcile 策略 | 当前 "先注册者优先" 仍为 "主备优先级"；数值仲裁 (`pkg/etl/reconcile.go`) 留待 Phase 5 |
+| 4 | **实时数据无背压** — 盘中实时通道挤压未处理 | ETL 同步路径 OK；盘中实时需另议背压队列 (`pkg/data/source/mootdx_adapter.go` 后续 PR) |
+| 5 | **HealthCheck 慢路径易误入 CI** — `TestInterfaceCompliance` 触发 5s+ 网络调用，CI 必崩 | Health probe 仅暴露在 `/ops/health` 端点；adapter 单元测试用 stub/mock (`pkg/data/source/etl_test.go` 模式) |
 
 ---
 
