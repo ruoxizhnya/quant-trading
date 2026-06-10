@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.7.0 (Sprint 5 P2 pickup #4 — CR-46)
+> **Version:** 3.8.0 (Sprint 5 P2 pickup #5 — CR-42)
 > **Last Updated:** 2026-06-10
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -529,7 +529,7 @@
 | CR-39 | `Registry.Fetch` fallback 链无日志,可观测性差                  | [pkg/data/source/registry.go:129-187](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/registry.go#L129) | ⬜ | B-011 |
 | CR-40 | `Registry.Fetch` "adapter 未注册" 与 "上游全炸" 错误未区分       | [pkg/data/source/registry.go:138-152](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/registry.go#L138) | ⬜ | B-012 |
 | CR-41 | `EastmoneyAdapter` 强制 `lmt=1000` 与时间窗口不一致被截断     | [pkg/data/source/eastmoney_adapter.go:264](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/data/source/eastmoney_adapter.go#L264) | ⬜ | B-013 |
-| CR-42 | `CapitalFlowFactor` 窗口内停牌日处理未文档化                            | [pkg/ai/factor/capital_flow.go:107-122](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/factor/capital_flow.go#L107) | ⬜ | B-014 |
+| CR-42 | `CapitalFlowFactor` 窗口内停牌日处理未文档化                            | [pkg/ai/factor/capital_flow.go:107-122](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/factor/capital_flow.go#L107) | ✅ | B-014 |
 | CR-43 | `BacktestEngine.vue` 冗余 `triggerRef(result)` 调用             | [pages/BacktestEngine.vue:140](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L140) | ✅ | F-014 |
 | CR-44 | `useAsyncBacktest.ts` 进度 90→100 跳跃                          | [composables/useAsyncBacktest.ts:103-109](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/composables/useAsyncBacktest.ts#L103) | ⬜ | F-015 |
 | CR-45 | `BacktestEngine.vue` `strategiesCache` 类型 `string[]` 污染    | [pages/BacktestEngine.vue:211](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestEngine.vue#L211) | ⬜ | F-016 |
@@ -569,12 +569,34 @@
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
-| **CR (Sprint 5 — 综合审查)** | **11** | **0** | **43** | **0** | **0** | **54** |
-| **总计**          | **21** | **0** | **176** | **1** | **0** | **198** |
+| **CR (Sprint 5 — 综合审查)** | **10** | **0** | **44** | **0** | **0** | **54** |
+| **总计**          | **20** | **0** | **177** | **1** | **0** | **198** |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-10 (v3.8.0) — Sprint 5 P2 pickup #5: CR-42 停牌日语义文档化 + 真实 bug 修复
+
+- **触发**: Sprint 5 P2 继续;挑选 ⭐ 易改项: 文档可读性 (CR-42)
+- **过程**:
+  - 📚 **CR-42 docs**: [capital_flow.go:74-109](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/factor/capital_flow.go#L74) 新增 26 行 "Suspended-day (停牌) semantics" 注释块,
+    显式说明两种上游行为 (omit / zero-fill) 的影响,以及为何不做日历 gap-fill (避免假 zero-flow 与真实 zero-flow 混淆)
+  - 🐛 **CR-42 bonus bug fix**: 原 `if closeRef == 0 { closeRef = r.ClosePrice }` 模式有真 bug:
+    当 most recent day close=0 (停牌),第二个 row 的 close 会**静默覆盖** 0,
+    导致 (a) "closeRef <= 0" guard 永远不触发, (b) 用 stale price 做归一化。
+    改为 `haveClose bool` 显式追踪, 配合 CR-42 测试 "suspended as most recent day → symbol dropped" 锁定行为
+  - 🧪 **测试**: [capital_flow_test.go:112-160](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/factor/capital_flow_test.go#L112) 新增 `TestCapitalFlowFactor_SuspendedDaySemantics` 3 子测试:
+    1. 停牌为最新日 → 整个 symbol drop
+    2. 停牌在窗口中间 → 当 zero sum, factor 保留
+    3. 上游 omit 停牌日 → 无 gap-fill, 仅 sum 实际有 row
+- **验证**: `go test ./pkg/ai/factor -v -run TestCapitalFlow` 9/9 pass
+  (注: `go test ./pkg/ai/...` 整体有 1 个失败 — `TestMutation_MutateParams`,
+   是已登记的 F1-new (mutation.go:51 `Intn(5)-2` 可能产 0 delta),
+   与本任务无关, 下一轮 fix)
+- **总任务数**: 198 → 198 (1 项状态变更: CR-42)
+- **总完成数**: 176 → 177 (+1)
+- **总待处理**: 21 → 20 (-1)
 
 ### 2026-06-10 (v3.7.0) — Sprint 5 P2 pickup #4: CR-46 retry 退避公式
 
@@ -827,5 +849,5 @@
 
 ***
 
-_Last updated: 2026-06-10 (v3.7.0) — Sprint 5 P2 pickup #4: CR-46 retry 退避可读性_
+_Last updated: 2026-06-10 (v3.8.0) — Sprint 5 P2 pickup #5: CR-42 停牌日文档化 + closeRef 真实 bug 修复_
 _Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查_

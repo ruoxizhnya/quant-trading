@@ -81,6 +81,32 @@ func CapitalFlowFromPoints(points []source.UnifiedDataPoint) []CapitalFlowRow {
 //
 // lookback must be >= 1. The default of 5 covers one trading week and
 // is a standard Chinese A-share momentum window.
+//
+// # Suspended-day (停牌) semantics — CR-42 (ODR-012)
+//
+// The window is "the first `lookback` rows by trade time desc", which
+// is intentionally a *row-count* window, NOT a *trading-day* window.
+// That choice interacts with stock suspensions in two ways, both of
+// which are accepted behaviour rather than bugs:
+//
+//  1. Upstream (capital_flow ETL) OMITS suspended days for the symbol.
+//     Effect: the window is shorter than `lookback`. A stock suspended
+//     3 days in a 5-day window is effectively evaluated over only the
+//     2 days it actually traded. This biases the factor toward more
+//     recent trading activity, which is the intended signal.
+//
+//  2. Upstream INCLUDES suspended days with MainNet=0 and ClosePrice=0
+//     (or last-known close). Effect: those zero rows are summed into
+//     the factor (no penalty beyond the zero itself) and the symbol is
+//     dropped via the `closeRef <= 0` guard below when the most recent
+//     close is zero.
+//
+// We deliberately do NOT gap-fill against the trading calendar:
+// filling would (a) require a calendar query per symbol per day, and
+// (b) inject fake "no flow on suspended day" rows that look identical
+// to actual zero-flow trading days, blurring the signal. Callers that
+// need strict trading-day alignment should pre-filter `rows` against
+// `pkg/storage.TradingCalendar` before passing them in.
 func CapitalFlowFactor(rows []CapitalFlowRow, lookback int) map[string]float64 {
 	if lookback <= 0 {
 		lookback = 5
@@ -105,16 +131,28 @@ func CapitalFlowFactor(rows []CapitalFlowRow, lookback int) map[string]float64 {
 			continue
 		}
 		var mainSum, closeRef float64
+		// closeRef must be the *most recent* close (i.e. the first row
+		// after the desc sort). The previous `if closeRef == 0 { ... }`
+		// pattern would silently overwrite with the next row's close
+		// whenever the most recent day's close was 0 (e.g. a suspension),
+		// which (a) made the "drop if closeRef <= 0" guard below never
+		// fire and (b) used a stale price for normalisation. Track
+		// "have we set closeRef" explicitly with a bool so the
+		// most-recent row wins. — CR-42 (ODR-012)
+		haveClose := false
 		for _, r := range symRows {
 			mainSum += r.MainNet
-			if closeRef == 0 {
+			if !haveClose {
 				closeRef = r.ClosePrice
+				haveClose = true
 			}
 		}
 		// Normalize by close to make the factor cross-section comparable
 		// between high- and low-price stocks. We do NOT divide by shares
 		// outstanding here because the data point doesn't carry it; for a
 		// strict per-share metric, compute TurnoverFactor separately.
+		// closeRef <= 0 also covers the "most recent day is suspended"
+		// case documented in the function comment above.
 		if closeRef <= 0 {
 			continue
 		}

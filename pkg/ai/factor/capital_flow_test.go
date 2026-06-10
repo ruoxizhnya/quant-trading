@@ -109,6 +109,56 @@ func TestCapitalFlowFactor_SkipsZeroClose(t *testing.T) {
 	}
 }
 
+// CR-42 (ODR-012): pins the suspended-day (停牌) semantics documented
+// on CapitalFlowFactor. A 3-day window with the most recent day being
+// a suspension (close=0) must drop the symbol entirely via the
+// closeRef guard. A window where the suspension is older than the
+// first row in the slice must just be summed across the trading days
+// (no calendar-based gap-fill).
+func TestCapitalFlowFactor_SuspendedDaySemantics(t *testing.T) {
+	now := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
+
+	t.Run("suspended as most recent day → symbol dropped", func(t *testing.T) {
+		rows := []CapitalFlowRow{
+			{Symbol: "A", TradeTime: now, MainNet: 0, ClosePrice: 0},                    // 停牌 (most recent)
+			{Symbol: "A", TradeTime: now.AddDate(0, 0, -1), MainNet: 2e6, ClosePrice: 100},
+			{Symbol: "A", TradeTime: now.AddDate(0, 0, -2), MainNet: 3e6, ClosePrice: 100},
+		}
+		factor := CapitalFlowFactor(rows, 3)
+		if _, ok := factor["A"]; ok {
+			t.Errorf("expected A to be dropped when most recent day is suspended, got %v", factor["A"])
+		}
+	})
+
+	t.Run("suspended day inside window (not most recent) → summed as zero, factor survives", func(t *testing.T) {
+		rows := []CapitalFlowRow{
+			{Symbol: "A", TradeTime: now, MainNet: 5e6, ClosePrice: 100},                 // day 0
+			{Symbol: "A", TradeTime: now.AddDate(0, 0, -1), MainNet: 0, ClosePrice: 100}, // 停牌 day -1
+			{Symbol: "A", TradeTime: now.AddDate(0, 0, -2), MainNet: 2e6, ClosePrice: 100},
+		}
+		factor := CapitalFlowFactor(rows, 3)
+		want := 7e6 / 100 // 5 + 0 + 2 = 7
+		if factor["A"] != want {
+			t.Errorf("A factor = %v, want %v (suspended day should sum as zero, not skip)", factor["A"], want)
+		}
+	})
+
+	t.Run("upstream omits suspended days → window is just the trading days that exist", func(t *testing.T) {
+		// 5 days would normally be returned; upstream dropped 2 of them
+		// (模拟停牌). Factor must use whatever rows remain, no gap-fill.
+		rows := []CapitalFlowRow{
+			{Symbol: "A", TradeTime: now, MainNet: 1e6, ClosePrice: 100},
+			{Symbol: "A", TradeTime: now.AddDate(0, 0, -1), MainNet: 1e6, ClosePrice: 100},
+			{Symbol: "A", TradeTime: now.AddDate(0, 0, -4), MainNet: 1e6, ClosePrice: 100},
+		}
+		factor := CapitalFlowFactor(rows, 5)
+		want := 3e6 / 100 // just 3 actual rows summed
+		if factor["A"] != want {
+			t.Errorf("A factor = %v, want %v (no calendar gap-fill expected)", factor["A"], want)
+		}
+	})
+}
+
 func TestCapitalFlowICSign(t *testing.T) {
 	now := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
 	rows := []CapitalFlowRow{
