@@ -37,6 +37,18 @@ function getStatusMessage(status: number, fallback: string): string {
   return STATUS_MESSAGES[status] || fallback
 }
 
+// CR-25 (ODR-012): one pagehide listener at module scope aborts every
+// in-flight controller. See request() below for the add/delete lifecycle.
+const inFlightControllers = new Set<AbortController>()
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    inFlightControllers.forEach(c => {
+      try { c.abort() } catch { /* ignore */ }
+    })
+    inFlightControllers.clear()
+  })
+}
+
 class ApiClient {
   private baseURL: string
 
@@ -54,8 +66,13 @@ class ApiClient {
       signal.addEventListener('abort', () => controller.abort(), { once: true })
     }
 
-    window.addEventListener('pagehide', () => controller.abort(), { once: true })
-
+    // CR-25 (ODR-012): pagehide is a one-shot browser event, so we install
+    // a SINGLE module-scoped listener that aborts every in-flight controller
+    // registered through `inFlightControllers`. The previous implementation
+    // added a fresh `addEventListener('pagehide', ...)` on every request —
+    // 100 API calls = 100 lingering listeners because SPA route changes do
+    // not fire pagehide.
+    inFlightControllers.add(controller)
     try {
       const url = path.startsWith('http') ? path : `${this.baseURL}${path}`
       const res = await fetch(url, {
@@ -94,6 +111,8 @@ class ApiClient {
         return this.request<T>(path, { ...options, retry: retry - 1 })
       }
       throw new ApiError(0, e instanceof Error ? e.message : '网络连接失败')
+    } finally {
+      inFlightControllers.delete(controller)
     }
   }
 

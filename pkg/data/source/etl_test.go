@@ -8,23 +8,38 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 )
 
-// stubStore is a minimal stand-in for *storage.PostgresStore. It
-// records every call to BulkInsert so tests can assert on the
-// persisted count.
+// stubStore is a minimal stand-in for storage.BulkInserter. It records
+// every BulkInsert call so tests can assert on the persisted count and
+// the (dataType, points) payload.
+//
+// CR-21 (ODR-012): the previous stub used `points []interface{}` which
+// did not satisfy the real PostgresStore.BulkInsert signature
+// (`[]storage.UnifiedDataPoint`). The static type system accepted the
+// old stub because NewETLPipeline was typed as `*storage.PostgresStore`
+// (a concrete type), so the test code path `NewETLPipeline(reg, nil)`
+// silently bypassed BulkInsert — zero L2 integration coverage was real.
+// The stub now uses the real signature and a test below exercises it
+// through the same `storage.BulkInserter` interface the production
+// pipeline uses.
 type stubStore struct {
-	mu          sync.Mutex
-	calls       int
+	mu           sync.Mutex
+	calls        int
 	lastDataType string
-	persisted   int
+	persisted    int
+	skipped      int
+	received     []storage.UnifiedDataPoint
 }
 
-func (s *stubStore) BulkInsert(_ context.Context, dataType string, points []interface{}) (int, int, error) {
+func (s *stubStore) BulkInsert(_ context.Context, dataType string, points []storage.UnifiedDataPoint) (int, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls++
 	s.lastDataType = dataType
+	s.received = append([]storage.UnifiedDataPoint{}, points...)
 	s.persisted += len(points)
 	return len(points), 0, nil
 }
@@ -233,4 +248,52 @@ func normalizerIdentity(item DataItem, source, dataType string) UnifiedDataPoint
 		DataType:  dataType,
 		Data:      item.Data,
 	}
+}
+
+// CR-21 (ODR-012): L2 integration test that actually exercises the
+// storage.BulkInserter wiring. Previous tests all passed `nil` as the
+// store, so the persistence path was never covered. This test uses the
+// real `storage.BulkInserter` interface and verifies that:
+//
+//  1. The stub is invoked exactly once per ETL run.
+//  2. The points reaching the stub are the post-dedup, post-validate
+//     survivors, not the raw FetchResponse items.
+//  3. The dataType passed in matches the request.
+//  4. The ProcessResult.Persisted reflects what the stub recorded.
+func TestETL_StubStore_Persists(t *testing.T) {
+	reg := NewRegistry()
+	now := time.Now().UTC().Truncate(time.Second)
+	a := &testAdapter{
+		name:      "primary",
+		supported: []string{DataTypeRealtime},
+		items: []DataItem{
+			{Symbol: "600519.SH", TradeTime: now, Data: map[string]interface{}{"price": 1500.0}},
+			{Symbol: "600519.SH", TradeTime: now, Data: map[string]interface{}{"price": 1501.0}}, // dup → dropped
+			{Symbol: "000001.SZ", TradeTime: now, Data: map[string]interface{}{"price": 12.5}},
+		},
+	}
+	require.NoError(t, reg.Register(a))
+
+	store := &stubStore{}
+	pipeline := NewETLPipeline(reg, store)
+	res, err := pipeline.Process(context.Background(), FetchRequest{
+		DataType:  DataTypeRealtime,
+		Symbols:   []string{"600519.SH", "000001.SZ"},
+		StartDate: now.Add(-24 * time.Hour),
+		EndDate:   now.Add(24 * time.Hour),
+	}, normalizerIdentity)
+	require.NoError(t, err)
+
+	// 3 fetched, 1 deduped, 2 persisted
+	assert.Equal(t, 3, res.Fetched)
+	assert.Equal(t, 2, res.Persisted, "Persisted mirrors stub record")
+	assert.Equal(t, 1, res.Skipped, "1 dropped by dedup")
+
+	// Stub was called exactly once with the right payload.
+	assert.Equal(t, 1, store.calls)
+	assert.Equal(t, DataTypeRealtime, store.lastDataType)
+	assert.Equal(t, 2, store.persisted)
+	require.Len(t, store.received, 2, "stub received post-dedup points")
+	symbols := []string{store.received[0].Symbol, store.received[1].Symbol}
+	assert.ElementsMatch(t, []string{"600519.SH", "000001.SZ"}, symbols)
 }

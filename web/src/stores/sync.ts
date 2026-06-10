@@ -115,7 +115,18 @@ export const useSyncStore = defineStore('sync', () => {
 
   // SSE Actions
   function connectSSE(baseURL: string = '') {
-    if (eventSource?.readyState === EventSource.OPEN) return
+    // CR-26 (ODR-012): close any pre-existing EventSource before opening a new
+    // one. The previous guard `eventSource?.readyState === OPEN` only skipped
+    // re-connection in the OPEN state — if the prior connection was still
+    // CONNECTING (e.g. previous call raced) or CLOSED, we'd overwrite the
+    // reference without closing, leaving the browser holding a TCP stream
+    // whose handler closure points to a stale `syncStatus` ref. The new
+    // EventSource would not receive messages until the old one finally
+    // timed out.
+    if (eventSource) {
+      try { eventSource.close() } catch { /* ignore */ }
+      eventSource = null
+    }
 
     const url = baseURL
       ? `${baseURL}/api/sync/stream`

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -367,14 +368,44 @@ type topListResponse struct {
 //   &columns=ALL&filter=&pageNumber=1&pageSize=50
 //   &sortColumns=TRADE_DATE&sortTypes=-1
 func (a *EastmoneyTopListAdapter) fetchTopList(ctx context.Context, req FetchRequest) (*FetchResponse, error) {
+	// CR-19 (ODR-012): the four hardcoded pagination/filter knobs below
+	// (`pageNumber`, `pageSize`, the lower-bound `TRADE_DATE>='...'`, and
+	// the missing upper bound) are now driven by `req.Extra` with documented
+	// defaults. The previous implementation always fetched page 1 of size
+	// 100 with no upper bound — fine for a smoke test, useless for a backfill
+	// of "all dragon-tiger rows in 2024".
+	pageNumber := "1"
+	pageSize := "100"
+	if req.Extra != nil {
+		if v, ok := req.Extra["page_number"].(int); ok && v > 0 {
+			pageNumber = strconv.Itoa(v)
+		} else if v, ok := req.Extra["page_number"].(string); ok && v != "" {
+			pageNumber = v
+		}
+		if v, ok := req.Extra["page_size"].(int); ok && v > 0 {
+			pageSize = strconv.Itoa(v)
+		} else if v, ok := req.Extra["page_size"].(string); ok && v != "" {
+			pageSize = v
+		}
+	}
+
 	q := url.Values{}
 	q.Set("reportName", "RPT_DAILYBILLBOARD_DETAILS")
 	q.Set("columns", "ALL")
+	var filterParts []string
 	if !req.StartDate.IsZero() {
-		q.Set("filter", fmt.Sprintf("(TRADE_DATE>='%s')", req.StartDate.Format("2006-01-02")))
+		filterParts = append(filterParts,
+			fmt.Sprintf("(TRADE_DATE>='%s')", req.StartDate.Format("2006-01-02")))
 	}
-	q.Set("pageNumber", "1")
-	q.Set("pageSize", "100")
+	if !req.EndDate.IsZero() {
+		filterParts = append(filterParts,
+			fmt.Sprintf("(TRADE_DATE<='%s')", req.EndDate.Format("2006-01-02")))
+	}
+	if len(filterParts) > 0 {
+		q.Set("filter", strings.Join(filterParts, " and "))
+	}
+	q.Set("pageNumber", pageNumber)
+	q.Set("pageSize", pageSize)
 	q.Set("sortColumns", "TRADE_DATE")
 	q.Set("sortTypes", "-1")
 

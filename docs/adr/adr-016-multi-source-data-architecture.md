@@ -1,12 +1,19 @@
 # ADR-016: Multi-Source Data Architecture
 
-> **Status**: Proposed
+> **Status**: Accepted
 > **Date**: 2026-05-17
 > **Category**: Architecture
 > **Related ADRs**: ADR-013 (Data Sync Enhancement), ADR-007 (AI Sandbox)
 > **Related ODRs**: ODR-011 (Multi-Source Integration)
 > **Author**: AI Assistant (Trae IDE)
 > **Supersedes**: N/A
+>
+> **CR-35 (ODR-012)**: Status updated from "Proposed" to "Accepted" — the
+> multi-source data layer is live in production: 9 adapters registered
+> (tushare, akshare, eastmoney, eastmoney-sectors, eastmoney-toplist,
+> mootdx, postgres-local, in-memory test, plus the meta-fallback
+> coordinator), all routed through `pkg/data/source/Registry`, and the
+> `/api/datasource/registry/*` endpoints are wired to the Vue UI.
 
 ---
 
@@ -348,10 +355,18 @@ func (p *ETLPipeline) Process(ctx context.Context, dataType string, req FetchReq
 | `pkg/data/source/xueqiu_adapter.go` | Go | 雪球热搜适配器 (Sprint 3) |
 | `pkg/data/source/alpha_vantage_adapter.go` | Go | Alpha Vantage 适配器 (Sprint 4) |
 | `pkg/data/source/yahoo_finance_adapter.go` | Go | Yahoo Finance 适配器 (Sprint 4) |
-| `migrations/013_add_source_columns.sql` | SQL | 给所有表加 source 列 |
-| `migrations/014_add_realtime_tables.sql` | SQL | realtime_quote, ohlcv_minute (hypertable) |
-| `migrations/015_add_market_dimension_tables.sql` | SQL | sectors, capital_flow, top_list 等 |
-| `migrations/016_add_data_source_registry.sql` | SQL | 元数据表 |
+| `migrations/014_add_source_columns.sql` | SQL | 给所有表加 source 列 (Sprint 1 基础设施) |
+| `migrations/015_add_realtime_and_capital_flow.sql` | SQL | realtime_quote, ohlcv_minute (hypertable) + capital_flow — Sprint 1 |
+| `migrations/016_add_sectors_and_toplist.sql` | SQL | sectors, top_list, limit_up_pool — Sprint 2 |
+| `migrations/017_add_announcements_news_hotsearch.sql` | SQL | announcements, news, hotsearch — Sprint 3 |
+| `migrations/018_add_global_ohlcv.sql` | SQL | global_ohlcv (跨市场美股/全球) — Sprint 4 |
+
+> **CR-31 (ODR-012)**: 早期草稿把迁移文件名全部写小 1（`013_add_source_columns.sql`
+> 等），与 `ls migrations/` 实际不符。同时漏掉了 Sprint 3/4 的 017/018。
+> 已对齐到 `014→015→016→017→018` 五文件序列。注意"registry 元数据表"实际并未
+> 创建独立 migration——adapters 元数据走的是代码层的 `pkg/data/source/registry.go`
+> 内存态（启动时由 `cmd/data/main.go` 的 `buildDataSourceRegistry()` 装配），
+> 而非 DB 表；此为有意设计选择。
 
 ### 修改
 

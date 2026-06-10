@@ -10,7 +10,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 
 interface GenerationStat {
   generation: number
@@ -30,6 +30,28 @@ const chartCanvas = ref<HTMLCanvasElement>()
 
 const height = computed(() => props.height || 300)
 const hasData = computed(() => props.generations.length > 0)
+
+// CR-23 (ODR-012): Math.max(...arr) and Math.min(...arr) spread each element
+// as a function argument. For >~65k elements (or fewer on V8 with strict mode
+// in older runtimes), this triggers "Maximum call stack size exceeded". A
+// 200-generation evolution run produces 3*200 = 600 fitness values via
+// flatMap — safe today, but a 1000-generation scenario would crash. Use
+// reduce-based safe extremes.
+function safeMax(values: number[], fallback: number): number {
+  let best = fallback
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] > best) best = values[i]
+  }
+  return best
+}
+
+function safeMin(values: number[], fallback: number): number {
+  let best = fallback
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] < best) best = values[i]
+  }
+  return best
+}
 
 function drawChart() {
   const canvas = chartCanvas.value
@@ -52,12 +74,13 @@ function drawChart() {
 
   // Calculate scales
   const gens = props.generations
-  const maxGen = Math.max(...gens.map(g => g.generation))
-  const minGen = Math.min(...gens.map(g => g.generation))
+  const genValues = gens.map(g => g.generation)
+  const maxGen = safeMax(genValues, 0)
+  const minGen = safeMin(genValues, 0)
 
   const allFitness = gens.flatMap(g => [g.bestFitness, g.avgFitness, g.worstFitness])
-  const maxFitness = Math.max(...allFitness, 0.1)
-  const minFitness = Math.min(...allFitness, 0)
+  const maxFitness = safeMax(allFitness, 0.1)
+  const minFitness = safeMin(allFitness, 0)
   const fitnessRange = maxFitness - minFitness || 1
 
   // Helper functions
@@ -197,9 +220,18 @@ watch(() => props.generations, async () => {
   drawChart()
 }, { deep: true })
 
+// CR-27 (ODR-012): register the resize listener in onMounted and remove it in
+// onUnmounted. Previously the listener was added on mount but never removed,
+// so a navigation away from the Evolution page would leave a dangling
+// `drawChart` closure holding refs to the canvas — and re-running it on every
+// browser resize of unrelated pages.
 onMounted(() => {
   drawChart()
   window.addEventListener('resize', drawChart)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', drawChart)
 })
 </script>
 

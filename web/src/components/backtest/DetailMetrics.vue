@@ -12,9 +12,13 @@
 <script setup lang="ts">
 import { fmtMetric } from '@/utils/format'
 
-const props = defineProps<{ metrics: Record<string, number> | null }>()
+// CR-22 (ODR-012): `const props = defineProps(...)` was assigned to a variable
+// but never referenced — ESLint flagged it. In <script setup> the prop is auto-
+// exposed to the template by name, so we can call defineProps() as a side-effect
+// purely for the type annotation. The `metrics` template binding works without
+// the `props.` prefix.
+defineProps<{ metrics: Record<string, number> | null }>()
 
-// Expose to template
 const formatMetric = fmtMetric
 </script>
 

@@ -213,18 +213,38 @@ func (a *MootdxAdapter) fetchRealtime(ctx context.Context, req FetchRequest) (*F
 	if len(req.Symbols) == 0 {
 		return nil, fmt.Errorf("mootdx realtime: symbols required")
 	}
-	// mootdx batches by market; we group symbols to minimize calls.
-	items := make([]DataItem, 0, len(req.Symbols))
+	// CR-17 (ODR-012): the previous implementation called
+	// `transport.GetSecurityQuotes` once per symbol (N serial round-trips).
+	// For a 500-symbol real-time snapshot that meant 500 TCP handshakes to
+	// the mootdx server — typically 5-10s. Group symbols by market and issue
+	// a single GetSecurityQuotes call per market. The transport signature
+	// already accepts `[]string{codes}`; this change just stops the per-symbol
+	// loop from happening.
+	byMarket := make(map[int][]string, 2)
+	codeToSymbol := make(map[string]string, len(req.Symbols))
 	for _, sym := range req.Symbols {
 		market, code, err := splitMarketSymbol(sym)
 		if err != nil {
 			return nil, fmt.Errorf("mootdx: %w", err)
 		}
-		quotes, err := a.transport.GetSecurityQuotes(ctx, market, []string{code})
+		byMarket[market] = append(byMarket[market], code)
+		codeToSymbol[code] = sym
+	}
+
+	items := make([]DataItem, 0, len(req.Symbols))
+	for market, codes := range byMarket {
+		quotes, err := a.transport.GetSecurityQuotes(ctx, market, codes)
 		if err != nil {
 			return nil, fmt.Errorf("mootdx quotes: %w", err)
 		}
 		for _, q := range quotes {
+			// Map the quote back to its full symbol via the code. The
+			// transport returns quotes for the codes we sent, so a missing
+			// code means mootdx dropped it (delisted/suspended).
+			sym, ok := codeToSymbol[q.Symbol]
+			if !ok {
+				continue
+			}
 			items = append(items, DataItem{
 				Symbol:    sym,
 				TradeTime: q.ServerTime,

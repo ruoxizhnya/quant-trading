@@ -427,3 +427,17 @@ func toFloat64(v interface{}) (float64, error) {
 // It is intentionally not configurable at runtime: schema drift is a
 // deploy-time concern, not a runtime knob.
 var defaultTableMapper = NewTableMapper()
+
+// BulkInserter is the persistence contract that any storage backend
+// (Postgres, in-memory test double, future ClickHouse shim) must satisfy.
+// CR-21 (ODR-012): defining this interface in pkg/storage (not in
+// pkg/data/source) means consumers cannot accidentally call the wrong
+// signature. Previously etl_test.go's stub used `[]interface{}` — Go's
+// type system accepted the call site (because *PostgresStore was the
+// concrete type) but the stub method would never have been invoked by
+// the real code path, so the "test coverage" was an illusion. With this
+// interface, any test double has to use the real `[]UnifiedDataPoint`
+// signature to be assignable.
+type BulkInserter interface {
+	BulkInsert(ctx context.Context, dataType string, points []UnifiedDataPoint) (persisted int, skipped int, err error)
+}

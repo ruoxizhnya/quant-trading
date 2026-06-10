@@ -66,8 +66,16 @@ function drawTree() {
   const generations = Array.from(genMap.keys()).sort((a, b) => a - b)
   if (generations.length === 0) return
 
-  const maxGen = Math.max(...generations)
-  const minGen = Math.min(...generations)
+  // CR-24 (ODR-012): Math.max(...generations) / Math.min(...generations)
+  // spread each element as a function argument and overflow the call stack
+  // for long evolution lineages. With 1000 generations the spread would push
+  // 1000 arguments onto the stack frame. Use reduce-based safe extremes.
+  let maxGen = generations[0]
+  let minGen = generations[0]
+  for (let i = 1; i < generations.length; i++) {
+    if (generations[i] > maxGen) maxGen = generations[i]
+    if (generations[i] < minGen) minGen = generations[i]
+  }
   const genCount = maxGen - minGen + 1
 
   const nodeRadius = 20

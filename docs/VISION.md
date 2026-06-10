@@ -153,11 +153,14 @@ type Strategy interface {
     Configure(params map[string]interface{}) error
     GenerateSignals(ctx context.Context,
         bars map[string][]domain.OHLCV,
-        portfolio *domain.Portfolio) ([]Signal, error)
-    Weight(signal Signal, portfolioValue float64) float64
+        portfolio *domain.Portfolio) ([]domain.Signal, error)
+    Weight(signal domain.Signal, portfolioValue float64) float64
     Cleanup()
 }
 ```
+
+> **CR-33 (ODR-012)**: 早期 `Signal` 类型缺少 `domain.` 包前缀。已与
+> SPEC.md §Strategy Interface / AGENTS.md §6 同步修正。
 
 Strategies live in `pkg/strategy/plugins/` and auto-register via `init()`. A strategy config (YAML) provides parameters at runtime. The engine resolves strategies by name from the `GlobalRegistry`.
 
@@ -574,7 +577,7 @@ The phases below define the build order. All P0 items must be fully done (not "i
 **Key Design Principle:** AI is an augmentation layer, not a replacement. The existing backtest engine, data pipeline, and strategy framework remain the foundational assets. AI Agents call the backtest service for validation, ensuring consistency and leveraging A-share specific rules (T+1, limit up/down).
 
 **Exit criteria — all must pass before Phase 4:**
-1. **AI Agent tests:** All agent components have ≥75% test coverage ✅
+1. **AI Agent tests:** Core sub-packages (agents/expression/search/evolution) have meaningful unit-test coverage (avg ~67%, range 16-95%); top-level `pkg/ai` entrypoints have 0% coverage — the Phase 4 子包优先 / 顶层滞后模式为已知技术债 (CR-34, ODR-012)
 2. **Expression engine:** Can parse and evaluate `ts_mean(close, 20)` and `cs_rank(ts_std(returns, 60))` ✅
 3. **Gene pool persistence:** Factor and strategy genes stored in PostgreSQL with JSONB metadata ✅
 4. **Validation pipeline:** L1-L4 validation operational (syntax → quick eval → backtest → walk-forward) ✅

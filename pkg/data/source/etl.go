@@ -35,11 +35,15 @@ func toStoragePoints(in []UnifiedDataPoint) []storage.UnifiedDataPoint {
 // concerns (logging, metrics, retry policy).
 type ETLPipeline struct {
 	Registry *Registry
-	Store    *storage.PostgresStore
+	// CR-21 (ODR-012): Store is now `storage.BulkInserter` (the interface
+	// in pkg/storage), not `*storage.PostgresStore`. This lets tests inject
+	// a stub that satisfies the real signature (`[]storage.UnifiedDataPoint`)
+	// and forces every caller to match the production code path.
+	Store storage.BulkInserter
 }
 
 // NewETLPipeline constructs a pipeline. Either field may be nil for tests.
-func NewETLPipeline(reg *Registry, store *storage.PostgresStore) *ETLPipeline {
+func NewETLPipeline(reg *Registry, store storage.BulkInserter) *ETLPipeline {
 	return &ETLPipeline{Registry: reg, Store: store}
 }
 

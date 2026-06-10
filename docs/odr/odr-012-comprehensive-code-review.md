@@ -1,7 +1,7 @@
 # ODR-012: Sprint 5 — 全项目综合代码审查
 
 > **Status**: Completed
-> **Date**: 2026-06-08
+> **Date**: 2026-06-08 (initiated) → 2026-06-10 (P1 completed)
 > **Category**: Audit
 > **Related ADRs**: N/A
 > **Supersedes**: N/A
@@ -12,6 +12,18 @@
 > ./pkg/data/source/... ./cmd/data/...` / `vue-tsc --noEmit` / `npm test` (78/78) /
 > `npm run build` 全通过。P1 (CR-17~36) / P2 (CR-37~50) / P3 (CR-51~54) 留作
 > 后续 Sprint,已登记在 TASKS.md。
+>
+> **P1 Completion Update (2026-06-10)**: P1 全部 20 项 (CR-17~36) 修复完毕。
+> 后端 5 项 (CR-17~21: mootdx 批量 / bulk_insert 测试 / TopList 字段 / Registry
+> 并行 health check / etl_test 接口签名) + 前端 7 项 (CR-22~28: DetailMetrics
+> 未用 props / FitnessChart Math.max+resize / GenealogyTree Math.max /
+> api/client pagehide / sync.ts SSE / TradeTable+useAsyncBacktest 测试) +
+> 文档 8 项 (CR-29~36: SPEC 端点增补 / ADR-015 *_agent 文件名 / ADR-016
+> migration off-by-one / ODR-011 数据源 7→9 / Signal 包名前缀 / ai 75% 过度
+> 承诺 / ADR-015/016 Status / AGENTS.md services)。验证 `go vet ./...` /
+> `go build ./...` / `go test ./pkg/data/source/... ./pkg/storage/... ./cmd/...`
+> / `vue-tsc --noEmit` / `npx vitest run` (7 files, 105 tests) / `npm run build`
+> 全通过。
 
 ---
 
@@ -70,10 +82,37 @@
 
 | 优先级 | 数量 | 立即 | 后续 |
 | --- | --- | --- | --- |
-| P0 (Critical) | 16 | CR-01~16 全部本周 | — |
-| P1 (High) | 20 | CR-17~21 (后端 5) | CR-22~28 (前端 7) + CR-29~36 (文档 8) |
+| P0 (Critical) | 16 | CR-01~16 ✅ 2026-06-08 (commit `0c8bfb3`) | — |
+| P1 (High) | 20 | CR-17~21 (后端 5) ✅ + CR-22~28 (前端 7) ✅ + CR-29~36 (文档 8) ✅ 2026-06-10 | — |
 | P2 (Medium) | 14 | — | CR-37~50 |
 | P3 (Low) | 4 | — | CR-51~54 |
+
+### P1 Artifacts (2026-06-10)
+
+**后端 (5 项)**:
+- `pkg/data/source/mootdx_adapter.go` — fetchRealtime 按市场批量 (CR-17)
+- `pkg/storage/bulk_insert.go` + `pkg/storage/bulk_insert_test.go` — 单元测试覆盖 (CR-18)
+- `pkg/data/source/eastmoney_sectors_adapter.go` — TopList 4 字段硬编码 1 修正 (CR-19)
+- `pkg/data/source/registry.go` — HealthCheck 并行化 (CR-20)
+- `pkg/data/source/etl_test.go` — stubStore 接口签名对齐 (CR-21)
+
+**前端 (7 项)**:
+- `web/src/components/backtest/DetailMetrics.vue` — 清理未用 props (CR-22)
+- `web/src/components/ai/FitnessChart.vue` — Math.max 迭代式 + resize 清理 (CR-23, CR-27)
+- `web/src/components/ai/GenealogyTree.vue` — Math.max 迭代式 (CR-24)
+- `web/src/api/client.ts` — pagehide 监听器单次注册 + abort 清理 (CR-25)
+- `web/src/stores/sync.ts` — SSE EventSource.close 路径 (CR-26)
+- `web/src/utils/pairTrades.ts` + `pairTrades.test.ts` (18 测试) + `useAsyncBacktest.test.ts` (16 测试) — 核心算法/状态机测试覆盖 (CR-28)
+
+**文档 (8 项)**:
+- `docs/SPEC.md` — Analysis Service 增补 Batch/WalkForward/DataSource/Factor 19 端点 + Proxy 双轨 (CR-29)
+- `docs/adr/adr-015-ai-agent-architecture.md` — `*_agent.go` → 裸文件名 (CR-30)
+- `docs/adr/adr-016-multi-source-data-architecture.md` — migration 014→015→016→017→018 off-by-one 修正 (CR-31)
+- `docs/odr/odr-011-multi-source-integration.md` — 数据源 7→9 修正 (CR-32)
+- `docs/SPEC.md` + `docs/VISION.md` + `AGENTS.md` — `Signal` → `domain.Signal` 三处一致 (CR-33)
+- `docs/SPEC.md` + `docs/VISION.md` — ai coverage 75% → 0%/avg 67% 修正 (CR-34)
+- `docs/adr/adr-015-ai-agent-architecture.md` + `adr-016-multi-source-data-architecture.md` — Status Proposed → Accepted (CR-35)
+- `AGENTS.md` — 新增 risk-service(8083)/execution-service(8084) (CR-36)
 
 ### 关键发现 (按维度)
 
@@ -103,14 +142,17 @@
 | --- | --- |
 | 审查文件数 (后端+前端+文档) | 140+ |
 | 发现问题总数 | 54 (含 16 P0, 20 P1, 14 P2, 4 P3) |
+| **完成总数 (P0 + P1)** | **36 (16 + 20)** |
 | 高置信度 (High) 比例 | 96% (52/54) |
 | 跨子代理交叉验证 | 100% (关键 P0 全部二次确认) |
 | 文档↔代码脱节比例 | ~13% (D-001~015) |
-| 测试盲区 (0 覆盖关键包) | 2 (pkg/storage/bulk_insert.go, web/src/components/backtest/TradeTable.vue) |
+| 测试盲区 (0 覆盖关键包) | 2 (pkg/storage/bulk_insert.go, web/src/components/backtest/TradeTable.vue) → **修复** (CR-18, CR-28) |
 | 任务登记数 | 54 (CR-01 ~ CR-54) |
 | 任务数变化 | 144 → 198 (+54) |
-| 待处理数变化 | 10 → 64 (+54) |
-| 完成数变化 | 133 → 133 (无变化) |
+| 待处理数变化 | 10 → 64 → 28 (P0+P1 修复 -36) |
+| 完成数变化 | 133 → 133 → 169 (+36) |
+| P0 完成日期 | 2026-06-08 (commit `0c8bfb3`) |
+| P1 完成日期 | 2026-06-10 |
 
 ## Lessons Learned
 
@@ -133,9 +175,16 @@
 - **TASKS.md v3.3.0**: 54 项 CR 任务已登记
 - **AGENTS.md §10**: 文档维护协议 (Rule 1) — 本次发现 ODR-011 提交后未触发 SPEC/ARCHITECTURE 同步
 
+### P1 Sprint 后续建议 (P2/P3 仍 Backlog)
+
+P1 实施暴露的 2 个**新发现**(留作 P2):
+
+- **F1-new**: `pkg/ai/evolution/mutation_test.go` `TestMutation_MutateParams` 用 `math/rand` 但 seed 不固定 → 偶发失败 (p≈1/200)。修复: 在 `TestMain` 里 `rand.Seed(time.Now().UnixNano())` 改为 `rand.New(rand.NewSource(42))`,将 flake 变为确定性失败以便调试。
+- **F2-new**: Vue 3.4+ 的 `expect(value, message)` 是合法 vitest 4 签名,但 `expect(value).toBe(expected, message)` 不合法 (`toBe` 自身不接 message)。本会话发现并已修正 2 处。建议在 `web/.eslintrc` 加 `vitest/no-standalone-expect` + 在 CI 加自定义 rule。
+
 ---
 
-_Last updated: 2026-06-08_
-_Status: Completed (P0 全部 16 项修复并提交 — commit `0c8bfb3`)_
-_P0: 1-2 周 (实际 ~1 个会话), P1 (2-3 周), P2/P3 (Backlog)_
-_P1/P2/P3 状态: 已登记 TASKS.md,等待下一 Sprint 排期_
+_Last updated: 2026-06-10_
+_Status: Completed (P0 全部 16 项 + P1 全部 20 项修复 — 见 P1 Artifacts 章节)_
+_P0: 1-2 周 (实际 ~1 个会话), P1: 2-3 周 (实际 ~1 个会话)_
+_P2/P3 状态: 已登记 TASKS.md,等待下一 Sprint 排期_

@@ -1,7 +1,7 @@
 # Quant Lab — Agentic Coding Configuration
 
 > **版本**: v3.0 (基于 AGENTS Template v2.0 迁移)
-> **最后更新**: 2026-05-05
+> **最后更新**: 2026-06-10 (ODR-012 P1 20 项完成, 详见 [ODR-012](docs/odr/odr-012-comprehensive-code-review.md))
 > **适用项目**: A-share quantitative trading system (Quant Lab)
 >
 > 本文件为 AI 编码助手提供项目上下文。阅读本文件即可快速理解项目全貌。
@@ -26,9 +26,17 @@
 | 前端 SPA | Vue 3 + Naive UI | :5173 (dev) |
 | 数据服务 | Go + Gin | :8081 |
 | **AI 研究服务** | **Go + Gin** | **:8086** |
-| 策略服务 | Go + Gin | :8082 (备用) |
+| 策略服务 | Go + Gin | :8082 (备用 per ADR-012) |
+| 风控服务 | Go + Gin | :8083 |
+| 执行服务 | Go + Gin | :8084 |
 | 数据库 | PostgreSQL | :5432 |
 | 缓存 | Redis | :6379 |
+
+> **CR-36 (ODR-012)**: previously only analysis/data/strategy/AI were listed.
+> risk-service(8083) and execution-service(8084) are live in
+> `docker-compose.yml` and exercised by backtest end-to-end tests
+> (see `docs/TEST.md`). Added to the table to match the running
+> topology.
 
 ---
 
@@ -214,7 +222,7 @@ type Strategy interface {
     GenerateSignals(ctx context.Context,
         bars map[string][]domain.OHLCV,
         portfolio *domain.Portfolio) ([]domain.Signal, error)
-    Weight(signal Signal, portfolioValue float64) float64
+    Weight(signal domain.Signal, portfolioValue float64) float64
     Cleanup()
 }
 ```

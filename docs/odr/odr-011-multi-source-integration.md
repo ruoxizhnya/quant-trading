@@ -154,13 +154,21 @@
 
 | 指标 | Sprint 前 | Sprint 完成后 |
 |------|---------|---------|
-| 数据源数量 | 1 (Tushare) | 7 (含 Tushare) |
+| 数据源数量 | 1 (Tushare) | **9** (Tushare + 8 新增) — `tushare`, `mootdx`, `eastmoney` (push2), `eastmoney_sectors`, `eastmoney_toplist`, `juchao`, `xueqiu`, `alpha_vantage`, `yahoo_finance` |
 | 数据类型数量 | 8 | 20+ |
 | 实时支持 | ❌ | ✅ (mootdx，待 SDK 接入) |
 | 跨市场 | ❌ | ✅ (Alpha/Yahoo) |
 | 因子空间 | ~10 因子 | 30+ 因子 (新增 3 个 L4) |
 | 鲁棒性 | 单点故障 | 降级链 + 健康检查缓存 |
 | 观测性 | 无 | `/api/datasource/registry/*` 3 个端点 |
+>
+> **CR-32 (ODR-012)**: prior draft claimed "1 → 7" data sources; the actual
+> post-Sprint count is **9** (Tushare plus the 8 new adapters listed in the
+> Sprint breakdown above). The "1 → 7" line came from an early draft that
+> split eastmoney into 1 slot; production splits it into 3 named slots
+> (`eastmoney`, `eastmoney_sectors`, `eastmoney_toplist`) so the Registry can
+> route `DataTypeCapitalFlow`, `DataTypeSectors`, and `DataTypeTopList`
+> independently without one adapter's failure blocking the others.
 
 ---
 

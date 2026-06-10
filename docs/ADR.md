@@ -93,5 +93,5 @@ ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical examp
 
 ---
 
-_Last updated by: AI Assistant — 2026-06-08 (ADR-011~016 indexed; ODR-012 marked Completed; index version 2.4.1)_
+_Last updated by: AI Assistant — 2026-06-10 (ODR-012 P1 20 项修复完成并入索引; index version 2.4.2)_
 _ODR 累计 12 条: Cleanup 3 (ODR-001/006/008) | Audit 4 (ODR-002/009/010/012) | Migration 4 (ODR-003/005/007/011) | Process 1 (ODR-004)_

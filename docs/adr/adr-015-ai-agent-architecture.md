@@ -1,10 +1,15 @@
 # ADR-015: AI Agent Quantitative Research Architecture
 
-> **Status**: Proposed  
+> **Status**: Accepted  
 > **Date**: 2026-05-04  
 > **Category**: Architecture  
 > **Related ADRs**: ADR-014 (Strategy Framework Refactor), ADR-007 (AI Sandbox)  
 > **Author**: AI Assistant
+>
+> **CR-35 (ODR-012)**: Status updated from "Proposed" to "Accepted" — the
+> AI Research Service (`cmd/ai`, port 8086) is implemented, registered in
+> `docker-compose.yml`, and exercised by the AIResearch.vue page. Pipeline
+> end-to-end works: intent → YAML → code → compile → backtest.
 
 ---
 
@@ -190,10 +195,15 @@ CREATE TABLE strategy_genes (
 
 | Agent | 责任 | 实现状态 | 文件 |
 |-------|-----|---------|------|
-| Research | 因子假设生成 | ✅ | `pkg/ai/agents/research_agent.go` |
-| Generate | 策略代码生成 | ✅ | `pkg/ai/agents/generate_agent.go` |
-| Validate | 多层验证 | ✅ | `pkg/ai/agents/validate_agent.go` |
-| Evolve | 种群进化 | ✅ | `pkg/ai/agents/evolve_agent.go` |
+| Research | 因子假设生成 | ✅ | `pkg/ai/agents/research.go` |
+| Generate | 策略代码生成 | ✅ | `pkg/ai/agents/generate.go` |
+| Validate | 多层验证 | ✅ | `pkg/ai/agents/validate.go` |
+| Evolve | 种群进化 | ✅ | `pkg/ai/agents/evolve.go` |
+
+> **CR-30 (ODR-012)**: 早期草稿引用了 `*_agent.go`（如 `research_agent.go`），
+> 但实际目录 `pkg/ai/agents/` 中无 `_agent` 后缀（参见
+> [AGENTS.md](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md) §3
+> 目录树）。修正为裸文件名以与 `ls pkg/ai/agents/` 输出一致。
 
 ### 维度 3: Factor Expression DSL
 

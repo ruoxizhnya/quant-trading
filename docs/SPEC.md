@@ -175,8 +175,8 @@ type Strategy interface {
     Configure(params map[string]interface{}) error
     GenerateSignals(ctx context.Context,
         bars map[string][]domain.OHLCV,
-        portfolio *domain.Portfolio) ([]Signal, error)
-    Weight(signal Signal, portfolioValue float64) float64
+        portfolio *domain.Portfolio) ([]domain.Signal, error)
+    Weight(signal domain.Signal, portfolioValue float64) float64
     Cleanup()
 }
 ```

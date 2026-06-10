@@ -191,23 +191,47 @@ func (r *Registry) Fetch(ctx context.Context, req FetchRequest) (*FetchResponse,
 func (r *Registry) HealthCheck(ctx context.Context) map[string]error {
 	r.mu.RLock()
 	names := make([]string, 0, len(r.adapters))
-	for n := range r.adapters {
+	snapshot := make(map[string]DataSourceAdapter, len(r.adapters))
+	for n, a := range r.adapters {
 		names = append(names, n)
+		snapshot[n] = a
 	}
 	r.mu.RUnlock()
 	sort.Strings(names)
 
+	// CR-20 (ODR-012): the previous loop called `a.HealthCheck(ctx)` serially
+	// in the registry's read-lock-free section. For 9 adapters each with a
+	// 500ms-cold TCP/HTTP probe, the API call to /api/datasource/registry/health
+	// took 4.5s. Run them concurrently under a single shared context, but
+	// cap parallelism at 8 so we don't open 100 TCP connections if a future
+	// config files in 50 adapters. The map write is safe — each goroutine
+	// writes a distinct key.
+	const maxParallel = 8
 	out := make(map[string]error, len(names))
+	var (
+		wg sync.WaitGroup
+		mu sync.Mutex
+	)
+	sem := make(chan struct{}, maxParallel)
+
 	for _, n := range names {
-		r.mu.RLock()
-		a := r.adapters[n]
-		r.mu.RUnlock()
+		a := snapshot[n]
 		if a == nil {
 			out[n] = errors.New("nil adapter")
 			continue
 		}
-		out[n] = a.HealthCheck(ctx)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(name string, adapter DataSourceAdapter) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			err := adapter.HealthCheck(ctx)
+			mu.Lock()
+			out[name] = err
+			mu.Unlock()
+		}(n, a)
 	}
+	wg.Wait()
 	return out
 }
 
