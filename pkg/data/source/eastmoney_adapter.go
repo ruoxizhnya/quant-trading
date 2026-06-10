@@ -55,6 +55,17 @@ func (c *EastmoneyClient) GetJSON(ctx context.Context, base string, path string,
 		return fmt.Errorf("eastmoney: %w", err)
 	}
 	defer resp.Body.Close()
+	// CR-52 (ODR-012): Eastmoney signals throttling via 429; surface it as
+	// ErrRateLimited so the Registry's fallback chain skips to the next
+	// adapter instead of treating it as a generic upstream outage (which
+	// the user would see as "Eastmoney is down" — misleading because the
+	// real cause is rate-limit, not unavailability). 5xx remains
+	// ErrUpstreamUnavailable: those are real outages and deserve a
+	// different operator response.
+	if resp.StatusCode == http.StatusTooManyRequests {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("%w: eastmoney 429: %s", ErrRateLimited, string(body))
+	}
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("%w: eastmoney %d: %s", ErrUpstreamUnavailable, resp.StatusCode, string(body))
@@ -252,7 +263,8 @@ func (a *EastmoneyAdapter) fetchCapitalFlowForSymbol(ctx context.Context, sym, p
 	q.Set("secid", secid)
 	q.Set("fields1", "f1,f2,f3,f4")
 	q.Set("fields2", "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65")
-	q.Set("klt", "1")
+	klt := 1 // daily
+	q.Set("klt", strconv.Itoa(klt))
 	q.Set("fqt", "1")
 	if !start.IsZero() {
 		q.Set("beg", start.Format("20060102"))
@@ -260,7 +272,11 @@ func (a *EastmoneyAdapter) fetchCapitalFlowForSymbol(ctx context.Context, sym, p
 	if !end.IsZero() {
 		q.Set("end", end.Format("20060102"))
 	}
-	q.Set("lmt", "1000")
+	// CR-41 (ODR-012): lmt must match the requested time window. The
+	// previous hard-coded 1000 silently truncated anything beyond ~4
+	// years of daily bars (≈1000 trading days). Compute the minimum
+	// lmt that covers the window, with a sensible cap.
+	q.Set("lmt", strconv.Itoa(eastmoneyCapitalFlowLmt(klt, start, end)))
 	q.Set("klines", "0")
 
 	var resp eastmoneyPush2Response
@@ -292,6 +308,73 @@ func (a *EastmoneyAdapter) fetchCapitalFlowForSymbol(ctx context.Context, sym, p
 		})
 	}
 	return items, nil
+}
+
+// eastmoneyCapitalFlowLmt computes the minimum `lmt` (max K-line
+// points) the Eastmoney capital-flow endpoint must return to fully
+// cover the [start, end] window. CR-41 (ODR-012): the previous
+// hard-coded `lmt=1000` silently truncated any window wider than ~4
+// years of daily bars — the upstream caps results at lmt and we had
+// no signal that data was missing.
+//
+// The conversion factor per `klt` (K-line type) is approximate
+// (Chinese A-share calendar ≈ 244 trading days/year, with weeks and
+// months computed from that). We always add a small headroom of 20%
+// to absorb months with extra trading days and we clamp the result
+// to a sensible upper bound so a 50-year window can't blow up the
+// request.
+func eastmoneyCapitalFlowLmt(klt int, start, end time.Time) int {
+	const (
+		headroom     = 1.2  // 20% safety margin
+		maxLmt       = 8000 // ~33 years of daily bars; above this, paginate
+		defaultDaily = 1000 // upstream default — used when no window is given
+	)
+	if start.IsZero() || end.IsZero() || !end.After(start) {
+		// No window (or invalid): defer to upstream default. CR-41
+		// regression: the previous code also used 1000 in this case,
+		// so we preserve that behaviour.
+		return defaultDaily
+	}
+	// Approximate period length per klt value (Eastmoney convention):
+	//   1  → 1 day,  5 → 5 min, 15 → 15 min, 30 → 30 min, 60 → 60 min,
+	//   101 → 1 week, 102 → 1 month
+	daysPerPeriod := kltToDays(klt)
+	if daysPerPeriod <= 0 {
+		daysPerPeriod = 1
+	}
+	windowDays := int(end.Sub(start).Hours()/24) + 1
+	periods := int(float64(windowDays)/float64(daysPerPeriod)*headroom) + 1
+	if periods > maxLmt {
+		return maxLmt
+	}
+	if periods < 1 {
+		return 1
+	}
+	return periods
+}
+
+// kltToDays maps Eastmoney's klt (K-line type) parameter to an
+// approximate number of calendar days per period. Used by
+// eastmoneyCapitalFlowLmt to translate the requested time window
+// into a row count.
+//
+// CR-41: previously, lmt was hard-coded to 1000 regardless of
+// klt, so weekly/monthly requests also got truncated at 1000
+// periods (≈19 years for weekly, ≈83 years for monthly — the
+// latter accidentally worked; the former didn't).
+func kltToDays(klt int) int {
+	switch klt {
+	case 1:
+		return 1 // 1 day
+	case 5, 15, 30, 60:
+		return 1 // intraday — one trading day, multiple bars
+	case 101:
+		return 7 // 1 week
+	case 102:
+		return 30 // 1 month
+	default:
+		return 1
+	}
 }
 
 // parseEastmoneyCapitalFlowKLines parses the comma-separated rows from

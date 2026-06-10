@@ -61,6 +61,10 @@ func (a *EastmoneySectorsAdapter) Schema(dataType string) (DataSchema, error) {
 			DataType: DataTypeStockSector,
 			Fields: []SchemaField{
 				{Name: "sector_name", Type: "string", Required: true},
+				// CR-38 (ODR-012): add category so consumers can distinguish
+				// industry (f100/f102) from concept (f101/f103) sectors
+				// emitted by the same per-stock endpoint.
+				{Name: "category", Type: "string", Required: false},
 			},
 		}, nil
 	default:
@@ -163,11 +167,16 @@ func (a *EastmoneySectorsAdapter) fetchSectorList(ctx context.Context, req Fetch
 
 // fetchStockSectors fetches sector membership for a list of symbols.
 // Eastmoney returns sector codes per stock via
-//   GET /api/qt/stock/get?secid=1.600519&fields=f100,f102,...
-// but the most reliable approach is the sector list endpoint with a
-// per-stock filter:
-//   GET /api/qt/clist/get?fs=m:90+t:2+f:!2,m:90+t:3+f:!2&...
-// (We use the simpler approach: call per symbol.)
+//   GET /api/qt/stock/get?secid=1.600519&fields=f100,f101,f102,f103
+//   - f100: 行业名称 (industry name, e.g. "银行")
+//   - f101: 概念名称 (concept name, e.g. "区块链")
+//   - f102: 行业代码 (industry code)
+//   - f103: 概念代码 (concept code)
+//
+// CR-38 (ODR-012): previously only f100/f102 were requested, so concept
+// membership was silently dropped. We now request all four fields and
+// emit a separate DataItem per (industry, concept) pair, tagged with a
+// `category` field so downstream consumers can distinguish them.
 func (a *EastmoneySectorsAdapter) fetchStockSectors(ctx context.Context, req FetchRequest) (*FetchResponse, error) {
 	if len(req.Symbols) == 0 {
 		return nil, fmt.Errorf("eastmoney-sectors stock_sector: symbols required")
@@ -188,13 +197,26 @@ func (a *EastmoneySectorsAdapter) fetchStockSectors(ctx context.Context, req Fet
 }
 
 // stockSectorResponse is the per-symbol sector membership response.
+// CR-38: the Industry map carries f100 (industry name), f101 (concept
+// name), f102 (industry code) and f103 (concept code) — all four must
+// be present in the requested `fields` query parameter to be populated.
 type stockSectorResponse struct {
 	Data struct {
-		Code string                   `json:"code"`
-		Name string                   `json:"name"`
-		Industry map[string]interface{} `json:"industry"`
+		Code     string                   `json:"code"`
+		Name     string                   `json:"name"`
+		Industry map[string]interface{}   `json:"industry"`
 	} `json:"data"`
 }
+
+// stockSectorCategory is the per-emission sector category tag. CR-38
+// (ODR-012): downstream code can filter on `category` to keep industry
+// and concept membership separate.
+type stockSectorCategory string
+
+const (
+	stockSectorCategoryIndustry stockSectorCategory = "industry"
+	stockSectorCategoryConcept  stockSectorCategory = "concept"
+)
 
 func (a *EastmoneySectorsAdapter) fetchStockSectorsForSymbol(ctx context.Context, sym string) ([]DataItem, error) {
 	secid, err := symbolToEastmoneySecid(sym)
@@ -203,7 +225,9 @@ func (a *EastmoneySectorsAdapter) fetchStockSectorsForSymbol(ctx context.Context
 	}
 	q := url.Values{}
 	q.Set("secid", secid)
-	q.Set("fields", "f100,f102")
+	// CR-38: include f101/f103 so concept sectors are returned. The
+	// endpoint's `industry` JSON object carries all four fields flat.
+	q.Set("fields", "f100,f101,f102,f103")
 	q.Set("invt", "2")
 	q.Set("fltt", "2")
 
@@ -211,27 +235,72 @@ func (a *EastmoneySectorsAdapter) fetchStockSectorsForSymbol(ctx context.Context
 	if err := a.client.GetJSON(ctx, a.client.BaseURL, "/api/qt/stock/get", q, &resp); err != nil {
 		return nil, err
 	}
-	// Industry field may be a string like "银行" or a list of sector codes.
-	var industries []string
-	if s, ok := resp.Data.Industry["f100"].(string); ok && s != "" {
-		industries = append(industries, s)
+	items := buildStockSectorItems(sym, resp.Data.Industry)
+	return items, nil
+}
+
+// buildStockSectorItems turns the Eastmoney `data.industry` map into
+// per-category DataItems. Each (category, sector) pair produces one
+// item; rows with both name and code empty are dropped.
+//
+// CR-38 (ODR-012): extracted from fetchStockSectorsForSymbol so the
+// field → category mapping is unit-testable without a live HTTP
+// round-trip. See TestBuildStockSectorItems in source_test.go.
+func buildStockSectorItems(sym string, industry map[string]interface{}) []DataItem {
+	type mapping struct {
+		category stockSectorCategory
+		nameKey  string
+		codeKey  string
 	}
-	if s, ok := resp.Data.Industry["f102"].(string); ok && s != "" {
-		industries = append(industries, s)
+	// Field map per CR-38: f100/f102 = industry, f101/f103 = concept.
+	mappings := []mapping{
+		{stockSectorCategoryIndustry, "f100", "f102"},
+		{stockSectorCategoryConcept, "f101", "f103"},
 	}
-	items := make([]DataItem, 0, len(industries))
+	items := make([]DataItem, 0, len(mappings))
 	now := time.Now().UTC()
-	for _, ind := range industries {
+	for _, m := range mappings {
+		name := stringField(industry, m.nameKey)
+		code := stringField(industry, m.codeKey)
+		if name == "" && code == "" {
+			continue
+		}
+		// If only a name is present (Eastmoney occasionally returns
+		// the name without a code for newer/hot sectors), fall back to
+		// the name as a stable code so the row is still ingestable.
+		if code == "" {
+			code = name
+		}
 		items = append(items, DataItem{
 			Symbol:    sym,
 			TradeTime: now,
 			Data: map[string]interface{}{
-				"sector_code": ind,
-				"sector_name": ind,
+				"sector_code": code,
+				"sector_name": name,
+				"category":    string(m.category),
 			},
 		})
 	}
-	return items, nil
+	return items
+}
+
+// stringField returns the string value of key in m, or "" if absent
+// or non-string. Eastmoney's per-stock endpoint encodes f100–f103 as
+// raw strings (e.g. "银行", "BK0001"), but defensive parsing keeps us
+// resilient if the upstream ever switches to numeric codes.
+func stringField(m map[string]interface{}, key string) string {
+	if m == nil {
+		return ""
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return s
 }
 
 // HealthCheck implements DataSourceAdapter.HealthCheck.
