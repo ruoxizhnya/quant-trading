@@ -2,9 +2,9 @@
 
 > **Location:** `docs/adr/` — architectural ADR files | `docs/odr/` — operational ODR files
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Version:** 2.4.0
+> **Version:** 2.5.0
 > **Created:** 2026-03-24
-> **Updated:** 2026-06-08
+> **Updated:** 2026-06-11
 
 ---
 
@@ -18,8 +18,8 @@
 | [ADR-004](adr/adr-004-scoring-method.md) | Rank-Based Composite Scoring vs. Portfolio Optimization | Accepted | 2026-03-24 |
 | [ADR-005](adr/adr-005-strategy-config.md) | YAML Strategy Config vs. Database-Driven Strategy Config | Accepted | 2026-03-24 |
 | [ADR-006](adr/adr-006-job-queue.md) | Job Queue Technology Selection | OPEN | 2026-03-24 |
-| [ADR-007](adr/adr-007-ai-sandbox.md) | AI Evolution Layer — Sandbox & Safety | OPEN | 2026-03-24 |
-| [ADR-008](adr/adr-008-inter-service-comm.md) | Synchronous vs. Async Inter-Service Communication | PARTIAL | 2026-03-24 |
+| [ADR-007](adr/adr-007-ai-sandbox.md) | AI Evolution Layer — Sandbox & Safety | **Accepted** (2026-06-11) | 2026-03-24 |
+| [ADR-008](adr/adr-008-inter-service-comm.md) | Synchronous vs. Async Inter-Service Communication | **Accepted** (2026-06-11) | 2026-03-24 |
 | [ADR-009](adr/adr-009-speed-target-revision.md) | Speed Target Revision — Phase 1 Exit Criteria | Decided | 2026-03-25 |
 | [ADR-010](adr/adr-010-speed-architecture.md) | Speed Optimization Architecture — Phase 2 | Draft | 2026-03-25 |
 | [ADR-011](adr/adr-011-vue-spa-frontend.md) | Vue 3 SPA as Official Frontend (Replacing Legacy HTML) | Accepted | 2026-04-11 |
@@ -28,6 +28,10 @@
 | [ADR-014](adr/adr-014-strategy-framework-refactor.md) | Strategy Framework Refactor & Unified Interface | Proposed | 2026-05-04 |
 | [ADR-015](adr/adr-015-ai-agent-architecture.md) | AI Agent Quantitative Research Architecture | Proposed | 2026-05-04 |
 | [ADR-016](adr/adr-016-multi-source-data-architecture.md) | Multi-Source Data Architecture | Proposed | 2026-05-17 |
+| [ADR-017](adr/adr-017-observability-and-auth.md) | Observability Stack + API Authentication (前置 Phase 4) | Proposed | 2026-06-11 |
+| [ADR-018](adr/adr-018-test-and-async-safety.md) | Testing Architecture + Async Safety + Determinism | Proposed | 2026-06-11 |
+| [ADR-019](adr/adr-019-service-merge-ai-copilot.md) | Service 合并 + AI Copilot Sandbox 重构 | Proposed | 2026-06-11 |
+| [ADR-020](adr/adr-020-engine-decomposition.md) | Engine God Object 拆分 + 函数式依赖注入 | Proposed | 2026-06-11 |
 
 ---
 
@@ -47,6 +51,8 @@
 | [ODR-010](odr/odr-010-code-doc-audit-2026-05-17.md) | 2026-05-17 全项目代码与文档一致性审查 | Completed | Audit | 2026-05-17 |
 | [ODR-011](odr/odr-011-multi-source-integration.md) | Multi-Source Data Integration (ashare-data-source-fetchers 整合) | Completed | Migration | 2026-05-17 → 2026-06-08 |
 | [ODR-012](odr/odr-012-comprehensive-code-review.md) | Sprint 5 — 全项目综合代码审查 (代码质量/测试/文档一致性 4 维度) | Completed | Audit | 2026-06-08 |
+| [ODR-013](odr/odr-013-comprehensive-audit-2026-06-11.md) | Sprint 6 — 全项目 4 维度综合审查 (业务/架构/代码/测试) | Accepted | Audit | 2026-06-11 |
+| [ODR-014](odr/odr-014-sprint6-spec-migration.md) | Sprint 6 对齐审查 Spec 文件迁移 + 合并回长效文档 | Completed | Migration | 2026-06-11 |
 
 ---
 
@@ -61,6 +67,7 @@
 | Accepted | Decided and implemented |
 | Decided | Decided but not yet implemented |
 | Superseded | Replaced by a later ADR |
+| Proposed | Draft submitted, awaiting review/decision (Sprint 6+ style) |
 
 ### ODR Status
 | Status | Meaning |
@@ -75,10 +82,10 @@
 
 ## Future ADRs
 
-| ADR | Topic | Phase |
-|-----|-------|-------|
-| ADR-017 | API authentication and access control | Phase 5 |
-| ADR-018 | Docker networking → Kubernetes service discovery | Phase 5 |
+| ADR | Topic | Phase | Note |
+|-----|-------|-------|------|
+| ~~ADR-017 (API auth)~~ | ~~Phase 5~~ | **Promoted to Sprint 6 via ADR-017** | 2026-06-11 |
+| ADR-018 | Docker networking → Kubernetes service discovery | Phase 5 | 待定 |
 
 ---
 
@@ -92,6 +99,10 @@ When to create an ODR:
 ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical example.
 
 ---
-
-_Last updated by: AI Assistant — 2026-06-10 (ODR-012 P1 20 项修复完成并入索引; index version 2.4.2)_
-_ODR 累计 12 条: Cleanup 3 (ODR-001/006/008) | Audit 4 (ODR-002/009/010/012) | Migration 4 (ODR-003/005/007/011) | Process 1 (ODR-004)_
+_Last updated by: AI Assistant — 2026-06-11 (Sprint 6 启动 + ODR-013 综合审查 + ADR-017~020 提交 + ADR-007/008 状态更新为 Accepted + ODR-014 文件迁移 + Spec 内容合并至长效文档; index version 2.7.0)_
+_ADR 累计 20 条: 架构 16 + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020)_
+_ODR 累计 14 条: Cleanup 3 (ODR-001/006/008) | Audit 5 (ODR-002/009/010/012/013) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004)_
+_2026-06-11 状态变更: ADR-007 OPEN→Accepted, ADR-008 PARTIAL→Accepted, ADR-017~020 新建 Proposed, ODR-014 新建 Completed (Sprint 6 spec 迁移 + 内容合并回长效文档: ODR-013/VISION.md/TASKS.md)_
+_docs/ 新增内容: VISION.md §Principle 8 (Documentation-Path Consistency) + TASKS.md §Sprint 6 启动期 待校核项 (6 项)_
+_.trae/ 临时目录: 已清空并删除 (3 个文件迁至 docs/specs/ 后已合并回 ODR-013/VISION.md/TASKS.md)_
+_docs/specs/ 临时目录: 已清空并删除 (内容合并至 ODR-013 §对齐审计复核 + VISION.md §Principle 8 + TASKS.md §Sprint 6 启动期 待校核项)_

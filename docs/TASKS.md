@@ -898,6 +898,196 @@
 
 ***
 
+## 🚀 Sprint 6: ODR-013 综合审查闭环 (2026-06-11 → 2026-07-02)
+
+> **来源**: [ODR-013 全项目 4 维度综合审查](odr/odr-013-comprehensive-audit-2026-06-11.md) (2026-06-11)
+> **综合评分**: 59/100（业务 68 + 架构 62 + 代码 72 + 测试 47）
+> **总任务数**: **73 项** (P0: 10 + P1: 30 + P2: 33)
+> **关联 ADR**: [ADR-007](adr/adr-007-ai-sandbox.md) (Accepted) + [ADR-008](adr/adr-008-inter-service-comm.md) (Accepted) + [ADR-017](adr/adr-017-observability-and-auth.md) + [ADR-018](adr/018-test-and-async-safety.md) + [ADR-019](adr/019-service-merge-ai-copilot.md) + [ADR-020](adr/020-engine-decomposition.md)
+> **Owner**: 龙少 (Longshao) — AI Assistant
+> **Sprint 周期**: 3 周 (2026-06-11 → 2026-07-02)
+> **CI Gate**: `go test -race -count=1 ./...` 0 panic + `pkg/storage` 覆盖率 ≥ 60% + `go vet ./...` 0 issue
+> **对齐审计**: 2026-06-11 完成；详见 [ODR-013 §对齐审计复核 (2026-06-11)](odr/odr-013-comprehensive-audit-2026-06-11.md#对齐审计复核-2026-06-11-同日) — 路径/行号/描述对齐项目实际状态后完成 4 类修正（P1-15 路径、P0-2 lock-during-I/O、P1-19 setter 数量、P1-2/8 migrations 格式）；剩余 6 类"待校核项"见 [§Sprint 6 启动期 待校核项](#-sprint-6-启动期-待校核项-6-项)
+
+### 🔴 Sprint 6 P0 — 必须立即修复 (10 项) [CI 阻断]
+
+> **验收**: Sprint 6 第 1 周末 (2026-06-18) 前全部完成。CI 任何 P0 未完成 → 阻断部署。
+
+| ID | 任务 | 关联问题 | 文件 | Owner | 估时 | 验收标准 | 状态 |
+|---|---|---|---|---|---|---|---|
+| **P0-1** | LLMClient interface 化 | TQ-003, CQ-003 | `pkg/ai/client.go`, `pkg/strategy/copilot.go` | TBD | 1d | `pkg/strategy` 测试套件 `go test` 0 panic | ⬜ |
+| **P0-2** | 修复 `pkg/live/engine.go::Stop` 持锁跨越 `Unsubscribe`/`Disconnect` 网络 I/O（类似 CR-02 ODR-012 模式） | CQ-009 | `pkg/live/engine.go:Stop` | TBD | 1d | 锁在 `close(stopCh)` 后立即释放；`TestLiveEngine_Stop_Concurrent` 1000 次并发无 deadlock | ⬜ |
+| **P0-3** | 引入 OpenTelemetry + Prometheus + `/metrics` + request_id 透传 | AR-001, ADR-017 §1 | `cmd/analysis/main.go` | TBD | 2d | `/metrics` 端点暴露 4 类核心 metric；trace_id 跨服务透传 | ⬜ |
+| **P0-4** | Copilot `WorkingDir` 配置化 + 静态分析闸 (sandbox 阶段 1) | AR-003, ADR-007/019 §2 | `pkg/strategy/copilot.go`, `internal/sandbox/staticcheck/` | TBD | 1d | 硬编码路径消除；危险模式 (`os.RemoveAll`/`exec.Command`) 拒绝 | ⬜ |
+| **P0-5** | `engine.go::rand.NewSource` 返回值保留 + 确定性重放 | AR-007, CQ-001 | `pkg/backtest/engine.go:244-246` | TBD | 2d | `TestEngine_DeterministicReplay` byte-level 通过 | ⬜ |
+| **P0-6** | `pkg/backtest` 并发 map panic 修复 (RWMutex + race test) | CQ-019, TQ-012 | `pkg/backtest/engine.go`, `pkg/backtest/job.go` | TBD | 2d | `go test -race ./pkg/backtest/...` 0 竞态 | ⬜ |
+| **P0-7** | `pkg/storage` dockertest 集成测试 | TQ-011, AR-013 | `pkg/storage/integration_test.go` (新建) | TBD | 3d | 集成测试覆盖率 8.2% → ≥ 60% | ⬜ |
+| **P0-8** | `cmd/analysis` 优雅停机 (WaitGroup + stale 'running' cleanup) | AR-005, TQ-008 | `cmd/analysis/main.go`, `pkg/backtest/job.go` | TBD | 2d | SIGTERM 后 DB status 全部 'completed'/'failed' | ⬜ |
+| **P0-9** | AI service token bucket 限流 (10 req/min/user) | AR-004, AR-008, ADR-017 §2 | `cmd/ai/main.go` | TBD | 1d | 限流生效；超限返 429 | ⬜ |
+| **P0-10** | 删除 8 处手写 `max`/`min`，改用 Go 1.21+ 内建 | CQ-003 | `pkg/live/mock_trader.go:337`, `pkg/backtest/execution.go:147,154`, `pkg/ai/evolution/mutation.go:137,144`, `pkg/ai/metrics/turnover.go:112,126`, `pkg/ai/expression/evaluator.go:345` | TBD | 0.5d | `go vet` + 编译通过；测试通过 | ⬜ |
+
+### 🟠 Sprint 6 P1 — 1 周内修复 (30 项)
+
+> **验收**: Sprint 6 第 2 周末 (2026-06-25) 前全部完成。
+
+| ID | 任务 | 关联问题 | 文件 | Owner | 估时 | 验收标准 | 状态 |
+|---|---|---|---|---|---|---|---|
+| **P1-1** | 文档一致化 (VISION/SPEC/AGENTS 覆盖率 + Phase 状态对齐) | BR-001/008, TQ-009 | `docs/VISION.md`, `docs/SPEC.md`, `docs/AGENTS.md` | TBD | 2d | ODR-014 文档一致化创建；3 处状态冲突消除 | ⬜ |
+| **P1-2** | RBAC + JWT auth + audit_logs 表 + bcrypt login | AR-004, BR-002, ADR-017 §2 | `cmd/analysis/main.go`, migrations/019_*.sql | TBD | 1w | `POST /api/auth/login` 工作；mutating 端点需 token | ⬜ |
+| **P1-3** | LiveEngine 限价单实现 (Limit / Stop / Trailing) | AR-015 | `pkg/live/engine.go:tryFillOrder` | TBD | 3d | tryFillOrder 接受 OrderTypeLimit；价格匹配逻辑测试 | ⬜ |
+| **P1-4** | A 股券商真实对接 (中泰 XTP 推荐) | BR-003, BR-005 | `pkg/live/broker/xtp/` (新建) | TBD | 2w | 模拟账户下单/撤单/查询 working | ⬜ |
+| **P1-5** | A 股价格笼子校验 (沪深/创/科/北 4 套) | BR-004 | `pkg/live/price_cage.go` (新建) | TBD | 1w | 4 套笼子规则测试 + 主板 ±2% 模拟 | ⬜ |
+| **P1-6** | 集合竞价撮合 (9:15-9:25 + 14:57-15:00) | BR-004, BR-017 | `pkg/backtest/auction.go` (新建) | TBD | 1w | 开盘集合 + 收盘集合状态机测试 | ⬜ |
+| **P1-7** | 4 黄金 fixture 补全 (momentum/value/T+1/zhangting) | TQ-009, TEST.md §2.3 | `pkg/backtest/testdata/` | TBD | 2d | 4 fixture 存在；`TestGolden_*` 容差 ±0.01 | ⬜ |
+| **P1-8** | users/audit_logs 表 + JWT middleware + login endpoint | AR-004, ADR-017 | `migrations/019_add_auth_tables.sql` (扁平命名), `cmd/analysis/auth/` | TBD | 1w | 同 P1-2 (合并) | ⬜ |
+| **P1-9** | testing/quick property-based 5 个 invariant | TQ-014, TEST.md §2.4 | `pkg/backtest/property_test.go` (新建) | TBD | 3d | 1000 次随机序列不违反 5 个 property | ⬜ |
+| **P1-10** | research_batch_test.go fail-gate (10+ factors IC>0.03) | TQ-007, TQ-015 | `pkg/ai/agents/research_batch_test.go` | TBD | 1d | `assert.GreaterOrEqual(highICFactors, 10)` 通过 | ⬜ |
+| **P1-11** | AI Copilot 进程隔离 sandbox (Phase 2) | AR-003, ADR-007/019 | `internal/sandbox/runner/` (新建) | TBD | 1w | subprocess + rlimit + 5s timeout working | ⬜ |
+| **P1-12** | L4 validate 实际 walk-forward 实现 (非 placeholder) | TQ-007 | `pkg/ai/agents/validate.go:validateL4` | TBD | 3d | L4 真实跑 walk-forward；Score 不再恒 4.0 | ⬜ |
+| **P1-13** | AI Pipeline L5 人工审查 UI (Approve/Reject/Edit) | BR-013 | `web/src/components/ai/ReviewActions.vue` (新建) | TBD | 3d | PipelineDashboard 有 3 按钮 + POST /api/pipeline/jobs/:id/review | ⬜ |
+| **P1-14** | AI service httpclient 加固 (timeout/retry/rate/cost) | AR-008, AR-017 | `pkg/ai/client.go` | TBD | 3d | OTel trace；token bucket；cost table 写入 | ⬜ |
+| **P1-15** | risk/execution service 合并到 analysis (7→3 服务) | AR-002, ADR-008/019 | `cmd/risk/`, `cmd/execution/` (服务名 risk-service/execution-service 在 docker-compose 中) | TBD | 1w | Docker compose 3 服务；`engine.go` 0 HTTP 调用 | ⬜ |
+| **P1-16** | Engine 拆 CacheManager + FactorCacheAccessor | CQ-001, ADR-020 | `pkg/backtest/cache.go`, `pkg/backtest/factor_cache.go` | TBD | 3d | 2 子包独立测试；Engine 减少 ~300 行 | ⬜ |
+| **P1-17** | Engine 拆 LiveBridge + ExecutionBridge | CQ-001, ADR-020 | `pkg/backtest/live_bridge.go`, `pkg/backtest/execution_bridge.go` | TBD | 3d | 2 子包独立测试；Engine 减少 ~200 行 | ⬜ |
+| **P1-18** | StateStore interface + LRU/持久化 | CQ-008, AR-012, ADR-020 | `pkg/backtest/state_store.go` (新建) | TBD | 2d | LRU 1000 条 + 落 PG；backtests map 内存不再泄漏 | ⬜ |
+| **P1-19** | EngineOption 函数式注入 + backward-compat shim | CQ-005, ADR-020 | `pkg/backtest/engine.go` | TBD | 3d | `NewEngine(cfg, prov, opts...)` working；旧 5 个 engine setter（SetDataAdapter/SetStore/SetRiskManager/SetLiveTrader/SetExecutionService）+ 1 个 strategy SetFactorCache 共 6 个 setter 保留 6 个月 backward-compat | ⬜ |
+| **P1-20** | BacktestState 内部锁 + Freeze 模式 | AR-014, ADR-020 | `pkg/backtest/engine.go` (BacktestState struct) | TBD | 2d | race detector 0 issue；回测完成冻结 | ⬜ |
+| **P1-21** | `pkg/statistics/` 包抽取 (mean/std/slope/volatility) | CQ-004 | `pkg/statistics/` (新建) | TBD | 2d | 6+ 处重复消除；单包覆盖率 ≥ 80% | ⬜ |
+| **P1-22** | `pkg/fees/ashare.go` 费率常量统一 | CQ-005 | `pkg/fees/ashare.go` (新建) | TBD | 1d | 4 处硬编码消除；单包测试 | ⬜ |
+| **P1-23** | `pkg/id/order.go` UUID v7 统一 | CQ-007 | `pkg/id/order.go` (新建) | TBD | 1d | 3 处订单号生成统一；测试 | ⬜ |
+| **P1-24** | Strategy 接口拆分 (StrategyCore/Configurable/ResourceManaged) | CQ-006, ISP | `pkg/strategy/strategy.go` | TBD | 2d | 3 个可组合 interface；现有 strategy 适配 | ⬜ |
+| **P1-25** | domain.Strategy Deprecated 删除 | CQ-014 | `pkg/domain/types.go` | TBD | 0.5d | 旧接口移除；pkg/strategy.Strategy 唯一源 | ⬜ |
+| **P1-26** | 4 套执行实体合并 (LiveEngine/OrderManager/...) | CQ-010, YAGNI | `pkg/live/` | TBD | 1w | 5 套 → 2 套 (LiveEngine + MockTrader) | ⬜ |
+| **P1-27** | `pkg/strategy/plugins/utils.go` 删除手写 `itoa`/`ftoa`/`joinStrings` | CQ-006 | `pkg/strategy/plugins/utils.go` | TBD | 0.5d | 标准库替换；测试通过 | ⬜ |
+| **P1-28** | Redis 缓存 key namespace 化 (`quantlab:` 前缀) | AR-021 | `pkg/storage/redis.go` | TBD | 1d | 全部 key 加前缀；InvalidateOHLCV 限定 pattern | ⬜ |
+| **P1-29** | 持仓超限/行业集中度/回撤告警 (AlertManager) | BR-015, ADR-017 | `pkg/alert/manager.go` (新建) | TBD | 1w | 6 类 P0 风险告警；webhook 渠道 | ⬜ |
+| **P1-30** | E2E AI Copilot 端到端 + SSE 进度 | TQ-016, BR-014 | `e2e/tests/ai-copilot-e2e.spec.ts` | TBD | 3d | Playwright 自然语言 → 回测 → 展示 | ⬜ |
+
+### 🟢 Sprint 6 P2 — Backlog (33 项)
+
+> **验收**: Sprint 6 第 3 周末 (2026-07-02) 前 P0/P1 优先；P2 按 ROI 决定。
+
+| ID | 任务 | 关联问题 | 文件 | Owner | 估时 | 验收标准 | 状态 |
+|---|---|---|---|---|---|---|---|
+| **P2-1** | backtest 报告 PDF/HTML 导出 | BR-014 | `pkg/backtest/export.go` (新建) | TBD | 3d | `/api/backtest/:id/export/{pdf,html}` | ⬜ |
+| **P2-2** | 多策略对比 UI (`/backtest/compare`) | BR-014 | `web/src/pages/BacktestCompare.vue` (新建) | TBD | 3d | 2-N 曲线叠加 | ⬜ |
+| **P2-3** | 远程紧急平仓 (EMERGENCY FLATTEN 按钮) | BR-018 | `pkg/live/trader.go:EmergencyStop`, `web/src/components/EmergencyButton.vue` | TBD | 2d | 双重身份验证 + 短信告警 | ⬜ |
+| **P2-4** | 投资者适当性 (创业板/科创板/北交所) | BR-005, BR-011 | `pkg/compliance/appropriateness.go` (新建) | TBD | 1w | 10/50/100 万 + 24 月验证 | ⬜ |
+| **P2-5** | 异常交易监控 (6 类) | BR-011 | `pkg/compliance/abnormal_trade.go` (新建) | TBD | 1w | 频繁撤单/自成交/对倒/洗售/虚假申报/拉抬打压 检测 | ⬜ |
+| **P2-6** | 大额交易报告 (单笔 ≥200万 / 累计 ≥500万) | BR-011 | `pkg/compliance/reporter.go` (新建) | TBD | 3d | 日终 reporter 生成 report.json | ⬜ |
+| **P2-7** | 减持规则引擎 (控股股东 ≤3月 ≤1%) | BR-011 | `pkg/compliance/divestment.go` (新建) | TBD | 1w | 3 类股东减持规则 | ⬜ |
+| **P2-8** | 券资金对账 Worker (每 15min) | BR-012 | `pkg/live/reconciliation.go` (新建) | TBD | 1w | 偏差 > 阈值报警 | ⬜ |
+| **P2-9** | 融资融券 + 做空 | BR-005, BR-007 | `pkg/live/margin.go` (新建) | TBD | 2w | MarginAccount + ShortableList | ⬜ |
+| **P2-10** | 可转债策略 | BR-005 | `pkg/strategy/plugins/convertible_bond.go` (新建) | TBD | 1w | 转股价值/纯债价值/赎回回售 | ⬜ |
+| **P2-11** | 期权定价 + Greeks | BR-005 | `pkg/strategy/options/` (新建) | TBD | 2w | Black-Scholes + Binomial | ⬜ |
+| **P2-12** | 港股通/北向因子 | BR-005 | `pkg/data/source/hkex/` (新建) | TBD | 1w | 陆股通净流入 + 汇率换算 | ⬜ |
+| **P2-13** | 退市 + 北交所 30% 涨跌停 | BR-005, BR-006 | `pkg/live/stock_state.go` (新建) | TBD | 3d | delisted_date 字段 + 强制清仓逻辑 | ⬜ |
+| **P2-14** | 止盈/移动止盈/分批止盈 | BR-007 | `pkg/risk/take_profit.go` (新建) | TBD | 1w | TakeProfitRule 接口 + 3 种实现 | ⬜ |
+| **P2-15** | 分红/送股/拆股/配股/增发 | BR-006 | `pkg/domain/corporate_action.go` (新建) | TBD | 1w | CorporateAction 接口 + 5 种行为 | ⬜ |
+| **P2-16** | API 版本化 (`/api/v1` 强制) | AR-020 | `cmd/analysis/main.go` | TBD | 1d | legacy 路由 301 → v1 | ⬜ |
+| **P2-17** | OpenAPI 3.0 spec 自动生成 | AR-020 | `docs/openapi.yaml` (新建) | TBD | 2d | swagger 端点可用 | ⬜ |
+| **P2-18** | pkg/data/source ETL 真实集成测试 (dockertest) | TQ-016 | `pkg/data/source/integration_test.go` (新建) | TBD | 2d | 9 个 adapter 真实测试 | ⬜ |
+| **P2-19** | pkg/ai/gene_pool 持久化测试 (覆盖 41.3%→60%) | TQ-011 | `pkg/ai/gene_pool/integration_test.go` (新建) | TBD | 2d | 覆盖率 ≥ 60% | ⬜ |
+| **P2-20** | pkg/risk 边界测试 (60%→70%) | TQ-016 | `pkg/risk/*_test.go` | TBD | 2d | stoploss/regime/volatility 边界 | ⬜ |
+| **P2-21** | pkg/ai/pipeline 端到端测试 (57%→70%) | TQ-016 | `pkg/ai/pipeline/e2e_test.go` (新建) | TBD | 3d | Intent → YAML → Code → Compile → Backtest | ⬜ |
+| **P2-22** | pkg/domain 类型边界测试 (0%→80%) | TQ-016 | `pkg/domain/types_test.go` (新建) | TBD | 1d | OHLCV/Portfolio/Signal zero value + JSON | ⬜ |
+| **P2-23** | pkg/httpclient 测试 (0%→80%) | TQ-016 | `pkg/httpclient/*_test.go` (新建) | TBD | 1d | timeout/retry/backoff 测试 | ⬜ |
+| **P2-24** | pkg/logging 日志脱敏 (0%→80%) | TQ-016 | `pkg/logging/*_test.go` (新建) | TBD | 1d | API key/账号脱敏测试 | ⬜ |
+| **P2-25** | pkg/ai/client LLMClient interface 测试 (78%→90%) | ADR-018 | `pkg/ai/client_test.go` (扩展) | TBD | 1d | 所有 interface 方法 mock 覆盖 | ⬜ |
+| **P2-26** | E2E 视觉回归 (Playwright 截图对比) | TQ-016 | `e2e/tests/visual-regression.spec.ts` | TBD | 2d | 关键页面截图 baseline | ⬜ |
+| **P2-27** | WASM sandbox (wazero) | AR-003, ADR-007/019 Phase 3 | `internal/sandbox/wasm/` (新建) | TBD | 1mo | 完全内存隔离 | ⬜ |
+| **P2-28** | EventBus backpressure (drop-oldest 策略) | AR-018 | `pkg/marketdata/eventbus.go` | TBD | 2d | 5000+ 标的实时不阻塞 | ⬜ |
+| **P2-29** | 跨日状态持久化测试 (Quant 状态) | TQ-016 | `pkg/backtest/persistence_test.go` (新建) | TBD | 2d | 服务重启不丢历史 | ⬜ |
+| **P2-30** | 数值精度 (float64 vs Decimal) | TQ-016 | `pkg/decimal/` (新建) | TBD | 1w | 累计误差 < 0.01 CNY | ⬜ |
+| **P2-31** | 拆分 3 个长函数 (getSignals/SubmitOrder/CalculatePosition) | CQ-011 | 3 个文件 | TBD | 2d | 每个函数 < 50 行 | ⬜ |
+| **P2-32** | 删除 4 处 `Test*_Cleanup` 空测试 | TQ-002 | `pkg/strategy/plugins/coverage_test.go` | TBD | 0.5d | 删除或补 assert | ⬜ |
+| **P2-33** | 删除 `assert.True(t, true)` placeholder | TQ-001 | `pkg/storage/postgres_screen_test.go:235` | TBD | 0.5d | pgxmock 真实 SQL 验证 | ⬜ |
+
+### Sprint 6 验收 Gate (2026-07-02)
+
+| Gate | 命令/标准 | 通过条件 |
+|---|---|---|
+| **G1** | `go test -race -count=1 ./...` | 0 panic, 0 race condition |
+| **G2** | `go vet ./...` | 0 issue |
+| **G3** | `pkg/storage` 覆盖率 | ≥ 60% |
+| **G4** | `pkg/ai/agents` 覆盖率 | ≥ 60% |
+| **P5** | `pkg/ai/pipeline` 覆盖率 | ≥ 70% |
+| **G6** | 73 项任务完成率 | ≥ 80% (59/73) |
+| **G7** | Docker compose 服务数 | ≤ 3 (analysis/data/ai) |
+| **G8** | ADR/ODR 索引同步 | 20 ADR + 13 ODR |
+
+### Sprint 6 任务分布
+
+| Owner Role | 任务数 | 工作日估算 |
+|---|---|---|
+| Backend Go | 38 项 | ~25d |
+| Frontend Vue | 8 项 | ~5d |
+| Database/SQL | 5 项 | ~3d |
+| Infrastructure/DevOps | 6 项 | ~4d |
+| Documentation | 4 项 | ~2d |
+| E2E Tests | 5 项 | ~3d |
+| Cross-cutting (Auth/Logging) | 7 项 | ~5d |
+| **Total** | **73 项** | **~47 工作日 (3 人 × 3 周)** |
+
+### Sprint 6 Top 10 ROI 排序 (与 ODR-013 Top 10 一致)
+
+1. **P0-1** LLMClient interface 化 (1d, CI panic fix)
+2. **P0-6** pkg/backtest 并发 map 修复 (2d, 消除 critical 竞态)
+3. **P0-7** pkg/storage dockertest (3d, 8.2%→60%)
+4. **P0-3** OTel + Prometheus (2d, 可观测性 25→70)
+5. **P1-15** Service 合并 (1w, 部署 -50%)
+6. **P1-2** JWT + RBAC (1w, 实盘前置)
+7. **P1-4** 中泰 XTP 对接 (2w, 真正具备实盘能力)
+8. **P0-10** + **P1-21/22/23** Go 现代化 (1w, 7.2→8.5)
+9. **P1-12** L4 validate 实际实现 (3d, Phase 4 P0 fail gate)
+10. **P1-16~20** Engine 拆分 (2w, 1408 行→300 行)
+
+---
+
+## 🔍 Sprint 6 启动期 待校核项 (6 项)
+
+> **来源**: [ODR-013 §对齐审计复核 (2026-06-11)](odr/odr-013-comprehensive-audit-2026-06-11.md#对齐审计复核-2026-06-11-同日)
+> **状态**: 路径引用为 (新建) — 任务执行时精确校核
+> **原则**: [VISION.md §Principle 8](VISION.md#principle-8-documentation-path-consistency)
+
+ODR-013 综合审查生成的 73 项 Sprint 6 任务中，有 6 项涉及"待新建文件"或"待引入依赖"，无法在 Sprint 6 启动时（2026-06-11）做精确路径/行号对照。这些项在对应任务执行时再做最终校核。
+
+| 任务 | 待校核内容 | 校核触发点 | 校核 Owner |
+|------|----------|----------|-----------|
+| **P0-7** | `pkg/storage/integration_test.go` (新建) | P0-7 实施时确认 dockertest 引入 + integration_test.go 文件创建 | TBD |
+| **P0-3** | OpenTelemetry/Prometheus go.mod 依赖 | P0-3 实施时 `go.mod` 增补（搜索 `go.opentelemetry.io`、`github.com/prometheus/client_golang`） | TBD |
+| **P1-2 / P1-8** | `migrations/019_add_auth_tables.sql` (新建) | P1-2 实施时创建；格式遵循扁平式（与 `012_add_sync_jobs_table.sql` 一致） | TBD |
+| **P1-11** | `internal/sandbox/runner/` (新建) | P1-11 实施时创建（Phase 2 sandbox 进程隔离 + rlimit + timeout） | TBD |
+| **P1-21/22/23** | `pkg/statistics/`, `pkg/fees/`, `pkg/id/` (新建) | 对应任务实施时创建（Go 现代化拆分） | TBD |
+| **P1-29** | `pkg/alert/` (新建) | P1-29 实施时创建（AlertManager 告警框架） | TBD |
+
+### 校核操作清单 (Checklist)
+
+实施上述任一任务时，须执行：
+
+```bash
+# 1. 验证路径是否已存在
+ls -la pkg/storage/integration_test.go 2>/dev/null
+ls -la internal/sandbox/runner/ 2>/dev/null
+
+# 2. 验证依赖是否已引入
+grep -E "opentelemetry|client_golang" go.mod
+
+# 3. 验证 migrations 序号下一个可用
+ls migrations/ | sort
+
+# 4. 若不匹配，更新任务描述
+edit docs/TASKS.md  # 修正路径/依赖声明
+```
+
+### 校核完成判定
+
+- [ ] 6 项全部校核完成（Sprint 6 第 1 周末前）
+- [ ] 校核结果填入 ODR-013 §对齐审计复核 状态表
+- [ ] 任何与原始描述不符的项，更新 TASKS.md 任务描述（不创建新任务）
+
+---
+
 ## 🔗 相关文档
 
 | 文档                               | 用途             |
@@ -906,8 +1096,11 @@
 | [PHASE3-PLAN.md](PHASE3-PLAN.md) | Phase 3 实施计划详情 |
 | [archive/NEXT\_STEPS.md](archive/NEXT_STEPS.md)  | 审查发现详情         |
 | [TEST.md](TEST.md)               | 测试策略和覆盖率目标     |
+| [ODR-013](odr/odr-013-comprehensive-audit-2026-06-11.md) | Sprint 6 综合审查记录 |
+| [ADR-017](adr/adr-017-observability-and-auth.md) ~ [ADR-020](adr/adr-020-engine-decomposition.md) | Sprint 6 架构决策 |
 
 ***
 
-_Last updated: 2026-06-10 (v3.9.0) — Sprint 5 P2 pickup #6: F1-new mutation 偶发修复 + F1/F2 入表_
-_Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查_
+_Last updated: 2026-06-11 (v3.10.0) — Sprint 6 (ODR-013) 73 项任务全量入库：P0×10 + P1×30 + P2×33；ADR-007/008 Accepted + ADR-017~020 Proposed；ODR-013 审计 + 6 跨维度系统性问题_
+_Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查 + Sprint 6 (ODR-013) 综合审查_
+

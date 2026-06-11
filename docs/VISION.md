@@ -114,6 +114,22 @@ Every trading decision in the system is backed by a backtest. Every strategy is 
 
 **What this means:** The dashboard always shows backtest results alongside any live suggestion. A strategy that looks good in a chat with 龙少 must still pass through the backtest engine before being taken seriously.
 
+### Principle 8: Documentation-Path Consistency
+
+Any ADR, ODR, or TASKS document that references a file path **must** match the actual project layout. Line numbers must be verified with `grep -n` or Read tools — not invented. The cost of an inaccurate path reference is real: a developer following a stale reference wastes time, and the trust in the documentation erodes.
+
+**What this means:**
+
+1. **Path references must match actual directories.** When writing `cmd/risk/` vs `cmd/risk-service/`, the document must reflect what `ls` actually shows. Service names (docker-compose `service.name`) and code directory names (`cmd/<short>/`) are distinct concerns; documents should prefer the code directory name and note the service name separately.
+
+2. **Line number references must be verified.** Use `grep -n` or the Read tool before quoting `pkg/foo/bar.go:123`. If the line has drifted (code evolved), say "verify current line" rather than asserting an exact number.
+
+3. **Newly-created files must be labeled.** Any path like `pkg/storage/integration_test.go` that does not yet exist must be marked `(新建)` so the reader knows it is a future artifact, not an existing one.
+
+4. **All path references are auditable.** During the ODR-013 alignment review (2026-06-11), 4 of 73 Sprint 6 task descriptions contained path drift (e.g., `cmd/risk-service/` vs `cmd/risk/`, "10+ setters" vs. the actual 5+1+4=10). Future audits will continue to check this.
+
+**Reference:** [ODR-013 §对齐审计复核 (2026-06-11)](../odr/odr-013-comprehensive-audit-2026-06-11.md#对齐审计复核-2026-06-11-同日)
+
 ---
 
 ## 3. Feature Breakdown by Category

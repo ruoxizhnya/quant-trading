@@ -1,7 +1,8 @@
 # ADR-007: AI Evolution Layer — Sandbox & Safety
 
 **Date:** 2026-03-24
-**Status:** OPEN — needs decision before Phase 3
+**Status:** **Accepted** (2026-06-11 — see Decision)
+**Supersedes:** —
 
 ## Context
 
@@ -30,21 +31,47 @@ Before running any LLM-generated code:
 
 Only allow strategies from a curated library. AI Copilot helps modify existing strategies, not generate from scratch.
 
-## Recommendation
+## Decision (2026-06-11)
 
-**Option A (Process Isolation) + Option B (Static Analysis Gate)** layered approach:
+**Status updated to Accepted** based on 2026-06-11 comprehensive audit ([ODR-013](../odr/odr-013-comprehensive-audit-2026-06-11.md) AR-003 finding).
+
+**Adopt Option A (Process Isolation) + Option B (Static Analysis Gate) layered approach:**
+
 1. LLM generates code
 2. Static analysis rejects dangerous patterns
 3. Code compiles to isolated subprocess
 4. Subprocess has resource limits
 5. Signals returned via IPC
 
+### Implementation Path (Sprint 6 — see ADR-019 §Service Merge & AI Copilot Sandbox)
+
+**Phase 1 (Sprint 6 P0-4, 2 days):**
+- Replace `pkg/strategy/copilot.go:158-162` hard-coded `buildCmd.Dir = "/Users/ruoxi/..."` with config-injected `WorkingDir` (immediate fix)
+- Introduce `LLMClient interface` in `pkg/ai/client.go`; struct → interface to allow mock injection
+- Add `internal/sandbox/staticcheck` package: regex/AST-based rejection of `os.RemoveAll`, `exec.Command`, `net.Dial`, `panic` patterns
+
+**Phase 2 (Sprint 6 P1-11, 1 week):**
+- Implement Option A: separate subprocess via `os/exec` + stdin/stdout JSON-RPC
+- Resource limits: `ulimit -v` (memory), `rlimit.CPU` (time), context timeout 5s per GenerateSignals call
+- Disable filesystem write in subprocess (chroot or empty bind mount)
+
+**Phase 3 (Sprint 7+, 1 month):**
+- Optional: WASM sandbox via `wazero` (Go-native WebAssembly runtime) for stronger isolation
+
 ## Consequences
 
-- Higher implementation complexity for Phase 3
+- Higher implementation complexity
 - Better safety guarantees
 - Enables truly untrusted strategy generation
+- **Phased rollout** allows immediate fix (P0) without blocking on full WASM migration
 
 ## Review
 
-Must be decided before Phase 3 begins. See Phase 2 exit criteria.
+Phase 2 implementation tied to Sprint 6 (P0-4, P1-11 in [TASKS.md §Sprint 6](../../TASKS.md)).
+Final review checkpoint at Sprint 6 retrospective.
+
+## Related
+
+- [ODR-013 AR-003 finding](../odr/odr-013-comprehensive-audit-2026-06-11.md#ar-003)
+- [ADR-019 §AI Copilot Sandbox Refactor](adr-019-service-merge-ai-copilot.md)
+- Original discussion: see git history commit 0c8bfb3 (pre-Status update)
