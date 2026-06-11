@@ -956,7 +956,7 @@
 | **P1-22** | `pkg/fees/ashare.go` 费率常量统一 | CQ-005 | `pkg/fees/ashare.go` (新建) | TBD | 1d | 4 处硬编码消除；单包测试 | ✅ |
 | **P1-23** | `pkg/id/order.go` UUID v7 统一 | CQ-007 | `pkg/id/order.go` (新建) | TBD | 1d | 3 处订单号生成统一；测试 | ✅ |
 | **P1-24** | Strategy 接口拆分 (StrategyCore/Configurable/ResourceManaged) | CQ-006, ISP | `pkg/strategy/strategy.go` | TBD | 2d | 3 个可组合 interface；现有 strategy 适配 | ⬜ |
-| **P1-25** | domain.Strategy Deprecated 删除 | CQ-014 | `pkg/domain/types.go` | TBD | 0.5d | 旧接口移除；pkg/strategy.Strategy 唯一源 | ⬜ |
+| **P1-25** | `domain.Strategy` Deprecated 删除 (ODR-013) | CQ-014 | `pkg/domain/types.go`, `pkg/strategy/registry.go`, `pkg/strategy/examples/*`, `cmd/strategy/main.go` | TBD | 0.5d | 旧接口移除；`pkg/strategy.Strategy` 唯一源 | ✅ |
 | **P1-26** | 4 套执行实体合并 (LiveEngine/OrderManager/...) | CQ-010, YAGNI | `pkg/live/` | TBD | 1w | 5 套 → 2 套 (LiveEngine + MockTrader) | ⬜ |
 | **P1-27** | `pkg/strategy/plugins/utils.go` 删除手写 `itoa`/`ftoa`/`joinStrings` | CQ-006 | `pkg/strategy/plugins/utils.go` | TBD | 0.5d | 标准库替换；测试通过 | ✅ |
 | **P1-28** | Redis 缓存 key namespace 化 (`quantlab:` 前缀) | AR-021 | `pkg/storage/redis.go` | TBD | 1d | 全部 key 加前缀；InvalidateOHLCV 限定 pattern | ✅ |
