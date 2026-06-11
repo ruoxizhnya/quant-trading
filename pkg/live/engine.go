@@ -126,27 +126,46 @@ func (e *LiveEngine) Start(ctx context.Context, symbols []string) error {
 	return nil
 }
 
-// Stop stops the live trading engine
+// Stop stops the live trading engine.
+//
+// Sprint 6 P0-2 (CQ-009): the previous implementation held e.mu across
+// Unsubscribe() and Disconnect(), which are network I/O. A misbehaving
+// broker or data feed could block the caller's goroutine for an
+// arbitrary duration while every other LiveEngine accessor (Start,
+// IsRunning, etc.) waits on the same mutex. The fix splits the
+// critical section into a state-only phase (lock held) and an I/O
+// phase (lock released).
 func (e *LiveEngine) Stop(symbols []string) error {
+	// ── Phase 1: state transition under lock ────────────────────────
+	// Only flip flags and signal run-loop. Network calls live outside
+	// the critical section so a slow broker can't freeze the engine.
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	if !e.running {
+		e.mu.Unlock()
 		return nil
 	}
-
 	close(e.stopCh)
 	e.running = false
+	e.mu.Unlock()
 
+	// ── Phase 2: network I/O without the lock ───────────────────────
+	// close(stopCh) above is sufficient to make the run() goroutine
+	// exit, so we can drain broker / data feed independently of
+	// engine state. If Unsubscribe fails we still attempt Disconnect
+	// (best-effort teardown) and return the first error.
+	var firstErr error
 	if err := e.dataFeed.Unsubscribe(symbols); err != nil {
-		return fmt.Errorf("failed to unsubscribe: %w", err)
+		firstErr = fmt.Errorf("failed to unsubscribe: %w", err)
 	}
-
 	if err := e.broker.Disconnect(); err != nil {
-		return fmt.Errorf("failed to disconnect from broker: %w", err)
+		if firstErr == nil {
+			firstErr = fmt.Errorf("failed to disconnect from broker: %w", err)
+		}
+		// Don't shadow firstErr — both failures are reported
+		// separately via log-friendly concatenation would be ideal,
+		// but for now we just return the unsubscribe error if any.
 	}
-
-	return nil
+	return firstErr
 }
 
 // IsRunning returns whether the engine is running
