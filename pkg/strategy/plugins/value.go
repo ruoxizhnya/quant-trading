@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
@@ -118,12 +119,11 @@ func (s *valueStrategy) GenerateSignals(ctx context.Context, bars map[string][]d
 
 		// Estimate PE using price and a proxy for earnings
 		// Use price stability as a proxy - more stable prices suggest mature companies with earnings
-		var variance float64
+		closes := make([]float64, lookback)
 		for i := len(sorted) - lookback; i < len(sorted); i++ {
-			diff := sorted[i].Close - avgPrice
-			variance += diff * diff
+			closes[i-(len(sorted)-lookback)] = sorted[i].Close
 		}
-		stdDev := math.Sqrt(variance / float64(lookback))
+		stdDev := statistics.PopulationStdDev(closes)
 		cv := stdDev / avgPrice // coefficient of variation
 
 		// Lower CV suggests more stable earnings, higher value score

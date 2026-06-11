@@ -3,12 +3,12 @@ package data
 import (
 	"context"
 	"fmt"
-	"math"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 	"github.com/rs/zerolog"
 )
 
@@ -44,36 +44,50 @@ func (f *FactorComputer) SetLogger(l zerolog.Logger) {
 // ZScore normalizes raw values to z-scores (cross-sectional, per date).
 // Returns a map from symbol to z-score. Symbols with NaN or zero variance
 // are assigned a z-score of 0.
+//
+// The math (mean / population stddev) is delegated to pkg/statistics
+// (ODR-013 P1-21). The map input/output is kept here because the
+// factor pipeline passes OHLCV-derived symbol keys; converting to
+// []float64 at every call site would lose that mapping.
+//
+// We build a (symbol, value) slice once so that the same key index is
+// used both for the z-score lookup and the result assignment; relying
+// on `for symbol := range values` twice would mis-pair entries because
+// Go map iteration order is not stable across iterations.
 func ZScore(values map[string]float64) map[string]float64 {
 	n := len(values)
 	if n == 0 {
 		return make(map[string]float64)
 	}
-	var sum float64
-	for _, v := range values {
-		sum += v
+	type kv struct {
+		symbol string
+		value  float64
 	}
-	mean := sum / float64(n)
-	var varianceSum float64
-	for _, v := range values {
-		diff := v - mean
-		varianceSum += diff * diff
-	}
-	stdDev := math.Sqrt(varianceSum / float64(n))
-	result := make(map[string]float64, n)
-	if stdDev == 0 || math.IsNaN(stdDev) {
-		for symbol := range values {
-			result[symbol] = 0
-		}
-		return result
-	}
+	pairs := make([]kv, 0, n)
 	for symbol, v := range values {
-		result[symbol] = (v - mean) / stdDev
+		pairs = append(pairs, kv{symbol, v})
+	}
+	raw := make([]float64, n)
+	for i, p := range pairs {
+		raw[i] = p.value
+	}
+	zs := statistics.ZScore(raw)
+	result := make(map[string]float64, n)
+	for i, p := range pairs {
+		result[p.symbol] = zs[i]
 	}
 	return result
 }
 
 // PercentileRank converts raw values to percentile ranks [0, 100].
+//
+// The formula here is the **ordinal** percentile (no tie handling):
+// for the i-th smallest value in a slice of length n, the rank is
+// (i+1 - 0.5) / n * 100. This is the standard SAS / SQL PERCENT_RANK
+// flavour and is what the factor pipeline stores downstream. It is
+// intentionally distinct from statistics.PercentileRank, which
+// uses the **average** (competition) rank. Do not migrate this to
+// the shared helper without first auditing factor-cache consumers.
 func PercentileRank(values map[string]float64) map[string]float64 {
 	n := len(values)
 	if n == 0 {

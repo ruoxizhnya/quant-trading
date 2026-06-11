@@ -8,6 +8,7 @@ import (
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/errors"
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 	"github.com/rs/zerolog"
 )
 
@@ -172,20 +173,7 @@ func (vs *VolatilitySizer) GetVolatilityStats(ohlcv []domain.OHLCV) (daily, annu
 		returns[i-1] = math.Log(ohlcv[i].Close / ohlcv[i-1].Close)
 	}
 
-	mean := 0.0
-	for _, r := range returns {
-		mean += r
-	}
-	mean /= float64(len(returns))
-
-	variance := 0.0
-	for _, r := range returns {
-		diff := r - mean
-		variance += diff * diff
-	}
-	variance /= float64(len(returns) - 1)
-
-	daily = math.Sqrt(variance)
+	daily = statistics.SampleStdDev(returns)
 	annualized = daily * vs.annualizationFactor
 
 	return daily, annualized, nil

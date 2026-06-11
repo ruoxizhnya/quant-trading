@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
@@ -101,21 +102,16 @@ func (s *qualityStrategy) GenerateSignals(ctx context.Context, bars map[string][
 
 		// Calculate quality metrics from price action
 		// Quality = consistent upward trend with low volatility
-		var sumPrice, sumSq float64
+		closes := make([]float64, lookback)
 		for i := len(sorted) - lookback; i < len(sorted); i++ {
-			sumPrice += sorted[i].Close
-			sumSq += sorted[i].Close * sorted[i].Close
+			closes[i-(len(sorted)-lookback)] = sorted[i].Close
 		}
-		avgPrice := sumPrice / float64(lookback)
+		avgPrice := statistics.Mean(closes)
 		if avgPrice <= 0 {
 			continue
 		}
 
-		variance := sumSq/float64(lookback) - avgPrice*avgPrice
-		if variance < 0 {
-			variance = 0
-		}
-		stdDev := math.Sqrt(variance)
+		stdDev := statistics.PopulationStdDev(closes)
 		cv := stdDev / avgPrice
 
 		// Trend consistency: count up days vs down days

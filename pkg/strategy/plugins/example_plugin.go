@@ -13,6 +13,7 @@ import (
 	"sort"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
@@ -147,8 +148,8 @@ func (s *exampleStrategy) GenerateSignals(ctx context.Context, bars map[string][
 		shortWindow := sorted[len(sorted)-period:]
 		longWindow := sorted[len(sorted)-period*2:]
 
-		shortMA := calculateMean(extractClosePrices(shortWindow))
-		longMA := calculateMean(extractClosePrices(longWindow))
+		shortMA := statistics.Mean(extractClosePrices(shortWindow))
+		longMA := statistics.Mean(extractClosePrices(longWindow))
 
 		if longMA <= 0 {
 			continue

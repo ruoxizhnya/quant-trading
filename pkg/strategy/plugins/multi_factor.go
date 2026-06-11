@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
@@ -497,17 +498,12 @@ func (s *multiFactorStrategy) generateSignalsFromPriceData(
 		}
 
 		// Quality: consistency of upward movement (low volatility + positive trend)
-		var sumPrice, sumSq float64
+		closes := make([]float64, lookback+1)
 		for i := endIdx - lookback; i <= endIdx; i++ {
-			sumPrice += sorted[i].Close
-			sumSq += sorted[i].Close * sorted[i].Close
+			closes[i-(endIdx-lookback)] = sorted[i].Close
 		}
-		avgPrice := sumPrice / float64(lookback+1)
-		variance := sumSq/float64(lookback+1) - avgPrice*avgPrice
-		if variance < 0 {
-			variance = 0
-		}
-		stdDev := math.Sqrt(variance)
+		avgPrice := statistics.Mean(closes)
+		stdDev := statistics.PopulationStdDev(closes)
 		cv := stdDev / avgPrice
 		qualityScore := 1.0 / (1.0 + cv*10.0) // Lower CV = higher quality
 		if momentumScore > 0 {

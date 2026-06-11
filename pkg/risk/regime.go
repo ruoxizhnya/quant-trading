@@ -8,6 +8,7 @@ import (
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/errors"
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 	"github.com/rs/zerolog"
 )
 
@@ -211,29 +212,13 @@ func (rd *RegimeDetector) calculateSlope(prices []float64) float64 {
 		return 0.0
 	}
 
-	n := float64(len(prices))
-	sumX := 0.0
-	sumY := 0.0
-	sumXY := 0.0
-	sumX2 := 0.0
+	// Raw OLS slope delegated to pkg/statistics (ODR-013 P1-21).
+	// The downstream "normalize by average price" step is strategy-
+	// specific and stays here.
+	slope := statistics.Slope(prices)
 
-	for i, price := range prices {
-		x := float64(i)
-		sumX += x
-		sumY += price
-		sumXY += x * price
-		sumX2 += x * x
-	}
-
-	denominator := n*sumX2 - sumX*sumX
-	if denominator == 0 {
-		return 0.0
-	}
-
-	slope := (n*sumXY - sumX*sumY) / denominator
-	
 	// Normalize by average price
-	avgPrice := sumY / n
+	avgPrice := statistics.Mean(prices)
 	if avgPrice > 0 {
 		slope = slope / avgPrice
 	}

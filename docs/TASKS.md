@@ -952,7 +952,7 @@
 | **P1-18** | StateStore interface + LRU/持久化 | CQ-008, AR-012, ADR-020 | `pkg/backtest/state_store.go` (新建) | TBD | 2d | LRU 1000 条 + 落 PG；backtests map 内存不再泄漏 | ⬜ |
 | **P1-19** | EngineOption 函数式注入 + backward-compat shim | CQ-005, ADR-020 | `pkg/backtest/engine.go` | TBD | 3d | `NewEngine(cfg, prov, opts...)` working；旧 5 个 engine setter（SetDataAdapter/SetStore/SetRiskManager/SetLiveTrader/SetExecutionService）+ 1 个 strategy SetFactorCache 共 6 个 setter 保留 6 个月 backward-compat | ⬜ |
 | **P1-20** | BacktestState 内部锁 + Freeze 模式 | AR-014, ADR-020 | `pkg/backtest/engine.go` (BacktestState struct) | TBD | 2d | race detector 0 issue；回测完成冻结 | ⬜ |
-| **P1-21** | `pkg/statistics/` 包抽取 (mean/std/slope/volatility) | CQ-004 | `pkg/statistics/` (新建) | TBD | 2d | 6+ 处重复消除；单包覆盖率 ≥ 80% | ⬜ |
+| **P1-21** | `pkg/statistics/` 包抽取 (mean/std/slope/volatility) | CQ-004 | `pkg/statistics/` (新建) | TBD | 2d | 6+ 处重复消除；单包覆盖率 ≥ 80% | ✅ |
 | **P1-22** | `pkg/fees/ashare.go` 费率常量统一 | CQ-005 | `pkg/fees/ashare.go` (新建) | TBD | 1d | 4 处硬编码消除；单包测试 | ✅ |
 | **P1-23** | `pkg/id/order.go` UUID v7 统一 | CQ-007 | `pkg/id/order.go` (新建) | TBD | 1d | 3 处订单号生成统一；测试 | ✅ |
 | **P1-24** | Strategy 接口拆分 (StrategyCore/Configurable/ResourceManaged) | CQ-006, ISP | `pkg/strategy/strategy.go` | TBD | 2d | 3 个可组合 interface；现有 strategy 适配 | ⬜ |

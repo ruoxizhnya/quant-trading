@@ -2,6 +2,8 @@ package metrics
 
 import (
 	"math"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 )
 
 // TurnoverCalculator computes portfolio turnover metrics.
@@ -42,7 +44,7 @@ func (c *TurnoverCalculator) ComputeTurnover(weightsByDate []map[string]float64)
 	}
 
 	return &TurnoverResult{
-		MeanTurnover:   mean(turnovers),
+		MeanTurnover:   statistics.Mean(turnovers),
 		MaxTurnover:    maxIn(turnovers),
 		MinTurnover:    minIn(turnovers),
 		TurnoverSeries: turnovers,

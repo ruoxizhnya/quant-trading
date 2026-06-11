@@ -10,6 +10,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/metrics"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/validator"
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 )
 
 // ValidationLevel defines the depth of validation.
@@ -272,7 +273,11 @@ func estimateComplexity(node expression.Node) int {
 	return count
 }
 
-// computeVariance calculates the variance of evaluation results.
+// computeVariance calculates the sample (n-1) variance of all finite
+// evaluation results across runs.
+//
+// The NaN/Inf filter is preserved here (legacy behaviour) and the
+// remaining math is delegated to pkg/statistics (ODR-013 P1-21).
 func computeVariance(results map[string][]float64) float64 {
 	var allValues []float64
 	for _, values := range results {
@@ -282,24 +287,7 @@ func computeVariance(results map[string][]float64) float64 {
 			}
 		}
 	}
-
-	if len(allValues) < 2 {
-		return 0
-	}
-
-	m := 0.0
-	for _, v := range allValues {
-		m += v
-	}
-	m /= float64(len(allValues))
-
-	var sumSq float64
-	for _, v := range allValues {
-		diff := v - m
-		sumSq += diff * diff
-	}
-
-	return sumSq / float64(len(allValues)-1)
+	return statistics.SampleVariance(allValues)
 }
 
 // ComputeFitness calculates a composite fitness score.

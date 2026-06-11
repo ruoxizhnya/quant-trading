@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
@@ -226,9 +227,8 @@ func (s *bollingerMRStrategy) GenerateSignals(ctx context.Context, bars map[stri
 		latestPrice := window[len(window)-1].Close
 
 		prices := extractClosePrices(window)
-		mean := calculateMean(prices)
-		variance := calculateStdDev(prices, mean)
-		sd := math.Sqrt(variance)
+		mean := statistics.Mean(prices)
+		sd := statistics.PopulationStdDev(prices)
 
 		if sd <= 0 || latestPrice <= 0 { continue }
 

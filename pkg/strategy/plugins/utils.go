@@ -66,36 +66,10 @@ func getLatestPrice(data []domain.OHLCV) float64 {
 	return sorted[len(sorted)-1].Close
 }
 
-// calculateMean computes the arithmetic mean of a float64 slice.
-// Returns 0 for empty slices.
-func calculateMean(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	var sum float64
-	for _, v := range values {
-		sum += v
-	}
-	return sum / float64(len(values))
-}
-
-// calculateStdDev computes the population standard deviation.
-// Returns 0 for empty slices or when mean is 0.
-func calculateStdDev(values []float64, mean float64) float64 {
-	if len(values) == 0 || mean == 0 {
-		return 0
-	}
-	var sumSqDiff float64
-	for _, v := range values {
-		diff := v - mean
-		sumSqDiff += diff * diff
-	}
-	variance := sumSqDiff / float64(len(values))
-	if variance < 0 {
-		variance = 0
-	}
-	return variance
-}
+// calculateMean and calculateStdDev were moved to
+// pkg/statistics (Mean / PopulationStdDev) in ODR-013 P1-21.
+// Callers in this package now use those helpers directly.
+// The wrapper is kept removed — see git log for the migration.
 
 // calculateCV computes the coefficient of variation (stdDev / mean).
 // Returns 0 if mean is 0.

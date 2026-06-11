@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 )
 
 // ValueMomentumConfig holds configuration for the value_momentum strategy.
@@ -338,8 +339,8 @@ func (s *valueMomentumStrategy) calculatePercentiles(data map[string]*stockFacto
 	}
 
 	return percentileData{
-		PE30th: calculatePercentile(peValues, s.config.Factors.PE.PercentileThreshold),
-		PB30th: calculatePercentile(pbValues, s.config.Factors.PB.PercentileThreshold),
+		PE30th: statistics.Percentile(peValues, s.config.Factors.PE.PercentileThreshold),
+		PB30th: statistics.Percentile(pbValues, s.config.Factors.PB.PercentileThreshold),
 	}
 }
 
@@ -464,28 +465,17 @@ func (s *valueMomentumStrategy) Cleanup() {
 }
 
 // calculatePercentile calculates the nth percentile of a slice.
+// Migrated to pkg/statistics (ODR-013 P1-21): the shared implementation
+// is mathematically identical and adds clamping + NaN-safe semantics.
 func calculatePercentile(values []float64, percentile float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-
-	sorted := make([]float64, len(values))
-	copy(sorted, values)
-	sort.Float64s(sorted)
-
-	index := percentile * float64(len(sorted)-1)
-	lower := int(math.Floor(index))
-	upper := int(math.Ceil(index))
-
-	if lower == upper {
-		return sorted[lower]
-	}
-
-	frac := index - float64(lower)
-	return sorted[lower]*(1-frac) + sorted[upper]*frac
+	return statistics.Percentile(values, percentile)
 }
 
 // calculateMeanStd calculates mean and standard deviation for a field.
+//
+// The NaN/Inf/zero filter is preserved here (legacy behaviour: ignore
+// stocks with missing or zero factor values) and the core math is
+// delegated to pkg/statistics (ODR-013 P1-21).
 func calculateMeanStd(data map[string]*stockFactorData, extractor func(*stockFactorData) float64) (mean, std float64) {
 	values := make([]float64, 0, len(data))
 	for _, d := range data {
@@ -499,20 +489,8 @@ func calculateMeanStd(data map[string]*stockFactorData, extractor func(*stockFac
 		return 0, 0
 	}
 
-	// Calculate mean
-	sum := 0.0
-	for _, v := range values {
-		sum += v
-	}
-	mean = sum / float64(len(values))
-
-	// Calculate standard deviation
-	varianceSum := 0.0
-	for _, v := range values {
-		diff := v - mean
-		varianceSum += diff * diff
-	}
-	std = math.Sqrt(varianceSum / float64(len(values)))
+	mean = statistics.Mean(values)
+	std = statistics.PopulationStdDev(values)
 
 	if std == 0 {
 		std = 1 // Avoid division by zero

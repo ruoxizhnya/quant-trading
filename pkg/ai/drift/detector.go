@@ -5,6 +5,8 @@ import (
 	"math"
 	"sort"
 	"time"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 )
 
 // Detector performs concept drift detection on strategy performance metrics.
@@ -254,19 +256,8 @@ func calculateStats(values []float64) (mean, std float64) {
 		return 0, 0
 	}
 
-	var sum float64
-	for _, v := range values {
-		sum += v
-	}
-	mean = sum / float64(len(values))
-
-	var variance float64
-	for _, v := range values {
-		diff := v - mean
-		variance += diff * diff
-	}
-	variance /= float64(len(values))
-	std = math.Sqrt(variance)
+	mean = statistics.Mean(values)
+	std = statistics.PopulationStdDev(values)
 
 	return mean, std
 }

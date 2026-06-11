@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 )
 
@@ -277,9 +278,9 @@ func (wf *WalkForwardEngine) computeAggregateMetrics(report *domain.WalkForwardR
 	report.AvgDegradation = sumDegradation / fn
 	report.PassRate = float64(positiveCount) / fn
 
-	report.StdTestSharpe = stdDev(sharpes)
+	report.StdTestSharpe = statistics.SampleStdDev(sharpes)
 	if len(degradations) > 0 {
-		report.StdDegradation = stdDev(degradations)
+		report.StdDegradation = statistics.SampleStdDev(degradations)
 	}
 
 	report.OverallPass = report.AvgTestSharpe > 0.5 && report.AvgDegradation < 0.7
@@ -473,21 +474,5 @@ func (wf *WalkForwardEngine) toBacktestResult(r *BacktestResponse) *domain.Backt
 	}
 }
 
-func stdDev(values []float64) float64 {
-	n := len(values)
-	if n < 2 {
-		return 0.0
-	}
-	mean := 0.0
-	for _, v := range values {
-		mean += v
-	}
-	mean /= float64(n)
-	variance := 0.0
-	for _, v := range values {
-		d := v - mean
-		variance += d * d
-	}
-	variance /= float64(n - 1)
-	return math.Sqrt(variance)
-}
+// stdDev was migrated to statistics.SampleStdDev in ODR-013 P1-21.
+// Callers now use the shared helper directly.

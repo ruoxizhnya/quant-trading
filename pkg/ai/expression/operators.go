@@ -3,6 +3,8 @@ package expression
 import (
 	"math"
 	"sort"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 )
 
 // Time-series operators
@@ -198,7 +200,7 @@ func tsCorr(data1, data2 []float64, window int) []float64 {
 			result[i] = math.NaN()
 			continue
 		}
-		result[i] = correlation(x, y)
+		result[i] = statistics.Pearson(x, y)
 	}
 	return result
 }
@@ -359,29 +361,9 @@ func csPercentile(values []float64) []float64 {
 }
 
 // Utility functions
-
-func correlation(x, y []float64) float64 {
-	if len(x) != len(y) || len(x) < 2 {
-		return math.NaN()
-	}
-
-	n := float64(len(x))
-	sumX, sumY, sumXY, sumX2, sumY2 := 0.0, 0.0, 0.0, 0.0, 0.0
-
-	for i := range x {
-		sumX += x[i]
-		sumY += y[i]
-		sumXY += x[i] * y[i]
-		sumX2 += x[i] * x[i]
-		sumY2 += y[i] * y[i]
-	}
-
-	numerator := n*sumXY - sumX*sumY
-	denominator := math.Sqrt((n*sumX2 - sumX*sumX) * (n*sumY2 - sumY*sumY))
-
-	if denominator == 0 {
-		return math.NaN()
-	}
-
-	return numerator / denominator
-}
+//
+// The legacy inlined `correlation` helper has been removed (ODR-013
+// P1-21). The Pearson coefficient is now computed via
+// pkg/statistics.Pearson, which preserves the same NaN-on-zero-variance
+// and length-mismatch semantics (see statistics/correlation.go for
+// the contract).

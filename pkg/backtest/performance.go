@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 )
 
 // CalculateMetrics computes all risk and performance metrics from portfolio values and trades.
@@ -134,10 +135,10 @@ func CalculateSharpeRatio(returns []float64, riskFreeRate float64) float64 {
 	dailyRF := riskFreeRate / 252
 
 	// Mean return
-	meanReturn := mean(returns)
+	meanReturn := statistics.Mean(returns)
 
 	// Standard deviation
-	stdDev := standardDeviation(returns)
+	stdDev := statistics.SampleStdDev(returns)
 
 	if stdDev == 0 {
 		return 0
@@ -160,7 +161,7 @@ func CalculateSortinoRatio(returns []float64, riskFreeRate float64) float64 {
 	dailyRF := riskFreeRate / 252
 
 	// Mean return
-	meanReturn := mean(returns)
+	meanReturn := statistics.Mean(returns)
 
 	// Downside deviation (only negative returns)
 	downsideReturns := filterNegative(returns)
@@ -169,7 +170,7 @@ func CalculateSortinoRatio(returns []float64, riskFreeRate float64) float64 {
 		return math.MaxFloat64
 	}
 
-	downsideDev := standardDeviation(downsideReturns)
+	downsideDev := statistics.SampleStdDev(downsideReturns)
 	if downsideDev == 0 {
 		return 0
 	}
@@ -223,7 +224,7 @@ func calculateVolatility(returns []float64) float64 {
 	if len(returns) < 2 {
 		return 0
 	}
-	return standardDeviation(returns) * math.Sqrt(252)
+	return statistics.SampleStdDev(returns) * math.Sqrt(252)
 }
 
 // calculateVaR calculates Value at Risk at the given confidence level.
@@ -413,32 +414,6 @@ func calculateTradeMetrics(trades []domain.Trade, portfolioValues []domain.Portf
 }
 
 // Helper functions
-func mean(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	sum := 0.0
-	for _, v := range values {
-		sum += v
-	}
-	return sum / float64(len(values))
-}
-
-func standardDeviation(values []float64) float64 {
-	if len(values) < 2 {
-		return 0
-	}
-
-	m := mean(values)
-	sumSquares := 0.0
-	for _, v := range values {
-		diff := v - m
-		sumSquares += diff * diff
-	}
-
-	return math.Sqrt(sumSquares / float64(len(values)-1))
-}
-
 func filterNegative(values []float64) []float64 {
 	var negative []float64
 	for _, v := range values {
