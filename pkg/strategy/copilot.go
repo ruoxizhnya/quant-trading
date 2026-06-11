@@ -13,8 +13,10 @@ import (
 	"sync/atomic"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/internal/sandbox/staticcheck"
 )
 
 // BacktestRunner runs a backtest for the copilot.
@@ -36,6 +38,29 @@ type CopilotService struct {
 	backtested int64 // backtest produced valid result (≥1 trade)
 
 	jobs sync.Map // jobID string -> *JobResult
+
+	// Sprint 6 P0-4 (ODR-013): WorkingDir replaces the previously
+	// hard-coded `buildCmd.Dir = "/Users/ruoxi/longshaosWorld/quant-trading"`.
+	//
+	// WorkingDir is the directory `go build` runs in when compiling
+	// the LLM-generated strategy. It must contain a `go.mod` so that
+	// the generated file can resolve its imports
+	// (github.com/ruoxizhnya/quant-trading/pkg/domain, etc.). The
+	// service does NOT auto-detect this — callers MUST set it
+	// explicitly via WithWorkingDir so the configuration is
+	// environment-agnostic and reviewable in code review.
+	//
+	// Empty WorkingDir causes the service to fail-closed at build
+	// time (it returns "sandbox_rejected" with a clear error). We do
+	// NOT silently fall back to os.Getwd() because the typical
+	// caller is a long-running server whose working directory may
+	// change between restarts.
+	workingDir string
+
+	// logger is the structured logger used by the sandbox gate and
+	// retry loop. Defaults to zerolog.Nop() if the caller did not
+	// set one (so unit tests don't have to thread a logger through).
+	logger zerolog.Logger
 }
 
 // JobResult holds the outcome of a copilot generation job.
@@ -63,6 +88,7 @@ type GenerateParams struct {
 func NewCopilotService() *CopilotService {
 	return &CopilotService{
 		aiClient: ai.NewClient(),
+		logger:   zerolog.Nop(),
 	}
 }
 
@@ -73,7 +99,41 @@ func NewCopilotServiceWithLLM(client ai.LLMClient) *CopilotService {
 	if client == nil {
 		client = ai.NewClient()
 	}
-	return &CopilotService{aiClient: client}
+	return &CopilotService{aiClient: client, logger: zerolog.Nop()}
+}
+
+// WithWorkingDir returns the receiver with WorkingDir set to dir.
+// This is the post-construction setter used by cmd/analysis/main.go
+// once it has read the value from analysis-service.yaml. The method
+// returns the service so it can be chained immediately after
+// construction:
+//
+//	svc := strategy.NewCopilotService().WithWorkingDir(v.GetString("copilot.working_dir"))
+//
+// dir is NOT validated at this point — the validation is deferred to
+// the first Generate() call so a misconfigured server can still start
+// (and report the issue via /health or /api/copilot/generate) instead
+// of crashing on boot.
+func (s *CopilotService) WithWorkingDir(dir string) *CopilotService {
+	s.workingDir = dir
+	return s
+}
+
+// WorkingDir returns the currently configured working directory.
+// Exported so config-bootstrap code and tests can assert that the
+// service received a working dir at all.
+func (s *CopilotService) WorkingDir() string {
+	return s.workingDir
+}
+
+// WithLogger attaches a structured logger to the service. Production
+// callers in cmd/analysis use the root logger with a `component=copilot`
+// field. Tests may leave the default zerolog.Nop() in place.
+func (s *CopilotService) WithLogger(l zerolog.Logger) *CopilotService {
+	if l.GetLevel() != zerolog.Disabled {
+		s.logger = l
+	}
+	return s
 }
 
 // IsConfigured returns true if AI client is configured.
@@ -140,6 +200,29 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 	result.Code = code
 	result.Unlock()
 
+	// Sprint 6 P0-4 (ODR-013): Stage-1 sandbox gate.
+	//
+	// Run the regex-based staticcheck pass BEFORE creating any temp
+	// directory or invoking `go build`. If the LLM produced code
+	// containing known-dangerous patterns (os.RemoveAll, exec.Command,
+	// net.Dial, panic, …), reject the job with status
+	// "sandbox_rejected" and a finding-bearing error message.
+	//
+	// This is the cheap, fail-closed filter from ADR-007 Phase 1; the
+	// process-isolation sandbox (Phase 2) is tracked under Sprint 6
+	// P1-11.
+	if err := staticcheck.CheckOrError(code); err != nil {
+		s.logger.Warn().
+			Err(err).
+			Str("job_id", jobID).
+			Msg("Generated strategy rejected by staticcheck sandbox gate (P0-4)")
+		result.Lock()
+		result.Status = "sandbox_rejected"
+		result.BuildErr = err.Error()
+		result.Unlock()
+		return
+	}
+
 	tmpDir, err := os.MkdirTemp("", "copilot-*")
 	if err != nil {
 		result.Lock()
@@ -154,6 +237,21 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 	code = strings.TrimPrefix(code, "```")
 	code = strings.TrimSuffix(code, "```")
 	code = strings.TrimSpace(code)
+
+	// Sprint 6 P0-4 (ODR-013): fail-closed if WorkingDir is not set.
+	// The previous hard-coded path
+	// "/Users/ruoxi/longshaosWorld/quant-trading" was the only reason
+	// this code worked on a single developer's machine; in any other
+	// environment (CI, Docker, a different developer's laptop) the
+	// `go build` would have failed silently with a non-obvious
+	// "no go.mod" error. Configuration must be explicit.
+	if s.workingDir == "" {
+		result.Lock()
+		result.Status = "sandbox_rejected"
+		result.BuildErr = "copilot.working_dir is not configured; set it in analysis-service.yaml under the `copilot:` key"
+		result.Unlock()
+		return
+	}
 
 	const maxRetries = 2
 	strategyName := ""
@@ -170,18 +268,31 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 
 		var stderr bytes.Buffer
 		buildCmd := exec.Command("go", "build", "-o", filepath.Join(tmpDir, fmt.Sprintf("strategy_v%d", attempt)), outFile)
-		buildCmd.Dir = "/Users/ruoxi/longshaosWorld/quant-trading"
+		buildCmd.Dir = s.workingDir // Sprint 6 P0-4: was a hard-coded path
 		buildCmd.Stderr = &stderr
 		if err := buildCmd.Run(); err != nil {
 			buildErr := stderr.String()
 			if attempt < maxRetries && s.aiClient.IsConfigured() {
 				fixedCode, fixErr := s.aiClient.FixStrategyCode(ctx, code, buildErr)
 				if fixErr == nil && fixedCode != "" {
-					code = fixedCode
-					result.Lock()
-					result.Code = code
-					result.Unlock()
-					continue
+					// Re-run the sandbox gate on the LLM's fix. A
+					// self-correcting LLM that, in a retry,
+					// accidentally introduces an os.RemoveAll
+					// (because it copied a snippet from training
+					// data) would otherwise sneak past us.
+					if recheckErr := staticcheck.CheckOrError(fixedCode); recheckErr == nil {
+						code = fixedCode
+						result.Lock()
+						result.Code = code
+						result.Unlock()
+						continue
+					} else {
+						s.logger.Warn().
+							Err(recheckErr).
+							Str("job_id", jobID).
+							Int("attempt", attempt).
+							Msg("LLM's retry code rejected by staticcheck; aborting retry loop")
+					}
 				}
 			}
 			result.Lock()

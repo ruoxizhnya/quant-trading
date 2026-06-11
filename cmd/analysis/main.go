@@ -174,8 +174,13 @@ func main() {
 	factorAttributor := data.NewFactorAttributor(store)
 	logger.Info().Msg("Factor attribution service initialized")
 
-	copilotService := strategy.NewCopilotService()
-	logger.Info().Bool("ai_configured", copilotService.IsConfigured()).Msg("Copilot service initialized")
+	copilotService := strategy.NewCopilotService().
+		WithLogger(logger.With().Str("component", "copilot").Logger()).
+		WithWorkingDir(v.GetString("copilot.working_dir"))
+	logger.Info().
+		Bool("ai_configured", copilotService.IsConfigured()).
+		Str("working_dir", copilotService.WorkingDir()).
+		Msg("Copilot service initialized")
 
 	copilotRunner := &strategyEngineAdapter{engine: engine}
 

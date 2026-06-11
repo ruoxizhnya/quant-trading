@@ -29,6 +29,22 @@ backtest:
   slippage_rate: 0.0001
   risk_free_rate: 0.03
 
+# Sprint 6 P0-4 (ODR-013): AI Copilot sandbox Stage 1
+#
+# `working_dir` is the directory `go build` runs in when compiling
+# LLM-generated strategy code. It MUST contain a `go.mod` that
+# resolves `github.com/ruoxizhnya/quant-trading/pkg/domain`. Empty
+# value = service refuses to build any generated strategy (fails
+# closed with status="sandbox_rejected").
+#
+# Production: point this at the deployed repo root, e.g.
+#   working_dir: "/opt/quant-trading"
+# CI:  working_dir: "/Users/runner/work/quant-trading/quant-trading"
+# Local dev: working_dir: ""   (then the API will return sandbox_rejected
+#   and the operator will see a clear error in the response body)
+copilot:
+  working_dir: ""
+
 # A-share trading rules
 trading:
   stamp_tax_rate: 0.001          # 印花税 0.1%

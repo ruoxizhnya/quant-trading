@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -243,4 +244,182 @@ func TestParseUniverse_TrimsWhitespace(t *testing.T) {
 
 func TestParseUniverse_SingleEntry(t *testing.T) {
 	assert.Equal(t, []string{"csi300"}, parseUniverse("csi300"))
+}
+
+// ---- P0-4 (ODR-013) WorkingDir + Stage-1 sandbox -----------------------
+
+// TestCopilotService_WithWorkingDir verifies the post-construction
+// setter pattern. The method is the only way to wire a working dir
+// into the service, and the getter (WorkingDir) is what the
+// bootstrap log uses to confirm the operator actually configured
+// the value at startup.
+func TestCopilotService_WithWorkingDir(t *testing.T) {
+	svc := newCopilotWithMock(&ai.MockClient{Configured: true})
+	assert.Equal(t, "", svc.WorkingDir(),
+		"freshly-constructed service must have an empty WorkingDir (fail-closed)")
+
+	const want = "/opt/quant-trading"
+	svc.WithWorkingDir(want)
+	assert.Equal(t, want, svc.WorkingDir())
+
+	// Chained setter returns the same receiver (we don't compare
+	// pointers directly because the helper allocates).
+	_ = svc.WithWorkingDir("/elsewhere").WorkingDir()
+	assert.Equal(t, "/elsewhere", svc.WorkingDir(),
+		"chained call must overwrite the prior value")
+}
+
+// TestCopilotService_Run_StaticcheckRejectsDangerousCode is the
+// P0-4 sandbox gate end-to-end: the LLM produces code containing
+// os.RemoveAll, the gate must reject it with status="sandbox_rejected"
+// and the error must surface the finding details so the API client
+// (and the LLM on retry) can act on it.
+func TestCopilotService_Run_StaticcheckRejectsDangerousCode(t *testing.T) {
+	mock := &ai.MockClient{
+		Configured:      true,
+		GenerateResponse: "package x\nimport \"os\"\nfunc f() { os.RemoveAll(\"/\") }\n",
+	}
+	svc := newCopilotWithMock(mock).
+		WithWorkingDir(t.TempDir()) // WorkingDir set, so the rejection must come from staticcheck, not config
+
+	res := svc.Generate(context.Background(),
+		GenerateParams{Description: "do bad things"}, nil)
+	require.NotNil(t, res)
+
+	waitTerminal(t, svc, res.JobID, 2*time.Second)
+
+	job := svc.GetJob(res.JobID)
+	require.NotNil(t, job)
+	job.Lock()
+	status := job.Status
+	buildErr := job.BuildErr
+	job.Unlock()
+
+	assert.Equal(t, "sandbox_rejected", status,
+		"LLM-generated code containing os.RemoveAll must be rejected by staticcheck")
+	assert.Contains(t, buildErr, "os.RemoveAll",
+		"BuildErr must identify the offending pattern for the LLM retry")
+	assert.Contains(t, buildErr, "staticcheck rejected",
+		"BuildErr must carry the staticcheck marker for log filtering")
+
+	// Counters: buildable and backtested must NOT be bumped.
+	_, b, bt := svc.Stats()
+	assert.Equal(t, int64(0), b, "buildable must not increment on sandbox rejection")
+	assert.Equal(t, int64(0), bt, "backtested must not increment on sandbox rejection")
+}
+
+// TestCopilotService_Run_StaticcheckRejectsExecCommand covers the
+// exec.Command pattern (subprocess execution). This is the most
+// likely real-world LLM failure mode — strategies that "test
+// themselves" by shelling out.
+func TestCopilotService_Run_StaticcheckRejectsExecCommand(t *testing.T) {
+	mock := &ai.MockClient{
+		Configured:      true,
+		GenerateResponse: "package x\nimport \"os/exec\"\nfunc f() { _ = exec.Command(\"ls\") }\n",
+	}
+	svc := newCopilotWithMock(mock).WithWorkingDir(t.TempDir())
+
+	res := svc.Generate(context.Background(),
+		GenerateParams{Description: "shell out"}, nil)
+	require.NotNil(t, res)
+
+	waitTerminal(t, svc, res.JobID, 2*time.Second)
+
+	job := svc.GetJob(res.JobID)
+	job.Lock()
+	status, buildErr := job.Status, job.BuildErr
+	job.Unlock()
+
+	assert.Equal(t, "sandbox_rejected", status)
+	assert.Contains(t, buildErr, "exec.Command")
+}
+
+// TestCopilotService_Run_WorkingDirEmpty_RejectsWithConfigError
+// covers the fail-closed configuration path: WorkingDir is empty
+// (operator forgot to set it in analysis-service.yaml). The job
+// must terminate with sandbox_rejected and a BuildErr that points
+// the operator at the config key, not at a generic "go: no go.mod"
+// error.
+func TestCopilotService_Run_WorkingDirEmpty_RejectsWithConfigError(t *testing.T) {
+	mock := &ai.MockClient{
+		Configured:      true,
+		GenerateResponse: "package x\nfunc f() {}\n", // safe code — failure must be config, not staticcheck
+	}
+	svc := newCopilotWithMock(mock) // WorkingDir left empty
+
+	res := svc.Generate(context.Background(),
+		GenerateParams{Description: "harmless"}, nil)
+	require.NotNil(t, res)
+
+	waitTerminal(t, svc, res.JobID, 2*time.Second)
+
+	job := svc.GetJob(res.JobID)
+	job.Lock()
+	status, buildErr := job.Status, job.BuildErr
+	job.Unlock()
+
+	assert.Equal(t, "sandbox_rejected", status,
+		"empty WorkingDir must terminate the job as sandbox_rejected (fail-closed)")
+	assert.Contains(t, buildErr, "copilot.working_dir",
+		"BuildErr must name the YAML key so the operator can fix it")
+}
+
+// TestCopilotService_WithLogger_NopIsSafe verifies that passing
+// zerolog.Nop() (the default) is fine and the service doesn't
+// crash. This is the "no logger threaded" path used by most unit
+// tests; the WithLogger setter must not blow up on it.
+func TestCopilotService_WithLogger_NopIsSafe(t *testing.T) {
+	svc := newCopilotWithMock(&ai.MockClient{Configured: true})
+	// Don't assert on the returned receiver — the contract is
+	// "doesn't panic, doesn't disable the service".
+	_ = svc.WithLogger(zerolog.Nop())
+}
+
+// TestCopilotService_Run_StaticcheckRejectsPanic covers the panic
+// pattern (high severity). Strategies must return errors, not
+// crash the backtest engine.
+func TestCopilotService_Run_StaticcheckRejectsPanic(t *testing.T) {
+	mock := &ai.MockClient{
+		Configured:      true,
+		GenerateResponse: "package x\nfunc f() { panic(\"boom\") }\n",
+	}
+	svc := newCopilotWithMock(mock).WithWorkingDir(t.TempDir())
+
+	res := svc.Generate(context.Background(),
+		GenerateParams{Description: "crashy"}, nil)
+	require.NotNil(t, res)
+
+	waitTerminal(t, svc, res.JobID, 2*time.Second)
+
+	job := svc.GetJob(res.JobID)
+	job.Lock()
+	status, buildErr := job.Status, job.BuildErr
+	job.Unlock()
+
+	assert.Equal(t, "sandbox_rejected", status)
+	assert.Contains(t, buildErr, "panic")
+}
+
+// waitTerminal polls GetJob until the run() goroutine has written a
+// non-pending status, or fails the test at deadline. It's the
+// synchronization point for the fire-and-forget Generate() call
+// across all the P0-4 sandbox tests.
+func waitTerminal(t *testing.T, svc *CopilotService, jobID string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		job := svc.GetJob(jobID)
+		if job == nil {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		job.Lock()
+		status := job.Status
+		job.Unlock()
+		if status != "" && status != "pending" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("job %s did not reach a terminal status within %s", jobID, timeout)
 }
