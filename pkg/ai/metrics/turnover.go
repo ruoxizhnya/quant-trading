@@ -43,8 +43,8 @@ func (c *TurnoverCalculator) ComputeTurnover(weightsByDate []map[string]float64)
 
 	return &TurnoverResult{
 		MeanTurnover:   mean(turnovers),
-		MaxTurnover:    max(turnovers),
-		MinTurnover:    min(turnovers),
+		MaxTurnover:    maxIn(turnovers),
+		MinTurnover:    minIn(turnovers),
 		TurnoverSeries: turnovers,
 	}
 }
@@ -108,30 +108,28 @@ func ranksToWeights(ranks map[string]int, topN int) map[string]float64 {
 	return weights
 }
 
-// max returns the maximum value in a slice.
-func max(data []float64) float64 {
+// maxIn returns the maximum value in a slice. Renamed from
+// `max` to avoid shadowing the Go 1.21+ builtin (Sprint 6 P0-10).
+func maxIn(data []float64) float64 {
 	if len(data) == 0 {
 		return 0
 	}
 	m := data[0]
 	for _, v := range data[1:] {
-		if v > m {
-			m = v
-		}
+		m = max(m, v)
 	}
 	return m
 }
 
-// min returns the minimum value in a slice.
-func min(data []float64) float64 {
+// minIn returns the minimum value in a slice. Renamed from
+// `min` to avoid shadowing the Go 1.21+ builtin (Sprint 6 P0-10).
+func minIn(data []float64) float64 {
 	if len(data) == 0 {
 		return 0
 	}
 	m := data[0]
 	for _, v := range data[1:] {
-		if v < m {
-			m = v
-		}
+		m = min(m, v)
 	}
 	return m
 }

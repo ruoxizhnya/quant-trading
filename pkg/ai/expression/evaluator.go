@@ -342,9 +342,4 @@ func broadcast(val float64, n int) []float64 {
 	return result
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
+// max is provided by Go 1.21+ builtin (P0-10).

@@ -334,9 +334,4 @@ func (m *MockTrader) Reset() {
 	m.orders = make(map[string]*OrderResult)
 }
 
-func max(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
-}
+// max is provided by Go 1.21+ builtin (P0-10).

@@ -144,16 +144,4 @@ func generateTradeID() string {
 	return fmt.Sprintf("TRD-%d", time.Now().UnixNano())
 }
 
-func min(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
-}
+// min and max are provided by Go 1.21+ builtins (P0-10).
