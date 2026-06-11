@@ -1,6 +1,6 @@
 module github.com/ruoxizhnya/quant-trading
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
@@ -14,6 +14,7 @@ require (
 	github.com/rs/zerolog v1.33.0
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/time v0.15.0
 )
 
 require (

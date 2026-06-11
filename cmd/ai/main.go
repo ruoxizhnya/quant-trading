@@ -23,6 +23,15 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 
+	// Sprint 6 P0-9 (ODR-013, ADR-017 §2): per-user token-bucket
+	// rate limit. Defaults: 10 req/min sustained, burst 10. Both
+	// knobs are env-overridable so a CI smoke test can crank
+	// the limit up while an incident response can drop it to 0.
+	ratePerMin := envInt("AI_RATE_LIMIT_PER_MIN", 10)
+	rateBurst := envInt("AI_RATE_LIMIT_BURST", 10)
+	router.Use(newRateLimiter(ratePerMin, rateBurst).middleware())
+	log.Printf("AI rate limit: %d req/min sustained, burst %d", ratePerMin, rateBurst)
+
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
