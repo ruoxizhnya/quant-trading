@@ -9,17 +9,23 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/fees"
 )
 
 // MockTraderConfig configures the mock trader simulation.
+//
+// Rate fields default to `pkg/fees.DefaultAShareFees()` when
+// left zero; that is the regulatory default from the 2024-Q1
+// 上交所/深交所公告. See pkg/fees for the exact values and
+// the change log.
 type MockTraderConfig struct {
-	InitialCash    float64
-	CommissionRate float64 // default 0.0003 (0.03%)
-	StampTaxRate   float64 // default 0.001 (0.1%, sell only)
-	SlippageRate   float64 // default 0.0001 (0.01%)
-	TransferFeeRate float64 // default 0.00001 (0.001%)
-	MinCommission  float64 // default 5.0 CNY
-	PriceProvider  func(symbol string) float64
+	InitialCash     float64
+	CommissionRate  float64
+	StampTaxRate    float64
+	SlippageRate    float64
+	TransferFeeRate float64
+	MinCommission   float64
+	PriceProvider   func(symbol string) float64
 }
 
 // MockTrader implements LiveTrader with in-memory simulation.
@@ -40,20 +46,26 @@ func NewMockTrader(config MockTraderConfig, logger zerolog.Logger) *MockTrader {
 	if config.InitialCash <= 0 {
 		config.InitialCash = 1000000
 	}
+	// Sprint 6 P1-22 (ODR-013): fee defaults now sourced from
+	// the unified `pkg/fees` package. Pre-P1-22 these 5 lines
+	// were hardcoded literals (0.0003, 0.001, 0.0001, 0.00001,
+	// 5.0) and diverged from `pkg/backtest/constants.go` after
+	// the 2023-08 stamp tax cut.
+	defaults := fees.DefaultAShareFees()
 	if config.CommissionRate <= 0 {
-		config.CommissionRate = 0.0003
+		config.CommissionRate = defaults.CommissionRate
 	}
 	if config.StampTaxRate <= 0 {
-		config.StampTaxRate = 0.001
+		config.StampTaxRate = defaults.StampTaxRate
 	}
 	if config.SlippageRate <= 0 {
-		config.SlippageRate = 0.0001
+		config.SlippageRate = defaults.SlippageRate
 	}
 	if config.TransferFeeRate <= 0 {
-		config.TransferFeeRate = 0.00001
+		config.TransferFeeRate = defaults.TransferFeeRate
 	}
 	if config.MinCommission <= 0 {
-		config.MinCommission = 5.0
+		config.MinCommission = defaults.MinCommission
 	}
 	return &MockTrader{
 		config:    config,

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/fees"
 )
 
 // ---- helpers -------------------------------------------------------------
@@ -22,10 +23,14 @@ func newTestLogger() zerolog.Logger {
 
 func defaultExecConfig() domain.ExecutionConfig {
 	return domain.ExecutionConfig{
-		OrderType:      domain.OrderTypeMarket,
-		SlippageModel:  "fixed",
-		CommissionRate: 0.00025,
-		MinCommission:  5.0,
+		OrderType:     domain.OrderTypeMarket,
+		SlippageModel: "fixed",
+		// Sprint 6 P1-22: simulate a discount broker (a ~17%
+		// haircut off the regulatory ceiling). The base value
+		// comes from fees.DefaultCommissionRate so a regulator
+		// change is still picked up by this fixture.
+		CommissionRate: fees.DefaultCommissionRate * (1.0 - 0.17),
+		MinCommission:  fees.DefaultMinCommission,
 		InitialCapital: 1_000_000,
 	}
 }

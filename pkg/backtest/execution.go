@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/fees"
 )
 
 // ExecutionService handles order execution in backtests.
@@ -110,8 +111,11 @@ func (s *BacktestExecutionService) SetSlippageModel(model string) {
 func (s *BacktestExecutionService) applySlippage(price float64, direction domain.Direction, quote Quote) float64 {
 	switch s.slippageModel {
 	case "fixed":
-		// Fixed 0.1% slippage
-		slippage := 0.001
+		// Sprint 6 P1-22 (ODR-013): pulled the literal 0.001
+		// out of this branch into fees.FixedSlippageRate so a
+		// "what-if" sensitivity sweep can change the fixed
+		// model rate in one place.
+		slippage := fees.FixedSlippageRate
 		if direction == domain.DirectionLong {
 			return price * (1 + slippage)
 		}
