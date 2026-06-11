@@ -915,16 +915,16 @@
 
 | ID | 任务 | 关联问题 | 文件 | Owner | 估时 | 验收标准 | 状态 |
 |---|---|---|---|---|---|---|---|
-| **P0-1** | LLMClient interface 化 | TQ-003, CQ-003 | `pkg/ai/client.go`, `pkg/strategy/copilot.go` | TBD | 1d | `pkg/strategy` 测试套件 `go test` 0 panic | ⬜ |
-| **P0-2** | 修复 `pkg/live/engine.go::Stop` 持锁跨越 `Unsubscribe`/`Disconnect` 网络 I/O（类似 CR-02 ODR-012 模式） | CQ-009 | `pkg/live/engine.go:Stop` | TBD | 1d | 锁在 `close(stopCh)` 后立即释放；`TestLiveEngine_Stop_Concurrent` 1000 次并发无 deadlock | ⬜ |
-| **P0-3** | 引入 OpenTelemetry + Prometheus + `/metrics` + request_id 透传 | AR-001, ADR-017 §1 | `cmd/analysis/main.go` | TBD | 2d | `/metrics` 端点暴露 4 类核心 metric；trace_id 跨服务透传 | ⬜ |
-| **P0-4** | Copilot `WorkingDir` 配置化 + 静态分析闸 (sandbox 阶段 1) | AR-003, ADR-007/019 §2 | `pkg/strategy/copilot.go`, `internal/sandbox/staticcheck/` | TBD | 1d | 硬编码路径消除；危险模式 (`os.RemoveAll`/`exec.Command`) 拒绝 | ⬜ |
-| **P0-5** | `engine.go::rand.NewSource` 返回值保留 + 确定性重放 | AR-007, CQ-001 | `pkg/backtest/engine.go:244-246` | TBD | 2d | `TestEngine_DeterministicReplay` byte-level 通过 | ⬜ |
-| **P0-6** | `pkg/backtest` 并发 map panic 修复 (RWMutex + race test) | CQ-019, TQ-012 | `pkg/backtest/engine.go`, `pkg/backtest/job.go` | TBD | 2d | `go test -race ./pkg/backtest/...` 0 竞态 | ⬜ |
-| **P0-7** | `pkg/storage` dockertest 集成测试 | TQ-011, AR-013 | `pkg/storage/integration_test.go` (新建) | TBD | 3d | 集成测试覆盖率 8.2% → ≥ 60% | ⬜ |
-| **P0-8** | `cmd/analysis` 优雅停机 (WaitGroup + stale 'running' cleanup) | AR-005, TQ-008 | `cmd/analysis/main.go`, `pkg/backtest/job.go` | TBD | 2d | SIGTERM 后 DB status 全部 'completed'/'failed' | ⬜ |
-| **P0-9** | AI service token bucket 限流 (10 req/min/user) | AR-004, AR-008, ADR-017 §2 | `cmd/ai/main.go` | TBD | 1d | 限流生效；超限返 429 | ⬜ |
-| **P0-10** | 删除 8 处手写 `max`/`min`，改用 Go 1.21+ 内建 | CQ-003 | `pkg/live/mock_trader.go:337`, `pkg/backtest/execution.go:147,154`, `pkg/ai/evolution/mutation.go:137,144`, `pkg/ai/metrics/turnover.go:112,126`, `pkg/ai/expression/evaluator.go:345` | TBD | 0.5d | `go vet` + 编译通过；测试通过 | ⬜ |
+| **P0-1** | LLMClient interface 化 | TQ-003, CQ-003 | `pkg/ai/client.go`, `pkg/strategy/copilot.go` | TBD | 1d | `pkg/strategy` 测试套件 `go test` 0 panic | ✅ |
+| **P0-2** | 修复 `pkg/live/engine.go::Stop` 持锁跨越 `Unsubscribe`/`Disconnect` 网络 I/O（类似 CR-02 ODR-012 模式） | CQ-009 | `pkg/live/engine.go:Stop` | TBD | 1d | 锁在 `close(stopCh)` 后立即释放；`TestLiveEngine_Stop_Concurrent` 1000 次并发无 deadlock | ✅ |
+| **P0-3** | 引入 OpenTelemetry + Prometheus + `/metrics` + request_id 透传 | AR-001, ADR-017 §1 | `cmd/analysis/main.go` | TBD | 2d | `/metrics` 端点暴露 4 类核心 metric；trace_id 跨服务透传 | ✅ |
+| **P0-4** | Copilot `WorkingDir` 配置化 + 静态分析闸 (sandbox 阶段 1) | AR-003, ADR-007/019 §2 | `pkg/strategy/copilot.go`, `internal/sandbox/staticcheck/` | TBD | 1d | 硬编码路径消除；危险模式 (`os.RemoveAll`/`exec.Command`) 拒绝 | ✅ |
+| **P0-5** | `engine.go::rand.NewSource` 返回值保留 + 确定性重放 | AR-007, CQ-001 | `pkg/backtest/engine.go:244-246` | TBD | 2d | `TestEngine_DeterministicReplay` byte-level 通过 | ✅ |
+| **P0-6** | `pkg/backtest` 并发 map panic 修复 (RWMutex + race test) | CQ-019, TQ-012 | `pkg/backtest/engine.go`, `pkg/backtest/job.go` | TBD | 2d | `go test -race ./pkg/backtest/...` 0 竞态 | ✅ |
+| **P0-7** | `pkg/storage` dockertest 集成测试 | TQ-011, AR-013 | `pkg/storage/integration_test.go` (新建) | TBD | 3d | 集成测试覆盖率 8.2% → ≥ 60% | ✅ |
+| **P0-8** | `cmd/analysis` 优雅停机 (WaitGroup + stale 'running' cleanup) | AR-005, TQ-008 | `cmd/analysis/main.go`, `pkg/backtest/job.go` | TBD | 2d | SIGTERM 后 DB status 全部 'completed'/'failed' | ✅ |
+| **P0-9** | AI service token bucket 限流 (10 req/min/user) | AR-004, AR-008, ADR-017 §2 | `cmd/ai/main.go` | TBD | 1d | 限流生效；超限返 429 | ✅ |
+| **P0-10** | 删除 8 处手写 `max`/`min`，改用 Go 1.21+ 内建 | CQ-003 | `pkg/live/mock_trader.go:337`, `pkg/backtest/execution.go:147,154`, `pkg/ai/evolution/mutation.go:137,144`, `pkg/ai/metrics/turnover.go:112,126`, `pkg/ai/expression/evaluator.go:345` | TBD | 0.5d | `go vet` + 编译通过；测试通过 | ✅ |
 
 ### 🟠 Sprint 6 P1 — 1 周内修复 (30 项)
 
