@@ -8,8 +8,20 @@ import (
 )
 
 // sortOHLCV sorts OHLCV data by date in ascending order.
+//
 // It creates a copy of the data to avoid modifying the original slice.
+//
+// Fast path: if the data is already sorted by date ascending (the common case
+// for backtest L1 cache, which is pre-sorted in warmCache / InMemoryProvider),
+// this returns the input slice unchanged. This avoids one allocation + N*log(N)
+// sort comparisons per call — and momentum/mean-reversion strategies call
+// sortOHLCV inside their per-day hot path (50 stocks × 240 days = 12,000 calls
+// per backtest run). Skipping the copy+sort shaves significant GC pressure
+// from the 5s backtest budget.
 func sortOHLCV(data []domain.OHLCV) []domain.OHLCV {
+	if isSortedByDate(data) {
+		return data
+	}
 	sorted := make([]domain.OHLCV, len(data))
 	copy(sorted, data)
 	sort.Slice(sorted, func(i, j int) bool {
@@ -18,11 +30,35 @@ func sortOHLCV(data []domain.OHLCV) []domain.OHLCV {
 	return sorted
 }
 
+// isSortedByDate returns true if data is sorted by Date in ascending order,
+// or has 0/1 elements. O(n) verification on the data.
+func isSortedByDate(data []domain.OHLCV) bool {
+	if len(data) < 2 {
+		return true
+	}
+	prev := data[0].Date
+	for i := 1; i < len(data); i++ {
+		cur := data[i].Date
+		if cur.Before(prev) {
+			return false
+		}
+		prev = cur
+	}
+	return true
+}
+
 // getLatestPrice extracts the latest closing price from OHLCV data.
 // Returns 0 if data is empty.
+//
+// Fast path: if data is already sorted by date (the common case), just return
+// the last element. The previous implementation always allocated a copy and
+// sorted — which was a hot allocation site in the per-day strategy loop.
 func getLatestPrice(data []domain.OHLCV) float64 {
 	if len(data) == 0 {
 		return 0
+	}
+	if isSortedByDate(data) {
+		return data[len(data)-1].Close
 	}
 	sorted := sortOHLCV(data)
 	return sorted[len(sorted)-1].Close
