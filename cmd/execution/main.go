@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/id"
 	"github.com/ruoxizhnya/quant-trading/pkg/live"
 )
 
@@ -337,5 +337,9 @@ func getAccountHandler(c *gin.Context) {
 }
 
 func generateOrderID() string {
-	return uuid.New().String()
+	// Sprint 6 P1-23 (ODR-013): unified ID generation.
+	// Time-ordered v7 (instead of random v4) so the orders
+	// table can sort by PK without a separate created_at
+	// index.
+	return id.OrderID()
 }

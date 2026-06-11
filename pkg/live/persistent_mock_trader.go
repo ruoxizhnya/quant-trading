@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/id"
 )
 
 type PersistentMockTraderConfig struct {
@@ -79,7 +79,7 @@ func (m *persistentMockTrader) SubmitOrder(_ context.Context, symbol string, dir
 
 		if totalCost > m.cash {
 			orderRecord := &OrderRecord{
-				OrderID:     uuid.New().String(),
+				OrderID:     id.OrderID(),
 				Symbol:      symbol,
 				Direction:   string(direction),
 				OrderType:   string(orderType),
@@ -160,7 +160,7 @@ func (m *persistentMockTrader) SubmitOrder(_ context.Context, symbol string, dir
 
 	now := time.Now()
 	result := &OrderResult{
-		OrderID:     uuid.New().String(),
+		OrderID:     id.OrderID(),
 		Symbol:      symbol,
 		Direction:   direction,
 		OrderType:   orderType,

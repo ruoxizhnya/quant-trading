@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/fees"
+	"github.com/ruoxizhnya/quant-trading/pkg/id"
 )
 
 // MockTraderConfig configures the mock trader simulation.
@@ -148,7 +148,7 @@ func (m *MockTrader) executeBuy(symbol string, orderType domain.OrderType, quant
 	}
 
 	result := &OrderResult{
-		OrderID:     uuid.New().String(),
+		OrderID:     id.OrderID(),
 		Symbol:      symbol,
 		Direction:   domain.DirectionLong,
 		OrderType:   orderType,
@@ -215,7 +215,7 @@ func (m *MockTrader) executeSell(symbol string, orderType domain.OrderType, quan
 	}
 
 	result := &OrderResult{
-		OrderID:     uuid.New().String(),
+		OrderID:     id.OrderID(),
 		Symbol:      symbol,
 		Direction:   domain.DirectionClose,
 		OrderType:   orderType,
