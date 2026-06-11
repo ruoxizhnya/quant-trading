@@ -101,10 +101,14 @@ func (c *RedisCache) Exists(ctx context.Context, keys ...string) (int64, error) 
 }
 
 // InvalidateStocks invalidates stock-related cache entries.
+//
+// Pattern is scoped to the KeyNamespace (see constants.go) so we
+// never accidentally scan/delete keys owned by other apps sharing
+// the same Redis instance.
 func (c *RedisCache) InvalidateStocks(ctx context.Context, exchange string) error {
-	pattern := "stocks:list:*"
+	pattern := KeyPrefixStocksList + "*"
 	if exchange != "" && exchange != "all" {
-		pattern = "stocks:list:" + exchange
+		pattern = KeyPrefixStocksList + exchange
 	}
 
 	var cursor uint64
@@ -130,7 +134,7 @@ func (c *RedisCache) InvalidateStocks(ctx context.Context, exchange string) erro
 
 // GetCachedStocks retrieves cached stocks list from Redis for an exchange.
 func (c *RedisCache) GetCachedStocks(ctx context.Context, exchange string) (interface{}, error) {
-	key := "stocks:list:" + exchange
+	key := KeyPrefixStocksList + exchange
 	data, err := c.Get(ctx, key)
 	if err != nil {
 		return nil, err
@@ -147,7 +151,7 @@ func (c *RedisCache) GetCachedStocks(ctx context.Context, exchange string) (inte
 
 // CacheStocks stores a stocks list in Redis with TTL for an exchange.
 func (c *RedisCache) CacheStocks(ctx context.Context, exchange string, stocks interface{}) error {
-	key := "stocks:list:" + exchange
+	key := KeyPrefixStocksList + exchange
 	data, err := json.Marshal(stocks)
 	if err != nil {
 		return fmt.Errorf("failed to marshal stocks list: %w", err)
@@ -157,7 +161,7 @@ func (c *RedisCache) CacheStocks(ctx context.Context, exchange string, stocks in
 
 // GetCachedStock retrieves a single cached stock from Redis.
 func (c *RedisCache) GetCachedStock(ctx context.Context, symbol string) (interface{}, error) {
-	key := "stock:" + symbol
+	key := KeyPrefixStock + symbol
 	data, err := c.Get(ctx, key)
 	if err != nil {
 		return nil, err
@@ -177,14 +181,14 @@ func (c *RedisCache) CacheStock(ctx context.Context, stock interface{}) error {
 	key := ""
 	switch s := stock.(type) {
 	case *domain.Stock:
-		key = "stock:" + s.Symbol
+		key = KeyPrefixStock + s.Symbol
 	case domain.Stock:
-		key = "stock:" + s.Symbol
+		key = KeyPrefixStock + s.Symbol
 	case map[string]interface{}:
 		if sym, ok := s["symbol"].(string); ok {
-			key = "stock:" + sym
+			key = KeyPrefixStock + sym
 		} else if sym, ok := s["Symbol"].(string); ok {
-			key = "stock:" + sym
+			key = KeyPrefixStock + sym
 		}
 	default:
 		return fmt.Errorf("invalid stock format: unsupported type %T", stock)

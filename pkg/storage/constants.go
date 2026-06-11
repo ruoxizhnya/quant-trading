@@ -29,13 +29,50 @@ const (
 	RedisShortTTL = 1 * time.Hour
 )
 
-// Cache key prefixes
+// Cache key namespace
+//
+// All Redis keys written by the Quant Lab system are prefixed with
+// `KeyNamespace` (currently "quantlab:") so that:
+//
+//  1. Multiple applications can share a single Redis instance without
+//     key collisions (e.g. dev/staging sharing a Redis box).
+//  2. Operators can `KEYS quantlab:*` (or `SCAN MATCH quantlab:*`)
+//     to enumerate every key owned by this project, and `DEL` the
+//     whole namespace for a cold reset.
+//
+// IMPORTANT: changing KeyNamespace is a **breaking change** for any
+// process holding pre-existing keys — they become unreachable and
+// will re-populate on next request. The 24h TTL on stock / OHLCV
+// entries ensures stale keys expire naturally.
 const (
-	// KeyPrefixOHLCV is the prefix for OHLCV cache keys
-	KeyPrefixOHLCV = "ohlcv:"
+	// KeyNamespace is the global prefix prepended to every Redis
+	// key the system writes. MUST end with ":" so a `MATCH
+	// quantlab:*` pattern is unambiguous.
+	KeyNamespace = "quantlab:"
+)
 
-	// KeyPrefixFund is the prefix for fundamental data cache keys
-	KeyPrefixFund  = "fund:"
+// Cache key prefixes
+//
+// All key prefix constants embed KeyNamespace so call sites only
+// ever compose against the prefixed form. Tests pin the literal
+// values to detect accidental renames.
+var (
+	// KeyPrefixOHLCV is the prefix for OHLCV cache keys.
+	// Full key shape: "quantlab:ohlcv:{symbol}:{startYYYYMMDD}:{endYYYYMMDD}"
+	KeyPrefixOHLCV = KeyNamespace + "ohlcv:"
+
+	// KeyPrefixFund is the prefix for fundamental data cache keys.
+	// Full key shape: "quantlab:fund:{symbol}:{dateYYYYMMDD}"
+	KeyPrefixFund = KeyNamespace + "fund:"
+
+	// KeyPrefixStocksList is the prefix for the per-exchange
+	// stock list. "all" / "" requests use "*" (no suffix).
+	// Full key shape: "quantlab:stocks:list:{exchange}"
+	KeyPrefixStocksList = KeyNamespace + "stocks:list:"
+
+	// KeyPrefixStock is the prefix for a single stock record.
+	// Full key shape: "quantlab:stock:{symbol}"
+	KeyPrefixStock = KeyNamespace + "stock:"
 )
 
 // Batch operation limits

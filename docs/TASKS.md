@@ -953,13 +953,13 @@
 | **P1-19** | EngineOption 函数式注入 + backward-compat shim | CQ-005, ADR-020 | `pkg/backtest/engine.go` | TBD | 3d | `NewEngine(cfg, prov, opts...)` working；旧 5 个 engine setter（SetDataAdapter/SetStore/SetRiskManager/SetLiveTrader/SetExecutionService）+ 1 个 strategy SetFactorCache 共 6 个 setter 保留 6 个月 backward-compat | ⬜ |
 | **P1-20** | BacktestState 内部锁 + Freeze 模式 | AR-014, ADR-020 | `pkg/backtest/engine.go` (BacktestState struct) | TBD | 2d | race detector 0 issue；回测完成冻结 | ⬜ |
 | **P1-21** | `pkg/statistics/` 包抽取 (mean/std/slope/volatility) | CQ-004 | `pkg/statistics/` (新建) | TBD | 2d | 6+ 处重复消除；单包覆盖率 ≥ 80% | ⬜ |
-| **P1-22** | `pkg/fees/ashare.go` 费率常量统一 | CQ-005 | `pkg/fees/ashare.go` (新建) | TBD | 1d | 4 处硬编码消除；单包测试 | ⬜ |
-| **P1-23** | `pkg/id/order.go` UUID v7 统一 | CQ-007 | `pkg/id/order.go` (新建) | TBD | 1d | 3 处订单号生成统一；测试 | ⬜ |
+| **P1-22** | `pkg/fees/ashare.go` 费率常量统一 | CQ-005 | `pkg/fees/ashare.go` (新建) | TBD | 1d | 4 处硬编码消除；单包测试 | ✅ |
+| **P1-23** | `pkg/id/order.go` UUID v7 统一 | CQ-007 | `pkg/id/order.go` (新建) | TBD | 1d | 3 处订单号生成统一；测试 | ✅ |
 | **P1-24** | Strategy 接口拆分 (StrategyCore/Configurable/ResourceManaged) | CQ-006, ISP | `pkg/strategy/strategy.go` | TBD | 2d | 3 个可组合 interface；现有 strategy 适配 | ⬜ |
 | **P1-25** | domain.Strategy Deprecated 删除 | CQ-014 | `pkg/domain/types.go` | TBD | 0.5d | 旧接口移除；pkg/strategy.Strategy 唯一源 | ⬜ |
 | **P1-26** | 4 套执行实体合并 (LiveEngine/OrderManager/...) | CQ-010, YAGNI | `pkg/live/` | TBD | 1w | 5 套 → 2 套 (LiveEngine + MockTrader) | ⬜ |
-| **P1-27** | `pkg/strategy/plugins/utils.go` 删除手写 `itoa`/`ftoa`/`joinStrings` | CQ-006 | `pkg/strategy/plugins/utils.go` | TBD | 0.5d | 标准库替换；测试通过 | ⬜ |
-| **P1-28** | Redis 缓存 key namespace 化 (`quantlab:` 前缀) | AR-021 | `pkg/storage/redis.go` | TBD | 1d | 全部 key 加前缀；InvalidateOHLCV 限定 pattern | ⬜ |
+| **P1-27** | `pkg/strategy/plugins/utils.go` 删除手写 `itoa`/`ftoa`/`joinStrings` | CQ-006 | `pkg/strategy/plugins/utils.go` | TBD | 0.5d | 标准库替换；测试通过 | ✅ |
+| **P1-28** | Redis 缓存 key namespace 化 (`quantlab:` 前缀) | AR-021 | `pkg/storage/redis.go` | TBD | 1d | 全部 key 加前缀；InvalidateOHLCV 限定 pattern | ✅ |
 | **P1-29** | 持仓超限/行业集中度/回撤告警 (AlertManager) | BR-015, ADR-017 | `pkg/alert/manager.go` (新建) | TBD | 1w | 6 类 P0 风险告警；webhook 渠道 | ⬜ |
 | **P1-30** | E2E AI Copilot 端到端 + SSE 进度 | TQ-016, BR-014 | `e2e/tests/ai-copilot-e2e.spec.ts` | TBD | 3d | Playwright 自然语言 → 回测 → 展示 | ⬜ |
 

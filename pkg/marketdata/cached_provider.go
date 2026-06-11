@@ -29,7 +29,11 @@ func DefaultCacheConfig() CacheConfig {
 		FundamentalTTL: 6 * time.Hour,
 		StocksTTL:      1 * time.Hour,
 		CalendarTTL:    72 * time.Hour,
-		Prefix:         "md:",
+		// Prefix must be namespaced (see storage.KeyNamespace) so
+		// cached_provider keys live under the same "quantlab:" root
+		// as the other cache layers. Operators can `SCAN MATCH
+		// quantlab:*` to enumerate every key owned by this project.
+		Prefix: "quantlab:md:",
 	}
 }
 

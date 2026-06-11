@@ -143,7 +143,7 @@ func DefaultDataSourceConfig() DataSourceConfig {
 			FundamentalTTL: 6 * time.Hour,
 			StocksTTL:      time.Hour,
 			CalendarTTL:    24 * time.Hour,
-			Prefix:         "md:",
+			Prefix:         "quantlab:md:",
 		},
 		Sources: map[string]SourceConfig{},
 	}
