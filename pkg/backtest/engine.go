@@ -149,6 +149,15 @@ type Engine struct {
 	// models (fixed slippage, variable slippage, no slippage) and unified
 	// commission calculation.
 	executionService ExecutionService
+
+	// rng is the per-engine *rand.Rand, initialized from config.Seed in
+	// NewEngine. Always retained (never discarded) so that any code path
+	// needing deterministic randomness — e.g. per-backtest trade IDs,
+	// bootstrap sampling in walk-forward, or future stochastic order-filling
+	// models — can call e.RNG() to get a stable, replayable stream.
+	// When config.Seed is 0 the engine falls back to a time-based seed and
+	// the stream is non-replayable (intentional, for production runs).
+	rng *rand.Rand
 }
 
 // BacktestState holds the state of a backtest run.
@@ -239,10 +248,25 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 	}
 
 	// Initialize random seed for deterministic backtests.
-	// If Seed is 0, math/rand is not used (no shuffle operations currently exist).
-	// Document the seed value used in test fixtures for reproducibility.
+	//
+	// Sprint 6 P0-5 (ODR-013): the previous code called
+	//     rand.New(rand.NewSource(config.Seed))
+	// and threw the *rand.Rand return value away. The global state was
+	// re-seeded but nothing in the engine held a handle to the source, so
+	// any code that wanted to replay a backtest bit-for-bit had no way to
+	// fork off a per-backtest RNG and no test could assert determinism.
+	//
+	// Now: the engine always owns a *rand.Rand (rng). When config.Seed is
+	// non-zero, the engine is fully deterministic — any code that goes
+	// through e.RNG() (or a future per-backtest fork) will produce a
+	// reproducible sequence. When config.Seed is 0, we still initialize
+	// rng but with a time-based seed so production runs remain
+	// non-deterministic.
+	var rng *rand.Rand
 	if config.Seed != 0 {
-		rand.New(rand.NewSource(config.Seed))
+		rng = rand.New(rand.NewSource(config.Seed))
+	} else {
+		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 	}
 
 	// Initialize default execution service
@@ -264,6 +288,7 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 		logger:             logger.With().Str("component", "backtest_engine").Logger(),
 		inMemoryOHLCV:      make(map[string][]domain.OHLCV),
 		executionService:   executionService,
+		rng:                rng,
 	}
 	// Publish the initial empty cache snapshot so the hot path can read it
 	// lock-free (atomic.Pointer.Load) without a nil check.
@@ -278,6 +303,24 @@ func (e *Engine) SetDataAdapter(adapter *marketdata.DataAdapter) {
 	if adapter != nil {
 		e.logger.Info().Str("source", adapter.Primary()).Msg("DataAdapter attached to engine")
 	}
+}
+
+// RNG returns the engine's *rand.Rand. The stream is fully deterministic
+// when NewEngine was called with a non-zero Config.Seed; otherwise it is
+// seeded from time.Now() and is non-replayable.
+//
+// Callers that need a stable, byte-equal stream across processes
+// (regression tests, golden fixtures, property tests) MUST construct the
+// engine with a fixed seed. Callers that need a per-backtest sub-stream
+// should fork from this one with rand.New(rand.NewSource(e.RNG().Int63()))
+// — that way the top-level seed is the only thing that needs to be
+// recorded in test fixtures.
+//
+// Concurrency: *rand.Rand methods are safe for concurrent use (Go std
+// documents this since 1.0), so callers may share e.RNG() across
+// goroutines without extra synchronization.
+func (e *Engine) RNG() *rand.Rand {
+	return e.rng
 }
 
 func (e *Engine) SetStore(store *storage.PostgresStore) {
