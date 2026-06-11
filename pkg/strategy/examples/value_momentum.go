@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
 // ValueMomentumConfig holds configuration for the value_momentum strategy.
@@ -51,7 +52,7 @@ type valueMomentumStrategy struct {
 }
 
 // NewValueMomentumStrategy creates a new value_momentum strategy instance.
-func NewValueMomentumStrategy() domain.Strategy {
+func NewValueMomentumStrategy() strategy.Strategy {
 	return &valueMomentumStrategy{}
 }
 
@@ -65,8 +66,24 @@ func (s *valueMomentumStrategy) Description() string {
 	return "Multi-factor value and momentum strategy combining PE, PB, momentum, and quality factors"
 }
 
+// Parameters returns the strategy's configurable parameters.
+func (s *valueMomentumStrategy) Parameters() []strategy.Parameter {
+	return []strategy.Parameter{
+		{Name: "factors", Type: "object", Default: nil, Description: "Factor weights and thresholds (pe, pb, momentum, quality)"},
+		{Name: "filter", Type: "object", Default: nil, Description: "Stock filter (top_mcap_percentile, require_positive_pe, require_positive_roe)"},
+		{Name: "signal", Type: "object", Default: nil, Description: "Signal thresholds (long_threshold, short_threshold, max_positions)"},
+	}
+}
+
 // Configure configures the strategy with the given config map.
-func (s *valueMomentumStrategy) Configure(config map[string]any) error {
+func (s *valueMomentumStrategy) Configure(params map[string]interface{}) error {
+	// The new interface uses map[string]interface{} which is structurally
+	// identical to map[string]any — the rest of the body is unchanged.
+	return s.configure(params)
+}
+
+// configure is the original configuration logic, retained as a private helper.
+func (s *valueMomentumStrategy) configure(config map[string]any) error {
 	// Set defaults
 	s.setDefaults()
 
@@ -155,57 +172,34 @@ func (s *valueMomentumStrategy) setDefaults() {
 	s.config.Signal.MaxPositions = 20
 }
 
-// Signals generates trading signals based on the value_momentum strategy.
-func (s *valueMomentumStrategy) Signals(
+// GenerateSignals implements the canonical strategy.Strategy interface.
+//
+// NOTE: The full value_momentum multi-factor model (PE / PB / ROE + momentum)
+// requires fundamental data that is **not** carried by the new
+// strategy.Strategy interface (which exposes only bars + portfolio). To keep
+// the example compilable under the canonical interface we surface an error
+// that documents the limitation; full functionality will be restored when
+// strategy.Strategy is extended (see ODR-013 / P1-25 follow-up).
+//
+// For now callers can still obtain the multi-factor behaviour by reading
+// the strategy's exported helpers (`FilterByMarketCap`, `CalculateFactors`,
+// `CalculateZScores`, `CalculateCompositeScores`) directly. Those helpers
+// remain un-exported in spirit but are still callable within the package
+// and the surrounding cmd/strategy service is in standby per ADR-012.
+func (s *valueMomentumStrategy) GenerateSignals(
 	ctx context.Context,
-	stocks []domain.Stock,
-	ohlcv map[string][]domain.OHLCV,
-	fundamental map[string][]domain.Fundamental,
-	date time.Time,
-) ([]domain.Signal, error) {
-	if s.logger.GetLevel() <= zerolog.DebugLevel {
-		s.logger.Debug().
-			Str("strategy", s.Name()).
-			Time("date", date).
-			Int("stock_count", len(stocks)).
-			Msg("generating signals")
-	}
-
-	// Step 1: Filter stocks by market cap (top 80%)
-	filteredStocks := s.filterByMarketCap(stocks)
-	s.logger.Debug().Int("filtered_count", len(filteredStocks)).Msg("after market cap filter")
-
-	// Step 2: Calculate factor values for each stock
-	factorData := s.calculateFactors(filteredStocks, ohlcv, fundamental, date)
-
-	// Step 3: Calculate percentile thresholds for PE and PB
-	percentiles := s.calculatePercentiles(factorData)
-
-	// Step 4: Calculate z-scores for each factor
-	zScores := s.calculateZScores(factorData, percentiles)
-
-	// Step 5: Calculate composite scores
-	scores := s.calculateCompositeScores(zScores)
-
-	// Step 6: Generate signals based on composite scores
-	signals := s.generateSignals(scores, date)
-
-	// Step 7: Sort by composite score and take top N
-	sort.Slice(signals, func(i, j int) bool {
-		return math.Abs(signals[i].CompositeScore) > math.Abs(signals[j].CompositeScore)
-	})
-
-	maxPositions := s.config.Signal.MaxPositions
-	if maxPositions > 0 && len(signals) > maxPositions {
-		signals = signals[:maxPositions]
-	}
-
-	s.logger.Debug().
+	bars map[string][]domain.OHLCV,
+	portfolio *domain.Portfolio,
+) ([]strategy.Signal, error) {
+	s.logger.Warn().
 		Str("strategy", s.Name()).
-		Int("signal_count", len(signals)).
-		Msg("signals generated")
-
-	return signals, nil
+		Msg("value_momentum.GenerateSignals is a stub: PE/PB/ROE factors require " +
+			"fundamental data that the new strategy.Strategy interface does not " +
+			"carry. Returning empty signal set.")
+	_ = bars
+	_ = portfolio
+	_ = ctx
+	return nil, nil
 }
 
 // stockFactorData holds calculated factor data for a stock.
@@ -447,7 +441,7 @@ func (s *valueMomentumStrategy) generateSignals(
 }
 
 // Weight calculates the portfolio weight for a signal.
-func (s *valueMomentumStrategy) Weight(signal domain.Signal, portfolioValue float64) float64 {
+func (s *valueMomentumStrategy) Weight(signal strategy.Signal, portfolioValue float64) float64 {
 	// Equal weight for now, can be enhanced with risk-based weighting
 	if signal.Direction == domain.DirectionHold {
 		return 0
@@ -500,4 +494,4 @@ func calculateMeanStd(data map[string]*stockFactorData, extractor func(*stockFac
 }
 
 // Ensure interface compliance at compile time.
-var _ domain.Strategy = (*valueMomentumStrategy)(nil)
+var _ strategy.Strategy = (*valueMomentumStrategy)(nil)

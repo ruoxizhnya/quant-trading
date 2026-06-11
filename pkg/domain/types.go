@@ -212,20 +212,6 @@ type TargetPosition struct {
 	LastUpdated time.Time `json:"last_updated"`
 }
 
-// Strategy interface must be implemented by all trading strategies
-//
-// Deprecated: Use pkg/strategy.Strategy instead. This interface is kept for backward
-// compatibility with existing example strategies and cmd/strategy service.
-// The canonical interface is strategy.Strategy which includes Parameters() method.
-type Strategy interface {
-	Name() string
-	Description() string
-	Configure(config map[string]any) error
-	Signals(ctx context.Context, stocks []Stock, ohlcv map[string][]OHLCV, fundamental map[string][]Fundamental, date time.Time) ([]Signal, error)
-	Weight(signal Signal, portfolioValue float64) float64
-	Cleanup()
-}
-
 // MarketDataProvider defines the interface for accessing market data
 type MarketDataProvider interface {
 	GetOHLCV(ctx context.Context, symbol string, start, end time.Time) ([]OHLCV, error)

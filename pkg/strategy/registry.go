@@ -8,12 +8,11 @@ import (
 	"sync"
 
 	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 // StrategyFactory is a function that creates a new Strategy instance.
 // Used for hot-reloadable strategies.
-type StrategyFactory func() domain.Strategy
+type StrategyFactory func() Strategy
 
 // Registry manages strategy registration and retrieval.
 type Registry struct {
@@ -181,10 +180,15 @@ func NewPlugin(s Strategy) Strategy {
 
 // ─── Backward Compatibility with domain.Strategy ──────────────────────────────────
 
-// oldRegistry is a separate registry for domain.Strategy implementations (backward compat).
+// Deprecated: domain.Strategy is removed in ODR-013 P1-25. The old registry
+// is no longer used; retained as a thin wrapper only so the file compiles
+// during the transition. It will be deleted in a follow-up commit.
+//
+// All callers should migrate to the canonical strategy.Strategy interface
+// (which is what `Registry` below uses).
 type oldRegistry struct {
 	factories  map[string]StrategyFactory
-	instances  map[string]domain.Strategy
+	instances  map[string]Strategy
 	mu         sync.RWMutex
 	logger     zerolog.Logger
 }
@@ -192,94 +196,44 @@ type oldRegistry struct {
 func newOldRegistry(logger zerolog.Logger) *oldRegistry {
 	return &oldRegistry{
 		factories: make(map[string]StrategyFactory),
-		instances: make(map[string]domain.Strategy),
-		logger:    logger.With().Str("component", "strategy_registry").Logger(),
+		instances: make(map[string]Strategy),
+		logger:    logger.With().Str("component", "strategy_registry_legacy").Logger(),
 	}
 }
 
-// DefaultOldRegistry is the global registry for domain.Strategy (backward compat).
+// DefaultOldRegistry is the global registry for the deprecated API.
+// It is intentionally uninitialised — old callers will get a clear error.
 var DefaultOldRegistry *oldRegistry
 
-// OldInit initializes the old registry for backward compatibility.
+// OldInit is a no-op kept only to satisfy the cmd/strategy main entry
+// point during the migration window. The old strategy registration API
+// (Register/GetStrategy) now returns errors instead of mutating state.
 func OldInit(logger zerolog.Logger) {
-	DefaultOldRegistry = newOldRegistry(logger)
+	logger.Warn().Msg("strategy.OldInit is deprecated (ODR-013 P1-25) and is a no-op")
 }
 
-// Register registers a strategy factory with the given name.
-// This is the old API for backward compatibility with cmd/strategy service.
+// Register is the deprecated old-API strategy registration. It always
+// returns an error directing the caller to use the new Registry.
 func Register(name string, factory StrategyFactory) error {
-	if DefaultOldRegistry == nil {
-		return fmt.Errorf("old registry not initialized, call OldInit first")
-	}
-	DefaultOldRegistry.mu.Lock()
-	defer DefaultOldRegistry.mu.Unlock()
-
-	if _, exists := DefaultOldRegistry.factories[name]; exists {
-		DefaultOldRegistry.logger.Info().Str("strategy", name).Msg("hot-swapping strategy")
-	} else {
-		DefaultOldRegistry.logger.Info().Str("strategy", name).Msg("registering new strategy")
-	}
-
-	DefaultOldRegistry.factories[name] = factory
-	DefaultOldRegistry.instances[name] = factory()
-	return nil
+	return fmt.Errorf("strategy.Register(%q) is removed in ODR-013 P1-25; "+
+		"use strategy.GlobalRegister with pkg/strategy.Strategy instead", name)
 }
 
-// GetStrategy retrieves a strategy by name.
-// Returns an error if the strategy is not found.
-func GetStrategy(name string) (domain.Strategy, error) {
-	if DefaultOldRegistry == nil {
-		return nil, fmt.Errorf("registry not initialized")
-	}
-	DefaultOldRegistry.mu.RLock()
-	defer DefaultOldRegistry.mu.RUnlock()
-
-	instance, exists := DefaultOldRegistry.instances[name]
-	if !exists {
-		return nil, fmt.Errorf("strategy not found: %s", name)
-	}
-
-	return instance, nil
+// GetStrategy is the deprecated lookup. It always returns an error.
+func GetStrategy(name string) (Strategy, error) {
+	return nil, fmt.Errorf("strategy.GetStrategy(%q) is removed in ODR-013 P1-25; "+
+		"use strategy.GlobalGet with pkg/strategy.Strategy instead", name)
 }
 
-// ListStrategies returns a list of all registered strategy names.
+// ListStrategies is the deprecated list. It returns an empty slice.
 func ListStrategies() []string {
-	if DefaultOldRegistry == nil {
-		return nil
-	}
-	DefaultOldRegistry.mu.RLock()
-	defer DefaultOldRegistry.mu.RUnlock()
-
-	names := make([]string, 0, len(DefaultOldRegistry.factories))
-	for name := range DefaultOldRegistry.factories {
-		names = append(names, name)
-	}
-
-	return names
+	return nil
 }
 
-// ReloadStrategy reloads a specific strategy by recreating its instance.
+// ReloadStrategy is the deprecated reload. It always returns an error.
 func ReloadStrategy(name string) error {
-	if DefaultOldRegistry == nil {
-		return fmt.Errorf("registry not initialized")
-	}
-	DefaultOldRegistry.mu.Lock()
-	defer DefaultOldRegistry.mu.Unlock()
-
-	factory, exists := DefaultOldRegistry.factories[name]
-	if !exists {
-		return fmt.Errorf("strategy not registered: %s", name)
-	}
-
-	DefaultOldRegistry.logger.Info().Str("strategy", name).Msg("reloading strategy")
-
-	if instance, exists := DefaultOldRegistry.instances[name]; exists {
-		instance.Cleanup()
-	}
-
-	DefaultOldRegistry.instances[name] = factory()
-
-	return nil
+	return fmt.Errorf("strategy.ReloadStrategy(%q) is removed in ODR-013 P1-25; "+
+		"use strategy.GlobalRegister with the new pkg/strategy.Strategy instead", name)
 }
 
 // ConfigureStrategy applies parameter overrides to a registered strategy.
@@ -329,24 +283,10 @@ func ReloadAllFromDB(ctx context.Context, db *StrategyDB) map[string]string {
 	return results
 }
 
-// ReloadAll reloads all registered strategies.
+// ReloadAll is the deprecated bulk reload. It always returns an error.
 func ReloadAll() error {
-	if DefaultOldRegistry == nil {
-		return fmt.Errorf("registry not initialized")
-	}
-	DefaultOldRegistry.mu.Lock()
-	defer DefaultOldRegistry.mu.Unlock()
-
-	DefaultOldRegistry.logger.Info().Msg("reloading all strategies")
-
-	for name, factory := range DefaultOldRegistry.factories {
-		if instance, exists := DefaultOldRegistry.instances[name]; exists {
-			instance.Cleanup()
-		}
-		DefaultOldRegistry.instances[name] = factory()
-	}
-
-	return nil
+	return fmt.Errorf("strategy.ReloadAll is removed in ODR-013 P1-25; "+
+		"use the new strategy.Registry directly", )
 }
 
 // ReloadAllStrategies is an alias for ReloadAll (for backward compatibility).
@@ -354,23 +294,10 @@ func ReloadAllStrategies() error {
 	return ReloadAll()
 }
 
-// GetStrategyInfo returns basic information about a strategy.
+// GetStrategyInfo is the deprecated info lookup. It always returns an error.
 func GetStrategyInfo(name string) (*StrategyInfo, error) {
-	if DefaultOldRegistry == nil {
-		return nil, fmt.Errorf("registry not initialized")
-	}
-	DefaultOldRegistry.mu.RLock()
-	defer DefaultOldRegistry.mu.RUnlock()
-
-	instance, exists := DefaultOldRegistry.instances[name]
-	if !exists {
-		return nil, fmt.Errorf("strategy not found: %s", name)
-	}
-
-	return &StrategyInfo{
-		Name:        instance.Name(),
-		Description: instance.Description(),
-	}, nil
+	return nil, fmt.Errorf("strategy.GetStrategyInfo(%q) is removed in ODR-013 P1-25; "+
+		"use the new strategy.Registry.ListWithInfo() instead", name)
 }
 
 func init() {

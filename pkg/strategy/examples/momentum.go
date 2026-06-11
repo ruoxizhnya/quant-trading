@@ -26,40 +26,54 @@ type momentumStrategy struct {
 	config MomentumConfig
 }
 
-func (s *momentumStrategy) Name() string            { return "momentum" }
-func (s *momentumStrategy) Description() string    { return "Simple price momentum strategy based on N-day returns" }
-func (s *momentumStrategy) Configure(config map[string]any) error {
-	if c, ok := config["lookback_days"]; ok {
+func (s *momentumStrategy) Name() string { return "momentum" }
+func (s *momentumStrategy) Description() string {
+	return "Simple price momentum strategy based on N-day returns"
+}
+
+func (s *momentumStrategy) Parameters() []strategy.Parameter {
+	return []strategy.Parameter{
+		{Name: "lookback_days", Type: "int", Default: 20, Description: "Days to calculate momentum", Min: 1, Max: 252},
+		{Name: "long_threshold", Type: "float", Default: 0.0, Description: "Momentum above this → long", Min: -1, Max: 1},
+		{Name: "short_threshold", Type: "float", Default: 0.0, Description: "Momentum below this → short", Min: -1, Max: 1},
+		{Name: "max_positions", Type: "int", Default: 5, Description: "Max signals to return", Min: 1, Max: 100},
+		{Name: "top_n", Type: "int", Default: 5, Description: "Top N candidates by momentum", Min: 1, Max: 100},
+		{Name: "rebalance_frequency", Type: "string", Default: "weekly", Description: "daily | weekly | monthly"},
+	}
+}
+
+func (s *momentumStrategy) Configure(params map[string]interface{}) error {
+	if c, ok := params["lookback_days"]; ok {
 		switch v := c.(type) {
 		case float64: s.config.LookbackDays = int(v)
 		case int: s.config.LookbackDays = v
 		}
 	}
-	if c, ok := config["long_threshold"]; ok {
+	if c, ok := params["long_threshold"]; ok {
 		switch v := c.(type) {
 		case float64: s.config.LongThreshold = v
 		case int: s.config.LongThreshold = float64(v)
 		}
 	}
-	if c, ok := config["short_threshold"]; ok {
+	if c, ok := params["short_threshold"]; ok {
 		switch v := c.(type) {
 		case float64: s.config.ShortThreshold = v
 		case int: s.config.ShortThreshold = float64(v)
 		}
 	}
-	if c, ok := config["max_positions"]; ok {
+	if c, ok := params["max_positions"]; ok {
 		switch v := c.(type) {
 		case float64: s.config.MaxPositions = int(v)
 		case int: s.config.MaxPositions = v
 		}
 	}
-	if c, ok := config["top_n"]; ok {
+	if c, ok := params["top_n"]; ok {
 		switch v := c.(type) {
 		case float64: s.config.TopN = int(v)
 		case int: s.config.TopN = v
 		}
 	}
-	if c, ok := config["rebalance_frequency"]; ok {
+	if c, ok := params["rebalance_frequency"]; ok {
 		switch v := c.(type) {
 		case string: s.config.RebalanceFrequency = v
 		case float64: s.config.RebalanceFrequency = string(rune(v))
@@ -72,9 +86,18 @@ func (s *momentumStrategy) Configure(config map[string]any) error {
 	return nil
 }
 
-func (s *momentumStrategy) Signals(ctx context.Context, stocks []domain.Stock, ohlcv map[string][]domain.OHLCV, fundamental map[string][]domain.Fundamental, date time.Time) ([]domain.Signal, error) {
-	if len(stocks) == 0 {
+func (s *momentumStrategy) GenerateSignals(ctx context.Context, bars map[string][]domain.OHLCV, portfolio *domain.Portfolio) ([]strategy.Signal, error) {
+	if len(bars) == 0 {
 		return nil, nil
+	}
+
+	// Date comes from portfolio snapshot (or fallback to now)
+	var date time.Time
+	if portfolio != nil {
+		date = portfolio.UpdatedAt
+	}
+	if date.IsZero() {
+		date = time.Now()
 	}
 
 	// Check if today is a rebalance day
@@ -83,9 +106,9 @@ func (s *momentumStrategy) Signals(ctx context.Context, stocks []domain.Stock, o
 	}
 
 	type stockMomentum struct {
-		symbol  string
+		symbol   string
 		momentum float64
-		score   float64
+		score    float64
 	}
 
 	var results []stockMomentum
@@ -94,21 +117,16 @@ func (s *momentumStrategy) Signals(ctx context.Context, stocks []domain.Stock, o
 		lookback = 20
 	}
 	longThresh := s.config.LongThreshold
-	if longThresh == 0 {
-		longThresh = 0.0  // any positive momentum = long
-	}
 	shortThresh := s.config.ShortThreshold
-	if shortThresh == 0 {
-		shortThresh = 0.0  // any negative momentum = short
-	}
 	topN := s.config.TopN
 	if topN == 0 {
 		topN = 5
 	}
 
-	for _, stock := range stocks {
-		data, ok := ohlcv[stock.Symbol]
-		if !ok || len(data) < lookback+1 {
+	// Iterate over all symbols present in `bars` (the canonical "stock universe"
+	// under the new strategy interface is the keys of the OHLCV map).
+	for symbol, data := range bars {
+		if len(data) < lookback+1 {
 			continue
 		}
 
@@ -140,9 +158,9 @@ func (s *momentumStrategy) Signals(ctx context.Context, stocks []domain.Stock, o
 		momentum := (endPrice - startPrice) / startPrice
 
 		results = append(results, stockMomentum{
-			symbol:   stock.Symbol,
+			symbol:   symbol,
 			momentum: momentum,
-			score:   momentum,
+			score:    momentum,
 		})
 	}
 
@@ -160,29 +178,34 @@ func (s *momentumStrategy) Signals(ctx context.Context, stocks []domain.Stock, o
 		n = s.config.MaxPositions
 	}
 
-	var signals []domain.Signal
+	var signals []strategy.Signal
 	for i := 0; i < n; i++ {
 		m := results[i].momentum
 		var dir domain.Direction
 		var strength float64
+		var action string
 
-		if m > longThresh {
+		switch {
+		case m > longThresh:
 			dir = domain.DirectionLong
+			action = "buy"
 			strength = m
-		} else if m < shortThresh {
+		case m < shortThresh:
 			dir = domain.DirectionShort
+			action = "sell"
 			strength = -m
-		} else {
+		default:
 			dir = domain.DirectionHold
+			action = "hold"
 			strength = 0
 		}
 
-		signals = append(signals, domain.Signal{
-			Symbol:          results[i].symbol,
-			Date:           date,
-			Direction:      dir,
-			Strength:       strength,
-			CompositeScore: results[i].momentum,
+		signals = append(signals, strategy.Signal{
+			Symbol:    results[i].symbol,
+			Action:    action,
+			Strength:  strength,
+			Direction: dir,
+			Date:      date,
 			Factors: map[string]float64{
 				"momentum_20d": results[i].momentum,
 			},
@@ -192,7 +215,7 @@ func (s *momentumStrategy) Signals(ctx context.Context, stocks []domain.Stock, o
 	return signals, nil
 }
 
-func (s *momentumStrategy) Weight(sig domain.Signal, portfolioValue float64) float64 {
+func (s *momentumStrategy) Weight(sig strategy.Signal, portfolioValue float64) float64 {
 	if sig.Direction == domain.DirectionHold {
 		return 0
 	}
@@ -202,7 +225,7 @@ func (s *momentumStrategy) Weight(sig domain.Signal, portfolioValue float64) flo
 func (s *momentumStrategy) Cleanup() {}
 
 // NewMomentumStrategy creates a new momentum strategy instance.
-func NewMomentumStrategy() domain.Strategy {
+func NewMomentumStrategy() strategy.Strategy {
 	return &momentumStrategy{
 		config: MomentumConfig{
 			LookbackDays:       20,

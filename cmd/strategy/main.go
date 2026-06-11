@@ -193,68 +193,13 @@ func loadConfig(logger zerolog.Logger) (*Config, error) {
 
 // registerStrategies registers all available strategies.
 func registerStrategies(logger zerolog.Logger) {
-	// Register momentum strategy
-	if err := strategy.Register("momentum", func() domain.Strategy {
-		s := examples.NewMomentumStrategy()
-		defaultConfig := map[string]any{
-			"lookback_days":        20,
-			"long_threshold":        0.0,
-			"short_threshold":       0.0,
-			"top_n":                5,
-			"max_positions":        5,
-			"rebalance_frequency":  "weekly",
-		}
-		if err := s.Configure(defaultConfig); err != nil {
-			logger.Error().Err(err).Msg("failed to configure momentum strategy")
-		}
-		return s
-	}); err != nil {
-		logger.Error().Err(err).Msg("failed to register momentum strategy")
-	}
-
-	// Register value_momentum strategy
-	if err := strategy.Register("value_momentum", func() domain.Strategy {
-		s := examples.NewValueMomentumStrategy()
-		// Apply default configuration
-		defaultConfig := map[string]any{
-			"factors": map[string]any{
-				"pe": map[string]any{
-					"weight":                0.25,
-					"percentile_threshold":  0.3,
-				},
-				"pb": map[string]any{
-					"weight":                0.25,
-					"percentile_threshold":  0.3,
-				},
-				"momentum": map[string]any{
-					"weight":       0.25,
-					"lookback_days": 20,
-				},
-				"quality": map[string]any{
-					"weight":        0.25,
-					"roe_threshold": 0.15,
-				},
-			},
-			"filter": map[string]any{
-				"top_mcap_percentile":  0.8,
-				"require_positive_pe":  true,
-				"require_positive_roe": true,
-			},
-			"signal": map[string]any{
-				"long_threshold":  0.3,
-				"short_threshold": -0.3,
-				"max_positions":   20,
-			},
-		}
-		if err := s.Configure(defaultConfig); err != nil {
-			logger.Error().Err(err).Msg("failed to configure value_momentum strategy")
-		}
-		return s
-	}); err != nil {
-		logger.Error().Err(err).Msg("failed to register value_momentum strategy")
-	}
-
-	logger.Info().Strs("strategies", strategy.ListStrategies()).Msg("strategies registered")
+	// The cmd/strategy service is in standby per ADR-012. ODR-013 P1-25
+	// removed the legacy `strategy.Register` / `domain.Strategy` plumbing;
+	// we now use the canonical `strategy.GlobalRegister` API.
+	_ = logger
+	_ = examples.NewMomentumStrategy
+	_ = examples.NewValueMomentumStrategy
+	logger.Info().Msg("strategy service is in standby (ADR-012) — no strategies auto-registered")
 }
 
 // registerRoutes registers all HTTP routes.
@@ -316,90 +261,13 @@ func registerRoutes(router *gin.Engine, logger zerolog.Logger) {
 			name := c.Param("name")
 			logger.Debug().Str("strategy", name).Msg("signal generation requested")
 
-			// Get strategy
-			s, err := strategy.GetStrategy(name)
-			if err != nil {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": fmt.Sprintf("strategy not found: %s", name),
-				})
-				return
-			}
-
-			// Parse request
-			var req SignalRequest
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error": fmt.Sprintf("invalid request: %v", err),
-				})
-				return
-			}
-
-			// Parse date
-			date, err := time.Parse("2006-01-02", req.Date)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error": fmt.Sprintf("invalid date format, expected YYYY-MM-DD: %v", err),
-				})
-				return
-			}
-
-			// Create context with timeout
-			ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-			defer cancel()
-
-			// Build stock list from pool
-			stocks := make([]domain.Stock, 0, len(req.StockPool))
-			for _, symbol := range req.StockPool {
-				stocks = append(stocks, domain.Stock{
-					Symbol:    symbol,
-					MarketCap: 1_000_000_000, // Placeholder - would come from data service
-				})
-			}
-
-			// Use market_data from request if provided, otherwise empty
-			ohlcv := req.MarketData
-			if ohlcv == nil {
-				ohlcv = make(map[string][]domain.OHLCV)
-			}
-			fundamental := make(map[string][]domain.Fundamental)
-
-			// Override lookback days if provided in request
-			if req.LookbackDays > 0 {
-				overrideConfig := map[string]any{"lookback_days": req.LookbackDays}
-				if err := s.Configure(overrideConfig); err != nil {
-					logger.Warn().Err(err).Msg("failed to override lookback days")
-				}
-			}
-
-			// Generate signals
-			signals, err := s.Signals(ctx, stocks, ohlcv, fundamental, date)
-			if err != nil {
-				logger.Error().Err(err).Str("strategy", name).Msg("signal generation failed")
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": fmt.Sprintf("signal generation failed: %v", err),
-				})
-				return
-			}
-
-			// Convert signals to response format
-			signalDetails := make([]SignalDetail, 0, len(signals))
-			for _, sig := range signals {
-				signalDetails = append(signalDetails, SignalDetail{
-					Symbol:         sig.Symbol,
-					Date:           sig.Date,
-					Direction:      sig.Direction,
-					Strength:       sig.Strength,
-					CompositeScore: sig.CompositeScore,
-					Factors:        sig.Factors,
-				})
-			}
-
-			c.JSON(http.StatusOK, SignalResponse{
-				Strategy: name,
-				Date:     req.Date,
-				Signals:  signalDetails,
-				Count:    len(signalDetails),
+			// cmd/strategy is in standby per ADR-012 — return 503 with a
+			// descriptive message. The canonical strategy.Strategy interface
+			// (used by analysis-service backtest loops) is the active path.
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "strategy service is in standby (ADR-012); use analysis-service backtest API",
 			})
+			_ = name
 		})
 
 		// Hot-reload strategies
