@@ -21,6 +21,20 @@ type JobService struct {
 	// cancelFuncs holds cancellation functions for running jobs.
 	// Key: jobID, Value: cancellation function.
 	cancelFuncs sync.Map
+
+	// Sprint 6 P0-8 (ODR-013): graceful shutdown coordination.
+	//
+	// shutdown is closed by Shutdown() to signal that the service is
+	// draining. StartJob() checks this channel under no lock — close()
+	// is atomic and reading from a closed channel is the standard
+	// "is the service still alive" pattern in Go.
+	shutdown chan struct{}
+
+	// inflightWg tracks every in-flight StartJob goroutine. Shutdown()
+	// waits on this WaitGroup (with the parent ctx as timeout) so that
+	// "SIGTERM → all jobs settled" is testable and observable rather
+	// than fire-and-forget.
+	inflightWg sync.WaitGroup
 }
 
 // JobStore is the subset of storage operations needed by JobService.
@@ -109,9 +123,10 @@ func mapToJobRecord(m map[string]any) *JobRecord {
 // NewJobService creates a new JobService.
 func NewJobService(store JobStore, engine *Engine) *JobService {
 	return &JobService{
-		store:  store,
-		engine: engine,
-		logger: engine.logger.With().Str("component", "job_service").Logger(),
+		store:    store,
+		engine:   engine,
+		logger:   engine.logger.With().Str("component", "job_service").Logger(),
+		shutdown: make(chan struct{}),
 	}
 }
 
@@ -204,7 +219,29 @@ func (s *JobService) CreateJob(ctx context.Context, req CreateJobRequest) (*Job,
 //   even after the HTTP request that started it has completed.
 // - Monitors the parent context for cancellation signals to allow graceful shutdown.
 // - For explicit cancellation, use CancelJob() method instead.
+//
+// Sprint 6 P0-8 (ODR-013): if the JobService is currently draining
+// (Shutdown has been called), StartJob refuses to start a new goroutine
+// and immediately marks the job as failed with a clear reason. This
+// keeps the DB clean: there are no "running" jobs that the process is
+// no longer actually running.
 func (s *JobService) StartJob(parentCtx context.Context, jobID string) {
+	// Sprint 6 P0-8: refuse to start new jobs during shutdown.
+	select {
+	case <-s.shutdown:
+		s.logger.Warn().
+			Str("job_id", jobID).
+			Msg("Rejecting StartJob: JobService is shutting down; marking as failed")
+		// Use Background ctx for the DB write — the request ctx may
+		// already be cancelled and we still want a persistent record
+		// of the refusal.
+		if err := s.store.UpdateJobFailed(context.Background(), jobID, "service is shutting down"); err != nil {
+			s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to mark refused job as failed")
+		}
+		return
+	default:
+	}
+
 	s.logger.Info().Str("job_id", jobID).Msg("Starting backtest job")
 
 	// Use Background context so the goroutine isn't cancelled when HTTP request ends
@@ -227,7 +264,11 @@ func (s *JobService) StartJob(parentCtx context.Context, jobID string) {
 		}
 	}()
 
+	// Sprint 6 P0-8: track this goroutine in the inflight WaitGroup
+	// so Shutdown() can wait for all in-flight jobs to settle.
+	s.inflightWg.Add(1)
 	go func() {
+		defer s.inflightWg.Done()
 		defer jobCancel()
 		startTime := time.Now()
 
@@ -376,6 +417,125 @@ func (s *JobService) CancelJob(ctx context.Context, jobID string) error {
 	default:
 		return fmt.Errorf("job is already %s", record.Status)
 	}
+}
+
+// Sprint 6 P0-8 (ODR-013): graceful shutdown.
+//
+// Shutdown drains the JobService in three observable phases:
+//
+//  1. REJECT-NEW — close the shutdown channel so any in-flight
+//     StartJob call short-circuits and refuses to spawn a new
+//     goroutine. New HTTP requests that try to start a job will
+//     be persisted as "failed" with a clear reason in the DB.
+//
+//  2. CANCEL-IN-FLIGHT — call every cancelFuncs entry. The running
+//     backtest goroutines see ctx.Done() and unwind naturally. The
+//     goroutines are responsible for marking their own row as
+//     "completed" or "failed" — Shutdown itself does NOT touch the
+//     DB for in-flight jobs because doing so would race with the
+//     goroutine's own UpdateJobCompleted/Failed call.
+//
+//  3. WAIT — block on the inflight WaitGroup until either every
+//     in-flight job has settled, or the parent ctx fires. If the
+//     timeout wins, the caller MUST call CleanupStaleRunning next
+//     to sweep any rows that are still "running" in the DB.
+//
+// Shutdown is idempotent: a second call after the first is a no-op.
+//
+// Returns nil on a clean drain, ctx.Err() if the wait timed out.
+func (s *JobService) Shutdown(ctx context.Context) error {
+	// Phase 1: REJECT-NEW. close() under no lock — startJob's select
+	// will see the closed channel immediately.
+	select {
+	case <-s.shutdown:
+		s.logger.Info().Msg("Shutdown already in progress; Shutdown is idempotent, returning")
+		return nil
+	default:
+		close(s.shutdown)
+	}
+	s.logger.Info().Msg("JobService draining: rejecting new jobs and cancelling in-flight ones")
+
+	// Phase 2: CANCEL-IN-FLIGHT.
+	cancelledCount := 0
+	s.cancelFuncs.Range(func(key, value any) bool {
+		if cancel, ok := value.(context.CancelFunc); ok && cancel != nil {
+			cancel()
+			cancelledCount++
+		}
+		return true
+	})
+	s.logger.Info().Int("cancelled", cancelledCount).Msg("In-flight job contexts cancelled; waiting for goroutines to settle")
+
+	// Phase 3: WAIT.
+	done := make(chan struct{})
+	go func() {
+		s.inflightWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		s.logger.Info().Msg("JobService drained cleanly: all in-flight jobs settled")
+		return nil
+	case <-ctx.Done():
+		s.logger.Warn().Err(ctx.Err()).Msg("JobService drain deadline reached; some jobs may still be settling — call CleanupStaleRunning to ensure DB consistency")
+		return ctx.Err()
+	}
+}
+
+// CleanupStaleRunning scans the JobStore for rows whose status is
+// still "running" and forces them to "failed" with a cancellation
+// message. This is the safety net for Shutdown: if the wait
+// deadline expired before all goroutines finished their own
+// UpdateJob* call, those rows would otherwise be stuck as "running"
+// forever, blocking CI gates / dashboards that look for
+// status IN ('completed','failed').
+//
+// CleanupStaleRunning is also useful as a recovery tool after a
+// hard process crash (kill -9, OOM, etc.) — call it on startup
+// to repair stale rows from the previous run.
+//
+// Returns the number of rows that were transitioned from
+// "running" to "failed".
+func (s *JobService) CleanupStaleRunning(ctx context.Context) (int, error) {
+	// ListBacktestJobs returns most-recent-first. The interface is
+	// limit-based; for the cleanup pass we ask for a large window
+	// (1000 rows = ~8 hours of typical 30s/job throughput) so any
+	// genuinely stuck jobs are caught. For sites that have
+	// legitimately thousands of jobs/day, a follow-up ODR may add a
+	// dedicated "ListByStatus" to JobStore; for now the broad
+	// scan is acceptable because the cost is one bounded query
+	// and a small status check per row.
+	const cleanupWindowLimit = 1000
+	records, err := s.store.ListBacktestJobs(ctx, cleanupWindowLimit)
+	if err != nil {
+		return 0, fmt.Errorf("failed to list jobs for stale-running cleanup: %w", err)
+	}
+
+	transitioned := 0
+	for _, r := range records {
+		status, _ := r["status"].(string)
+		if status != "running" {
+			continue
+		}
+		id, _ := r["id"].(string)
+		if id == "" {
+			continue
+		}
+		// UpdateJobFailed is the existing API; it already sets
+		// status='failed' and appends to error_msg. We use a fixed
+		// prefix so downstream log/alert consumers can recognize
+		// SIGTERM-killed rows.
+		msg := "job cancelled by service shutdown (P0-8 stale-running cleanup)"
+		if err := s.store.UpdateJobFailed(ctx, id, msg); err != nil {
+			s.logger.Error().Err(err).Str("job_id", id).Msg("Failed to clean up stale 'running' job")
+			continue
+		}
+		transitioned++
+		s.logger.Info().Str("job_id", id).Msg("Cleaned up stale 'running' job → 'failed'")
+	}
+	s.logger.Info().Int("transitioned", transitioned).Int("scanned", len(records)).Msg("Stale-running cleanup complete")
+	return transitioned, nil
 }
 
 // SaveSyncResult persists a completed synchronous backtest result to the DB.

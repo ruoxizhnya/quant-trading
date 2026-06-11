@@ -237,15 +237,65 @@ func main() {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	sig := <-quit
+	logger.Info().Str("signal", sig.String()).Msg("Shutdown signal received; beginning graceful drain")
 
-	logger.Info().Msg("Shutting down server...")
+	// Sprint 6 P0-8 (ODR-013): graceful shutdown sequence.
+	//
+	// The order matters and is documented in ADR-017 §1 / ODR-013:
+	//
+	//   1. JobService.Shutdown — REJECT new jobs, CANCEL in-flight
+	//      contexts, WAIT for goroutines to settle (up to 30s). This
+	//      must happen BEFORE srv.Shutdown so that requests currently
+	//      running a backtest see their ctx cancelled and can write
+	//      the "failed" status themselves (rather than being torn
+	//      out mid-write by the HTTP server close).
+	//   2. srv.Shutdown — stop accepting new HTTP requests and wait
+	//      for in-flight handlers to return. The 30s timeout is
+	//      shared with step 1.
+	//   3. JobService.CleanupStaleRunning — safety net for any rows
+	//      that the goroutines didn't get to update (e.g. a hard
+	//      freeze on the DB write, or the wait deadline elapsed).
+	//   4. Close the storage connection and stop the plugin loader's
+	//      file watcher so we don't leak FDs after process exit.
+	//
+	// The total budget is a 30s parent context; each phase gets a
+	// slice of it. Phases 1 and 2 share the same ctx so that the
+	// overall wall-clock stays under 30s even in the worst case.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	if err := jobService.Shutdown(shutdownCtx); err != nil {
+		logger.Warn().Err(err).Msg("JobService.Shutdown did not drain cleanly; will run CleanupStaleRunning")
+	}
 
-	if err := srv.Shutdown(ctx); err != nil {
-		logger.Error().Err(err).Msg("Server forced to shutdown")
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Error().Err(err).Msg("HTTP server forced to shutdown")
+	} else {
+		logger.Info().Msg("HTTP server stopped accepting new requests")
+	}
+
+	// Phase 3: sweep any rows still stuck in 'running'. We do this
+	// with a fresh, short ctx so a stuck DB doesn't hold the whole
+	// shutdown open past the budget.
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cleanupCancel()
+	transitioned, cleanupErr := jobService.CleanupStaleRunning(cleanupCtx)
+	if cleanupErr != nil {
+		logger.Error().Err(cleanupErr).Msg("CleanupStaleRunning failed; some jobs may still appear as 'running' in DB")
+	} else if transitioned > 0 {
+		logger.Info().Int("transitioned", transitioned).Msg("Stale 'running' jobs transitioned to 'failed'")
+	} else {
+		logger.Info().Msg("No stale 'running' jobs found; DB state is clean")
+	}
+
+	// Phase 4: close remaining resources. The PluginLoader's Watch
+	// loop is context-driven and exits on its own; we don't need to
+	// explicitly stop it. The store gets an explicit Close so the
+	// underlying *sql.DB is released and FDs don't leak after exit.
+	if store != nil {
+		store.Close()
+		logger.Info().Msg("Postgres store closed")
 	}
 
 	logger.Info().Msg("Server exited")
