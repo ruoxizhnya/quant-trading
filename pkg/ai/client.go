@@ -8,7 +8,33 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
+
+// LLMClient is the contract that downstream packages (e.g. pkg/strategy) depend
+// on. Extracting an interface lets tests inject a deterministic mock without
+// hitting a real LLM endpoint, which is required for CI to pass without
+// network access or shared credentials (Sprint 6 P0-1).
+//
+// Implementations:
+//   - *Client  — real OpenAI-compatible HTTP client
+//   - *MockClient (in mock.go) — deterministic fake for unit tests
+type LLMClient interface {
+	IsConfigured() bool
+	Chat(ctx context.Context, messages []ChatMessage) (string, error)
+	GenerateStrategyCode(ctx context.Context, description string) (string, error)
+	FixStrategyCode(ctx context.Context, code string, buildErrors string) (string, error)
+}
+
+// Compile-time assertion: *Client must satisfy LLMClient. If a method signature
+// on *Client changes, this line fails to compile and the breakage is caught
+// at the boundary rather than at runtime in a consumer.
+var _ LLMClient = (*Client)(nil)
+
+// Default HTTP timeout applied to the underlying transport. Without an
+// explicit timeout a misbehaving LLM server can hang the caller's goroutine
+// indefinitely (Sprint 6 P0-1 / TQ-003).
+const defaultHTTPTimeout = 30 * time.Second
 
 // Client wraps an HTTP client for LLM chat completions.
 type Client struct {
@@ -19,12 +45,63 @@ type Client struct {
 }
 
 // NewClient creates a new AI client reading config from environment.
+// A 30s default HTTP timeout is applied to prevent indefinite hangs.
 func NewClient() *Client {
 	return &Client{
 		apiKey:     os.Getenv("AI_API_KEY"),
 		apiURL:     os.Getenv("AI_API_URL"),
-		model:     "gpt-4o-mini",
-		httpClient: &http.Client{},
+		model:      "gpt-4o-mini",
+		httpClient: &http.Client{Timeout: defaultHTTPTimeout},
+	}
+}
+
+// NewClientWithOptions builds a Client with functional options. Useful for
+// tests that need to inject a custom model, custom HTTP client, or fixed
+// API key/URL without touching environment variables.
+func NewClientWithOptions(opts ...ClientOption) *Client {
+	c := &Client{
+		model:      "gpt-4o-mini",
+		httpClient: &http.Client{Timeout: defaultHTTPTimeout},
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+// ClientOption configures a Client at construction time. Follows the
+// functional-options pattern recommended by ADR-020 (avoiding Setter soup).
+type ClientOption func(*Client)
+
+// WithAPIKey overrides AI_API_KEY for this client instance.
+func WithAPIKey(key string) ClientOption {
+	return func(c *Client) { c.apiKey = key }
+}
+
+// WithAPIURL overrides AI_API_URL for this client instance.
+func WithAPIURL(url string) ClientOption {
+	return func(c *Client) { c.apiURL = url }
+}
+
+// WithModel overrides the default "gpt-4o-mini" model.
+func WithModel(model string) ClientOption {
+	return func(c *Client) { c.model = model }
+}
+
+// WithHTTPClient replaces the underlying *http.Client (e.g. with a custom
+// transport for testing or for an OTel-instrumented round tripper).
+func WithHTTPClient(hc *http.Client) ClientOption {
+	return func(c *Client) { c.httpClient = hc }
+}
+
+// WithTimeout overrides the default 30s HTTP timeout. Use 0 to disable.
+func WithTimeout(d time.Duration) ClientOption {
+	return func(c *Client) {
+		if d <= 0 {
+			c.httpClient = &http.Client{}
+			return
+		}
+		c.httpClient = &http.Client{Timeout: d}
 	}
 }
 

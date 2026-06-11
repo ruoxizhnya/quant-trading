@@ -26,7 +26,10 @@ type BacktestRunner interface {
 // CopilotService generates Go strategy code from natural-language descriptions
 // and optionally runs a backtest against the generated strategy.
 type CopilotService struct {
-	aiClient *ai.Client
+	// aiClient is the LLM backend. Typed as the ai.LLMClient interface
+	// (Sprint 6 P0-1) so tests can inject a deterministic *ai.MockClient
+	// instead of hitting a real LLM endpoint.
+	aiClient ai.LLMClient
 
 	generated  int64 // total generated (LLM called)
 	buildable  int64 // build succeeded
@@ -55,11 +58,22 @@ type GenerateParams struct {
 	EndDate    string `json:"end_date"`   // YYYY-MM-DD
 }
 
-// NewCopilotService creates a new CopilotService.
+// NewCopilotService creates a new CopilotService that reads AI credentials
+// from the AI_API_KEY / AI_API_URL environment variables.
 func NewCopilotService() *CopilotService {
 	return &CopilotService{
 		aiClient: ai.NewClient(),
 	}
+}
+
+// NewCopilotServiceWithLLM creates a CopilotService with an explicit
+// LLMClient. If client is nil, falls back to NewCopilotService() semantics.
+// This is the constructor tests should use to inject an *ai.MockClient.
+func NewCopilotServiceWithLLM(client ai.LLMClient) *CopilotService {
+	if client == nil {
+		client = ai.NewClient()
+	}
+	return &CopilotService{aiClient: client}
 }
 
 // IsConfigured returns true if AI client is configured.
