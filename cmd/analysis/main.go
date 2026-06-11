@@ -12,20 +12,36 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
+	"github.com/ruoxizhnya/quant-trading/pkg/observability"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	_ "github.com/ruoxizhnya/quant-trading/pkg/strategy/plugins"
 	"github.com/spf13/viper"
 )
 
+// httpClient wraps the outbound data-service / strategy-service /
+// ai-service calls. Sprint 6 P0-3: HTTPTransport propagates the
+// per-request X-Request-ID from the inbound request context to
+// downstream calls AND records an observation in
+// http_client_requests_total{service="data",status=...}.
 var httpClient = &http.Client{
 	Timeout: 30 * time.Second,
+	Transport: &observability.HTTPTransport{
+		Service: "data",
+	},
 }
+
+// metrics holds the four ADR-017 §1 core metrics. Constructed in
+// main() and shared into the httpClient transport (records
+// http_client_requests_total), the /metrics handler, and any
+// backtest/LLM observation call sites.
+var metrics *observability.Metrics
 
 type strategyEngineAdapter struct {
 	engine *backtest.Engine
@@ -64,6 +80,22 @@ func (a *strategyEngineAdapter) RunBacktest(
 
 func main() {
 	logger := initLogger()
+
+	// Sprint 6 P0-3: construct the four ADR-017 §1 core metrics and
+	// expose them via /metrics. The Go runtime collectors are
+	// attached for memory/CPU/Goroutine visibility.
+	metrics = observability.NewMetrics()
+	metrics.Register()
+	metrics.RegisterCollectors(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
+	// Wire the metrics into the httpClient transport so every
+	// outbound call records http_client_requests_total.
+	if t, ok := httpClient.Transport.(*observability.HTTPTransport); ok {
+		t.Metrics = metrics
+	}
+	logger.Info().Msg("observability: 4 core metrics registered (ADR-017 §1)")
 
 	v := viper.New()
 	configPath := os.Getenv("CONFIG_PATH")
@@ -287,6 +319,12 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 			"timestamp": time.Now().Format(time.RFC3339),
 		})
 	})
+
+	// Sprint 6 P0-3: /metrics endpoint exposing the four ADR-017 §1
+	// core metrics + Go runtime collectors. Unauthenticated by
+	// design — the metrics scraper runs on the same network and
+	// ADR-017 §2 (P1-2) will add an authn boundary separately.
+	router.GET("/metrics", observability.Handler(metrics))
 
 	router.GET("/api/v1", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
