@@ -3,6 +3,8 @@ package plugins
 
 import (
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
@@ -208,10 +210,10 @@ type ValidationResult struct {
 // validateIntRange checks if an int value is within [min, max].
 func validateIntRange(name string, value, min, max int) ValidationResult {
 	if value < min {
-		return ValidationResult{Valid: false, Field: name, Message: name + " must be >= " + itoa(min)}
+		return ValidationResult{Valid: false, Field: name, Message: name + " must be >= " + strconv.Itoa(min)}
 	}
 	if value > max {
-		return ValidationResult{Valid: false, Field: name, Message: name + " must be <= " + itoa(max)}
+		return ValidationResult{Valid: false, Field: name, Message: name + " must be <= " + strconv.Itoa(max)}
 	}
 	return ValidationResult{Valid: true}
 }
@@ -219,10 +221,10 @@ func validateIntRange(name string, value, min, max int) ValidationResult {
 // validateFloatRange checks if a float64 value is within [min, max].
 func validateFloatRange(name string, value, min, max float64) ValidationResult {
 	if value < min {
-		return ValidationResult{Valid: false, Field: name, Message: name + " must be >= " + ftoa(min)}
+		return ValidationResult{Valid: false, Field: name, Message: name + " must be >= " + strconv.FormatFloat(min, 'f', 2, 64)}
 	}
 	if value > max {
-		return ValidationResult{Valid: false, Field: name, Message: name + " must be <= " + ftoa(max)}
+		return ValidationResult{Valid: false, Field: name, Message: name + " must be <= " + strconv.FormatFloat(max, 'f', 2, 64)}
 	}
 	return ValidationResult{Valid: true}
 }
@@ -234,54 +236,5 @@ func validateStringChoice(name string, value string, choices []string) Validatio
 			return ValidationResult{Valid: true}
 		}
 	}
-	return ValidationResult{Valid: false, Field: name, Message: name + " must be one of: " + joinStrings(choices)}
-}
-
-// itoa converts int to string (minimal implementation to avoid strconv import).
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf) - 1
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	for n > 0 {
-		buf[i] = byte('0' + n%10)
-		n /= 10
-		i--
-	}
-	if neg {
-		buf[i] = '-'
-		i--
-	}
-	return string(buf[i+1:])
-}
-
-// ftoa converts float64 to string with 2 decimal places.
-func ftoa(f float64) string {
-	// Simple implementation: multiply by 100, round, then format
-	if f < 0 {
-		return "-" + ftoa(-f)
-	}
-	whole := int(f)
-	frac := int((f - float64(whole)) * 100)
-	if frac < 0 {
-		frac = -frac
-	}
-	return itoa(whole) + "." + itoa(frac/10) + itoa(frac%10)
-}
-
-// joinStrings joins a slice of strings with commas.
-func joinStrings(strs []string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	result := strs[0]
-	for i := 1; i < len(strs); i++ {
-		result += ", " + strs[i]
-	}
-	return result
+	return ValidationResult{Valid: false, Field: name, Message: name + " must be one of: " + strings.Join(choices, ", ")}
 }
