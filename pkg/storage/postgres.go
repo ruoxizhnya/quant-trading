@@ -244,6 +244,28 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			started_at TIMESTAMPTZ,
 			completed_at TIMESTAMPTZ
 		)`,
+		// Migration 019: auth tables (ADR-017 §2 / P1-2)
+		`CREATE TABLE IF NOT EXISTS users (
+			id BIGSERIAL PRIMARY KEY,
+			username VARCHAR(64) NOT NULL UNIQUE,
+			password_hash VARCHAR(120) NOT NULL,
+			role VARCHAR(16) NOT NULL DEFAULT 'viewer',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_login_at TIMESTAMPTZ,
+			disabled BOOLEAN NOT NULL DEFAULT FALSE
+		)`,
+		`CREATE TABLE IF NOT EXISTS audit_logs (
+			id BIGSERIAL PRIMARY KEY,
+			user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+			role VARCHAR(16),
+			ip INET,
+			endpoint TEXT NOT NULL,
+			method VARCHAR(8) NOT NULL,
+			payload_hash VARCHAR(64),
+			trace_id VARCHAR(64),
+			status_code INT NOT NULL,
+			timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -294,6 +316,11 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_strategies_active ON strategies(is_active)`,
 		`CREATE INDEX IF NOT EXISTS idx_bj_status ON backtest_jobs(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_bj_created_at ON backtest_jobs(created_at)`,
+		// P1-2: auth indexes
+		`CREATE INDEX IF NOT EXISTS idx_audit_user_time ON audit_logs(user_id, timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_endpoint ON audit_logs(endpoint, timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_users_role ON users(role) WHERE disabled = FALSE`,
 	}
 
 	for _, idx := range indexes {
