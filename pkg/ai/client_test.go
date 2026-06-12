@@ -297,7 +297,7 @@ func TestClient_Chat_AlreadyCanceledContext(t *testing.T) {
 // ---- NewClientWithOptions + functional options ----------------------------
 
 func TestNewClientWithOptions_Defaults(t *testing.T) {
-	c := NewClientWithOptions()
+	c, _ := NewClientWithOptions()
 	require.NotNil(t, c)
 	assert.Equal(t, "gpt-4o-mini", c.model)
 	assert.NotNil(t, c.httpClient)
@@ -308,7 +308,7 @@ func TestNewClientWithOptions_Defaults(t *testing.T) {
 
 func TestWithAPIKey_OverridesEnv(t *testing.T) {
 	t.Setenv("AI_API_KEY", "from-env")
-	c := NewClientWithOptions(
+	c, _ := NewClientWithOptions(
 		WithAPIKey("from-option"),
 		WithAPIURL("https://x.test"),
 	)
@@ -319,7 +319,7 @@ func TestWithAPIKey_OverridesEnv(t *testing.T) {
 
 func TestWithAPIURL_OverridesEnv(t *testing.T) {
 	t.Setenv("AI_API_URL", "https://env.example.test")
-	c := NewClientWithOptions(
+	c, _ := NewClientWithOptions(
 		WithAPIKey("k"),
 		WithAPIURL("https://opt.example.test"),
 	)
@@ -328,24 +328,24 @@ func TestWithAPIURL_OverridesEnv(t *testing.T) {
 }
 
 func TestWithModel_OverridesDefault(t *testing.T) {
-	c := NewClientWithOptions(WithModel("gpt-4o"))
+	c, _ := NewClientWithOptions(WithModel("gpt-4o"))
 	assert.Equal(t, "gpt-4o", c.model)
 }
 
 func TestWithHTTPClient_ReplacesTransport(t *testing.T) {
 	custom := &http.Client{Timeout: 7 * time.Second}
-	c := NewClientWithOptions(WithHTTPClient(custom))
+	c, _ := NewClientWithOptions(WithHTTPClient(custom))
 	assert.Same(t, custom, c.httpClient,
 		"WithHTTPClient must replace the transport by pointer equality")
 }
 
 func TestWithTimeout_SetsNewClient(t *testing.T) {
-	c := NewClientWithOptions(WithTimeout(123 * time.Millisecond))
+	c, _ := NewClientWithOptions(WithTimeout(123 * time.Millisecond))
 	assert.Equal(t, 123*time.Millisecond, c.httpClient.Timeout)
 }
 
 func TestWithTimeout_ZeroDisables(t *testing.T) {
-	c := NewClientWithOptions(WithTimeout(0))
+	c, _ := NewClientWithOptions(WithTimeout(0))
 	// Zero means "no timeout" — http.Client.Timeout is 0 but the
 	// pointer must be non-nil so the client is still usable.
 	require.NotNil(t, c.httpClient)
@@ -355,13 +355,13 @@ func TestWithTimeout_ZeroDisables(t *testing.T) {
 func TestWithTimeout_NegativeDisables(t *testing.T) {
 	// Defensive: a negative value is meaningless in net/http.
 	// The option should treat <=0 as "disable" rather than panic.
-	c := NewClientWithOptions(WithTimeout(-5 * time.Second))
+	c, _ := NewClientWithOptions(WithTimeout(-5 * time.Second))
 	require.NotNil(t, c.httpClient)
 	assert.Equal(t, time.Duration(0), c.httpClient.Timeout)
 }
 
 func TestNewClientWithOptions_AllCombined(t *testing.T) {
-	c := NewClientWithOptions(
+	c, _ := NewClientWithOptions(
 		WithAPIKey("k"),
 		WithAPIURL("https://x.test"),
 		WithModel("gpt-4o"),

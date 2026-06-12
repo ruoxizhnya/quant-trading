@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,7 +19,7 @@ import (
 // network access or shared credentials (Sprint 6 P0-1).
 //
 // Implementations:
-//   - *Client  — real OpenAI-compatible HTTP client
+//   - *Client  — real OpenAI-compatible HTTP client with timeout/retry/rate/cost
 //   - *MockClient (in mock.go) — deterministic fake for unit tests
 type LLMClient interface {
 	IsConfigured() bool
@@ -36,72 +38,140 @@ var _ LLMClient = (*Client)(nil)
 // indefinitely (Sprint 6 P0-1 / TQ-003).
 const defaultHTTPTimeout = 30 * time.Second
 
-// Client wraps an HTTP client for LLM chat completions.
+// Client wraps an HTTP client for LLM chat completions with production-grade
+// resilience (timeout, retry, rate-limit, cost tracking, tracing) and
+// observability (metrics). All knobs are exposed as functional options.
 type Client struct {
 	apiKey     string
 	apiURL     string
 	model      string
 	httpClient *http.Client
+
+	// Resilience layer (Sprint 6 P1-14, AR-008).
+	limiter    *Limiter     // token-bucket rate limiter
+	retry      RetryPolicy  // exponential backoff with jitter
+	costTable  *CostTable   // per-model token cost
+	metrics    *Metrics     // per-call observability
+	tracer     Tracer       // pluggable tracer (default: NoopTracer)
+
+	// mu protects limiter/retry/costTable/metrics/tracer swaps.
+	// Field assignments during NewClientWithOptions are safe without
+	// the lock because no other goroutine can see the client until
+	// construction returns. The lock is held only by option setters
+	// and the Chat() call site, which is also a single point of truth.
+	mu sync.Mutex
 }
 
 // NewClient creates a new AI client reading config from environment.
 // A 30s default HTTP timeout is applied to prevent indefinite hangs.
 func NewClient() *Client {
-	return &Client{
-		apiKey:     os.Getenv("AI_API_KEY"),
-		apiURL:     os.Getenv("AI_API_URL"),
-		model:      "gpt-4o-mini",
-		httpClient: &http.Client{Timeout: defaultHTTPTimeout},
-	}
+	c, _ := NewClientWithOptions()
+	return c
 }
 
 // NewClientWithOptions builds a Client with functional options. Useful for
 // tests that need to inject a custom model, custom HTTP client, or fixed
 // API key/URL without touching environment variables.
-func NewClientWithOptions(opts ...ClientOption) *Client {
+func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	c := &Client{
+		apiKey:     os.Getenv("AI_API_KEY"),
+		apiURL:     os.Getenv("AI_API_URL"),
 		model:      "gpt-4o-mini",
 		httpClient: &http.Client{Timeout: defaultHTTPTimeout},
+		limiter:    NewLimiter(),
+		retry:      DefaultRetryPolicy,
+		costTable:  NewCostTable(),
+		metrics:    NewMetrics(),
+		tracer:     NoopTracer{},
 	}
 	for _, opt := range opts {
-		opt(c)
+		if err := opt(c); err != nil {
+			return nil, fmt.Errorf("ai client option: %w", err)
+		}
 	}
-	return c
+	return c, nil
 }
 
 // ClientOption configures a Client at construction time. Follows the
 // functional-options pattern recommended by ADR-020 (avoiding Setter soup).
-type ClientOption func(*Client)
+//
+// Options may return an error to fail-fast on invalid input (e.g. negative
+// rate). They run in order; later options override earlier ones.
+type ClientOption func(*Client) error
 
 // WithAPIKey overrides AI_API_KEY for this client instance.
 func WithAPIKey(key string) ClientOption {
-	return func(c *Client) { c.apiKey = key }
+	return func(c *Client) error { c.apiKey = key; return nil }
 }
 
 // WithAPIURL overrides AI_API_URL for this client instance.
 func WithAPIURL(url string) ClientOption {
-	return func(c *Client) { c.apiURL = url }
+	return func(c *Client) error { c.apiURL = url; return nil }
 }
 
 // WithModel overrides the default "gpt-4o-mini" model.
 func WithModel(model string) ClientOption {
-	return func(c *Client) { c.model = model }
+	return func(c *Client) error { c.model = model; return nil }
 }
 
 // WithHTTPClient replaces the underlying *http.Client (e.g. with a custom
 // transport for testing or for an OTel-instrumented round tripper).
 func WithHTTPClient(hc *http.Client) ClientOption {
-	return func(c *Client) { c.httpClient = hc }
+	return func(c *Client) error { c.httpClient = hc; return nil }
 }
 
 // WithTimeout overrides the default 30s HTTP timeout. Use 0 to disable.
 func WithTimeout(d time.Duration) ClientOption {
-	return func(c *Client) {
+	return func(c *Client) error {
 		if d <= 0 {
 			c.httpClient = &http.Client{}
-			return
+			return nil
 		}
 		c.httpClient = &http.Client{Timeout: d}
+		return nil
+	}
+}
+
+// WithLimiter sets a custom rate limiter. Pass nil to disable rate limiting
+// (useful for tests that exercise single-call latency in isolation).
+func WithLimiter(l *Limiter) ClientOption {
+	return func(c *Client) error { c.limiter = l; return nil }
+}
+
+// WithRetryPolicy sets a custom retry policy. Pass DefaultRetryPolicy (or
+// a copy with adjustments) for production use.
+func WithRetryPolicy(p RetryPolicy) ClientOption {
+	return func(c *Client) error { c.retry = p; return nil }
+}
+
+// WithCostTable sets a custom cost table. Defaults to NewCostTable()
+// populated with 2026-06-12 OpenAI/Anthropic/DeepSeek rates.
+func WithCostTable(t *CostTable) ClientOption {
+	return func(c *Client) error {
+		if t == nil {
+			return errors.New("WithCostTable: nil table")
+		}
+		c.costTable = t
+		return nil
+	}
+}
+
+// WithMetrics sets a custom metrics tracker. Pass nil to disable metrics.
+func WithMetrics(m *Metrics) ClientOption {
+	return func(c *Client) error { c.metrics = m; return nil }
+}
+
+// WithTracer sets a custom tracer. Defaults to NoopTracer. To plug in OTel,
+// wrap otel.Tracer into the Tracer interface in your service init code and
+// pass it here — this keeps the AI package free of OTel dependencies.
+func WithTracer(t Tracer) ClientOption {
+	return func(c *Client) error {
+		if t == nil {
+			c.tracer = NoopTracer{}
+			return nil
+		}
+		c.tracer = t
+		return nil
 	}
 }
 
@@ -109,6 +179,17 @@ func WithTimeout(d time.Duration) ClientOption {
 func (c *Client) IsConfigured() bool {
 	return c.apiKey != "" && c.apiURL != ""
 }
+
+// Limiter returns the rate limiter (read-only handle). Useful for the
+// /metrics endpoint to expose token availability.
+func (c *Client) Limiter() *Limiter { return c.limiter }
+
+// CostTable returns the cost table (read-only handle). Useful for the
+// /pricing endpoint.
+func (c *Client) CostTable() *CostTable { return c.costTable }
+
+// Metrics returns the metrics tracker. Safe to call from any goroutine.
+func (c *Client) Metrics() *Metrics { return c.metrics }
 
 // ChatMessage represents a single message in a chat conversation.
 type ChatMessage struct {
@@ -125,6 +206,7 @@ type ChatRequest struct {
 // ChatResponse is the top-level response from OpenAI-compatible chat completions.
 type ChatResponse struct {
 	Choices []Choice `json:"choices"`
+	Usage   *Usage   `json:"usage,omitempty"` // OpenAI returns this; other providers may omit
 }
 
 // Choice represents one completion choice.
@@ -133,42 +215,232 @@ type Choice struct {
 }
 
 // Chat sends a chat completion request and returns the assistant's reply text.
+// The call goes through the full resilience stack: rate-limit wait →
+// retry-with-backoff → per-call observability (tracer + metrics + cost).
 func (c *Client) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
 	if !c.IsConfigured() {
 		return "", fmt.Errorf("AI_API_KEY or AI_API_URL not configured")
 	}
 
+	// Snapshot the resilience config (lock-free) so concurrent option
+	// changes (e.g. for hot-reload) don't tear the call state.
+	c.mu.Lock()
+	limiter := c.limiter
+	retry := c.retry
+	costTable := c.costTable
+	metrics := c.metrics
+	tracer := c.tracer
+	c.mu.Unlock()
+
+	// Defensive defaults: a hand-rolled Client (e.g. from tests) may not
+	// have these wired. Treat nil as a no-op rather than panicking.
+	if tracer == nil {
+		tracer = NoopTracer{}
+	}
+	if metrics == nil {
+		metrics = NewMetrics()
+	}
+	if costTable == nil {
+		costTable = NewCostTable()
+	}
+
+	// Start span (default: no-op).
+	ctx, span := tracer.StartSpan(ctx, SpanName, map[string]any{
+		AttrAIModel: c.model,
+	})
+	defer span.End()
+
+	// Rate-limit wait (blocks if bucket is empty, respects ctx).
+	rateLimited := false
+	if limiter != nil {
+		if err := limiter.Wait(ctx); err != nil {
+			span.RecordError(err, 0)
+			return "", fmt.Errorf("rate limit: %w", err)
+		}
+		rateLimited = true
+	}
+
+	start := time.Now()
+	attemptCount := 0
+	result, status, err := retry.Do(ctx, func(ctx context.Context, attempt int) (string, int, error) {
+		attemptCount = attempt
+		span.SetAttribute(AttrAIRetryCount, attempt-1)
+		return c.doChatOnce(ctx, messages)
+	})
+	duration := time.Since(start)
+
+	// Compute cost (best-effort; if the response didn't include usage,
+	// the cost is 0 — caller can still log the call).
+	var usage Usage
+	if err == nil {
+		// Re-fetch usage — doChatOnce returned a stripped result string.
+		// To keep the API simple, we re-parse the body in the caller path.
+		// (See doChatWithUsage below for the version that returns usage.)
+		// For now, we record zero usage when the simple path is used.
+		_ = usage
+	}
+
+	cost := 0.0
+	if costTable != nil && err == nil {
+		// Best-effort: if the underlying call returned usage, we'd
+		// record it here. The simple Chat() path doesn't, so cost is 0.
+		// Use ChatWithUsage() to get cost tracking.
+		_ = cost
+	}
+
+	// Span attributes.
+	span.SetAttribute(AttrAIStatusCode, status)
+	span.SetAttribute(AttrAIDurationMS, duration.Milliseconds())
+	span.SetAttribute(AttrAIRateLimited, rateLimited)
+	if err != nil {
+		span.RecordError(err, status)
+	}
+
+	// Metrics.
+	if metrics != nil {
+		metrics.Record(CallResult{
+			Model:       c.model,
+			Usage:       usage,
+			CostUSD:     cost,
+			Duration:    duration,
+			StatusCode:  status,
+			Err:         err,
+			Retried:     attemptCount > 1,
+			RateLimited: rateLimited,
+		})
+	}
+
+	return result, err
+}
+
+// ChatWithUsage is like Chat but returns the token usage and computes
+// the cost. Use this for production paths where cost tracking is
+// required; use Chat() for tests / quick paths.
+func (c *Client) ChatWithUsage(ctx context.Context, messages []ChatMessage) (string, Usage, error) {
+	if !c.IsConfigured() {
+		return "", Usage{}, fmt.Errorf("AI_API_KEY or AI_API_URL not configured")
+	}
+	c.mu.Lock()
+	limiter := c.limiter
+	retry := c.retry
+	costTable := c.costTable
+	metrics := c.metrics
+	tracer := c.tracer
+	c.mu.Unlock()
+
+	ctx, span := tracer.StartSpan(ctx, SpanName+".with_usage", map[string]any{
+		AttrAIModel: c.model,
+	})
+	defer span.End()
+
+	rateLimited := false
+	if limiter != nil {
+		if err := limiter.Wait(ctx); err != nil {
+			span.RecordError(err, 0)
+			return "", Usage{}, fmt.Errorf("rate limit: %w", err)
+		}
+		rateLimited = true
+	}
+
+	start := time.Now()
+	attemptCount := 0
+	var lastUsage Usage
+	type chatResult struct {
+		text  string
+		usage Usage
+	}
+	result, status, err := retry.Do(ctx, func(ctx context.Context, attempt int) (string, int, error) {
+		attemptCount = attempt
+		span.SetAttribute(AttrAIRetryCount, attempt-1)
+		text, usage, status, callErr := c.doChatOnceWithUsage(ctx, messages)
+		lastUsage = usage
+		return text, status, callErr
+	})
+	duration := time.Since(start)
+
+	cost := 0.0
+	if costTable != nil {
+		cost = costTable.Calculate(c.model, lastUsage.PromptTokens, lastUsage.CompletionTokens)
+	}
+
+	span.SetAttribute(AttrAIStatusCode, status)
+	span.SetAttribute(AttrAIPromptTok, lastUsage.PromptTokens)
+	span.SetAttribute(AttrAICompletionTok, lastUsage.CompletionTokens)
+	span.SetAttribute(AttrAITotalCost, cost)
+	span.SetAttribute(AttrAIDurationMS, duration.Milliseconds())
+	span.SetAttribute(AttrAIRateLimited, rateLimited)
+	if err != nil {
+		span.RecordError(err, status)
+	}
+
+	if metrics != nil {
+		metrics.Record(CallResult{
+			Model:       c.model,
+			Usage:       lastUsage,
+			CostUSD:     cost,
+			Duration:    duration,
+			StatusCode:  status,
+			Err:         err,
+			Retried:     attemptCount > 1,
+			RateLimited: rateLimited,
+		})
+	}
+
+	return result, lastUsage, err
+}
+
+// doChatOnce performs a single HTTP request (no retry, no rate limit).
+// Used internally by Chat() and ChatWithUsage(); exported via the
+// retryable signature.
+func (c *Client) doChatOnce(ctx context.Context, messages []ChatMessage) (string, int, error) {
+	text, _, status, err := c.doChatOnceFull(ctx, messages)
+	return text, status, err
+}
+
+// doChatOnceWithUsage is the version that returns usage. Returns
+// (text, usage, status, err).
+func (c *Client) doChatOnceWithUsage(ctx context.Context, messages []ChatMessage) (string, Usage, int, error) {
+	text, usage, status, err := c.doChatOnceFull(ctx, messages)
+	return text, usage, status, err
+}
+
+// doChatOnceFull does the actual HTTP call. Returns (text, usage, status, err).
+func (c *Client) doChatOnceFull(ctx context.Context, messages []ChatMessage) (string, Usage, int, error) {
 	reqBody := ChatRequest{Model: c.model, Messages: messages}
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return "", Usage{}, 0, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", c.apiURL, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return "", Usage{}, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
+		return "", Usage{}, 0, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("AI API returned status %d", resp.StatusCode)
+		return "", Usage{}, resp.StatusCode, fmt.Errorf("AI API returned status %d", resp.StatusCode)
 	}
 
 	var chatResp ChatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+		return "", Usage{}, resp.StatusCode, fmt.Errorf("failed to decode response: %w", err)
 	}
 	if len(chatResp.Choices) == 0 {
-		return "", fmt.Errorf("no response choices from LLM")
+		return "", Usage{}, resp.StatusCode, fmt.Errorf("no response choices from LLM")
 	}
-	return chatResp.Choices[0].Message.Content, nil
+	var usage Usage
+	if chatResp.Usage != nil {
+		usage = *chatResp.Usage
+	}
+	return chatResp.Choices[0].Message.Content, usage, resp.StatusCode, nil
 }
 
 // GenerateStrategyCode calls the LLM with system + user prompts and returns
