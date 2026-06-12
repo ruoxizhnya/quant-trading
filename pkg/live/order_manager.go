@@ -17,6 +17,16 @@ type OrderManager struct {
 	trades  []domain.Trade
 	pending []string
 	mu      sync.RWMutex
+
+	// priceCage (P1-5, ODR-018): optional validator for A-share limit
+	// orders. If nil, no cage / daily-limit enforcement is performed
+	// (backtests / fixtures that don't care about exchange microstructure).
+	priceCage *CageValidator
+	// priceRefProvider (P1-5, ODR-018): returns the reference price
+	// (best bid/ask + prev close) for a given symbol at submit time.
+	// Required when priceCage is set; nil means cage check is skipped
+	// (e.g. dry-run / backtest mode).
+	priceRefProvider func(symbol string) ReferencePrice
 }
 
 // NewOrderManager creates a new order manager
@@ -49,6 +59,15 @@ func (om *OrderManager) Run(ctx context.Context) {
 func (om *OrderManager) SubmitOrder(order domain.Order) (string, error) {
 	if err := validateOrderShape(&order); err != nil {
 		return "", err
+	}
+	// P1-5 (ODR-018): enforce A-share price cage / daily limit if the
+	// LiveEngine has wired a validator. Failures are rejected with a
+	// *PriceCageError so callers can map the violation back to the user.
+	if om.priceCage != nil && om.priceRefProvider != nil {
+		ref := om.priceRefProvider(order.Symbol)
+		if err := om.priceCage.Validate(&order, ref); err != nil {
+			return "", err
+		}
 	}
 	order.ID = generateOrderID()
 	order.Status = "pending"
@@ -219,6 +238,21 @@ func (om *OrderManager) AddTrade(trade domain.Trade) {
 	om.mu.Lock()
 	defer om.mu.Unlock()
 	om.trades = append(om.trades, trade)
+}
+
+// SetPriceCageValidator (P1-5, ODR-018) wires the A-share price cage
+// validator and a reference-price provider into the order pipeline.
+// When set, SubmitOrder rejects limit orders that violate the cage
+// or daily price limit with a *PriceCageError.
+//
+// Pass a nil provider to keep the validator active but skip the
+// per-submit lookup (e.g. when the data feed is down). Pass a nil
+// validator to disable enforcement entirely.
+func (om *OrderManager) SetPriceCageValidator(v *CageValidator, refProvider func(symbol string) ReferencePrice) {
+	om.mu.Lock()
+	defer om.mu.Unlock()
+	om.priceCage = v
+	om.priceRefProvider = refProvider
 }
 
 func generateOrderID() string {

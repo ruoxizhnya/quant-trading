@@ -195,6 +195,15 @@ func (e *LiveEngine) SubmitOrder(order domain.Order) (string, error) {
 	return e.orderManager.SubmitOrder(order)
 }
 
+// SetPriceCageValidator (P1-5, ODR-018) wires the A-share price cage
+// validator and a reference-price provider into the engine. The provider
+// receives the order's symbol and must return a ReferencePrice snapshot
+// (best bid/ask + prev close). When set, all subsequent limit orders
+// are validated before being forwarded to the broker.
+func (e *LiveEngine) SetPriceCageValidator(v *CageValidator, refProvider func(symbol string) ReferencePrice) {
+	e.orderManager.SetPriceCageValidator(v, refProvider)
+}
+
 // GetOrder returns a specific order by ID
 func (e *LiveEngine) GetOrder(orderID string) (domain.Order, bool) {
 	return e.orderManager.GetOrder(orderID)
