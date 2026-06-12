@@ -158,3 +158,52 @@ func (b *BaseStrategy) CloneParams() map[string]any {
 	}
 	return clone
 }
+
+// ─── P1-24 (ADR-020 §4) Sub-interface defaults ────────────────────────
+//
+// The Strategy interface was decomposed into 4 sub-interfaces
+// (StrategyCore / Configurable / SignalGenerator / ResourceManaged).
+// BaseStrategy provides default implementations of Configure() and
+// Cleanup() so that any struct embedding *BaseStrategy satisfies the
+// composite `Strategy` interface without writing boilerplate:
+//
+//   - Configure(): stores the params in the b.params map; subclasses
+//     that need typed/semantic validation (range checks, enum choices)
+//     override this. The default is "accept anything, store as-is".
+//   - Cleanup(): no-op (BaseStrategy holds no resources). Stateful
+//     strategies (cached features, open connections) override.
+//
+// Name() and Description() are already implemented above; they
+// satisfy the StrategyCore sub-interface.
+
+// Configure stores the parameter map verbatim. Subclasses typically
+// override this to add validation and copy values into a typed config
+// struct. The default behavior is "be permissive" — this matches
+// pre-P1-24 behavior where some strategies had no validation at all.
+func (b *BaseStrategy) Configure(params map[string]interface{}) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.params == nil {
+		b.params = make(map[string]any, len(params))
+	}
+	for k, v := range params {
+		b.params[k] = v
+	}
+	return nil
+}
+
+// Cleanup is a no-op for BaseStrategy (it holds no resources).
+// Stateful strategies should override to release caches, file handles,
+// open connections, etc. Safe to call multiple times.
+func (b *BaseStrategy) Cleanup() {
+	// Default: no resources to release.
+	// Subclasses with state (caches, connections) override.
+}
+
+// Parameters returns an empty schema by default. Subclasses that have
+// tunable parameters override this to expose their schema. Returning
+// an empty slice (not nil) is the contract — the registry uses it to
+// decide "this strategy has no parameters to configure".
+func (b *BaseStrategy) Parameters() []Parameter {
+	return []Parameter{}
+}

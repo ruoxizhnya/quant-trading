@@ -2,7 +2,6 @@
 package strategy
 
 import (
-	"context"
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -38,14 +37,16 @@ type Signal struct {
 	LimitPrice  float64            `json:"limit_price"`
 }
 
-// Strategy interface must be implemented by all trading strategies.
-// This is the canonical interface definition (v2) - unified across VISION.md, SPEC.md, and code.
-type Strategy interface {
-	Name() string                                                                    // unique strategy name
-	Description() string                                                             // human-readable description
-	Parameters() []Parameter                                                         // configurable parameters
-	Configure(params map[string]interface{}) error                                   // dynamic parameter configuration
-	GenerateSignals(ctx context.Context, bars map[string][]domain.OHLCV, portfolio *domain.Portfolio) ([]Signal, error)
-	Weight(signal Signal, portfolioValue float64) float64                            // position weight based on signal strength
-	Cleanup()                                                                        // release resources (cache, connections, etc.)
-}
+// Strategy is the canonical composite trading-strategy interface
+// (P1-24, ADR-020 §4). The interface is decomposed into 4 single-
+// responsibility sub-interfaces in `interfaces.go`:
+//
+//   - StrategyCore     — Name, Description
+//   - Configurable     — Parameters, Configure
+//   - SignalGenerator  — GenerateSignals, Weight
+//   - ResourceManaged  — Cleanup
+//
+// This file keeps the type definitions (Parameter, Signal, etc.).
+// The interface itself is declared in `interfaces.go` to keep the
+// decomposition rationale in one place. See that file for the
+// full ISP / backward-compat design notes.

@@ -237,18 +237,21 @@ func ReloadStrategy(name string) error {
 }
 
 // ConfigureStrategy applies parameter overrides to a registered strategy.
-// The strategy must implement the Configurable interface (Configure method).
+// The strategy must implement the Configurable sub-interface (P1-24,
+// ADR-020 §4). Strategies that omit Configurable get a clear error.
+//
+// New code should call `strategy.AsConfigurable(s).Configure(params)`
+// directly rather than going through this registry helper — the
+// registry path is retained for backward compatibility with callers
+// that look up strategies by name.
 func ConfigureStrategy(name string, params map[string]any) error {
 	s, err := DefaultRegistry.Get(name)
 	if err != nil {
 		return fmt.Errorf("strategy not found: %s", name)
 	}
-	type configurable interface {
-		Configure(params map[string]any) error
-	}
-	c, ok := s.(configurable)
-	if !ok {
-		return fmt.Errorf("strategy %s does not support runtime configuration", name)
+	c := AsConfigurable(s)
+	if c == nil {
+		return fmt.Errorf("strategy %s does not implement strategy.Configurable", name)
 	}
 	if err := c.Configure(params); err != nil {
 		return fmt.Errorf("failed to configure strategy %s: %w", name, err)
