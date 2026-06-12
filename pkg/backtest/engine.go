@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -84,38 +83,46 @@ type Engine struct {
 	// HTTP client for non-market-data service communication (with retry)
 	httpClient *httpclient.Client
 
-	// Active backtest states (supports concurrent backtests)
-	btMu      sync.RWMutex
-	backtests map[string]*BacktestState
+	// Active backtest states — P1-18 (ADR-020):
+	// 旧字段 `backtests map[string]*BacktestState` + `btMu sync.RWMutex` 已
+	// 删除。状态现在通过 `StateStore` 接口管理，LRUStateStore 默认
+	// capacity = 1000，防止长跑场景下无界增长导致 OOM。外部代码
+	// 通过 Engine.StateStore() 访问；旧 API (`GetBacktestResult` 等)
+	// 行为完全保留,内部委托到 store.Get。
+	//
+	// 工作流程：
+	//   - RunBacktest  : store.Put(id, state)
+	//   - Get*         : store.Get(id)
+	//   - 周期性 GC    : store.Evict(keepN)  (可由 caller 调用)
+	//   - LRU 自动驱逐 : Put 超过 capacity 时旧条目自动丢弃
+	stateStore StateStore
 
 	// Logger
 	logger zerolog.Logger
 
-	// L1 in-memory OHLCV cache (per-backtest-lifecycle).
+	// L1 in-memory OHLCV cache (per-backtest-lifecycle) — P1-16
+	// (ADR-020) 拆分为 CacheManager 子组件。旧字段 inMemoryOHLCV /
+	// inMemoryOHLCVAtomic 已删除，行为完全迁移到 cache；外部代码
+	// 通过 Engine.CacheManager() 访问，旧 LoadOHLCVInMemory /
+	// getOHLCV / warmCache 保留为 backward-compat shim (6 个月)。
+	//
 	// Key: symbol, Value: all OHLCV bars for that symbol (sorted by date).
-	// Populated via warmCache() or LoadOHLCVInMemory().
-	// getOHLCV() checks this first — zero-latency hit, falls back to provider on miss.
-	// This is the primary speed optimization: eliminates N×D HTTP calls
-	// (N=stocks, D=trading days) during a backtest run.
-	//
-	// The cache is set once before the backtest loop and read-only during the
-	// hot path. We publish it through an atomic.Pointer so the hot path
-	// (called 50×240=12,000 times per backtest) reads it lock-free. The
-	// previous design used e.mu.RLock for every read; with 8 worker goroutines
-	// fetching in parallel, that RLock was the dominant contention point
-	// (≈45% of total CPU in profiling).
-	//
-	// Initial empty map is published at NewEngine() so the atomic is never nil
-	// in the hot path.
-	inMemoryOHLCV       map[string][]domain.OHLCV
-	inMemoryOHLCVAtomic atomic.Pointer[map[string][]domain.OHLCV]
+	// Populated via CacheManager.Warm() or CacheManager.Load().
+	// CacheManager.Get() checks this first — zero-latency hit, falls back
+	// to provider on miss. Eliminates N×D HTTP calls (N=stocks, D=trading
+	// days) during a backtest run.
+	cache *CacheManager
 
-	// L1 factor cache (per-backtest-lifecycle).
+	// L1 factor cache (per-backtest-lifecycle) — P1-16 (ADR-020) 拆分
+	// 为 FactorCacheAccessor 子组件。旧字段 factorCache 已删除；
+	// 旧 LoadFactorCache / GetFactorZScore / warmFactorCache 保留为
+	// backward-compat shim。Engine.FactorCache() 返回 accessor。
+	//
 	// Structure: factorType -> tradeDate -> symbol -> zScore.
-	// Populated via LoadFactorCache() before a backtest run.
-	// GetFactorZScore() reads from this map — zero-latency hit.
-	// Eliminates per-symbol-per-day DB queries for multi-factor strategies.
-	factorCache map[domain.FactorType]map[time.Time]map[string]float64
+	// Populated via FactorCacheAccessor.Load() before a backtest run.
+	// Get() reads from this map — zero-latency hit. Eliminates
+	// per-symbol-per-day DB queries for multi-factor strategies.
+	factor *FactorCacheAccessor
 
 	// In-process risk manager — when set, position sizing, stop-loss, and
 	// regime detection are computed locally without HTTP calls to risk-service.
@@ -136,19 +143,18 @@ type Engine struct {
 	// eliminating per-symbol-per-day HTTP/DB queries for multi-factor strategies.
 	store *storage.PostgresStore
 
-	// Optional LiveTrader for bridging backtest signals to live/paper trading.
-	// When set, the engine can execute signals through a real or simulated broker
-	// instead of only simulating internally. This enables seamless transition from
-	// backtest to paper trading and eventually live trading.
-	// See pkg/live/trader.go for the interface definition.
-	liveTrader live.LiveTrader
+	// liveBridge 桥接 backtest 信号到 live/paper trading (P1-17 ADR-020)。
+	// 取代旧 `liveTrader live.LiveTrader` 字段；旧 SetLiveTrader /
+	// GetLiveTrader / ExecuteSignalViaLiveTrader 等方法保留为
+	// backward-compat shim (6 个月) 委托到 bridge。
+	// live 包接口见 pkg/live/trader.go。
+	liveBridge *LiveBridge
 
-	// ExecutionService handles order execution (slippage, commission, limit orders).
-	// When set, the engine routes trade execution through this service instead of
-	// using Tracker's built-in execution logic. This enables pluggable execution
-	// models (fixed slippage, variable slippage, no slippage) and unified
-	// commission calculation.
-	executionService ExecutionService
+	// executionBridge 桥接 ExecutionService (slippage / commission /
+	// 限价单)。取代旧 `executionService ExecutionService` 字段；
+	// 旧 SetExecutionService / GetExecutionService 保留为 shim。
+	// ExecutionService 接口见 execution.go。
+	executionBridge *ExecutionBridge
 
 	// rng is the per-engine *rand.Rand, initialized from config.Seed in
 	// NewEngine. Always retained (never discarded) so that any code path
@@ -160,18 +166,10 @@ type Engine struct {
 	rng *rand.Rand
 }
 
-// BacktestState holds the state of a backtest run.
-type BacktestState struct {
-	ID              string
-	Status          string // "running", "completed", "failed"
-	Params          domain.BacktestParams
-	Result          *domain.BacktestResult
-	Tracker         *Tracker
-	StartedAt       time.Time
-	CompletedAt     time.Time
-	Error           error
-	targetPositions map[string]*domain.TargetPosition // symbol -> target vs actual tracking
-}
+// BacktestState is defined in state.go (P1-20) with internal locking
+// (mu RWMutex) and a frozen flag. See state.go for the concurrency
+// contract and accessor methods (GetStatus / SetStatus / Freeze /
+// Snapshot / ...).
 
 // BacktestRequest represents the API request to start a backtest.
 type BacktestRequest struct {
@@ -278,6 +276,14 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 		InitialCapital: config.InitialCapital,
 	}
 	executionService := NewBacktestExecutionService(execConfig)
+	componentLogger := logger.With().Str("component", "backtest_engine").Logger()
+
+	executionBridge := NewExecutionBridge(componentLogger)
+	executionBridge.Set(executionService)
+
+	// P1-18 (ADR-020): 默认 LRU 1000 容量,防止长跑场景下无界增长 OOM。
+	// 测试或生产可用 WithStateStore(NoopStateStore) 注入自定义实现。
+	stateStore := NewLRUStateStore(DefaultStateStoreCapacity)
 
 	eng := &Engine{
 		config:             config,
@@ -285,14 +291,91 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 		strategyServiceURL: strategyServiceURL,
 		riskServiceURL:     riskServiceURL,
 		httpClient:         httpclient.New("", 30*time.Second, 3),
-		logger:             logger.With().Str("component", "backtest_engine").Logger(),
-		inMemoryOHLCV:      make(map[string][]domain.OHLCV),
-		executionService:   executionService,
+		logger:             componentLogger,
+		cache:              NewCacheManager(componentLogger),
+		factor:             NewFactorCacheAccessor(componentLogger),
+		stateStore:         stateStore,
+		liveBridge:         NewLiveBridge(componentLogger),
+		executionBridge:    executionBridge,
 		rng:                rng,
 	}
-	// Publish the initial empty cache snapshot so the hot path can read it
-	// lock-free (atomic.Pointer.Load) without a nil check.
-	eng.inMemoryOHLCVAtomic.Store(&eng.inMemoryOHLCV)
+	return eng, nil
+}
+
+// NewEngineWithOptions creates a new Engine from a parsed Config + Provider,
+// then applies a list of EngineOption (functional injection).
+//
+// P1-19 (ADR-020): the new construction path. Preferred for new code:
+//   eng, err := NewEngineWithOptions(cfg, provider,
+//       WithRiskManager(rm),
+//       WithDataAdapter(adapter),
+//       WithLiveTrader(mockTrader),
+//   )
+//
+// Backward compat: NewEngine(v, provider, logger) remains as a thin
+// wrapper that parses config from viper and calls NewEngineWithOptions
+// (no EngineOptions). Caller-controlled options should use this new path.
+func NewEngineWithOptions(cfg Config, provider marketdata.Provider, opts ...EngineOption) (*Engine, error) {
+	if provider == nil {
+		return nil, apperrors.New(apperrors.ErrCodeInvalidInput, "provider is required").WithOperation("NewEngineWithOptions")
+	}
+
+	// Apply defaults identical to NewEngine so callers passing a partial
+	// Config get the same behavior.
+	if cfg.InitialCapital == 0 {
+		cfg.InitialCapital = DefaultInitialCapital
+	}
+	if cfg.CommissionRate == 0 {
+		cfg.CommissionRate = DefaultCommissionRate
+	}
+	if cfg.SlippageRate == 0 {
+		cfg.SlippageRate = DefaultSlippageRate
+	}
+	if cfg.RiskFreeRate == 0 {
+		cfg.RiskFreeRate = DefaultRiskFreeRate
+	}
+	if cfg.Trading.StampTaxRate == 0 {
+		cfg.Trading = defaultTradingConfig()
+	}
+
+	// Initialize random seed (mirrors NewEngine; P0-5).
+	var rng *rand.Rand
+	if cfg.Seed != 0 {
+		rng = rand.New(rand.NewSource(cfg.Seed))
+	} else {
+		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+
+	componentLogger := zerolog.New(nil).With().Str("component", "backtest_engine").Logger()
+
+	// Default ExecutionService (mirrors NewEngine).
+	execConfig := domain.ExecutionConfig{
+		OrderType:      domain.OrderTypeMarket,
+		SlippageModel:  "fixed",
+		CommissionRate: cfg.CommissionRate,
+		MinCommission:  cfg.Trading.MinCommission,
+		InitialCapital: cfg.InitialCapital,
+	}
+	executionBridge := NewExecutionBridge(componentLogger)
+	executionBridge.Set(NewBacktestExecutionService(execConfig))
+
+	// P1-18 (ADR-020): 默认 LRU StateStore;通过 WithStateStore 可覆盖
+	// (例如测试用 NoopStateStore,生产用 PersistentStateStore)。
+	stateStore := NewLRUStateStore(DefaultStateStoreCapacity)
+
+	eng := &Engine{
+		config:          cfg,
+		provider:        provider,
+		httpClient:      httpclient.New("", 30*time.Second, 3),
+		logger:          componentLogger,
+		cache:           NewCacheManager(componentLogger),
+		factor:          NewFactorCacheAccessor(componentLogger),
+		stateStore:      stateStore,
+		liveBridge:      NewLiveBridge(componentLogger),
+		executionBridge: executionBridge,
+		rng:             rng,
+	}
+	applyOptions(eng, opts)
 	return eng, nil
 }
 
@@ -436,18 +519,14 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 		targetPositions: make(map[string]*domain.TargetPosition),
 	}
 
-	e.btMu.Lock()
-	if e.backtests == nil {
-		e.backtests = make(map[string]*BacktestState)
-	}
-	e.backtests[backtestID] = state
-	e.btMu.Unlock()
+	e.stateStore.Put(backtestID, state)
 
 	// Run the backtest
 	result, err := e.runBacktestInternal(ctx, state)
 	if err != nil {
-		state.Status = "failed"
-		state.Error = err
+		state.SetStatus("failed")
+		state.SetError(err)
+		state.Freeze()
 		return &BacktestResponse{
 			ID:        backtestID,
 			Status:    "failed",
@@ -456,9 +535,10 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 		}, err
 	}
 
-	state.Status = "completed"
-	state.Result = result
-	state.CompletedAt = time.Now()
+	state.SetResult(result)
+	state.SetCompletedAt(time.Now())
+	state.SetStatus("completed")
+	state.Freeze()
 
 	return &BacktestResponse{
 		ID:              backtestID,
@@ -479,7 +559,7 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 		AvgHoldingDays:  result.AvgHoldingDays,
 		CalmarRatio:     result.CalmarRatio,
 		StartedAt:       state.StartedAt.Format(time.RFC3339),
-		CompletedAt:     state.CompletedAt.Format(time.RFC3339),
+		CompletedAt:     state.GetCompletedAt().Format(time.RFC3339),
 		PortfolioValues: result.PortfolioValues,
 		Trades:          result.Trades,
 		StockPool:       req.StockPool,
@@ -510,7 +590,7 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 
 	if err := e.warmFactorCache(ctx, params.StartDate, params.EndDate); err != nil {
 		logger.Warn().Err(err).Msg("Factor cache warm-up failed — strategies will fall back to HTTP computation")
-	} else if e.factorCache != nil {
+	} else if e.factor.Len() > 0 {
 		logger.Info().Msg("Factor cache warm-up completed")
 	}
 
@@ -646,53 +726,18 @@ func (e *Engine) checkCalendarExists(ctx context.Context, start, end time.Time) 
 // entries for the requested symbols, this function returns immediately — the
 // caller has already done the work. This is the common path for in-memory and
 // benchmark backtests.
+//
+// P1-16 (ADR-020): thin shim to cache.Warm(). The fast-path skip,
+// bulk fetch, sort, and atomic publish are now in pkg/backtest/cache.go.
 func (e *Engine) warmCache(ctx context.Context, symbols []string, start, end time.Time) error {
-	if len(symbols) == 0 {
-		return nil
-	}
-
-	// Fast path: if L1 cache is already populated for the requested universe,
-	// skip the bulk re-fetch. The previous version always called BulkLoadOHLCV
-	// and re-sorted the bars, which doubled the in-memory workload.
-	e.mu.RLock()
-	haveAll := len(e.inMemoryOHLCV) >= len(symbols)
-	if haveAll {
-		for _, s := range symbols {
-			if _, ok := e.inMemoryOHLCV[s]; !ok {
-				haveAll = false
-				break
-			}
-		}
-	}
-	e.mu.RUnlock()
-	if haveAll {
-		e.logger.Debug().Int("symbols", len(symbols)).Msg("L1 OHLCV cache already warm — skipping bulk fetch")
-		return nil
-	}
-
-	data, err := e.effectiveProvider().BulkLoadOHLCV(ctx, symbols, start, end)
-	if err != nil {
-		return apperrors.Wrap(err, apperrors.ErrCodeUnavailable, "bulk OHLCV request failed", "warmCache")
-	}
-
-	e.mu.Lock()
-	for symbol, bars := range data {
-		// Pre-sort OHLCV bars by date ascending to ensure chronological order
-		// This eliminates per-symbol sorting overhead during backtest execution
-		sort.Slice(bars, func(i, j int) bool {
-			return bars[i].Date.Before(bars[j].Date)
-		})
-		e.inMemoryOHLCV[symbol] = bars
-	}
-	// Publish the new map snapshot for lock-free readers. We don't mutate the
-	// map after this point within a backtest, so callers can safely read it
-	// without locks.
-	e.inMemoryOHLCVAtomic.Store(&e.inMemoryOHLCV)
-	e.mu.Unlock()
-
-	return nil
+	return e.cache.Warm(ctx, symbols, start, end, e.effectiveProvider)
 }
 
+// P1-16 (ADR-020): thin shim to factor.Warm().
+// Typed-nil guard: e.store is a *storage.PostgresStore (concrete pointer).
+// Passing it directly to an interface param would create a non-nil
+// interface (Go's typed-nil trap), causing factor.Warm to dereference
+// a nil receiver. Check the underlying pointer first.
 func (e *Engine) warmFactorCache(ctx context.Context, start, end time.Time) error {
 	e.mu.RLock()
 	store := e.store
@@ -700,42 +745,7 @@ func (e *Engine) warmFactorCache(ctx context.Context, start, end time.Time) erro
 	if store == nil {
 		return nil
 	}
-
-	factors := []domain.FactorType{domain.FactorMomentum, domain.FactorValue, domain.FactorQuality}
-	combined := make(map[domain.FactorType]map[time.Time]map[string]float64)
-
-	for _, factor := range factors {
-		entries, err := store.GetFactorCacheRange(ctx, factor, start, end)
-		if err != nil {
-			e.logger.Warn().Str("factor", string(factor)).Err(err).Msg("Failed to load factor cache from DB")
-			continue
-		}
-		if len(entries) == 0 {
-			e.logger.Info().Str("factor", string(factor)).Msg("No factor cache entries in DB — run sync/factors/all first")
-			continue
-		}
-		for _, entry := range entries {
-			if combined[entry.FactorName] == nil {
-				combined[entry.FactorName] = make(map[time.Time]map[string]float64)
-			}
-			if combined[entry.FactorName][entry.TradeDate] == nil {
-				combined[entry.FactorName][entry.TradeDate] = make(map[string]float64)
-			}
-			combined[entry.FactorName][entry.TradeDate][entry.Symbol] = entry.ZScore
-		}
-		e.logger.Info().
-			Str("factor", string(factor)).
-			Int("entries", len(entries)).
-			Msg("Factor cache loaded from DB")
-	}
-
-	if len(combined) > 0 {
-		e.mu.Lock()
-		e.factorCache = combined
-		e.mu.Unlock()
-	}
-
-	return nil
+	return e.factor.Warm(ctx, start, end, store)
 }
 
 // getTradingDays retrieves trading days from data service.
@@ -753,60 +763,21 @@ func (e *Engine) getTradingDays(ctx context.Context, start, end time.Time) ([]ti
 }
 
 // getOHLCV retrieves OHLCV data for a symbol.
-// L1 cache hit (inMemoryOHLCV) → zero-latency return with date-range filtering.
+// L1 cache hit (CacheManager) → zero-latency return with date-range filtering.
 // L1 cache miss → fallback to provider (HTTP or InMemoryProvider).
 //
-// Hot path: reads the L1 snapshot lock-free via atomic.Pointer.Load. The
-// snapshot is published once before the backtest loop (LoadOHLCVInMemory /
-// warmCache) and never mutated, so concurrent readers are safe.
-//
-// Filter uses binary search (data is sorted by date ascending) — O(log n)
-// instead of O(n) per call. Across 50 stocks × 240 days = 12,000 calls per
-// backtest, this is the difference between ~1.4M comparisons and ~96K.
+// P1-16 (ADR-020): thin shim to cache.Get(). The atomic-pointer snapshot
+// load, binary-search range filter, and provider fallback all live in
+// pkg/backtest/cache.go. See CacheManager doc for hot-path invariants.
 func (e *Engine) getOHLCV(ctx context.Context, symbol string, start, end time.Time) ([]domain.OHLCV, error) {
-	snap := e.inMemoryOHLCVAtomic.Load()
-	if snap != nil {
-		if cached, ok := (*snap)[symbol]; ok {
-			lo, hi := dateRangeBounds(cached, start, end)
-			if lo > hi || lo >= len(cached) {
-				return []domain.OHLCV{}, nil
-			}
-			if hi >= len(cached) {
-				hi = len(cached) - 1
-			}
-			// Slice header is cheap and shares the underlying array. The
-			// returned slice is read-only from the strategy's perspective
-			// (callers that mutate the last element do so on a copy).
-			return cached[lo : hi+1], nil
-		}
-	}
-
-	return e.effectiveProvider().GetOHLCV(ctx, symbol, start, end)
+	return e.cache.Get(ctx, symbol, start, end, e.effectiveProvider)
 }
 
-// dateRangeBounds returns [lo, hi] indices in `bars` (sorted by date ascending)
-// such that bars[lo].Date is the first bar with Date >= start and
-// bars[hi].Date is the last bar with Date <= end. If no bar matches, lo > hi.
-//
-// `lo` is the lower bound (first index whose Date >= start).
-// `hi` is the upper bound (last index whose Date <= end).
+// dateRangeBounds was promoted to DateRangeBounds (exported) in
+// pkg/backtest/cache.go (P1-16 ADR-020). The unexported alias below is
+// kept for any in-package callers that still reference the old name.
 func dateRangeBounds(bars []domain.OHLCV, start, end time.Time) (int, int) {
-	n := len(bars)
-	if n == 0 {
-		return 0, -1
-	}
-	// Lower bound: first bar with Date >= start.
-	lo := sort.Search(n, func(i int) bool {
-		return !bars[i].Date.Before(start)
-	})
-	if lo == n {
-		return n, n - 1 // no bar >= start
-	}
-	// Upper bound: last bar with Date <= end.
-	hi := sort.Search(n, func(i int) bool {
-		return bars[i].Date.After(end)
-	})
-	return lo, hi - 1
+	return DateRangeBounds(bars, start, end)
 }
 
 // detectRegime detects market regime using risk service.
@@ -993,9 +964,10 @@ func (e *Engine) calculatePosition(ctx context.Context, signal domain.Signal, po
 	e.mu.RUnlock()
 
 	if rm != nil {
+		// P1-16 (ADR-020): read snapshot via CacheManager
 		var ohlcv []domain.OHLCV
-		if e.inMemoryOHLCV != nil {
-			ohlcv = e.inMemoryOHLCV[signal.Symbol]
+		if snap := e.cache.inMemoryOHLCVAtomic.Load(); snap != nil {
+			ohlcv = (*snap)[signal.Symbol]
 		}
 		pos, err := rm.CalculatePosition(ctx, signal, portfolio, regime, currentPrice, ohlcv)
 		if err != nil {
@@ -1152,28 +1124,23 @@ func (e *Engine) checkStopLossesWithATR(ctx context.Context, tracker *Tracker, p
 
 // GetBacktestResult retrieves the result of a completed backtest.
 func (e *Engine) GetBacktestResult(backtestID string) (*domain.BacktestResult, error) {
-	e.btMu.RLock()
-	state := e.backtests[backtestID]
-	e.btMu.RUnlock()
-
-	if state == nil {
+	state, ok := e.stateStore.Get(backtestID)
+	if !ok || state == nil {
 		return nil, apperrors.NotFound("backtest", backtestID)
 	}
 
-	if state.Status != "completed" {
-		return nil, apperrors.New(apperrors.ErrCodeConflict, fmt.Sprintf("backtest not completed: %s", state.Status)).WithOperation("GetBacktestResult")
+	status := state.GetStatus()
+	if status != "completed" {
+		return nil, apperrors.New(apperrors.ErrCodeConflict, fmt.Sprintf("backtest not completed: %s", status)).WithOperation("GetBacktestResult")
 	}
 
-	return state.Result, nil
+	return state.GetResult(), nil
 }
 
 // GetBacktestTrades retrieves trades for a backtest.
 func (e *Engine) GetBacktestTrades(backtestID string) ([]domain.Trade, error) {
-	e.btMu.RLock()
-	state := e.backtests[backtestID]
-	e.btMu.RUnlock()
-
-	if state == nil {
+	state, ok := e.stateStore.Get(backtestID)
+	if !ok || state == nil {
 		return nil, apperrors.NotFound("backtest", backtestID)
 	}
 
@@ -1182,11 +1149,8 @@ func (e *Engine) GetBacktestTrades(backtestID string) ([]domain.Trade, error) {
 
 // GetBacktestEquity retrieves equity curve for a backtest.
 func (e *Engine) GetBacktestEquity(backtestID string) ([]domain.PortfolioValue, error) {
-	e.btMu.RLock()
-	state := e.backtests[backtestID]
-	e.btMu.RUnlock()
-
-	if state == nil {
+	state, ok := e.stateStore.Get(backtestID)
+	if !ok || state == nil {
 		return nil, apperrors.NotFound("backtest", backtestID)
 	}
 
@@ -1195,23 +1159,17 @@ func (e *Engine) GetBacktestEquity(backtestID string) ([]domain.PortfolioValue, 
 
 // GetBacktestStatus returns the status of a backtest.
 func (e *Engine) GetBacktestStatus(backtestID string) (string, error) {
-	e.btMu.RLock()
-	state := e.backtests[backtestID]
-	e.btMu.RUnlock()
-
-	if state == nil {
+	state, ok := e.stateStore.Get(backtestID)
+	if !ok || state == nil {
 		return "", apperrors.NotFound("backtest", backtestID)
 	}
 
-	return state.Status, nil
+	return state.GetStatus(), nil
 }
 
 func (e *Engine) GetBacktestParams(backtestID string) (domain.BacktestParams, error) {
-	e.btMu.RLock()
-	state := e.backtests[backtestID]
-	e.btMu.RUnlock()
-
-	if state == nil {
+	state, ok := e.stateStore.Get(backtestID)
+	if !ok || state == nil {
 		return domain.BacktestParams{}, apperrors.NotFound("backtest", backtestID)
 	}
 
@@ -1222,46 +1180,40 @@ func (e *Engine) GetBacktestParams(backtestID string) (domain.BacktestParams, er
 // The map key is symbol; each slice is sorted by date ascending.
 // After calling this, getOHLCV returns cached data instantly (L1 hit).
 // Pass nil to clear the L1 cache (forces provider fallback on next getOHLCV).
+//
+// P1-16 (ADR-020): thin shim to cache.Load().
 func (e *Engine) LoadOHLCVInMemory(data map[string][]domain.OHLCV) {
-	e.mu.Lock()
-	if data == nil {
-		e.inMemoryOHLCV = make(map[string][]domain.OHLCV)
-	} else {
-		e.inMemoryOHLCV = data
-	}
-	// Publish the snapshot for lock-free readers in the hot path.
-	e.inMemoryOHLCVAtomic.Store(&e.inMemoryOHLCV)
-	e.mu.Unlock()
+	e.cache.Load(data)
+}
+
+// CacheManager returns the underlying CacheManager sub-component (P1-16).
+// Prefer this accessor in new code over the LoadOHLCVInMemory shim.
+func (e *Engine) CacheManager() *CacheManager {
+	return e.cache
 }
 
 // LoadFactorCache loads pre-computed factor z-scores into the L1 factor cache.
 // The input is typically from storage.GetFactorCacheRange() or data.LoadFactorCacheIntoMap().
 // After calling this, GetFactorZScore returns cached z-scores instantly (L1 hit).
 // Pass nil to clear the factor cache.
+//
+// P1-16 (ADR-020): thin shim to factor.Load().
 func (e *Engine) LoadFactorCache(data map[domain.FactorType]map[time.Time]map[string]float64) {
-	e.mu.Lock()
-	e.factorCache = data
-	e.mu.Unlock()
+	e.factor.Load(data)
+}
+
+// FactorCache returns the underlying FactorCacheAccessor sub-component (P1-16).
+// Prefer this accessor in new code over the LoadFactorCache shim.
+func (e *Engine) FactorCache() *FactorCacheAccessor {
+	return e.factor
 }
 
 // GetFactorZScore returns the pre-computed z-score for a given factor, date, and symbol.
 // Returns (0, false) if the factor cache is not loaded or the entry doesn't exist.
+//
+// P1-16 (ADR-020): thin shim to factor.Get().
 func (e *Engine) GetFactorZScore(factor domain.FactorType, date time.Time, symbol string) (float64, bool) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if e.factorCache == nil {
-		return 0, false
-	}
-	dateMap, ok := e.factorCache[factor]
-	if !ok {
-		return 0, false
-	}
-	symbolMap, ok := dateMap[date]
-	if !ok {
-		return 0, false
-	}
-	z, ok := symbolMap[symbol]
-	return z, ok
+	return e.factor.Get(factor, date, symbol)
 }
 
 // SetRiskManager injects an in-process risk manager.
@@ -1272,6 +1224,14 @@ func (e *Engine) SetRiskManager(rm *risk.RiskManager) {
 	e.mu.Lock()
 	e.riskManager = rm
 	e.mu.Unlock()
+}
+
+// GetRiskManager returns the currently attached in-process RiskManager (P1-19).
+// Returns nil if not set.
+func (e *Engine) GetRiskManager() *risk.RiskManager {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.riskManager
 }
 
 // SetParallelWorkers sets the number of concurrent workers for per-stock data fetching.
@@ -1300,152 +1260,95 @@ func hasSTPrefix(name string) bool {
 // only simulating internally via Tracker. This is the primary hook for transitioning
 // from backtest → paper trading → live trading.
 // Pass nil to disable live trading and use pure simulation.
+//
+// P1-17 (ADR-020): thin shim to liveBridge.Set(). Retained for
+// backward compatibility (6 months); new code should use
+// e.liveBridge().Set() or EngineOption WithLiveTrader (P1-19).
 func (e *Engine) SetLiveTrader(trader live.LiveTrader) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.liveTrader = trader
-	if trader != nil {
-		e.logger.Info().Str("trader", trader.Name()).Msg("LiveTrader attached to engine")
-	}
+	e.liveBridge.Set(trader)
 }
 
 // SetExecutionService injects a custom ExecutionService for order execution.
 // When set, the engine uses this service for all trade execution instead of
 // Tracker's built-in logic. Pass nil to fall back to Tracker execution.
+//
+// P1-17 (ADR-020): thin shim to executionBridge.Set(). Retained for
+// backward compatibility (6 months); new code should use
+// e.executionBridge().Set() or EngineOption WithExecutionService (P1-19).
 func (e *Engine) SetExecutionService(svc ExecutionService) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.executionService = svc
-	if svc != nil {
-		e.logger.Info().Str("slippage_model", svc.GetSlippageModel()).Msg("ExecutionService attached to engine")
-	}
+	e.executionBridge.Set(svc)
 }
 
 // GetExecutionService returns the current ExecutionService.
+//
+// P1-17 (ADR-020): thin shim to executionBridge.Get(). Retained for
+// backward compatibility.
 func (e *Engine) GetExecutionService() ExecutionService {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.executionService
+	return e.executionBridge.Get()
 }
 
 // GetLiveTrader returns the currently attached LiveTrader, or nil if none.
+//
+// P1-17 (ADR-020): thin shim to liveBridge.Get(). Retained for
+// backward compatibility.
 func (e *Engine) GetLiveTrader() live.LiveTrader {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.liveTrader
+	return e.liveBridge.Get()
+}
+
+// LiveBridge returns the underlying LiveBridge sub-component (P1-17).
+// Prefer this accessor in new code over the SetLiveTrader shim; the
+// shim is kept for backward compat only.
+func (e *Engine) LiveBridge() *LiveBridge {
+	return e.liveBridge
+}
+
+// ExecutionBridge returns the underlying ExecutionBridge sub-component (P1-17).
+// Prefer this accessor in new code over the SetExecutionService shim.
+func (e *Engine) ExecutionBridge() *ExecutionBridge {
+	return e.executionBridge
+}
+
+// StateStore returns the underlying StateStore (P1-18).
+// The returned store is safe for concurrent use; callers may invoke
+// Get / Put / Delete / Len / Evict directly. Typical use is for
+// observability (e.g. "how many backtests are tracked?") or for
+// out-of-band GC sweeps.
+func (e *Engine) StateStore() StateStore {
+	return e.stateStore
+}
+
+// EvictStates performs a bulk eviction of older backtest states, keeping
+// at most keepN entries. keepN=0 evicts all. Returns the number of
+// states removed. Useful for periodic GC under bursty batch load.
+func (e *Engine) EvictStates(keepN int) int {
+	return e.stateStore.Evict(keepN)
 }
 
 // ExecuteSignalViaLiveTrader executes a single trading signal through the attached LiveTrader.
 // This is the bridge between backtest signal generation and live/paper order execution.
 // Returns the order result or nil if no LiveTrader is attached.
 // The signal's Direction determines buy (DirectionLong) or sell (DirectionClose).
+//
+// P1-17 (ADR-020): thin shim to liveBridge.ExecuteSignal(). All order
+// type / price / quantity logic now lives in LiveBridge; behavior is
+// byte-equivalent to the previous in-line implementation.
 func (e *Engine) ExecuteSignalViaLiveTrader(ctx context.Context, signal domain.Signal, currentPrice float64) (*live.OrderResult, error) {
-	e.mu.RLock()
-	trader := e.liveTrader
-	e.mu.RUnlock()
-
-	if trader == nil {
-		return nil, nil
-	}
-
-	if currentPrice <= 0 {
-		return nil, fmt.Errorf("cannot execute signal: invalid price %.4f for %s", currentPrice, signal.Symbol)
-	}
-
-	// Determine order type from signal
-	orderType := signal.OrderType
-	if orderType == "" {
-		orderType = domain.OrderTypeMarket
-	}
-
-	// Determine price: limit price for limit orders, 0 for market orders
-	price := 0.0
-	if orderType == domain.OrderTypeLimit {
-		price = signal.LimitPrice
-		if price <= 0 {
-			price = currentPrice
-		}
-	}
-
-	// Calculate quantity from position sizing or default to a fixed lot
-	quantity := 100.0 // default lot size; in production this comes from risk/position sizing
-	if signal.Strength > 0 {
-		// Scale quantity by signal strength (capped)
-		quantity = 100.0 * max(1.0, signal.Strength*10)
-		if quantity > 10000 {
-			quantity = 10000
-		}
-	}
-
-	result, err := trader.SubmitOrder(ctx, signal.Symbol, signal.Direction, orderType, quantity, price)
-	if err != nil {
-		e.logger.Warn().
-			Str("symbol", signal.Symbol).
-			Str("direction", string(signal.Direction)).
-			Float64("price", currentPrice).
-			Err(err).
-			Msg("LiveTrader order submission failed")
-		return nil, err
-	}
-
-	e.logger.Info().
-		Str("order_id", result.OrderID).
-		Str("symbol", signal.Symbol).
-		Str("direction", string(signal.Direction)).
-		Str("status", result.Status).
-		Float64("qty", result.FilledQty).
-		Float64("price", result.Price).
-		Msg("Signal executed via LiveTrader")
-
-	return result, nil
+	return e.liveBridge.ExecuteSignal(ctx, signal, currentPrice)
 }
 
 // ExecuteSignalsViaLiveTrader executes multiple signals through the LiveTrader in batch.
 // This is useful for daily rebalancing where multiple signals are generated at once.
 // Returns a map of symbol → order result for successful executions.
+//
+// P1-17 (ADR-020): thin shim to liveBridge.ExecuteSignals().
 func (e *Engine) ExecuteSignalsViaLiveTrader(ctx context.Context, signals []domain.Signal, prices map[string]float64) map[string]*live.OrderResult {
-	e.mu.RLock()
-	trader := e.liveTrader
-	e.mu.RUnlock()
-
-	if trader == nil {
-		return nil
-	}
-
-	results := make(map[string]*live.OrderResult, len(signals))
-	for _, signal := range signals {
-		price, ok := prices[signal.Symbol]
-		if !ok || price <= 0 {
-			e.logger.Warn().Str("symbol", signal.Symbol).Msg("No price available for live execution, skipping")
-			continue
-		}
-
-		result, err := e.ExecuteSignalViaLiveTrader(ctx, signal, price)
-		if err != nil {
-			continue
-		}
-		if result != nil {
-			results[signal.Symbol] = result
-		}
-	}
-
-	e.logger.Info().
-		Int("signals", len(signals)).
-		Int("executed", len(results)).
-		Msg("Batch signal execution via LiveTrader completed")
-
-	return results
+	return e.liveBridge.ExecuteSignals(ctx, signals, prices)
 }
 
 // HealthCheckLiveTrader checks the health of the attached LiveTrader.
 // Returns nil if healthy or no trader attached, error otherwise.
+//
+// P1-17 (ADR-020): thin shim to liveBridge.HealthCheck().
 func (e *Engine) HealthCheckLiveTrader(ctx context.Context) error {
-	e.mu.RLock()
-	trader := e.liveTrader
-	e.mu.RUnlock()
-
-	if trader == nil {
-		return nil
-	}
-	return trader.HealthCheck(ctx)
+	return e.liveBridge.HealthCheck(ctx)
 }

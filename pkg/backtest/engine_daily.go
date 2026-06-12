@@ -412,9 +412,8 @@ func (e *Engine) executeSignalTrade(
 	var err error
 
 	// Check if ExecutionService is available for more realistic execution
-	e.mu.RLock()
-	execSvc := e.executionService
-	e.mu.RUnlock()
+	// P1-17 (ADR-020): read via ExecutionBridge (the live component)
+	execSvc := e.executionBridge.Get()
 
 	useExecutionService := execSvc != nil && signal.Direction != domain.DirectionHold
 
@@ -508,9 +507,8 @@ func (e *Engine) executeViaExecutionService(
 	execOpts *OrderExecutionOpts,
 	logger zerolog.Logger,
 ) (*domain.Trade, error) {
-	e.mu.RLock()
-	execSvc := e.executionService
-	e.mu.RUnlock()
+	// P1-17 (ADR-020): read via ExecutionBridge.
+	execSvc := e.executionBridge.Get()
 
 	if execSvc == nil {
 		return nil, fmt.Errorf("execution service not available")

@@ -52,3 +52,13 @@ const (
 	// MaxJobPollAttempts is the maximum number of polling attempts before giving up
 	MaxJobPollAttempts = 150 // 5min / 2s ≈ 150 attempts
 )
+
+// StateStore defaults (P1-18, ADR-020)
+const (
+	// DefaultStateStoreCapacity is the default LRU capacity for the
+	// backtest state store. 1000 entries balances memory footprint
+	// (~100KB per state × 1000 ≈ 100MB) against the typical batch
+	// backtest run size. Callers needing more (or fewer) entries can
+	// inject a custom StateStore via WithStateStore.
+	DefaultStateStoreCapacity = 1000
+)
