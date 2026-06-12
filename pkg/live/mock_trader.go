@@ -18,6 +18,11 @@ import (
 // left zero; that is the regulatory default from the 2024-Q1
 // 上交所/深交所公告. See pkg/fees for the exact values and
 // the change log.
+//
+// OrderStore is optional (Sprint 6 P1-26, ODR-022): when set,
+// every order is persisted for audit/recovery; when nil, the
+// trader runs purely in-memory (default paper trading mode).
+// This replaces the now-deleted `PersistentMockTrader`.
 type MockTraderConfig struct {
 	InitialCash     float64
 	CommissionRate  float64
@@ -26,6 +31,7 @@ type MockTraderConfig struct {
 	TransferFeeRate float64
 	MinCommission   float64
 	PriceProvider   func(symbol string) float64
+	OrderStore      OrderStore // optional; nil = no persistence
 }
 
 // MockTrader implements LiveTrader with in-memory simulation.
@@ -159,6 +165,7 @@ func (m *MockTrader) executeBuy(symbol string, orderType domain.OrderType, quant
 		SubmittedAt: time.Now(),
 	}
 	m.orders[result.OrderID] = result
+	m.persistOrder(result, execPrice, "filled", "")
 
 	m.logger.Info().
 		Str("order_id", result.OrderID).
@@ -226,6 +233,7 @@ func (m *MockTrader) executeSell(symbol string, orderType domain.OrderType, quan
 		SubmittedAt: time.Now(),
 	}
 	m.orders[result.OrderID] = result
+	m.persistOrder(result, execPrice, "filled", "")
 
 	m.logger.Info().
 		Str("order_id", result.OrderID).
@@ -256,6 +264,9 @@ func (m *MockTrader) CancelOrder(_ context.Context, orderID string) error {
 		return fmt.Errorf("cannot cancel order in status: %s", order.Status)
 	}
 	order.Status = "cancelled"
+	// Persist the cancellation when an OrderStore is configured so the
+	// audit trail reflects the final state of the order. (P1-26, ODR-022)
+	m.persistOrder(order, order.Price, "cancelled", "user-requested cancellation")
 	return nil
 }
 
@@ -347,3 +358,30 @@ func (m *MockTrader) Reset() {
 }
 
 // max is provided by Go 1.21+ builtin (P0-10).
+
+// persistOrder writes a filled order to the configured OrderStore.
+// No-op when OrderStore is nil (default in-memory paper trading).
+// Replaces the now-deleted `PersistentMockTrader` (Sprint 6 P1-26, ODR-022).
+func (m *MockTrader) persistOrder(result *OrderResult, fillPrice float64, status, message string) {
+	if m.config.OrderStore == nil {
+		return
+	}
+	now := time.Now()
+	record := &OrderRecord{
+		OrderID:      result.OrderID,
+		Symbol:       result.Symbol,
+		Direction:    string(result.Direction),
+		OrderType:    string(result.OrderType),
+		Quantity:     result.Quantity,
+		FilledQty:    result.FilledQty,
+		Price:        result.Price,
+		AvgFillPrice: fillPrice,
+		Status:       OrderStatus(status),
+		SubmittedAt:  now.Unix(),
+		UpdatedAt:    now.Unix(),
+		Message:      message,
+	}
+	if err := m.config.OrderStore.Save(context.Background(), record); err != nil {
+		m.logger.Warn().Err(err).Str("order_id", result.OrderID).Msg("MockTrader: failed to persist order")
+	}
+}

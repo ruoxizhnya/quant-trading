@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.16.0 (Sprint 6 P1 pickup #6 — P1-15 服务合并完成)
+> **Version:** 3.17.0 (Sprint 6 P1 pickup #7 — P1-26 执行实体合并完成)
 > **Last Updated:** 2026-06-12
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -577,6 +577,51 @@
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-12 (v3.17.0) — Sprint 6 P1 pickup #7: P1-26 4 套执行实体合并 (5→2 实体)
+
+- **触发**: v3.16.0 完成 P1-15 服务合并后, 接续 CQ-010 (ODR-013
+  风险 #10), 把 `pkg/live/` 中 0 production caller 的 3 个执行实体
+  (PersistentMockTrader / AdvancedMockTrader / AdvancedTrader
+  interface) 合并到 MockTrader, 减少 810 行 dead code。
+- **过程**:
+  - ✅ **MockTrader 增加 `OrderStore` 可选字段** [mock_trader.go:34](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/mock_trader.go#L34) — `MockTraderConfig.OrderStore OrderStore` 字段
+    (nil = 纯内存默认), 新增私有 `persistOrder` 方法
+    [mock_trader.go:362](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/mock_trader.go#L362), `executeBuy` /
+    `executeSell` / `CancelOrder` 全部接入持久化 hook (失败仅
+    log Warn, 不阻塞主路径)
+  - ✅ **删除 3 文件 635 行 + live_test.go 瘦身 175 行** (YAGNI):
+    - [advanced_mock_trader.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/advanced_mock_trader.go) (-277) — 0 caller, RiskCheck/SlippageModel 装饰器模式未启用
+    - [persistent_mock_trader.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/persistent_mock_trader.go) (-292) — 与 MockTrader 100% 行为重叠, 改用 `OrderStore` 字段
+    - [trader_advanced.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/trader_advanced.go) (-66) — AdvancedTrader interface, 0 实现引用
+    - [live_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/live_test.go) (-175 dead-code tests) — 删 TestAdvancedMockTrader_* / TestPersistentMockTrader_*, 文件本身 (723 行) 保留 LiveEngine 重要测试
+  - ✅ **convertToOrderResult 迁移** [order_store.go:49](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/order_store.go#L49) — 从 persistent_mock_trader.go
+    迁出, 改 godoc 为"任意 OrderStore adapter 复用"
+  - ✅ **mockOrderStoreForTest 迁移** [order_store_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/order_store_test.go) — 从
+    advanced_trader_test.go 迁出, 服务于新集成测试
+  - ✅ **新增 2 测试** [trader_test.go:50](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/trader_test.go#L50) — `TestMockTrader_Persistence_OrderStore_Integration` +
+    `TestMockTrader_Persistence_NilStore_NoOp`, 验证 `OrderStore` 字段
+    行为 (持久化 + nil 零开销)
+  - ✅ **CancelOrder 持久化 bug 修复** [mock_trader.go:269](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/mock_trader.go#L269) — 取消时
+    调 `persistOrder(..., "cancelled")`, 此前只更新内存不写 store
+  - ✅ **godoc 同步** [trader.go:6-17](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/trader.go#L6) — 顶部架构说明更新为"2 实体 + LiveEngine 独立", 列出已删除实体
+  - 📋 **TASKS.md**: P1-26 ⬜ → ✅
+  - 📋 **新 ODR**: [odr-022-p1-26-execution-entity-consolidation.md](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/odr/odr-022-p1-26-execution-entity-consolidation.md) Created/Completed
+  - 📋 **ADR.md index 2.8.0 → 2.9.0**: ODR 累计 21 → 22, ODR-022 新增
+- **验证**:
+  - **race detector**: `go test ./pkg/live/... -count=1` 全 PASS (28
+    test functions, 含 2 个新增 P1-26 集成测试)
+  - **集成**: `go build ./...` exit 0
+  - **go vet**: `go vet ./pkg/live/...` exit 0
+  - **全包测试**: `go test ./... -count=1` exit 0 (e2e/tests
+    connection refused 是预期, 服务未启)
+- **代码量变化**: 净 -743 行 (-815 / +72), `pkg/live/` 总规模
+  -10.6%
+- **实体数**: 5 → 2 (LiveTrader interface + MockTrader impl;
+  LiveEngine 保留但独立契约)
+- **总任务数**: 201 → 201 (无变化, 1 项状态变更)
+- **总完成数**: 206 → 207 (+1: P1-26)
+- **总待处理**: 0 → 0
 
 ### 2026-06-12 (v3.16.0) — Sprint 6 P1 pickup #6: P1-15 risk + execution 服务合并 (7→5)
 

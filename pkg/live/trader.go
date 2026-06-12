@@ -3,12 +3,17 @@
 // behind the LiveTrader interface, enabling seamless switching between paper trading
 // (MockTrader) and real broker integrations.
 //
-// Architecture:
+// Architecture (Sprint 6 P1-26, ODR-022 — consolidated from 5 to 2 entities):
 //   - LiveTrader: Core interface for order submission, cancellation, and account queries
-//   - AdvancedTrader: Extended interface with batch operations, quote subscription, and margin checks
-//   - MockTrader: In-memory simulation with A-share trading rules (T+1, stamp tax, price limits)
-//   - PersistentMockTrader: MockTrader with OrderStore persistence for audit trails
-//   - AdvancedMockTrader: PersistentMockTrader with quote streaming and batch operations
+//   - MockTrader: In-memory simulation with A-share trading rules (T+1, stamp tax, price limits).
+//                 Supports optional OrderStore for persistence (replaces PersistentMockTrader).
+//   - LiveEngine: Real-time quote-driven execution orchestrator for paper/live trading
+//                 (uses Broker + DataFeed interfaces, separate from LiveTrader)
+//
+// Previously-deleted entities (see ODR-022 for details):
+//   - PersistentMockTrader: merged into MockTrader via OrderStore config field
+//   - AdvancedMockTrader:   unused (no production callers) — deleted
+//   - AdvancedTrader:       unused interface (no production callers) — deleted
 //
 // Usage:
 //

@@ -2,6 +2,9 @@ package live
 
 import (
 	"context"
+	"time"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 type OrderStatus string
@@ -35,4 +38,25 @@ type OrderStore interface {
 	List(ctx context.Context, symbol string, status OrderStatus) ([]*OrderRecord, error)
 	Update(ctx context.Context, orderID string, updates map[string]interface{}) error
 	Delete(ctx context.Context, orderID string) error
+}
+
+// convertToOrderResult converts a persistence OrderRecord to the in-memory
+// OrderResult type used by MockTrader and the HTTP API.
+//
+// Moved here from the now-deleted `persistent_mock_trader.go` (Sprint 6
+// P1-26, ODR-022) so both `order_store_test.go` and any future adapter
+// can reuse the conversion without depending on the mock trader.
+func convertToOrderResult(record *OrderRecord) *OrderResult {
+	return &OrderResult{
+		OrderID:     record.OrderID,
+		Symbol:      record.Symbol,
+		Direction:   domain.Direction(record.Direction),
+		OrderType:   domain.OrderType(record.OrderType),
+		Quantity:    record.Quantity,
+		FilledQty:   record.FilledQty,
+		Price:       record.Price,
+		Status:      string(record.Status),
+		SubmittedAt: time.Unix(record.SubmittedAt, 0),
+		Message:     record.Message,
+	}
 }
