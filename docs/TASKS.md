@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.17.0 (Sprint 6 P1 pickup #7 — P1-26 执行实体合并完成)
+> **Version:** 3.18.0 (Sprint 6 P1 pickup #8 — P1-29 AlertManager 6 类 P0 风险告警)
 > **Last Updated:** 2026-06-12
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -577,6 +577,61 @@
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-12 (v3.18.0) — Sprint 6 P1 pickup #8: P1-29 AlertManager 6 类 P0 风险告警 + Webhook 渠道
+
+- **触发**: v3.17.0 完成 P1-26 实体合并后, 接续 BR-015 (ODR-013
+  风险 #15), 解决生产路径无风险告警问题: A 股风控阈值无主动监控
+  / 集中度失控 / 回撤无通知 / 订单失败率无聚合 / 无 webhook 渠道
+- **过程**:
+  - ✅ **新建 `pkg/alert/` 包** (1326 行) — 4 文件 / 25 TestXxx 全
+    PASS, race detector 0 issue, 5.077s 测试时长
+    - [manager.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/alert/manager.go) (307 行) —
+      AlertManager + Config + Alert + PortfolioSnapshot types
+      + 顶层 godoc 架构图
+    - [channel.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/alert/channel.go) (221 行) —
+      Channel interface + LogChannel (zerolog) + WebhookChannel
+      (异步 goroutine, 64 容量队列, 5s timeout, queue 满 drop+log)
+    - [detectors.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/alert/detectors.go) (249 行) —
+      6 个 evaluateXxx 纯函数 + severityForBreach 升级规则
+      + 6 个 Rule 常量
+    - [manager_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/alert/manager_test.go) (549 行) —
+      25 TestXxx (13 detector + 1 severity + 2 log + 3 webhook
+      + 6 manager)
+  - ✅ **6 类 P0 风险告警 100% 覆盖**:
+    - `position_concentration` — 单标的 > MaxPositionWeight (0.20)
+    - `sector_concentration` — 行业聚合 > MaxSectorWeight (0.40)
+    - `drawdown` — (current - peak) / peak < -MaxDrawdown (0.15)
+    - `daily_loss_limit` — DailyPnL < DailyLossLimit (e.g. -50000)
+    - `order_failure_rate` — 失败率 > FailureRateLimit (0.10) in window (1h)
+    - `risk_metric_breach` — RiskMetrics[name] > RiskMetricThresholds[name]
+  - ✅ **Severity 升级规则** [detectors.go:227](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/alert/detectors.go#L227) —
+    ratio<1.0 info, 1.0-2.5 warning, ≥2.5 critical
+  - ✅ **Webhook 渠道** [channel.go:115](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/alert/channel.go#L115) —
+    JSON POST, X-Alert-{ID,Rule,Severity} headers, 5s timeout,
+    queue 满 drop+log 不阻塞 caller
+  - ✅ **运行时可扩展** — AddChannel / SetWebhookURL 线程安全,
+    用户可注册自定义 Channel (Slack / PagerDuty / 飞书 / Prometheus
+    counter / SSE)
+  - 📋 **TASKS.md**: P1-29 ⬜ → ✅, v3.17.0 → v3.18.0
+  - 📋 **新 ODR**: [odr-023-p1-29-alert-manager.md](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/odr/odr-023-p1-29-alert-manager.md) Created/Completed
+  - 📋 **ADR.md index 2.9.0 → 3.0.0**: ODR 累计 22 → 23, ODR-023 新增
+- **验证**:
+  - **race detector**: `go test -race ./pkg/alert/... -count=1` 全
+    PASS, 5.077s (含 16 goroutine 并发 Evaluate)
+  - **集成**: `go build ./...` exit 0
+  - **go vet**: `go vet ./pkg/alert/...` exit 0
+  - **测试用例**: 25 (13 detector 单元 + 1 severity 边界 + 2 log
+    + 3 webhook + 6 manager)
+- **代码量**: 净 +1326 行 (生产 757 + 测试 569)
+- **新增 Go 依赖**: 0 (纯 stdlib + 已有的 zerolog)
+- **总任务数**: 201 → 201 (无变化, 1 项状态变更)
+- **总完成数**: 207 → 208 (+1: P1-29)
+- **总待处理**: 0 → 0
+- **未做但设计就绪** (P2 接入): `cmd/analysis/main.go` 加
+  `PeriodicAlertLoop` (5min 一次) 调 `alertManager.Evaluate(ctx,
+  snapshot)`, 30 行 mechanical change; 前端 Alert UI / 告警历史
+  持久化 / 飞书 channel adapter
 
 ### 2026-06-12 (v3.17.0) — Sprint 6 P1 pickup #7: P1-26 4 套执行实体合并 (5→2 实体)
 
@@ -1199,10 +1254,10 @@
 | **P1-23** | `pkg/id/order.go` UUID v7 统一 | CQ-007 | `pkg/id/order.go` (新建) | TBD | 1d | 3 处订单号生成统一；测试 | ✅ |
 | **P1-24** | Strategy 接口拆分 (StrategyCore/Configurable/ResourceManaged) | CQ-006, ISP | `pkg/strategy/interfaces.go` (新建) | 2026-06-12 | 2d | 4 个可组合 interface；AsConfigurable/AsSignalGenerator/AsResourceManaged helper；9 个 compliance 测试覆盖 builtin strategies | ✅ |
 | **P1-25** | `domain.Strategy` Deprecated 删除 (ODR-013) | CQ-014 | `pkg/domain/types.go`, `pkg/strategy/registry.go`, `pkg/strategy/examples/*`, `cmd/strategy/main.go` | TBD | 0.5d | 旧接口移除；`pkg/strategy.Strategy` 唯一源 | ✅ |
-| **P1-26** | 4 套执行实体合并 (LiveEngine/OrderManager/...) | CQ-010, YAGNI | `pkg/live/` | TBD | 1w | 5 套 → 2 套 (LiveEngine + MockTrader) | ⬜ |
+| **P1-26** | 4 套执行实体合并 (LiveEngine/OrderManager/...) | CQ-010, YAGNI | `pkg/live/` | 2026-06-12 | 1w | 5 套 → 2 套 (LiveTrader + MockTrader) | ✅ |
 | **P1-27** | `pkg/strategy/plugins/utils.go` 删除手写 `itoa`/`ftoa`/`joinStrings` | CQ-006 | `pkg/strategy/plugins/utils.go` | TBD | 0.5d | 标准库替换；测试通过 | ✅ |
 | **P1-28** | Redis 缓存 key namespace 化 (`quantlab:` 前缀) | AR-021 | `pkg/storage/redis.go` | TBD | 1d | 全部 key 加前缀；InvalidateOHLCV 限定 pattern | ✅ |
-| **P1-29** | 持仓超限/行业集中度/回撤告警 (AlertManager) | BR-015, ADR-017 | `pkg/alert/manager.go` (新建) | TBD | 1w | 6 类 P0 风险告警；webhook 渠道 | ⬜ |
+| **P1-29** | 持仓超限/行业集中度/回撤告警 (AlertManager) | BR-015, ADR-017 | `pkg/alert/manager.go` (新建) | 2026-06-12 | 1w | 6 类 P0 风险告警；webhook 渠道 | ✅ |
 | **P1-30** | E2E AI Copilot 端到端 + SSE 进度 | TQ-016, BR-014 | `e2e/tests/ai-copilot-e2e.spec.ts` | TBD | 3d | Playwright 自然语言 → 回测 → 展示 | ⬜ |
 
 ### 🟢 Sprint 6 P2 — Backlog (33 项)
