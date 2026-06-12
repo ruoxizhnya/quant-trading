@@ -46,6 +46,7 @@ import {
   BeakerOutline,
   TrendingUpOutline,
   CloudDownloadOutline,
+  NotificationsOutline,
 } from '@vicons/ionicons5'
 import { NSpace, NIcon } from 'naive-ui'
 
@@ -65,6 +66,7 @@ const navItems = [
   { path: '/copilot', label: '策略 Copilot', icon: markRaw(ChatbubbleEllipsesOutline) },
   { path: '/strategy-lab', label: '策略实验室', icon: markRaw(BeakerOutline) },
   { path: '/data-sync', label: '数据同步', icon: markRaw(CloudDownloadOutline) },
+  { path: '/alerts', label: '风险告警', icon: markRaw(NotificationsOutline) },
 ]
 </script>
 

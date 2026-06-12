@@ -48,6 +48,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/PaperTrading.vue'),
         meta: { title: '模拟交易' },
       },
+      {
+        path: 'alerts',
+        name: 'alerts',
+        component: () => import('@/pages/Alerts.vue'),
+        meta: { title: '风险告警' },
+      },
     ],
   },
   {
