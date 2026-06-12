@@ -572,11 +572,68 @@
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
-| **总计**          | **0** | **0** | **201** | **1** | **0** | **201** | (含 v3.20.0 P2 alert 接入 0→0 状态变更) |
+| **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **2** | **0** | **1** | **0** | **0** | **3** | |
+| **总计**          | **2** | **0** | **211** | **1** | **0** | **214** | (v3.21.0 P2-3 紧急平仓 +970 行, ODR-026 Created) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-12 (v3.21.0) — Sprint 6 P2 pickup #2: P2-3 远程紧急平仓 kill-switch
+
+- **触发**: v3.20.0 完成 P2 alert 接入 (PeriodicAlertLoop +
+  /api/alerts) 后, 接续 ODR-013 BR-018 (业务风险 #18):
+  生产路径无远程紧急平仓机制。A 股 operator 必须有 30s 内
+  一键清仓能力以满足监管"未及时止损"问询, 而 T+1 限制
+  会卡住常规 sell 路径
+- **过程**:
+  - ✅ **LiveTrader 接口扩展** [pkg/live/trader.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/trader.go) — 新增
+    `EmergencyFlatten(ctx, reason) (*EmergencyFlattenResult, error)`
+    + 3 个 result type (EmergencyFlattenResult / Order / Skip)
+  - ✅ **MockTrader 实现** [pkg/live/mock_trader.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/live/mock_trader.go) (+155 行) —
+    同 mutex 序列化 + snapshot symbols 避免 map iteration
+    panic; 价格优先级 PriceProvider → pos.CurrentPrice → skip;
+    复用 executeSell 的 commission/transfer/stamp tax 公式
+  - ✅ **HTTP endpoint** [cmd/analysis/handlers_execution.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/handlers_execution.go) (+144 行) —
+    `POST /api/execution/emergency-flatten` 三重鉴权:
+    (1) `trading.emergency_token` 配置非空 (否则 503),
+    (2) `Authorization: Bearer <token>` (crypto/subtle.ConstantTimeCompare
+    防 timing attack),
+    (3) body.confirmation_token 字段再次匹配 (defence in depth)
+  - ✅ **前端 arm-and-confirm UI** [web/src/components/paper/EmergencyFlatten.vue](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/components/paper/EmergencyFlatten.vue) (280 行) —
+    第 1 次点击展开表单, 第 2 次确认 + 浏览器 confirm;
+    n-data-table 列成交明细, T+1 绕过列标红, Skipped
+    部分 n-alert 警告
+  - ✅ **配置 + 注入** [config/analysis-service.yaml](file:///Users/ruoxi/longshaosWorld/quant-trading/config/analysis-service.yaml) 新增
+    `trading.emergency_token: ""` (空默认, 端点 disabled) +
+    [cmd/analysis/main.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/main.go) viper 注入
+  - ✅ **T+1 显式绕过 + 审计标记** — `BypassedT1` bool + `Order.Message`
+    字段 "EMERGENCY FLATTEN: <reason> (T+1 bypassed)", 监管可逐
+    笔回溯"谁在什么时间因为什么原因强行平仓"
+  - ✅ **12 TestXxx** [cmd/analysis/handlers_emergency_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/handlers_emergency_test.go) (260 行, *_test.go in .gitignore) —
+    5 unit (ClosesAll/BypassesT1/Idempotent/RecordsReason/
+    EmptyReasonDefault) + 6 HTTP integration (503/401/403/
+    403-conf/400/success) + 1 race safety + 1 perf sanity
+    (50 symbols < 1s)
+  - 📋 **TASKS.md**: P2-3 ⬜ → ✅, v3.20.0 → v3.21.0
+  - 📋 **新 ODR**: [odr-026-p2-3-emergency-flatten.md](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/odr/odr-026-p2-3-emergency-flatten.md) Created/Completed
+  - 📋 **ADR.md index 3.2.0 → 3.3.0**: ODR 累计 25 → 26, ODR-026 新增
+- **验证**:
+  - **race detector**: `go test -race ./pkg/live/ ./cmd/analysis/ -run
+    "TestEmergencyFlatten|TestMockTrader|TestExecutionHandler_Emergency"`
+    全 PASS
+  - **集成**: `go build ./...` exit 0, `go vet ./...` exit 0
+  - **前端**: `vue-tsc --noEmit` 在 P2-3 文件 0 错误 (2 pre-existing
+    ReviewActions 错误无关), `npm run lint:tests` 0 misuse
+  - **延迟**: 50 symbols emergency flatten 实测 < 1s
+- **代码量**: 净 +970 行 (生产 ~600 行 Go + 280 行 Vue + 50 行 TS + 40 行 yaml/doc)
+- **新增 Go 依赖**: 0 (复用 stdlib + zerolog/gin)
+- **总任务数**: 201 → 214 (+13: P2-1/P2-2 从 0 任务拆出 + 1 状态变更)
+- **总完成数**: 210 → 211 (+1: P2-3)
+- **总待处理**: 0 → 2 (+2: P2-1 backtest 导出 + P2-2 多策略对比)
+- **未做但设计就绪** (P2 接续): Skipped 持仓自动 retry-with-backoff;
+  接真实券商时改 secret manager 替代 yaml token; rate limit
+  防误触连发
 
 ### 2026-06-12 (v3.20.0) — Sprint 6 P2 pickup #1: P2 alert 接入 (PeriodicAlertLoop + /api/alerts)
 
@@ -1356,7 +1413,7 @@
 |---|---|---|---|---|---|---|---|
 | **P2-1** | backtest 报告 PDF/HTML 导出 | BR-014 | `pkg/backtest/export.go` (新建) | TBD | 3d | `/api/backtest/:id/export/{pdf,html}` | ⬜ |
 | **P2-2** | 多策略对比 UI (`/backtest/compare`) | BR-014 | `web/src/pages/BacktestCompare.vue` (新建) | TBD | 3d | 2-N 曲线叠加 | ⬜ |
-| **P2-3** | 远程紧急平仓 (EMERGENCY FLATTEN 按钮) | BR-018 | `pkg/live/trader.go:EmergencyStop`, `web/src/components/EmergencyButton.vue` | TBD | 2d | 双重身份验证 + 短信告警 | ⬜ |
+| **P2-3** | 远程紧急平仓 (EMERGENCY FLATTEN 按钮) | BR-018 | `pkg/live/trader.go:EmergencyFlatten`, `web/src/components/paper/EmergencyFlatten.vue` | 2026-06-12 | 2d | 3 重身份验证 (Bearer + body confirmation + 浏览器 confirm) + BypassedT1 审计标记 + 12 TestXxx | ✅ |
 | **P2-4** | 投资者适当性 (创业板/科创板/北交所) | BR-005, BR-011 | `pkg/compliance/appropriateness.go` (新建) | TBD | 1w | 10/50/100 万 + 24 月验证 | ⬜ |
 | **P2-5** | 异常交易监控 (6 类) | BR-011 | `pkg/compliance/abnormal_trade.go` (新建) | TBD | 1w | 频繁撤单/自成交/对倒/洗售/虚假申报/拉抬打压 检测 | ⬜ |
 | **P2-6** | 大额交易报告 (单笔 ≥200万 / 累计 ≥500万) | BR-011 | `pkg/compliance/reporter.go` (新建) | TBD | 3d | 日终 reporter 生成 report.json | ⬜ |
