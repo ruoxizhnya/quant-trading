@@ -1093,8 +1093,8 @@
 | **P1-10** | research_batch_test.go fail-gate (10+ factors IC>0.03) | TQ-007, TQ-015 | `pkg/ai/agents/research_batch_test.go` | TBD | 1d | `assert.GreaterOrEqual(highICFactors, 10)` 通过 | ✅ |
 | **P1-11** | AI Copilot 进程隔离 sandbox (Phase 2) | AR-003, ADR-007/019 | `internal/sandbox/runner/` (新建) | TBD | 1w | subprocess + rlimit + 5s timeout working | ⬜ |
 | **P1-12** | L4 validate 实际 walk-forward 实现 (非 placeholder) | TQ-007 | `pkg/ai/agents/validate_l4.go` | TBD | 3d | L4 真实跑 walk-forward；Score 不再恒 4.0 | ✅ |
-| **P1-13** | AI Pipeline L5 人工审查 UI (Approve/Reject/Edit) | BR-013 | `web/src/components/ai/ReviewActions.vue` (新建) | TBD | 3d | PipelineDashboard 有 3 按钮 + POST /api/pipeline/jobs/:id/review | ⬜ |
-| **P1-14** | AI service httpclient 加固 (timeout/retry/rate/cost) | AR-008, AR-017 | `pkg/ai/client.go` | TBD | 3d | OTel trace；token bucket；cost table 写入 | ⬜ |
+| **P1-13** | AI Pipeline L5 人工审查 UI (Approve/Reject/Edit) | BR-013 | `web/src/components/ai/ReviewActions.vue` (新建) | 2026-06-12 | 3d | PipelineDashboard 有 3 按钮 + POST /api/pipeline/jobs/:id/review | ✅ |
+| **P1-14** | AI service httpclient 加固 (timeout/retry/rate/cost) | AR-008, AR-017 | `pkg/ai/client.go` | 2026-06-12 | 3d | OTel trace；token bucket；cost table 写入 | ✅ |
 | **P1-15** | risk/execution service 合并到 analysis (7→3 服务) | AR-002, ADR-008/019 | `cmd/risk/`, `cmd/execution/` (服务名 risk-service/execution-service 在 docker-compose 中) | TBD | 1w | Docker compose 3 服务；`engine.go` 0 HTTP 调用 | ⬜ |
 | **P1-16** | Engine 拆 CacheManager + FactorCacheAccessor | CQ-001, ADR-020 | `pkg/backtest/cache.go`, `pkg/backtest/factor_cache.go` | TBD | 3d | 2 子包独立测试；Engine 减少 ~300 行 | ✅ |
 | **P1-17** | Engine 拆 LiveBridge + ExecutionBridge | CQ-001, ADR-020 | `pkg/backtest/live_bridge.go`, `pkg/backtest/execution_bridge.go` | TBD | 3d | 2 子包独立测试；Engine 减少 ~200 行 | ✅ |

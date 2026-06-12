@@ -55,6 +55,7 @@
 | [ODR-014](odr/odr-014-sprint6-spec-migration.md) | Sprint 6 对齐审查 Spec 文件迁移 + 合并回长效文档 | Completed | Migration | 2026-06-11 |
 | [ODR-015](odr/odr-015-p1-1-docs-consistency.md) | P1-1 文档一致化 — Strategy 接口 ISP 拆分 + Phase 3/4 编号统一 | Completed | Audit | 2026-06-12 |
 | [ODR-016](odr/odr-016-p1-3-live-limit-orders.md) | P1-3 LiveEngine 限价单 (Limit / Stop / Trailing) — 撮合语义 + HWM 跟踪 | Completed | Implementation | 2026-06-12 |
+| [ODR-017](odr/odr-017-p1-13-p1-14-ai-hardening.md) | P1-13 + P1-14 AI 研究闭环加固 — httpclient 弹性 (5 件套) + L5 人工审查 UI | Completed | Implementation | 2026-06-12 |
 | [ODR-018](odr/odr-018-p1-5-p1-6-ashare-microstructure.md) | P1-5 + P1-6 A 股交易所微观结构 — 价格笼子 + 集合竞价 | Completed | Implementation | 2026-06-12 |
 
 ---
