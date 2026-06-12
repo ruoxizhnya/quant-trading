@@ -169,21 +169,61 @@ type Portfolio struct {
 
 ## Strategy Interface
 
-> **Canonical definition** — matches [pkg/strategy/strategy.go](../pkg/strategy/strategy.go)
+> **Canonical definition** — matches [pkg/strategy/interfaces.go](../pkg/strategy/interfaces.go)
+> (single source of truth, P1-24 ADR-020 §6 ODR-013 CQ-006)
+
+The `Strategy` interface is a **composite** of 4 ISP single-responsibility
+sub-interfaces. Concrete strategies implement the composite by embedding
+`*strategy.BaseStrategy` (which provides `Configure`/`Cleanup`/`Parameters`
+defaults) and adding `GenerateSignals`/`Weight`.
 
 ```go
-type Strategy interface {
+// 4 个 single-responsibility 子接口
+type StrategyCore interface {
     Name() string
     Description() string
+}
+type Configurable interface {
     Parameters() []Parameter
     Configure(params map[string]interface{}) error
+}
+type SignalGenerator interface {
     GenerateSignals(ctx context.Context,
         bars map[string][]domain.OHLCV,
         portfolio *domain.Portfolio) ([]domain.Signal, error)
     Weight(signal domain.Signal, portfolioValue float64) float64
+}
+type ResourceManaged interface {
     Cleanup()
 }
+
+// 复合接口 (向后兼容, 7 方法 surface 不变)
+type Strategy interface {
+    StrategyCore
+    Configurable
+    SignalGenerator
+    ResourceManaged
+}
 ```
+
+**Sub-interface responsibilities**:
+
+| Sub-interface | Required? | Default in `*BaseStrategy` | Purpose |
+|---|---|---|---|
+| `StrategyCore` | ✅ | yes | Identity (Name/Description) |
+| `Configurable` | ⬜ optional | yes | Runtime parameters |
+| `SignalGenerator` | ✅ | ❌ (no default) | Signal generation + position sizing |
+| `ResourceManaged` | ⬜ optional | yes (no-op) | Resource release |
+
+**Type-assertion helpers** (accept `any`, not `Strategy`):
+- `strategy.AsConfigurable(s)` — runtime check + safe downcast
+- `strategy.AsSignalGenerator(s)` — runtime check + safe downcast
+- `strategy.AsResourceManaged(s)` — runtime check + safe downcast
+
+> **P1-24 migration note**: External API unchanged. The composite
+> `Strategy` interface still embeds 4 sub-interfaces whose union is
+> the original 7 methods. All 30+ existing strategy implementations,
+> tests, and plugin loaders work without modification.
 
 ### Hot-Swap Mechanism
 - Strategies are loaded from YAML + Go plugin

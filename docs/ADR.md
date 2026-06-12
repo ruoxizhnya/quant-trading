@@ -2,9 +2,9 @@
 
 > **Location:** `docs/adr/` — architectural ADR files | `docs/odr/` — operational ODR files
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Version:** 2.5.0
+> **Version:** 2.7.0
 > **Created:** 2026-03-24
-> **Updated:** 2026-06-11
+> **Updated:** 2026-06-12
 
 ---
 
@@ -53,6 +53,7 @@
 | [ODR-012](odr/odr-012-comprehensive-code-review.md) | Sprint 5 — 全项目综合代码审查 (代码质量/测试/文档一致性 4 维度) | Completed | Audit | 2026-06-08 |
 | [ODR-013](odr/odr-013-comprehensive-audit-2026-06-11.md) | Sprint 6 — 全项目 4 维度综合审查 (业务/架构/代码/测试) | Accepted | Audit | 2026-06-11 |
 | [ODR-014](odr/odr-014-sprint6-spec-migration.md) | Sprint 6 对齐审查 Spec 文件迁移 + 合并回长效文档 | Completed | Migration | 2026-06-11 |
+| [ODR-015](odr/odr-015-p1-1-docs-consistency.md) | P1-1 文档一致化 — Strategy 接口 ISP 拆分 + Phase 3/4 编号统一 | Completed | Audit | 2026-06-12 |
 
 ---
 
@@ -99,10 +100,10 @@ When to create an ODR:
 ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical example.
 
 ---
-_Last updated by: AI Assistant — 2026-06-12 (Sprint 6 P1 pickup #4: P1-24 Strategy 接口拆分完成 → ADR-020 §6 + ADR-020 status Proposed→Accepted; index version 2.8.0)_
+_Last updated by: AI Assistant — 2026-06-12 (P1-1 文档一致化完成 → ODR-015 新建 Completed (Strategy 4-way 同步 + Phase 3/4 编号统一 + 文件路径引用更新); index version 2.7.0)_
 _ADR 累计 20 条: 架构 16 + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020)_
-_ODR 累计 14 条: Cleanup 3 (ODR-001/006/008) | Audit 5 (ODR-002/009/010/012/013) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004)_
-_2026-06-12 状态变更: ADR-020 Proposed→Accepted (P1-16~20,24 全部完成); 新增 §6 Strategy ISP 拆分 (CQ-006)_
+_ODR 累计 15 条: Cleanup 3 (ODR-001/006/008) | Audit 6 (ODR-002/009/010/012/013/015) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004)_
+_2026-06-12 状态变更 (本次): ADR-020 Proposed→Accepted (P1-16~20,24 全部完成); ODR-015 新建 (P1-1 文档一致化完成)_
 _2026-06-11 状态变更: ADR-007 OPEN→Accepted, ADR-008 PARTIAL→Accepted, ADR-017~020 新建 Proposed, ODR-014 新建 Completed (Sprint 6 spec 迁移 + 内容合并回长效文档: ODR-013/VISION.md/TASKS.md)_
 _docs/ 新增内容: VISION.md §Principle 8 (Documentation-Path Consistency) + TASKS.md §Sprint 6 启动期 待校核项 (6 项)_
 _.trae/ 临时目录: 已清空并删除 (3 个文件迁至 docs/specs/ 后已合并回 ODR-013/VISION.md/TASKS.md)_

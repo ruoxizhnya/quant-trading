@@ -485,19 +485,36 @@ TTL 自动选择：
 
 ## 策略架构
 
-### 策略接口 (pkg/strategy/strategy.go)
-> **Canonical definition** — matches [SPEC.md](SPEC.md) and source code
+### 策略接口 (pkg/strategy/interfaces.go)
+> **Canonical definition** — matches [SPEC.md](SPEC.md#strategy-interface) §Strategy Interface
+> 与 [VISION.md](VISION.md#b-strategy-layer) §B Strategy Layer, P1-24 (ADR-020 §6)
+
 ```go
-type Strategy interface {
+// 4 个 single-responsibility 子接口 (P1-24 ISP 拆分)
+type StrategyCore interface {
     Name() string
     Description() string
+}
+type Configurable interface {
     Parameters() []Parameter
     Configure(params map[string]interface{}) error
+}
+type SignalGenerator interface {
     GenerateSignals(ctx context.Context,
         bars map[string][]domain.OHLCV,
-        portfolio *domain.Portfolio) ([]Signal, error)
-    Weight(signal Signal, portfolioValue float64) float64
+        portfolio *domain.Portfolio) ([]domain.Signal, error)
+    Weight(signal domain.Signal, portfolioValue float64) float64
+}
+type ResourceManaged interface {
     Cleanup()
+}
+
+// 复合接口 (向后兼容, 7 方法 surface 不变)
+type Strategy interface {
+    StrategyCore
+    Configurable
+    SignalGenerator
+    ResourceManaged
 }
 ```
 

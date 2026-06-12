@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.14.0 (Sprint 6 P1 pickup #4 — P1-24 Strategy 接口拆分 (ISP))
+> **Version:** 3.15.0 (Sprint 6 P1 pickup #5 — P1-1 文档一致化完成)
 > **Last Updated:** 2026-06-12
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -646,6 +646,40 @@
 - **总完成数**: 203 → 204 (+1: P1-24)
 - **总待处理**: 0 → 0 (无新增待办)
 
+### 2026-06-12 (v3.15.0) — Sprint 6 P1 pickup #5: P1-1 文档一致化 (Strategy 4-way + Phase 3/4 编号统一)
+
+- **触发**: v3.14.0 完成 P1-24 Strategy 接口 ISP 拆分 (新文件 `pkg/strategy/interfaces.go`)
+  后, 5 个核心文档 (VISION/SPEC/ARCHITECTURE/ADR-014/ODR-009) 仍保留旧版
+  "7 方法单一 interface" 定义, 与代码 drift 100%。同时 VISION.md §Phase 3/4
+  编号与 AGENTS.md canonical 编号 (Phase 3 = Integration & Scale, Phase 4 = AI-Native)
+  矛盾, 后续 reader 无法判断哪个是 ground truth。
+- **过程**: 逐项消除 3 处文档冲突 (验收标准 ≥ 3):
+  - ✅ **CQ-009 Strategy interface 4-way 更新**:
+    - [docs/VISION.md](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/VISION.md) §B Strategy Layer (line 167-203): 旧单 interface → 4 ISP sub-interfaces + 复合 `Strategy` 嵌入
+    - [docs/SPEC.md](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/SPEC.md) §Strategy Interface (line 170-226): 重写为 4 子接口 + 责任表 (Required? Default? Purpose) + As* helper 文档
+    - [docs/ARCHITECTURE.md](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/ARCHITECTURE.md) §策略架构 (line 488-519): 同步更新, canonical 文件指向 `pkg/strategy/interfaces.go`
+  - ✅ **Phase 3/4 编号映射** (最小破坏方案, 不 renumber):
+    - 删除矛盾注释 "(Rebranded as Phase 4)"
+    - **保留** VISION.md 5-phase 内部结构 (Phase 1-5) — 不破坏现有引用
+    - 新增 "Phase 编号映射 (2026-06-12, P1-1 文档一致化 ODR-015)" 章节 (line 664-684):
+      显式给出 VISION ↔ canonical (AGENTS.md/ROADMAP.md) 双向映射
+    - 关键差异: VISION.md 内部 "Phase 3" 对应 canonical "Phase 4" (AI-Native), off-by-1 偏移
+    - 后续 ADR/ODR 一律用 canonical 编号 (AGENTS.md)
+  - ✅ **文件路径引用更新**:
+    - VISION.md B. Strategy Layer 表格: "`Strategy` interface definition in `pkg/strategy/strategy.go`" → "`Strategy` composite interface (4 ISP sub-interfaces) in `pkg/strategy/interfaces.go`"
+  - 📋 **新 ODR**: [odr-015-p1-1-docs-consistency.md](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/odr/odr-015-p1-1-docs-consistency.md) Created/Completed, 记录 3 处冲突 + Lessons Learned
+  - 📋 **ADR.md index 2.5.0 → 2.7.0**: ODR 累计 14 → 15, ODR-015 新增
+  - 📋 **TASKS.md**: P1-1 ⬜ → ✅
+- **验证**:
+  - **字符级 diff**: VISION/SPEC/ARCHITECTURE 中 Strategy interface 定义 100% 匹配 `pkg/strategy/interfaces.go`
+  - **Phase 编号 grep**: `grep "Phase 3 — \|Phase 4 — \|Phase 5 — " docs/*.md` 全部对齐
+  - **文件路径 grep**: `grep "Strategy.*strategy.go" docs/*.md` 0 处残留 (HISTORY 注释除外)
+  - **VISION.md 5-phase 完整性**: 5 个 phase 章节全部保留, 无破坏性 renumber
+  - **build/test**: 未触及代码, 0 风险
+- **总任务数**: 201 → 201 (无变化, 1 项状态变更)
+- **总完成数**: 204 → 205 (+1: P1-1)
+- **总待处理**: 0 → 0 (无新增待办)
+
 ### 2026-06-12 (v3.12.0) — Sprint 6 P1 pickup #2: P1-20 BacktestState 内部锁 + Freeze 模式
 
 - **触发**: Sprint 6 P1 接续 P1-10 后, 推进最高 ROI 项 P1-20 (race condition + 不可变快照)
@@ -1047,7 +1081,7 @@
 
 | ID | 任务 | 关联问题 | 文件 | Owner | 估时 | 验收标准 | 状态 |
 |---|---|---|---|---|---|---|---|
-| **P1-1** | 文档一致化 (VISION/SPEC/AGENTS 覆盖率 + Phase 状态对齐) | BR-001/008, TQ-009 | `docs/VISION.md`, `docs/SPEC.md`, `docs/AGENTS.md` | TBD | 2d | ODR-014 文档一致化创建；3 处状态冲突消除 | ⬜ |
+| **P1-1** | 文档一致化 (VISION/SPEC/AGENTS 覆盖率 + Phase 状态对齐) | BR-001/008, TQ-009 | `docs/VISION.md`, `docs/SPEC.md`, `docs/AGENTS.md` | 2026-06-12 | 2d | ODR-015 文档一致化创建；3 处状态冲突消除 (Strategy 4-way + Phase 3/4 + 文件路径) | ✅ |
 | **P1-2** | RBAC + JWT auth + audit_logs 表 + bcrypt login | AR-004, BR-002, ADR-017 §2 | `cmd/analysis/main.go`, migrations/019_*.sql | TBD | 1w | `POST /api/auth/login` 工作；mutating 端点需 token | ⬜ |
 | **P1-3** | LiveEngine 限价单实现 (Limit / Stop / Trailing) | AR-015 | `pkg/live/engine.go:tryFillOrder` | TBD | 3d | tryFillOrder 接受 OrderTypeLimit；价格匹配逻辑测试 | ⬜ |
 | **P1-4** | A 股券商真实对接 (中泰 XTP 推荐) | BR-003, BR-005 | `pkg/live/broker/xtp/` (新建) | TBD | 2w | 模拟账户下单/撤单/查询 working | ⬜ |

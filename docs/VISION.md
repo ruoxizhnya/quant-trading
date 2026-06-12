@@ -164,24 +164,43 @@ Any ADR, ODR, or TASKS document that references a file path **must** match the a
 
 **How are strategies created, managed, executed?**
 
-Strategies implement the `Strategy` interface:
-> **Canonical definition** — matches [pkg/strategy/strategy.go](../pkg/strategy/strategy.go)
+Strategies implement the `Strategy` interface — a composite of 4 ISP
+single-responsibility sub-interfaces (P1-24, ADR-020 §6, ODR-013 CQ-006):
+> **Canonical definition** — matches [pkg/strategy/interfaces.go](../pkg/strategy/interfaces.go)
 ```go
-type Strategy interface {
+// 4 个 single-responsibility 子接口
+type StrategyCore interface {
     Name() string
     Description() string
+}
+type Configurable interface {
     Parameters() []Parameter
     Configure(params map[string]interface{}) error
+}
+type SignalGenerator interface {
     GenerateSignals(ctx context.Context,
         bars map[string][]domain.OHLCV,
         portfolio *domain.Portfolio) ([]domain.Signal, error)
     Weight(signal domain.Signal, portfolioValue float64) float64
+}
+type ResourceManaged interface {
     Cleanup()
+}
+
+// 复合接口 (向后兼容, 7 方法 surface 不变)
+type Strategy interface {
+    StrategyCore
+    Configurable
+    SignalGenerator
+    ResourceManaged
 }
 ```
 
-> **CR-33 (ODR-012)**: 早期 `Signal` 类型缺少 `domain.` 包前缀。已与
-> SPEC.md §Strategy Interface / AGENTS.md §6 同步修正。
+> **P1-24 (ODR-013 CQ-006)**: Strategy 原 7 方法单一接口违反 Interface
+> Segregation Principle (parameterless 策略被迫实现空 stub Parameters/Configure,
+> 只读策略被迫实现 no-op Cleanup)。拆分后 `Configurable`/`ResourceManaged`
+> 标记 optional, BaseStrategy 提供默认实现, 具体策略按需选择。
+> 9 个 compliance 测试覆盖所有 builtin 策略 + As* 类型下转 helper。
 
 Strategies live in `pkg/strategy/plugins/` and auto-register via `init()`. A strategy config (YAML) provides parameters at runtime. The engine resolves strategies by name from the `GlobalRegistry`.
 
@@ -440,7 +459,7 @@ type Position struct {
 
 | Feature | Description | Priority | Status | Dependencies |
 |---------|-------------|----------|--------|--------------|
-| Strategy interface | `Strategy` interface definition in `pkg/strategy/strategy.go` | P0 | ✅ Done | — |
+| Strategy interface | `Strategy` composite interface (4 ISP sub-interfaces) in `pkg/strategy/interfaces.go` | P0 | ✅ Done | — |
 | Strategy registry | `GlobalRegistry` maps name → Strategy instance; auto-discovery via `init()` | P0 | ✅ Done | — |
 | Momentum strategy | 20-day price momentum; buy strength, sell weakness | P0 | ✅ Done | — |
 | Value Momentum strategy | PE + PB + ROE + 20-day momentum composite | P0 | ✅ Done | — |
@@ -569,7 +588,7 @@ The phases below define the build order. All P0 items must be fully done (not "i
 5. **Background worker:** `POST /backtest` returns `job_id` immediately; worker runs async; client can poll `/backtest/:id`
 5. **Strategy DB config:** `strategies` table with JSONB column operational; YAML import/export functional
 
-### Phase 3 — AI-Native Evolution ✅ DONE (Rebranded as Phase 4)
+### Phase 3 — AI-Native Evolution ✅ DONE
 **Goal:** AI acts as a senior quantitative researcher — autonomously discovering alpha factors, generating trading strategies, and validating hypotheses through the existing backtest infrastructure.
 
 | Category | Deliverables | Status |
@@ -639,6 +658,30 @@ The phases below define the build order. All P0 items must be fully done (not "i
 | Strategy | Risk parity strategy, event-driven, sentiment strategies |
 | AI | Multi-modal data fusion (news + price + fundamental), reinforcement learning for execution |
 | Compliance | Audit trails, regulatory reporting, trade reconstruction |
+
+---
+
+### Phase 编号映射 (2026-06-12, P1-1 文档一致化 ODR-015)
+
+> **背景**: VISION.md 使用 5-phase roadmap (Phase 1-5), 与
+> [AGENTS.md](../AGENTS.md#1-项目概述) / [ROADMAP.md](ROADMAP.md) /
+> [tasks-phase-2.md](tasks-phase-2.md) 的 canonical 编号存在 off-by-1 偏移。
+> 下表给出完整映射, 后续 Phase 6/7 命名以此为据。
+
+| VISION.md 内部 | AGENTS.md / ROADMAP.md canonical | 当前状态 | 备注 |
+|----------------|--------------------------------|----------|------|
+| Phase 1 — Foundation & Accuracy | Phase 1 (同名) | ✅ DONE | 100% 一致 |
+| Phase 2 — Reliability & Copilot | Phase 2 (同名) | ✅ DONE | 100% 一致 |
+| Phase 3 — AI-Native Evolution | **Phase 4 — AI-Native Evolution** | ✅ DONE | **off-by-1**: AGENTS.md Phase 3 = Integration & Scale (ROADMAP "融合发展") |
+| Phase 4 — Scale & Production | (无对应项, 合并入 Phase 5) | 🔄 In Progress | 内容与 Phase 5 重叠, 视为 Phase 5 的 sub-goal |
+| Phase 5 — Institutional Grade | **Phase 5 (新增)** — Scale & Production | ⬜ Planned | post-AI-Native, 当前对标 PRD Phase 5 |
+
+> **关键差异**: VISION.md 内部 "Phase 3" 对应 canonical "Phase 4" (AI-Native)。
+> 原因: VISION.md 早期文档 (2026-Q1) 把 AI-Native 视为 Phase 3, 后来
+> ROADMAP.md 引入 "Phase 3 = 融合发展 (Integration & Scale)", 编号
+> 整体向后移 1 位。VISION.md 未同步迁移, 导致偏移。**建议**:
+> 新文档 (SPEC/ADR/ODR) 一律用 canonical 编号 (AGENTS.md), 引用 VISION.md
+> 章节时明确写 "VISION Phase 3 ≡ canonical Phase 4"。
 
 ---
 
