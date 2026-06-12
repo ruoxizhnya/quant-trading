@@ -57,6 +57,7 @@
 | [ODR-016](odr/odr-016-p1-3-live-limit-orders.md) | P1-3 LiveEngine 限价单 (Limit / Stop / Trailing) — 撮合语义 + HWM 跟踪 | Completed | Implementation | 2026-06-12 |
 | [ODR-017](odr/odr-017-p1-13-p1-14-ai-hardening.md) | P1-13 + P1-14 AI 研究闭环加固 — httpclient 弹性 (5 件套) + L5 人工审查 UI | Completed | Implementation | 2026-06-12 |
 | [ODR-018](odr/odr-018-p1-5-p1-6-ashare-microstructure.md) | P1-5 + P1-6 A 股交易所微观结构 — 价格笼子 + 集合竞价 | Completed | Implementation | 2026-06-12 |
+| [ODR-019](odr/odr-019-p1-2-rbac-jwt-auth.md) | P1-2 + P1-8 RBAC + JWT auth + audit_logs (HS256 / bcrypt cost 12 / 3 角色) | Completed | Implementation | 2026-06-12 |
 
 ---
 
