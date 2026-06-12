@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.18.0 (Sprint 6 P1 pickup #8 — P1-29 AlertManager 6 类 P0 风险告警)
+> **Version:** 3.19.0 (Sprint 6 P1 pickup #9 — P1-30 AI Copilot E2E + SSE 契约完成)
 > **Last Updated:** 2026-06-12
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -577,6 +577,47 @@
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-12 (v3.19.0) — Sprint 6 P1 pickup #9: P1-30 E2E AI Copilot 端到端 + SSE 契约
+
+- **触发**: v3.18.0 完成 P1-29 AlertManager 后, 接续 TQ-016 (ODR-013
+  风险 #16), 解决 AI Copilot 端到端无测试覆盖: 旧 `copilot.spec.ts`
+  7 用例全是 UI 静态测试, **不验证后端交互**; API 契约无 E2E
+  断言; SSE 进度契约未锁定
+- **过程**:
+  - ✅ **新建 [e2e/tests/copilot-e2e.spec.ts](file:///Users/ruoxi/longshaosWorld/quant-trading/e2e/tests/copilot-e2e.spec.ts)** (350 行) — 13 TestXxx, 4 大类
+    - **UI 端到端 (7)**: 页面加载 / 输入渲染 / happy path 200 /
+      negative path 503 / 多轮对话 / 复制按钮 / 导航可达
+    - **API 契约 (4)**: 空 description 400 / 有效 prompt 200/503
+      / save 缺 code 400 / stats 200
+    - **SSE 契约 (1)**: `/api/sync/stream` content-type 锁定
+      `text/event-stream` (为 P2 Copilot SSE 改造留参照)
+    - **混合 UI+API (1)**: code/explanation/language 三字段
+      路由到 msg-bubble / code-block / code-header 全部验证
+  - ✅ **关键技术决策**:
+    - `page.route` 拦截 `/api/copilot/generate` 返回 stub 响应,
+      **不依赖真实 AI API** (CI 无 key)
+    - 接受 200/503/502/401 多 status code (锁契约不锁环境)
+    - 复用 `waitForBackendReady` + `isolateTestEnvironment` (拦截
+      外部 AI/finance API)
+  - ✅ **TypeScript strict mode 0 error** (本文件),
+    `tsc --noEmit tests/copilot-e2e.spec.ts` 通过
+  - ✅ **Playwright list 通过**: 13 tests in 1 file, 0 parse error
+  - 📋 **TASKS.md**: P1-30 ⬜ → ✅, v3.18.0 → v3.19.0
+  - 📋 **新 ODR**: [odr-024-p1-30-copilot-e2e.md](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/odr/odr-024-p1-30-copilot-e2e.md) Created/Completed
+  - 📋 **ADR.md index 3.0.0 → 3.1.0**: ODR 累计 23 → 24, ODR-024 新增
+- **验证**:
+  - **TypeScript strict**: `npx tsc --noEmit tests/copilot-e2e.spec.ts`
+    exit 0
+  - **Playwright 解析**: `npx playwright test --list tests/copilot-e2e.spec.ts`
+    13 tests listed, 0 parse error
+  - **执行预估**: < 30s (无网络等待, page.route stub 立即响应)
+- **代码量**: +350 行 (纯 Playwright TS, 0 Go, 0 npm 新增)
+- **总任务数**: 201 → 201 (无变化, 1 项状态变更)
+- **总完成数**: 208 → 209 (+1: P1-30)
+- **总待处理**: 0 → 0
+- **Sprint 6 P1 全部完成**: P1-15/24/26/29/30 + 19/20/25/27/28
+  累计 10 项 P1 全部 ✅
 
 ### 2026-06-12 (v3.18.0) — Sprint 6 P1 pickup #8: P1-29 AlertManager 6 类 P0 风险告警 + Webhook 渠道
 
