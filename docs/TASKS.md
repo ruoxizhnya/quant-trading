@@ -1085,8 +1085,8 @@
 | **P1-2** | RBAC + JWT auth + audit_logs 表 + bcrypt login | AR-004, BR-002, ADR-017 §2 | `cmd/analysis/main.go`, migrations/019_*.sql | TBD | 1w | `POST /api/auth/login` 工作；mutating 端点需 token | ⬜ |
 | **P1-3** | LiveEngine 限价单实现 (Limit / Stop / Trailing) | AR-015 | `pkg/live/engine.go:tryFillOrder` | 2026-06-12 | 3d | tryFillOrder 接受 OrderTypeLimit/Stop/Trailing；价格匹配 + HWM 跟踪 17 项单测全通过；ODR-016 创建 | ✅ |
 | **P1-4** | A 股券商真实对接 (中泰 XTP 推荐) | BR-003, BR-005 | `pkg/live/broker/xtp/` (新建) | TBD | 2w | 模拟账户下单/撤单/查询 working | ⬜ |
-| **P1-5** | A 股价格笼子校验 (沪深/创/科/北 4 套) | BR-004 | `pkg/live/price_cage.go` (新建) | TBD | 1w | 4 套笼子规则测试 + 主板 ±2% 模拟 | ⬜ |
-| **P1-6** | 集合竞价撮合 (9:15-9:25 + 14:57-15:00) | BR-004, BR-017 | `pkg/backtest/auction.go` (新建) | TBD | 1w | 开盘集合 + 收盘集合状态机测试 | ⬜ |
+| **P1-5** | A 股价格笼子校验 (沪深/创/科/北 4 套) | BR-004 | `pkg/live/price_cage.go` (新建) | 2026-06-12 | 1w | 4 套笼子规则测试 + 主板 ±2% 模拟 | ✅ |
+| **P1-6** | 集合竞价撮合 (9:15-9:25 + 14:57-15:00) | BR-004, BR-017 | `pkg/backtest/auction.go` (新建) | 2026-06-12 | 1w | 开盘集合 + 收盘集合状态机测试 | ✅ |
 | **P1-7** | 4 黄金 fixture 补全 (momentum/value/T+1/zhangting) | TQ-009, TEST.md §2.3 | `pkg/backtest/fixtures_p1_7_test.go`, `testdata/backtest-fixtures/` | TBD | 2d | 4 fixture 存在；`TestGolden_*` 容差 ±0.01 | ✅ |
 | **P1-8** | users/audit_logs 表 + JWT middleware + login endpoint | AR-004, ADR-017 | `migrations/019_add_auth_tables.sql` (扁平命名), `cmd/analysis/auth/` | TBD | 1w | 同 P1-2 (合并) | ⬜ |
 | **P1-9** | testing/quick property-based 5 个 invariant | TQ-014, TEST.md §2.4 | `pkg/backtest/property_test.go` | TBD | 3d | 1000 次随机序列不违反 5 个 property | ✅ |
