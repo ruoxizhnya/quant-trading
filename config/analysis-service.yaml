@@ -53,6 +53,29 @@ risk_manager:
     slow_ma_period: 20
     vol_lookback: 60
 
+# ── AlertManager + PeriodicAlertLoop (P2 alert, ODR-025) ──────────
+#
+# The 6 P0 risk rules evaluate the live portfolio on every tick
+# of the periodic loop (default 5min). Alerts are dispatched to:
+#   1. LogChannel (always-on, structured zerolog)
+#   2. WebhookChannel (when webhook_url is set)
+#   3. RecorderChannel (in-process ring buffer for /api/alerts/history)
+#
+# A 0 or empty value disables the corresponding rule. The
+# defaults below mirror ODR-023's recommended production values.
+alert:
+  enabled: true
+  interval_sec: 300           # 5min between evaluations
+  history_limit: 100          # ring buffer for /api/alerts/history
+  recorder_capacity: 100      # recorder channel capacity
+  max_position_weight: 0.20   # single position > 20% of portfolio
+  max_sector_weight: 0.40     # single sector > 40% of portfolio
+  max_drawdown: 0.15          # peak-to-trough drawdown > 15%
+  daily_loss_limit: -50000    # daily P&L < -50k
+  failure_rate_limit: 0.10    # order failure rate > 10% in 1h
+  webhook_url: ""             # empty = webhook disabled
+  webhook_timeout_sec: 5
+
 backtest:
   initial_capital: 1000000.0
   commission_rate: 0.0003

@@ -572,11 +572,58 @@
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
-| **总计**          | **0** | **0** | **201** | **1** | **0** | **201** |
+| **总计**          | **0** | **0** | **201** | **1** | **0** | **201** | (含 v3.20.0 P2 alert 接入 0→0 状态变更) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-12 (v3.20.0) — Sprint 6 P2 pickup #1: P2 alert 接入 (PeriodicAlertLoop + /api/alerts)
+
+- **触发**: v3.19.0 完成 P1-30 E2E 后, 接续 P2 alert 接入
+  (ODR-013 BR-015 风险 #15 调度部分)。P1-29 (ODR-023) 已实现
+  AlertManager 6 类 P0 detector, 但**没有触发器、没有 HTTP
+  暴露、没有告警历史**, operator 仍无法在生产环境使用
+- **过程**:
+  - ✅ **新建 [cmd/analysis/alert_loop.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/alert_loop.go)**
+    (196 行) — PeriodicAlertConfig / AlertHistory (ring buffer) /
+    PeriodicAlertLoop.Start/TriggerOnce / buildSnapshot
+  - ✅ **新建 [cmd/analysis/handlers_alert.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/handlers_alert.go)**
+    (142 行) — `/api/alerts/{history,force-check,stats}` 3 endpoints
+    + registerAlertRoutes
+  - ✅ **新建 [cmd/analysis/alert_loop_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/alert_loop_test.go)**
+    (461 行, 16 TestXxx) — 5 AlertHistory + 5 PeriodicAlertLoop + 6
+    HTTP handler, 全 PASS
+    - **关键修复**: `DrainAndReset` 死锁 10min — 同 mutex 持
+      Lock 时调 Snapshot() 的 RLock, 内联逻辑修复
+    - **关键修复**: `stubLiveTrader.HealthCheck` 签名匹配
+      `live.LiveTrader` interface (ctx 参数)
+  - ✅ **扩展 [pkg/alert/channel.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/alert/channel.go)** —
+    RecorderChannel (76 行) + Send/Snapshot/DrainAndReset/Len/Evicted
+  - ✅ **扩展 [pkg/alert/manager.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/alert/manager.go)** —
+    `AlertManager.Recorder()` 暴露 in-process recorder
+  - ✅ **接入 [cmd/analysis/main.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/main.go)** —
+    187-229 行 (构造) + 352-357 行 (挂路由 + 启 loop) + 414-423
+    行 (shutdown)
+  - ✅ **配置 [config/analysis-service.yaml](file:///Users/ruoxi/longshaosWorld/quant-trading/config/analysis-service.yaml)** —
+    新增 `alert.*` 配置块 (enabled/interval/history/recorder/threshold/webhook)
+  - 📋 **TASKS.md**: P2 alert 接入 ⬜ → ✅, v3.19.0 → v3.20.0
+  - 📋 **新 ODR**: [odr-025-p2-alert-integration.md](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/odr/odr-025-p2-alert-integration.md) Created/Completed
+  - 📋 **ADR.md index 3.1.0 → 3.2.0**: ODR 累计 24 → 25, ODR-025 新增
+- **验证**:
+  - **race detector**: `go test -race ./cmd/analysis/ -run 'Alert|PeriodicAlert' -count=1` 16/16 PASS
+  - **集成**: `go build ./...` exit 0
+  - **go vet**: `go vet ./...` exit 0
+  - **测试用例**: 16 (5 AlertHistory + 5 PeriodicAlertLoop + 6 HTTP)
+- **代码量**: 净 +873 行 (生产 412 + 测试 461)
+- **新增 Go 依赖**: 0 (纯 stdlib + 已有的 zerolog/gin)
+- **总任务数**: 201 → 201 (无变化, 1 项状态变更)
+- **总完成数**: 209 → 210 (+1: P2 alert 接入)
+- **总待处理**: 0 → 0
+- **未做但设计就绪** (P2 接续): 前端 Alert UI 面板 (alerts
+  history 可视化 + by_rule 饼图 + force-check 按钮); Sector
+  字段进 pkg/live.PositionInfo; PeakEquity 进 AccountInfo; 多
+  实例时共享 history (Redis)
 
 ### 2026-06-12 (v3.19.0) — Sprint 6 P1 pickup #9: P1-30 E2E AI Copilot 端到端 + SSE 契约
 

@@ -63,6 +63,7 @@
 | [ODR-022](odr/odr-022-p1-26-execution-entity-consolidation.md) | P1-26 4 套执行实体合并 (5→2) — PersistentMockTrader/AdvancedMockTrader/AdvancedTrader 合并到 MockTrader + OrderStore 字段; -743 行 net | Completed | Refactor | 2026-06-12 |
 | [ODR-023](odr/odr-023-p1-29-alert-manager.md) | P1-29 AlertManager — 6 类 P0 风险告警 (position_concentration / sector_concentration / drawdown / daily_loss_limit / order_failure_rate / risk_metric_breach) + LogChannel + WebhookChannel; 1326 行 + 25 TestXxx | Completed | Implementation | 2026-06-12 |
 | [ODR-024](odr/odr-024-p1-30-copilot-e2e.md) | P1-30 E2E AI Copilot 端到端 + SSE 契约 — 13 TestXxx (7 UI + 4 API + 1 SSE + 1 混合); page.route stub 模式不依赖真实 AI; tsc strict + playwright list 全过 | Completed | Implementation | 2026-06-12 |
+| [ODR-025](odr/odr-025-p2-alert-integration.md) | P2 alert 接入 — PeriodicAlertLoop (5min tick) + AlertHistory (ring buffer 100) + /api/alerts/{history,force-check,stats}; RecorderChannel.Snapshot/DrainAndReset; 16 TestXxx; in-process 注入零运维开销 | Completed | Implementation | 2026-06-12 |
 
 ---
 
@@ -109,10 +110,11 @@ When to create an ODR:
 ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical example.
 
 ---
-_Last updated by: AI Assistant — 2026-06-12 (P1-30 AI Copilot E2E 完成 → ODR-024 新建 Completed (13 TestXxx + page.route stub 模式 + SSE 契约); index version 3.1.0; Sprint 6 P1 累计 10 项全部 ✅)_
+_Last updated by: AI Assistant — 2026-06-12 (P2 alert 接入完成 → ODR-025 新建 Completed (PeriodicAlertLoop + 3 HTTP endpoints + 16 TestXxx); Sprint 6 P1 累计 10 项 + P2 alert 1 项全部 ✅)_
 _ADR 累计 20 条: 架构 16 + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020)_
-_ODR 累计 24 条: Cleanup 3 (ODR-001/006/008) | Audit 6 (ODR-002/009/010/012/013/015) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004) | Implementation 8 (ODR-016/017/018/019/020/021/023/024) | Refactor 1 (ODR-022)_
-_2026-06-12 状态变更 (本次): ODR-024 新建 (P1-30 E2E AI Copilot 13 TestXxx + SSE 契约完成); Sprint 6 P1 全部完成_
+_ODR 累计 25 条: Cleanup 3 (ODR-001/006/008) | Audit 6 (ODR-002/009/010/012/013/015) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004) | Implementation 9 (ODR-016/017/018/019/020/021/023/024/025) | Refactor 1 (ODR-022)_
+_2026-06-12 状态变更 (本次): ODR-025 新建 (P2 alert 接入 PeriodicAlertLoop + /api/alerts + 16 TestXxx 完成)_
+_2026-06-12 状态变更: ODR-024 新建 (P1-30 E2E AI Copilot 13 TestXxx + SSE 契约完成); Sprint 6 P1 全部完成_
 _2026-06-12 状态变更: ODR-023 新建 (P1-29 AlertManager 6 类 P0 风险告警 + Webhook 渠道完成)_
 _2026-06-12 状态变更: ODR-022 新建 (P1-26 执行实体合并 5→2 完成, -743 行 net)_
 _2026-06-12 状态变更: ODR-021 新建 (P1-15 服务合并 7→5 完成)_

@@ -298,6 +298,26 @@ func (am *AlertManager) ChannelCount() int {
 	return len(am.channels)
 }
 
+// Recorder returns the in-process RecorderChannel registered with the
+// manager, if any. The RecorderChannel captures every alert the
+// manager dispatches so the caller can persist or expose them via
+// HTTP. Returns (nil, false) when no recorder has been registered.
+//
+// The AlertManager does not install a recorder by default; the
+// wiring layer (e.g. PeriodicAlertLoop) attaches one at
+// construction time so this method never blocks the normal
+// Log/Webhook dispatch path.
+func (am *AlertManager) Recorder() (*RecorderChannel, bool) {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	for _, ch := range am.channels {
+		if r, ok := ch.(*RecorderChannel); ok {
+			return r, true
+		}
+	}
+	return nil, false
+}
+
 func (am *AlertManager) nextAlertID(rule string) string {
 	am.mu.Lock()
 	am.alertSeq++

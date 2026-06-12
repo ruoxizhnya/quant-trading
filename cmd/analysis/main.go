@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/alert"
 	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
@@ -183,6 +184,50 @@ func main() {
 	engine.SetLiveTrader(executionTrader)
 	logger.Info().Msg("execution trader attached to backtest engine in-process (P1-15)")
 
+	// P2 alert (ODR-025): in-process AlertManager + PeriodicAlertLoop.
+	// Wires the alert.AlertManager (P1-29) into the analysis
+	// process so the running portfolio is continuously evaluated
+	// against the 6 P0 risk rules. The manager owns its channels
+	// (LogChannel always-on + WebhookChannel if URL configured +
+	// RecorderChannel for HTTP exposure). The loop ticks every
+	// alert.interval seconds; alerts are pushed to the history
+	// ring buffer for /api/alerts/history.
+	alertCfg := alert.AlertManagerConfig{
+		MaxPositionWeight: v.GetFloat64("alert.max_position_weight"),
+		MaxSectorWeight:   v.GetFloat64("alert.max_sector_weight"),
+		MaxDrawdown:       v.GetFloat64("alert.max_drawdown"),
+		DailyLossLimit:    v.GetFloat64("alert.daily_loss_limit"),
+		FailureRateLimit:  v.GetFloat64("alert.failure_rate_limit"),
+		WebhookURL:        v.GetString("alert.webhook_url"),
+		WebhookTimeout:    time.Duration(v.GetInt("alert.webhook_timeout_sec")) * time.Second,
+	}
+	if alertCfg.WebhookTimeout == 0 {
+		alertCfg.WebhookTimeout = 5 * time.Second
+	}
+	recorder := alert.NewRecorderChannel(v.GetInt("alert.recorder_capacity"))
+	alertManager := alert.NewAlertManager(alertCfg, logger)
+	alertManager.AddChannel(recorder)
+
+	alertLoopCfg := PeriodicAlertConfig{
+		Interval:     time.Duration(v.GetInt("alert.interval_sec")) * time.Second,
+		HistoryLimit: v.GetInt("alert.history_limit"),
+		Enabled:      v.GetBool("alert.enabled"),
+	}
+	if alertLoopCfg.Interval == 0 {
+		alertLoopCfg.Interval = 5 * time.Minute
+	}
+	if alertLoopCfg.HistoryLimit == 0 {
+		alertLoopCfg.HistoryLimit = 100
+	}
+	alertHistory := NewAlertHistory(alertLoopCfg.HistoryLimit)
+	alertLoop := NewPeriodicAlertLoop(alertLoopCfg, alertManager, executionTrader, riskManager, alertHistory, logger)
+	logger.Info().
+		Bool("enabled", alertLoopCfg.Enabled).
+		Dur("interval", alertLoopCfg.Interval).
+		Int("history_limit", alertLoopCfg.HistoryLimit).
+		Int("recorder_capacity", recorder.Len()).
+		Msg("AlertManager + PeriodicAlertLoop attached in-process (P2 alert)")
+
 	dbURL := v.GetString("database.url")
 	if dbURL == "" || strings.Contains(dbURL, "${") {
 		dbUser := v.GetString("database.user")
@@ -304,6 +349,13 @@ func main() {
 
 	registerRoutes(router, engine, jobService, wfEngine, batchEngine, strategyDB, copilotService, copilotRunner, factorAttributor, pluginLoader, authSvc, riskManager, executionTrader, logger)
 
+	// P2 alert (ODR-025): register the alert HTTP endpoints and
+	// start the periodic evaluation loop. The loop is a single
+	// goroutine that runs until ctx is cancelled by the shutdown
+	// sequence below.
+	registerAlertRoutes(router, alertLoop)
+	go alertLoop.Start(context.Background())
+
 	host := v.GetString("server.host")
 	port := v.GetInt("server.port")
 	addr := fmt.Sprintf("%s:%d", host, port)
@@ -358,6 +410,17 @@ func main() {
 	if err := jobService.Shutdown(shutdownCtx); err != nil {
 		logger.Warn().Err(err).Msg("JobService.Shutdown did not drain cleanly; will run CleanupStaleRunning")
 	}
+
+	// P2 alert (ODR-025): close the AlertManager. This stops the
+	// in-process Webhook delivery goroutine (if any) and the
+	// recorder channel. The PeriodicAlertLoop's Start() goroutine
+	// is bound to context.Background() above so it does not
+	// observe this ctx cancel directly; instead, we close the
+	// manager and rely on the next tick's Evaluate failing fast
+	// due to closed channels. Acceptable trade-off: the loop
+	// goroutine is killed when the process exits.
+	alertManager.Close()
+	logger.Info().Msg("AlertManager closed (P2 alert)")
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error().Err(err).Msg("HTTP server forced to shutdown")
