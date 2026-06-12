@@ -1091,7 +1091,7 @@
 | **P1-8** | users/audit_logs 表 + JWT middleware + login endpoint | AR-004, ADR-017 | `migrations/019_add_auth_tables.sql` (扁平命名), `cmd/analysis/auth/` | 2026-06-12 | 1w | 同 P1-2 (合并) | ✅ |
 | **P1-9** | testing/quick property-based 5 个 invariant | TQ-014, TEST.md §2.4 | `pkg/backtest/property_test.go` | TBD | 3d | 1000 次随机序列不违反 5 个 property | ✅ |
 | **P1-10** | research_batch_test.go fail-gate (10+ factors IC>0.03) | TQ-007, TQ-015 | `pkg/ai/agents/research_batch_test.go` | TBD | 1d | `assert.GreaterOrEqual(highICFactors, 10)` 通过 | ✅ |
-| **P1-11** | AI Copilot 进程隔离 sandbox (Phase 2) | AR-003, ADR-007/019 | `internal/sandbox/runner/` (新建) | TBD | 1w | subprocess + rlimit + 5s timeout working | ⬜ |
+| **P1-11** | AI Copilot 进程隔离 sandbox (Phase 2) | AR-003, ADR-007/019 | `internal/sandbox/runner/` (新建) | 2026-06-12 | 1w | subprocess + rlimit + 5s timeout working | ✅ |
 | **P1-12** | L4 validate 实际 walk-forward 实现 (非 placeholder) | TQ-007 | `pkg/ai/agents/validate_l4.go` | TBD | 3d | L4 真实跑 walk-forward；Score 不再恒 4.0 | ✅ |
 | **P1-13** | AI Pipeline L5 人工审查 UI (Approve/Reject/Edit) | BR-013 | `web/src/components/ai/ReviewActions.vue` (新建) | 2026-06-12 | 3d | PipelineDashboard 有 3 按钮 + POST /api/pipeline/jobs/:id/review | ✅ |
 | **P1-14** | AI service httpclient 加固 (timeout/retry/rate/cost) | AR-008, AR-017 | `pkg/ai/client.go` | 2026-06-12 | 3d | OTel trace；token bucket；cost table 写入 | ✅ |
