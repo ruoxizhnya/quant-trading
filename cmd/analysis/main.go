@@ -18,8 +18,10 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/live"
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
+	"github.com/ruoxizhnya/quant-trading/pkg/risk"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	_ "github.com/ruoxizhnya/quant-trading/pkg/strategy/plugins"
@@ -129,6 +131,57 @@ func main() {
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize backtest engine")
 	}
+
+	// P1-15 (Sprint 6, ODR-021): in-process risk manager.
+	// Constructed once from viper config and injected into the
+	// backtest engine so position sizing / regime detection /
+	// stop-loss checks happen in-process (zero HTTP latency). The
+	// same instance is also exposed over HTTP via RiskHandler.
+	riskCfg := risk.RiskManagerConfig{
+		TargetVolatility:     v.GetFloat64("risk_manager.target_volatility"),
+		MaxPositionWeight:    v.GetFloat64("risk_manager.max_position_weight"),
+		MinPositionWeight:    v.GetFloat64("risk_manager.min_position_weight"),
+		ATRPeriod:            v.GetInt("risk_manager.stoploss.atr_period"),
+		BaseMultiplier:       v.GetFloat64("risk_manager.stoploss.base_multiplier"),
+		BullMultiplier:       v.GetFloat64("risk_manager.stoploss.bull_multiplier"),
+		BearMultiplier:       v.GetFloat64("risk_manager.stoploss.bear_multiplier"),
+		SidewaysMultiplier:   v.GetFloat64("risk_manager.stoploss.sideways_multiplier"),
+		TakeProfitMult:       v.GetFloat64("risk_manager.take_profit.atr_multiplier"),
+		VolLookbackDays:      v.GetInt("risk_manager.volatility.lookback_days"),
+		AnnualizationFactor:  v.GetFloat64("risk_manager.volatility.annualization_factor"),
+		FastMAPeriod:         v.GetInt("risk_manager.regime.fast_ma_period"),
+		SlowMAPeriod:         v.GetInt("risk_manager.regime.slow_ma_period"),
+		RegimeVolLookback:    v.GetInt("risk_manager.regime.vol_lookback"),
+	}
+	riskManager, err := risk.NewRiskManager(riskCfg, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to initialize in-process risk manager (P1-15)")
+	}
+	engine.SetRiskManager(riskManager)
+	logger.Info().Msg("risk manager attached to backtest engine in-process (P1-15)")
+
+	// P1-15 (Sprint 6, ODR-021): in-process execution trader.
+	// A MockTrader with the A-share trading rules from the
+	// analysis config is created once. The same instance is
+	// injected into the backtest engine via WithLiveTrader so
+	// backtest signal bridges to live/paper trading without an
+	// HTTP call, AND exposed over HTTP via ExecutionHandler so
+	// operators can submit / list / cancel orders through REST.
+	execConfig := domain.ExecutionConfig{
+		OrderType:      domain.OrderTypeMarket,
+		SlippageModel:  "fixed",
+		CommissionRate: v.GetFloat64("backtest.commission_rate"),
+		MinCommission:  v.GetFloat64("trading.min_commission"),
+		InitialCapital: v.GetFloat64("backtest.initial_capital"),
+	}
+	executionTrader := live.NewMockTrader(live.MockTraderConfig{
+		InitialCash:    execConfig.InitialCapital,
+		CommissionRate: execConfig.CommissionRate,
+		StampTaxRate:   v.GetFloat64("trading.stamp_tax_rate"),
+		SlippageRate:   v.GetFloat64("backtest.slippage_rate"),
+	}, logger)
+	engine.SetLiveTrader(executionTrader)
+	logger.Info().Msg("execution trader attached to backtest engine in-process (P1-15)")
 
 	dbURL := v.GetString("database.url")
 	if dbURL == "" || strings.Contains(dbURL, "${") {
@@ -249,7 +302,7 @@ func main() {
 		router.Use(authSvc.AuditMiddleware())
 	}
 
-	registerRoutes(router, engine, jobService, wfEngine, batchEngine, strategyDB, copilotService, copilotRunner, factorAttributor, pluginLoader, authSvc, logger)
+	registerRoutes(router, engine, jobService, wfEngine, batchEngine, strategyDB, copilotService, copilotRunner, factorAttributor, pluginLoader, authSvc, riskManager, executionTrader, logger)
 
 	host := v.GetString("server.host")
 	port := v.GetInt("server.port")
@@ -355,7 +408,7 @@ func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 	}
 }
 
-func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, wfEngine *backtest.WalkForwardEngine, batchEngine *backtest.BatchEngine, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, pluginLoader *strategy.PluginLoader, authSvc *auth.Service, logger zerolog.Logger) {
+func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, wfEngine *backtest.WalkForwardEngine, batchEngine *backtest.BatchEngine, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, pluginLoader *strategy.PluginLoader, authSvc *auth.Service, riskManager *risk.RiskManager, executionTrader live.LiveTrader, logger zerolog.Logger) {
 	router.Static("/static", "./cmd/analysis/static")
 
 	router.GET("/", func(c *gin.Context) {
@@ -438,4 +491,12 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 	registerPluginRoutes(router, pluginLoader)
 	registerPipelineRoutes(router)
 	registerAuthRoutes(router, authSvc, logger)
+
+	// P1-15 (Sprint 6, ODR-021): risk + execution endpoints
+	// absorbed from cmd/risk/main.go + cmd/execution/main.go.
+	// Both backends are in-process (risk.RiskManager and
+	// live.MockTrader) so the HTTP layer is a thin shim — no
+	// service-to-service hop.
+	NewRiskHandler(riskManager, logger).RegisterRoutes(router)
+	NewExecutionHandler(executionTrader, logger).RegisterRoutes(router)
 }

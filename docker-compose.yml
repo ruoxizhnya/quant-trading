@@ -1,5 +1,22 @@
 version: '3.9'
 
+# P1-15 (Sprint 6, ODR-021): service count reduced from 7 to 5.
+# The risk and execution services have been merged into the
+# analysis service (in-process), so docker-compose no longer
+# builds/boots them as separate containers. Their HTTP endpoints
+# (under /api/risk/* and /api/execution/*) are served by
+# analysis-service:8085.
+#
+# Remaining services:
+#   - postgres (5432)         — TS DB
+#   - redis (6379)            — cache / session / sync_job_cache
+#   - data-service (8081)     — multi-source data ingestion
+#   - strategy-service (8082) — strategy registry (standby per ADR-012)
+#   - analysis-service (8085) — backtest + risk + execution + auth
+#
+# (ai-service is started by the separate ai/ cmd, not via
+# docker-compose; see cmd/ai/main.go and the AI Research docs.)
+
 services:
   postgres:
     image: timescale/timescaledb:latest-pg17
@@ -77,49 +94,6 @@ services:
       data-service:
         condition: service_healthy
 
-  risk-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
-    command: ["/app/risk-service"]
-    ports:
-      - "8083:8083"
-    environment:
-      REDIS_URL: redis://redis:6379
-      DATA_SERVICE_URL: http://data-service:8081
-      LOG_LEVEL: info
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8083/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    depends_on:
-      redis:
-        condition: service_healthy
-      data-service:
-        condition: service_healthy
-
-  execution-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.service
-    command: ["/app/execution-service"]
-    ports:
-      - "8084:8084"
-    environment:
-      REDIS_URL: redis://redis:6379
-      LOG_LEVEL: info
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8084/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    depends_on:
-      redis:
-        condition: service_healthy
-
   analysis-service:
     build:
       context: .
@@ -137,7 +111,12 @@ services:
       REDIS_URL: redis://redis:6379
       DATA_SERVICE_URL: http://data-service:8081
       STRATEGY_SERVICE_URL: http://strategy-service:8082
-      RISK_SERVICE_URL: http://risk-service:8083
+      # P1-15 (Sprint 6, ODR-021): risk + execution merged into
+      # analysis. RISK_SERVICE_URL kept as a legacy fallback only
+      # — the engine prefers the in-process risk manager
+      # attached via WithRiskManager. STRATEGY_SERVICE_URL is
+      # still used as an external fallback if the in-process
+      # registry doesn't have the requested strategy.
       AI_API_KEY: ${AI_API_KEY:-}
       AI_API_URL: ${AI_API_URL:-https://api.openai.com/v1/chat/completions}
       LOG_LEVEL: info

@@ -20,8 +20,38 @@ data_service:
 strategy_service:
   url: "http://strategy-service:8082"
 
+# P1-15 (Sprint 6, ODR-021): risk + execution services merged into
+# analysis service. The `risk_service.url` and the
+# `STRATEGY_SERVICE_URL` env on docker-compose still work for backward
+# compat (in case someone deploys a separate risk service), but the
+# canonical runtime is in-process — `risk_manager` and `trading`
+# sections below are the single source of truth.
 risk_service:
-  url: "http://risk-service:8083"
+  url: "http://localhost:8085"  # legacy fallback only
+
+# In-process risk manager config (absorbed from risk-service.yaml).
+# Used by the backtest engine via WithRiskManager(rm) so all risk
+# computations (position sizing / regime detection / stop loss) run
+# without an HTTP hop.
+risk_manager:
+  target_volatility: 0.15
+  max_position_weight: 0.10
+  min_position_weight: 0.01
+  stoploss:
+    atr_period: 14
+    base_multiplier: 2.5
+    bull_multiplier: 2.0
+    bear_multiplier: 3.5
+    sideways_multiplier: 2.5
+  take_profit:
+    atr_multiplier: 3.0
+  volatility:
+    lookback_days: 20
+    annualization_factor: 16.0
+  regime:
+    fast_ma_period: 10
+    slow_ma_period: 20
+    vol_lookback: 60
 
 backtest:
   initial_capital: 1000000.0
