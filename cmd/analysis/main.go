@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -158,6 +159,30 @@ func main() {
 	}
 	engine.SetStore(store)
 
+	// P1-2: JWT + RBAC + audit (ADR-017 §2). If `auth.jwt_secret` is
+	// unset, the service runs in "disabled" mode and the middleware is
+	// a no-op so dev / test environments continue to work. The secret
+	// is read from env (JWT_SECRET) or, failing that, from the YAML
+	// config — but YAML is checked in, so prefer env in production.
+	jwtSecret := []byte(os.Getenv("JWT_SECRET"))
+	if len(jwtSecret) == 0 {
+		jwtSecret = []byte(v.GetString("auth.jwt_secret"))
+	}
+	authSvc := auth.NewService(store.DB(), auth.Config{
+		JWTSecret:       jwtSecret,
+		AccessTokenTTL:  v.GetDuration("auth.access_token_ttl"),
+		RefreshTokenTTL: v.GetDuration("auth.refresh_token_ttl"),
+		Issuer:          v.GetString("auth.issuer"),
+	})
+	if authSvc.Enabled() {
+		logger.Info().
+			Int("access_ttl_sec", int(authSvc.AccessTTL().Seconds())).
+			Msg("auth: JWT enabled (P1-2)")
+	} else {
+		logger.Warn().Msg("auth: JWT secret not configured — running in open-access mode (dev only)")
+	}
+	_ = authSvc // referenced via registerAuthRoutes below
+
 	pgProvider := marketdata.NewPostgresProvider(store, logger)
 	dataAdapter := marketdata.NewDataAdapter(nil, pgProvider, httpProvider, logger)
 	engine.SetDataAdapter(dataAdapter)
@@ -216,8 +241,15 @@ func main() {
 	router.Use(corsMiddleware())
 	router.Use(newRateLimiter(100, time.Minute).middleware())
 	router.Use(requestLogger(logger))
+	// P1-2: JWT auth middleware (no-op when auth is disabled) + audit
+	// log middleware. Both run before route registration so the
+	// handlers can rely on the context values being set.
+	if authSvc.Enabled() {
+		router.Use(authSvc.Middleware())
+		router.Use(authSvc.AuditMiddleware())
+	}
 
-	registerRoutes(router, engine, jobService, wfEngine, batchEngine, strategyDB, copilotService, copilotRunner, factorAttributor, pluginLoader, logger)
+	registerRoutes(router, engine, jobService, wfEngine, batchEngine, strategyDB, copilotService, copilotRunner, factorAttributor, pluginLoader, authSvc, logger)
 
 	host := v.GetString("server.host")
 	port := v.GetInt("server.port")
@@ -323,7 +355,7 @@ func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 	}
 }
 
-func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, wfEngine *backtest.WalkForwardEngine, batchEngine *backtest.BatchEngine, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, pluginLoader *strategy.PluginLoader, logger zerolog.Logger) {
+func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, wfEngine *backtest.WalkForwardEngine, batchEngine *backtest.BatchEngine, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, pluginLoader *strategy.PluginLoader, authSvc *auth.Service, logger zerolog.Logger) {
 	router.Static("/static", "./cmd/analysis/static")
 
 	router.GET("/", func(c *gin.Context) {
@@ -405,4 +437,5 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 	registerFactorRoutes(router, factorAttributor, logger)
 	registerPluginRoutes(router, pluginLoader)
 	registerPipelineRoutes(router)
+	registerAuthRoutes(router, authSvc, logger)
 }
