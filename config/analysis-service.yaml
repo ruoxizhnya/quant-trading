@@ -108,6 +108,13 @@ trading:
     st: 0.05                     # ST股票涨跌幅限制 ±5%
     new: 0.20                    # 新股涨跌幅限制 ±20%
   new_stock_days: 60             # 新股判断阈值（上市60天内）
+  # P2-3 (ODR-026): emergency flatten (kill-switch) bearer token.
+  # Empty (default) disables POST /api/execution/emergency-flatten
+  # (returns 503). When set, the operator must send the same token
+  # in BOTH the `Authorization: Bearer <token>` header AND the
+  # JSON body field `confirmation_token` — defence in depth against
+  # accidental button presses.
+  emergency_token: ""
 
 logging:
   level: "info"

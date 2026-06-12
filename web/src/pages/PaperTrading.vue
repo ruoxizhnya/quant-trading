@@ -147,6 +147,7 @@ import {
   getTrades,
 } from '@/api/paper-trading'
 import type { Position, Trade, Order, PaperTradingStatus, Portfolio } from '@/api/paper-trading'
+import EmergencyFlatten from '@/components/paper/EmergencyFlatten.vue'
 
 const message = useMessage()
 

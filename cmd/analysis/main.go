@@ -347,7 +347,7 @@ func main() {
 		router.Use(authSvc.AuditMiddleware())
 	}
 
-	registerRoutes(router, engine, jobService, wfEngine, batchEngine, strategyDB, copilotService, copilotRunner, factorAttributor, pluginLoader, authSvc, riskManager, executionTrader, logger)
+	registerRoutes(router, engine, jobService, wfEngine, batchEngine, strategyDB, copilotService, copilotRunner, factorAttributor, pluginLoader, authSvc, riskManager, executionTrader, v.GetString("trading.emergency_token"), logger)
 
 	// P2 alert (ODR-025): register the alert HTTP endpoints and
 	// start the periodic evaluation loop. The loop is a single
@@ -471,7 +471,7 @@ func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 	}
 }
 
-func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, wfEngine *backtest.WalkForwardEngine, batchEngine *backtest.BatchEngine, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, pluginLoader *strategy.PluginLoader, authSvc *auth.Service, riskManager *risk.RiskManager, executionTrader live.LiveTrader, logger zerolog.Logger) {
+func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, wfEngine *backtest.WalkForwardEngine, batchEngine *backtest.BatchEngine, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, pluginLoader *strategy.PluginLoader, authSvc *auth.Service, riskManager *risk.RiskManager, executionTrader live.LiveTrader, emergencyToken string, logger zerolog.Logger) {
 	router.Static("/static", "./cmd/analysis/static")
 
 	router.GET("/", func(c *gin.Context) {
@@ -561,5 +561,8 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 	// live.MockTrader) so the HTTP layer is a thin shim — no
 	// service-to-service hop.
 	NewRiskHandler(riskManager, logger).RegisterRoutes(router)
-	NewExecutionHandler(executionTrader, logger).RegisterRoutes(router)
+	// P2-3 (ODR-026): pass the emergency-flatten bearer token
+	// through to the execution handler. Empty token disables the
+	// kill-switch endpoint (returns 503 instead of 404).
+	NewExecutionHandler(executionTrader, logger, emergencyToken).RegisterRoutes(router)
 }

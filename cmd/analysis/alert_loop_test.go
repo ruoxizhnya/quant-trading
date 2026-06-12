@@ -79,6 +79,11 @@ func (s *stubLiveTrader) GetOrder(context.Context, string) (*live.OrderResult, e
 }
 func (s *stubLiveTrader) Name() string                    { return "stub" }
 func (s *stubLiveTrader) HealthCheck(context.Context) error { return nil }
+func (s *stubLiveTrader) EmergencyFlatten(_ context.Context, reason string) (*live.EmergencyFlattenResult, error) {
+	// Alert loop does not exercise emergency flatten; return an
+	// empty result so the interface stays satisfied.
+	return &live.EmergencyFlattenResult{Reason: reason}, nil
+}
 
 // stubRiskManager is a minimal risk.RiskManager facade. The full
 // struct is too heavy to instantiate for these tests; we return

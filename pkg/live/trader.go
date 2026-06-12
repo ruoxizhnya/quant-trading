@@ -65,6 +65,76 @@ type LiveTrader interface {
 	// HealthCheck verifies connectivity to the broker/exchange.
 	// Returns nil if healthy, error otherwise.
 	HealthCheck(ctx context.Context) error
+
+	// EmergencyFlatten closes all open positions at the best
+	// available market price. This is intended for the kill-switch
+	// path — operator presses the EMERGENCY FLATTEN button on the
+	// dashboard, the server issues market orders for every held
+	// symbol, and the portfolio returns to 100% cash within seconds.
+	//
+	// Unlike SubmitOrder(Sell), EmergencyFlatten bypasses T+1
+	// restrictions: positions bought today are force-closed and
+	// tracked with `bypassed_t1: true` in the result so the
+	// audit trail records the operator override. The reason is
+	// recorded for compliance review.
+	//
+	// Implementations should be idempotent: calling EmergencyFlatten
+	// on a flat portfolio returns an empty result, not an error.
+	// Failures to close a single symbol do not abort the whole call;
+	// each symbol's outcome is reported in the result.
+	EmergencyFlatten(ctx context.Context, reason string) (*EmergencyFlattenResult, error)
+}
+
+// EmergencyFlattenResult reports the outcome of an EmergencyFlatten
+// call. Sold and Skipped are mutually exclusive — a symbol appears
+// in exactly one of them.
+type EmergencyFlattenResult struct {
+	// Sold is the list of positions that were successfully closed
+	// during the emergency flatten. Each entry corresponds to one
+	// order that was submitted and filled.
+	Sold []EmergencyFlattenOrder `json:"sold"`
+
+	// Skipped is the list of positions that could not be closed
+	// (e.g. broker rejected the order, price feed unavailable).
+	// These are reported to the operator for manual follow-up.
+	Skipped []EmergencyFlattenSkip `json:"skipped"`
+
+	// SoldTotal is the sum of Sold[i].NetProceeds, in CNY. Provided
+	// for at-a-glance display in the UI without forcing callers to
+	// sum the slice themselves.
+	SoldTotal float64 `json:"sold_total"`
+
+	// StartedAt and CompletedAt bracket the flatten call. Both are
+	// UTC. CompletedAt - StartedAt is the wall-clock latency the
+	// operator should expect; in production with N symbols this is
+	// usually < 1s.
+	StartedAt   time.Time `json:"started_at"`
+	CompletedAt time.Time `json:"completed_at"`
+
+	// Reason is the operator-supplied explanation that was passed
+	// to EmergencyFlatten. Persisted with each order for audit.
+	Reason string `json:"reason"`
+}
+
+// EmergencyFlattenOrder describes a single successful close in an
+// EmergencyFlatten call.
+type EmergencyFlattenOrder struct {
+	Symbol       string    `json:"symbol"`
+	OrderID      string    `json:"order_id"`
+	Quantity     float64   `json:"quantity"`
+	FillPrice    float64   `json:"fill_price"`
+	NetProceeds  float64   `json:"net_proceeds"`
+	BypassedT1   bool      `json:"bypassed_t1"` // true if T+1 was overridden
+	SubmittedAt  time.Time `json:"submitted_at"`
+}
+
+// EmergencyFlattenSkip describes a single failed close in an
+// EmergencyFlatten call. The portfolio retains the position; the
+// operator must intervene manually.
+type EmergencyFlattenSkip struct {
+	Symbol   string `json:"symbol"`
+	Quantity float64 `json:"quantity"`
+	Reason   string `json:"reason"`
 }
 
 // OrderResult represents the outcome of an order submission.

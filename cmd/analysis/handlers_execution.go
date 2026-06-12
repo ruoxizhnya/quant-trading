@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +32,13 @@ type ExecutionHandler struct {
 	trader live.LiveTrader
 	logger zerolog.Logger
 
+	// emergencyToken is the bearer token required to invoke
+	// EmergencyFlatten via the HTTP endpoint. Empty token means
+	// the endpoint is disabled. P2-3 (ODR-026): the token is
+	// configured via `trading.emergency_token` in the analysis
+	// service config; see config/analysis-service.yaml.
+	emergencyToken string
+
 	mu     sync.RWMutex
 	orders map[string]*live.OrderResult
 }
@@ -38,11 +47,17 @@ type ExecutionHandler struct {
 // typically a MockTrader; the same instance should also be passed
 // to the backtest engine via WithLiveTrader so HTTP-driven paper
 // orders are visible to backtest bridge (and vice versa).
-func NewExecutionHandler(trader live.LiveTrader, logger zerolog.Logger) *ExecutionHandler {
+//
+// emergencyToken is the bearer token required for the
+// emergency-flatten endpoint. Pass "" to disable the endpoint
+// entirely (returns 404). Tokens are compared using
+// crypto/subtle.ConstantTimeCompare to prevent timing attacks.
+func NewExecutionHandler(trader live.LiveTrader, logger zerolog.Logger, emergencyToken string) *ExecutionHandler {
 	return &ExecutionHandler{
-		trader: trader,
-		logger: logger.With().Str("component", "execution_handler").Logger(),
-		orders: make(map[string]*live.OrderResult),
+		trader:         trader,
+		logger:         logger.With().Str("component", "execution_handler").Logger(),
+		emergencyToken: emergencyToken,
+		orders:         make(map[string]*live.OrderResult),
 	}
 }
 
@@ -59,6 +74,11 @@ func (h *ExecutionHandler) RegisterRoutes(router *gin.Engine) {
 		execGroup.POST("/orders/:id/cancel", h.cancelOrder)
 		execGroup.GET("/positions", h.getPositions)
 		execGroup.GET("/account", h.getAccount)
+		// P2-3 (ODR-026): kill-switch endpoint. The token is
+		// checked inline (see emergencyFlattenHandler); the route
+		// is registered even when the token is empty so a
+		// misconfigured token returns 503 instead of 404.
+		execGroup.POST("/emergency-flatten", h.emergencyFlattenHandler)
 	}
 
 	// Legacy compatibility routes (no /api/execution prefix).
@@ -196,4 +216,120 @@ func (h *ExecutionHandler) getAccount(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, account)
+}
+
+// emergencyFlattenRequest is the body of POST /api/execution/emergency-flatten.
+// Reason is mandatory for audit (the operator must type a justification).
+// ConfirmationToken must match the server-side configured token — the
+// second factor is to prevent accidental button-presses from killing
+// the portfolio.
+type emergencyFlattenRequest struct {
+	Reason           string `json:"reason" binding:"required"`
+	ConfirmationToken string `json:"confirmation_token" binding:"required"`
+}
+
+// emergencyFlattenResponse mirrors live.EmergencyFlattenResult with
+// the audit fields added.
+type emergencyFlattenResponse struct {
+	Sold         []live.EmergencyFlattenOrder `json:"sold"`
+	Skipped      []live.EmergencyFlattenSkip  `json:"skipped"`
+	SoldTotal    float64                      `json:"sold_total"`
+	StartedAt    time.Time                    `json:"started_at"`
+	CompletedAt  time.Time                    `json:"completed_at"`
+	Reason       string                       `json:"reason"`
+	LatencyMS    int64                        `json:"latency_ms"`
+}
+
+// emergencyFlattenHandler implements the kill-switch endpoint
+// (P2-3, ODR-026). It requires:
+//
+//  1. A non-empty server-side `emergencyToken` (configured via
+//     `trading.emergency_token`); otherwise the endpoint is
+//     disabled and returns 503.
+//  2. A bearer token in the `Authorization: Bearer <token>` header
+//     that matches the server-side token (constant-time compare
+//     via crypto/subtle).
+//  3. A JSON body with `reason` (audit) and `confirmation_token`
+//     (the operator must type the same token again — defence in
+//     depth against accidental button presses).
+//
+// On success, returns 200 with the result. On auth failure,
+// returns 401/403. On trader failure, returns 500.
+//
+// The handler is intentionally permissive about the trader's
+// per-symbol failures: the trader returns a structured
+// EmergencyFlattenResult that already separates Sold from Skipped;
+// the handler just relays it.
+func (h *ExecutionHandler) emergencyFlattenHandler(c *gin.Context) {
+	if h.emergencyToken == "" {
+		// Endpoint disabled by configuration. Return 503 (not
+		// 404) so the operator knows the server is up but the
+		// kill switch is intentionally not wired.
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":  "emergency flatten endpoint disabled (trading.emergency_token not configured)",
+			"detail": "set trading.emergency_token in config/analysis-service.yaml to enable",
+		})
+		return
+	}
+
+	// Header bearer check.
+	authHeader := c.GetHeader("Authorization")
+	const prefix = "Bearer "
+	if !strings.HasPrefix(authHeader, prefix) {
+		c.Header("WWW-Authenticate", `Bearer realm="emergency-flatten"`)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing or malformed Authorization header"})
+		return
+	}
+	gotToken := strings.TrimPrefix(authHeader, prefix)
+	if subtle.ConstantTimeCompare([]byte(gotToken), []byte(h.emergencyToken)) != 1 {
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid bearer token"})
+		return
+	}
+
+	// Body parse.
+	var req emergencyFlattenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Confirmation token check (defence in depth — operator must
+	// re-type the token to prevent accidental triggers).
+	if subtle.ConstantTimeCompare([]byte(req.ConfirmationToken), []byte(h.emergencyToken)) != 1 {
+		c.JSON(http.StatusForbidden, gin.H{"error": "confirmation_token mismatch"})
+		return
+	}
+
+	if req.Reason == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reason is required for audit"})
+		return
+	}
+
+	// Hard cap on the call duration. Emergency flatten itself
+	// should complete in < 1s for a typical portfolio; 30s is a
+	// safety net for pathological cases (large portfolio, slow
+	// broker).
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := h.trader.EmergencyFlatten(ctx, req.Reason)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("emergency flatten: trader error")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  "trader failed to flatten",
+			"detail": err.Error(),
+		})
+		return
+	}
+
+	resp := emergencyFlattenResponse{
+		Sold:        result.Sold,
+		Skipped:     result.Skipped,
+		SoldTotal:   result.SoldTotal,
+		StartedAt:   result.StartedAt,
+		CompletedAt: result.CompletedAt,
+		Reason:      result.Reason,
+		LatencyMS:   result.CompletedAt.Sub(result.StartedAt).Milliseconds(),
+	}
+	c.JSON(http.StatusOK, resp)
 }

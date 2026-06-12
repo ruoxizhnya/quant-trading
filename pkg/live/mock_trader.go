@@ -348,6 +348,164 @@ func (m *MockTrader) GetCash() float64 {
 	return m.cash
 }
 
+// EmergencyFlatten closes every open position at the best available
+// market price. T+1 is bypassed for the duration of the call — see
+// the LiveTrader.EmergencyFlatten godoc for rationale and audit
+// trail. See ODR-026.
+//
+// Per-symbol outcomes are reported in the returned result; a single
+// failure does not abort the whole call. The method is safe to
+// invoke from multiple goroutines (it takes the same mutex as
+// SubmitOrder). Idempotent: a flat portfolio returns an empty
+// result without error.
+//
+// The Reason is logged at WARN level (kill-switch events should be
+// visible in any log scrape) and persisted on every order record
+// (when an OrderStore is configured).
+func (m *MockTrader) EmergencyFlatten(_ context.Context, reason string) (*EmergencyFlattenResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	started := time.Now()
+	result := &EmergencyFlattenResult{
+		Sold:      make([]EmergencyFlattenOrder, 0, len(m.positions)),
+		Skipped:   make([]EmergencyFlattenSkip, 0),
+		StartedAt: started,
+		Reason:    reason,
+	}
+
+	if reason == "" {
+		reason = "operator-initiated kill switch"
+	}
+
+	// Re-apply the resolved reason to the result so callers see
+	// the audit-friendly value (not the empty input).
+	result.Reason = reason
+
+	m.logger.Warn().
+		Str("event", "emergency_flatten_start").
+		Int("open_positions", len(m.positions)).
+		Str("reason", reason).
+		Msg("EMERGENCY FLATTEN initiated — closing all positions at market")
+
+	// Snapshot the symbols first so we don't mutate the map while
+	// iterating (executeSell deletes the entry on full close).
+	symbols := make([]string, 0, len(m.positions))
+	for sym := range m.positions {
+		symbols = append(symbols, sym)
+	}
+
+	for _, sym := range symbols {
+		pos, ok := m.positions[sym]
+		if !ok || pos.Quantity <= 0 {
+			continue
+		}
+
+		// Determine the execution price: prefer the configured
+		// price provider; fall back to the position's last known
+		// price so we can still flatten if the feed is dead.
+		execPrice := pos.CurrentPrice
+		if m.config.PriceProvider != nil {
+			if p := m.config.PriceProvider(sym); p > 0 {
+				execPrice = p
+			}
+		}
+		if execPrice <= 0 {
+			result.Skipped = append(result.Skipped, EmergencyFlattenSkip{
+				Symbol:   sym,
+				Quantity: pos.Quantity,
+				Reason:   "no execution price available (feed down)",
+			})
+			m.logger.Error().
+				Str("symbol", sym).
+				Msg("emergency flatten: skipped, no price")
+			continue
+		}
+
+		// Decide whether T+1 must be bypassed. Emergency flatten
+		// always force-closes; the audit trail (BypassedT1 flag +
+		// message) records the operator override.
+		bypassT1 := pos.QuantityYesterday <= 0 && pos.QuantityToday > 0
+		qty := pos.Quantity // close the entire position
+		if qty <= 0 {
+			continue
+		}
+
+		slippage := execPrice * m.config.SlippageRate
+		fillPrice := execPrice - slippage
+		tradeValue := qty * fillPrice
+		commission := max(tradeValue*m.config.CommissionRate, m.config.MinCommission)
+		transferFee := tradeValue * m.config.TransferFeeRate
+		stampTax := tradeValue * m.config.StampTaxRate
+		netProceeds := tradeValue - commission - transferFee - stampTax
+
+		// Apply cash + position updates directly. We are already
+		// inside the mutex so we cannot call executeSell (which
+		// would re-acquire the lock and deadlock). Mirror its
+		// behaviour but flag the bypass.
+		m.cash += netProceeds
+		delete(m.positions, sym)
+
+		orderID := id.OrderID()
+		result.Sold = append(result.Sold, EmergencyFlattenOrder{
+			Symbol:      sym,
+			OrderID:     orderID,
+			Quantity:    qty,
+			FillPrice:   fillPrice,
+			NetProceeds: netProceeds,
+			BypassedT1:  bypassT1,
+			SubmittedAt: time.Now(),
+		})
+		result.SoldTotal += netProceeds
+
+		// Persist the order so the audit trail captures the
+		// flatten. Tag the message with the reason + bypass
+		// status so a future operator can reconstruct what
+		// happened.
+		persistMsg := fmt.Sprintf("EMERGENCY FLATTEN: %s", reason)
+		if bypassT1 {
+			persistMsg += " (T+1 bypassed)"
+		}
+		m.orders[orderID] = &OrderResult{
+			OrderID:     orderID,
+			Symbol:      sym,
+			Direction:   domain.DirectionClose,
+			OrderType:   domain.OrderTypeMarket,
+			Quantity:    qty,
+			FilledQty:   qty,
+			Price:       execPrice,
+			Status:      "filled",
+			SubmittedAt: time.Now(),
+			Message:     persistMsg,
+		}
+		m.persistOrder(m.orders[orderID], fillPrice, "filled", persistMsg)
+
+		m.logger.Warn().
+			Str("event", "emergency_flatten_close").
+			Str("order_id", orderID).
+			Str("symbol", sym).
+			Float64("quantity", qty).
+			Float64("fill_price", fillPrice).
+			Float64("net_proceeds", netProceeds).
+			Bool("bypassed_t1", bypassT1).
+			Str("reason", reason).
+			Msg("EMERGENCY FLATTEN — position force-closed")
+	}
+
+	result.CompletedAt = time.Now()
+
+	m.logger.Warn().
+		Str("event", "emergency_flatten_end").
+		Int("sold", len(result.Sold)).
+		Int("skipped", len(result.Skipped)).
+		Float64("net_proceeds", result.SoldTotal).
+		Dur("latency", result.CompletedAt.Sub(result.StartedAt)).
+		Str("reason", reason).
+		Msg("EMERGENCY FLATTEN complete")
+
+	return result, nil
+}
+
 // Reset resets the mock trader to its initial state.
 func (m *MockTrader) Reset() {
 	m.mu.Lock()

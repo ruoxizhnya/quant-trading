@@ -55,7 +55,7 @@ func newTestExecutionHandler(t *testing.T) *ExecutionHandler {
 		StampTaxRate:   0.001,
 		SlippageRate:   0.0001,
 	}, zerolog.New(nil))
-	return NewExecutionHandler(trader, zerolog.New(nil))
+	return NewExecutionHandler(trader, zerolog.New(nil), "")
 }
 
 func setupRouter(rh *RiskHandler, eh *ExecutionHandler) *gin.Engine {
