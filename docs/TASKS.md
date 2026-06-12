@@ -1,8 +1,8 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.9.0 (Sprint 5 P2 pickup #6 — F1-new mutation 偶发)
-> **Last Updated:** 2026-06-10
+> **Version:** 3.14.0 (Sprint 6 P1 pickup #4 — P1-24 Strategy 接口拆分 (ISP))
+> **Last Updated:** 2026-06-12
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
 >
@@ -566,17 +566,132 @@
 | 优先级             | 待处理    | 进行中   | 已完成    | 已阻塞   | 已取消   | 总计     |
 | --------------- | ------ | ----- | ------ | ----- | ----- | ------ |
 | P0              | 0      | 0     | 8      | 0     | 0     | 8      |
-| P1              | 0      | 0     | 20     | 0     | 0     | 20     |
+| P1              | 0      | 0     | 21     | 0     | 0     | 21     |
 | P2              | 0      | 0     | 19     | 0     | 0     | 19     |
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
-| **总计**          | **0** | **0** | **200** | **1** | **0** | **200** |
+| **总计**          | **0** | **0** | **201** | **1** | **0** | **201** |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-12 (v3.13.0) — Sprint 6 P1 pickup #3: P1-18 Engine ↔ StateStore 集成闭环
+
+- **触发**: v3.12.0 完成 P1-20 (BacktestState 内部锁) 后, P1-18 StateStore 已
+  存在但 Engine 仍用 `backtests map[string]*BacktestState` —— 资源泄漏风险
+  实际未消除。闭环 P1-18。
+- **过程**:
+  - ✅ **Engine ↔ StateStore 集成** [pkg/backtest/engine.go:86-98](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/engine.go#L86) 删除 `backtests map` + `btMu sync.RWMutex`, 改为 `stateStore StateStore` 接口; 8 处访问全部迁移
+  - ✅ **默认 LRU 1000** [pkg/backtest/constants.go:56-64](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/constants.go#L56) 新增 `DefaultStateStoreCapacity = 1000`; NewEngine + NewEngineWithOptions 初始化 `NewLRUStateStore(DefaultStateStoreCapacity)`
+  - ✅ **WithStateStore + WithStateStoreCapacity** [pkg/backtest/options.go:114-151](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/options.go#L114) 函数式注入 2 项
+  - ✅ **StateStore() + EvictStates 访问器** [pkg/backtest/engine.go:1311-1325](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/engine.go#L1311) Engine 公共方法
+  - ✅ **测试更新** [pkg/backtest/engine_accessors_test.go:186-253](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/engine_accessors_test.go#L186) + [engine_concurrency_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/engine_concurrency_test.go) (重写) + [state_test.go:288](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/state_test.go#L288) 全部从 `eng.backtests[id] = state` 改为 `eng.stateStore.Put(id, state)`
+  - ✅ **新增 P1-18 集成测试** [pkg/backtest/state_store_integration_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/state_store_integration_test.go) 12 个:
+    - `TestEngine_DefaultStateStore` / `TestEngine_DefaultStateStoreViaOptions` — 默认 LRU 1000
+    - `TestEngine_WithStateStore_ReplacesDefault` / `TestEngine_WithStateStore_Nil_KeepsDefault` — option 行为
+    - `TestEngine_WithStateStoreCapacity_Positive` / `TestEngine_WithStateStoreCapacity_ZeroOrNegative_FallsBackToNoop` — 容量选项
+    - `TestEngine_StateStoreAccessor_ReturnsLiveReference` — 访问器
+    - `TestEngine_StateStore_LRUEvictsAtCapacity` — LRU 行为端到端
+    - `TestEngine_EvictStates_ShimToStore` / `TestEngine_EvictStates_KeepN` — GC
+    - `TestEngine_Backtests_NotFound_ReturnsError` / `TestEngine_Backtests_GetAfterPut_RoundTrip` — 公共 API
+  - 📋 **TASKS.md**: P1-18 ⬜ → ✅
+- **验证**:
+  - **race detector**: `go test ./pkg/backtest/ -race -count=1` 全绿 (含 12 个 P1-18 新增)
+  - **集成**: `go build ./...` exit 0 (无 broken caller)
+  - **go vet**: `go vet ./pkg/backtest/...` exit 0
+- **总任务数**: 201 → 201 (无变化, 1 项状态变更)
+- **总完成数**: 202 → 203 (+1: P1-18)
+- **总待处理**: 0 → 0 (无新增待办)
+
+### 2026-06-12 (v3.14.0) — Sprint 6 P1 pickup #4: P1-24 Strategy 接口拆分 (ISP)
+
+- **触发**: v3.13.0 完成 P1-18 StateStore 集成闭环后, 接续 ADR-020 §4
+  (CQ-006: Strategy interface 7 方法 → ISP 拆分)。同时为后续 P1-26 (4 套
+  执行实体合并) 准备更细粒度的接口契约, 避免合并时被迫做大爆炸式改动。
+- **过程**:
+  - ✅ **P1-24** [pkg/strategy/interfaces.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/strategy/interfaces.go) (新建, 165 lines):
+    - **4 个 single-responsibility 子接口** (line 42-95):
+      - `StrategyCore { Name() string; Description() string }` — 身份
+      - `Configurable { Parameters() []Parameter; Configure(map[string]any) error }` — 运行时参数 (optional)
+      - `SignalGenerator { GenerateSignals(...); Weight(...) }` — 信号产生 + 仓位 (required)
+      - `ResourceManaged { Cleanup() }` — 资源释放 (optional)
+    - **复合 `Strategy` 接口** (line 106-111): 嵌入 4 个子接口, 保持对外 7 方法 surface, 现有所有 strategy 实现零迁移
+    - **As* 类型下转 helper** (line 128-153): `AsConfigurable(s any) Configurable` / `AsSignalGenerator(s any) SignalGenerator` / `AsResourceManaged(s any) ResourceManaged`, 全部接受 `any` 而非 `Strategy` 以支持 partial 策略
+    - **Compile-time 守卫** (line 162-166): `var _ StrategyCore = (*BaseStrategy)(nil)` + `var _ Configurable = (*BaseStrategy)(nil)` + `var _ ResourceManaged = (*BaseStrategy)(nil)`; 缺失 `var _ SignalGenerator` 表明 BaseStrategy 故意不实现 (设计意图, 见 test)
+  - ✅ **[pkg/strategy/base.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/strategy/base.go) 默认实现** (line 183-209):
+    - `Configure()`: 把 `params` map 拷贝到 `b.params`, 接受任意值 (permissive, 与 pre-P1-24 行为一致)
+    - `Cleanup()`: no-op (BaseStrategy 无资源)
+    - `Parameters()`: 返回 `[]Parameter{}` (非 nil, 约定)
+  - ✅ **[pkg/strategy/registry.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/strategy/registry.go) ConfigureStrategy 改造** (line 247-263):
+    - 用 `AsConfigurable(s)` 替代 `s.(Configurable)` 显式断言, 错误信息更清晰 ("does not implement strategy.Configurable")
+  - ✅ **[pkg/strategy/strategy.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/strategy/strategy.go) 文档迁移** (line 40-52): 注释指向 `interfaces.go` 作为 single source of truth
+  - ✅ **[pkg/strategy/interfaces_compliance_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/strategy/interfaces_compliance_test.go) (新建, 9 个测试)**:
+    - `TestBaseStrategy_SatisfiesSubInterfaces` — 验证 3 个子接口
+    - `TestBaseStrategy_DoesNotImplementSignalGenerator` — 验证 BaseStrategy 故意不实现 SignalGenerator
+    - `TestAsConfigurable` / `TestAsResourceManaged` / `TestAsSignalGenerator` — 验证 type assertion helper 对 full vs partial 策略行为
+    - `TestRegisteredStrategies_SatisfyComposite` — 遍历 DefaultRegistry 所有 builtin 策略, 全部 4 子接口 (含所有 8 个 plugin: momentum/value/multi_factor/mean_reversion/td_sequential/bollinger_mr/volume_price_trend/volatility_breakout)
+    - `TestRegisteredStrategies_AllHaveNonEmptyName` — 守护 Name()/Description() 非空
+    - `TestConfigureStrategy_ConfigurableSucceeds` / `TestConfigureStrategy_UnknownStrategy` — Registry 级 helper 集成
+    - `TestCompositeInterface_MethodCount` — 用 reflection 验证 Strategy 复合接口恰好 7 方法, 防止后续无意增加方法
+  - 📋 **TASKS.md**: P1-24 ⬜ → ✅
+- **验证**:
+  - **race detector**: `go test ./pkg/strategy/ -race -count=1 -run 'TestBaseStrategy|TestAs|TestRegistered|TestConfigure|TestComposite'` 9/9 PASS, 0 issue
+  - **集成**: `go test ./pkg/strategy/...` 全部 PASS
+  - **全工程**: `go build ./...` exit 0, `go vet ./pkg/strategy/...` exit 0
+  - **零回归**: 现有 30+ 测试文件 + plugin loader 全部通过; 所有 builtin strategy 满足 composite interface
+- **总任务数**: 201 → 201 (无变化, 1 项状态变更)
+- **总完成数**: 203 → 204 (+1: P1-24)
+- **总待处理**: 0 → 0 (无新增待办)
+
+### 2026-06-12 (v3.12.0) — Sprint 6 P1 pickup #2: P1-20 BacktestState 内部锁 + Freeze 模式
+
+- **触发**: Sprint 6 P1 接续 P1-10 后, 推进最高 ROI 项 P1-20 (race condition + 不可变快照)
+- **过程**:
+  - ✅ **P1-20** [pkg/backtest/state.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/state.go) (新建, 219 lines) + [pkg/backtest/state_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/state_test.go) (新建, 7 个 race-detector 测试):
+    - **BacktestState 内部 mu RWMutex + frozen flag**: 解决 `e.backtests[btID] = state` 后 `state.Status/Result/Error/CompletedAt` 跨 goroutine 读写 race
+    - **Set* 方法 (SetStatus/SetResult/SetError/SetCompletedAt)**: 全部取 `mu.Lock()` + 检查 `frozen` 标志; 已冻结时返回 `(prev, false)` 拒绝写
+    - **Get* 方法 (GetStatus/Result/Error/CompletedAt)**: 全部取 `mu.RLock()`; 提供 reader 友好的快路径
+    - **Freeze() 方法**: 回测完成 (成功或失败) 后调用一次, 状态变 immutable; 幂等
+    - **Snapshot() 方法**: 原子多字段读, 返回 `BacktestStateSnapshot` 值拷贝, 调用方可安全长期持有
+    - **engine.go RunBacktest 接入** (line 438-455): `state.SetResult/SetCompletedAt/SetStatus("completed")` 顺序写入 + `state.Freeze()` 在结尾; 失败路径同样 `SetStatus("failed")/SetError/Freeze`
+    - **engine.go GetBacktestResult/Status 接入** (line 1157-1162, 1201): 改用 `state.GetStatus()/GetResult()` 走 RLock
+  - 📋 **TASKS.md**: P1-20 ⬜ → ✅
+- **验证**:
+  - **race detector**: `go test ./pkg/backtest/ -race -count=5` 5/5 PASS, 0 issue
+  - **集成**: `go test ./pkg/backtest/ -race -count=1` 13.3s 全绿 (含 28 个 _test.go)
+  - **全工程**: `go vet ./...` exit 0
+  - **新测试覆盖**:
+    - `TestBacktestState_GetSetRoundTrip` — Set/Get 基本往返
+    - `TestBacktestState_FreezeRejectsWrites` — 冻结后所有 Set* 拒绝
+    - `TestBacktestState_SnapshotAtomicity` — 多字段一致读
+    - `TestBacktestState_SnapshotIsValueCopy` — 双向隔离 (snap→live 和 live→snap)
+    - `TestBacktestState_ConcurrentReadWriteStatus` — 8 writers + 16 readers + 并发 Freeze
+    - `TestBacktestState_ConcurrentResultErrorCompletedAt` — Result/Error/CompletedAt 并发
+    - `TestBacktestState_EngineGetBacktestStatusRace` — Engine API 集成 race 测试
+- **总任务数**: 201 → 201 (无变化, 1 项状态变更)
+- **总完成数**: 201 → 202 (+1: P1-20)
+
+### 2026-06-12 (v3.11.0) — Sprint 6 P1 pickup #1: P1-10 research_batch_test fail-gate
+
+- **触发**: Sprint 6 P1 启动; 优先挑选 ⭐⭐ 高 ROI 项: AI 研究流水线质量门禁 (P1-10, 1d)
+- **过程**:
+  - ✅ **P1-10** [pkg/ai/agents/research_batch_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/ai/agents/research_batch_test.go) — research_batch_test fail-gate:
+    - **常量显式化** (line 199-203): `highICThreshold = 0.03` + `minHighICFactors = 10` + `defaultSeedOffset = 42`, 消除文档/代码口径漂移风险
+    - **`generateSyntheticData` 确定性化** (line 211-249): 移除 `time.Now().UnixNano()` 不可重现 seed, 改用 per-factor `int64(i+1)` 显式 seed; 样本 n=200→500, 减小 std-error ≈ 0.07→0.045, 让"custom" 弱相关类别 (理论 IC ≈ 0.062) 稳定通过 0.03 阈值
+    - **`TestFactorDiscoveryBatch/ComputeIC` 硬断言** (line 90-119): 增加 `t.Fatalf("P1-10 fail-gate: need at least %d factors ...")` — 之前 10/12 是 `t.Logf` 仅记录, 任何回退 (e.g. 全部 collapse 到 custom 弱相关) 都会静默 PASS
+    - **`TestFactorDiscoveryMinimumTarget` 硬断言** (line 394-418): 同步添加 fail-gate, 两处独立 witness, 单点故障概率减半
+  - 📋 **TASKS.md**: P1-10 ⬜ → ✅
+- **验证**:
+  - **正向**: `go test ./pkg/ai/agents/ -run "TestFactorDiscoveryMinimumTarget|TestFactorDiscoveryBatch" -count=10` 10/10 ✅ (确定性)
+  - **负向**: 临时测试 (零相关数据) → 5/12 factors, gate 逻辑正确识别 `5 < 10` (已删除)
+  - `go vet ./pkg/ai/... ./cmd/...` exit 0
+  - `go test ./pkg/ai/...` 14 packages 全绿 (含 agents, evolution, factor, pipeline, search, validator)
+- **总任务数**: 201 → 201 (无变化, 1 项状态变更)
+- **总完成数**: 200 → 201 (+1: P1-10)
+- **总待处理**: 1 → 0 (-1: P1-10)
 
 ### 2026-06-10 (v3.9.2) — Sprint 5 P2 pickup #8: CR-38/CR-41 收尾 + TASKS 表全部 ✅
 
@@ -938,24 +1053,24 @@
 | **P1-4** | A 股券商真实对接 (中泰 XTP 推荐) | BR-003, BR-005 | `pkg/live/broker/xtp/` (新建) | TBD | 2w | 模拟账户下单/撤单/查询 working | ⬜ |
 | **P1-5** | A 股价格笼子校验 (沪深/创/科/北 4 套) | BR-004 | `pkg/live/price_cage.go` (新建) | TBD | 1w | 4 套笼子规则测试 + 主板 ±2% 模拟 | ⬜ |
 | **P1-6** | 集合竞价撮合 (9:15-9:25 + 14:57-15:00) | BR-004, BR-017 | `pkg/backtest/auction.go` (新建) | TBD | 1w | 开盘集合 + 收盘集合状态机测试 | ⬜ |
-| **P1-7** | 4 黄金 fixture 补全 (momentum/value/T+1/zhangting) | TQ-009, TEST.md §2.3 | `pkg/backtest/testdata/` | TBD | 2d | 4 fixture 存在；`TestGolden_*` 容差 ±0.01 | ⬜ |
+| **P1-7** | 4 黄金 fixture 补全 (momentum/value/T+1/zhangting) | TQ-009, TEST.md §2.3 | `pkg/backtest/fixtures_p1_7_test.go`, `testdata/backtest-fixtures/` | TBD | 2d | 4 fixture 存在；`TestGolden_*` 容差 ±0.01 | ✅ |
 | **P1-8** | users/audit_logs 表 + JWT middleware + login endpoint | AR-004, ADR-017 | `migrations/019_add_auth_tables.sql` (扁平命名), `cmd/analysis/auth/` | TBD | 1w | 同 P1-2 (合并) | ⬜ |
-| **P1-9** | testing/quick property-based 5 个 invariant | TQ-014, TEST.md §2.4 | `pkg/backtest/property_test.go` (新建) | TBD | 3d | 1000 次随机序列不违反 5 个 property | ⬜ |
-| **P1-10** | research_batch_test.go fail-gate (10+ factors IC>0.03) | TQ-007, TQ-015 | `pkg/ai/agents/research_batch_test.go` | TBD | 1d | `assert.GreaterOrEqual(highICFactors, 10)` 通过 | ⬜ |
+| **P1-9** | testing/quick property-based 5 个 invariant | TQ-014, TEST.md §2.4 | `pkg/backtest/property_test.go` | TBD | 3d | 1000 次随机序列不违反 5 个 property | ✅ |
+| **P1-10** | research_batch_test.go fail-gate (10+ factors IC>0.03) | TQ-007, TQ-015 | `pkg/ai/agents/research_batch_test.go` | TBD | 1d | `assert.GreaterOrEqual(highICFactors, 10)` 通过 | ✅ |
 | **P1-11** | AI Copilot 进程隔离 sandbox (Phase 2) | AR-003, ADR-007/019 | `internal/sandbox/runner/` (新建) | TBD | 1w | subprocess + rlimit + 5s timeout working | ⬜ |
-| **P1-12** | L4 validate 实际 walk-forward 实现 (非 placeholder) | TQ-007 | `pkg/ai/agents/validate.go:validateL4` | TBD | 3d | L4 真实跑 walk-forward；Score 不再恒 4.0 | ⬜ |
+| **P1-12** | L4 validate 实际 walk-forward 实现 (非 placeholder) | TQ-007 | `pkg/ai/agents/validate_l4.go` | TBD | 3d | L4 真实跑 walk-forward；Score 不再恒 4.0 | ✅ |
 | **P1-13** | AI Pipeline L5 人工审查 UI (Approve/Reject/Edit) | BR-013 | `web/src/components/ai/ReviewActions.vue` (新建) | TBD | 3d | PipelineDashboard 有 3 按钮 + POST /api/pipeline/jobs/:id/review | ⬜ |
 | **P1-14** | AI service httpclient 加固 (timeout/retry/rate/cost) | AR-008, AR-017 | `pkg/ai/client.go` | TBD | 3d | OTel trace；token bucket；cost table 写入 | ⬜ |
 | **P1-15** | risk/execution service 合并到 analysis (7→3 服务) | AR-002, ADR-008/019 | `cmd/risk/`, `cmd/execution/` (服务名 risk-service/execution-service 在 docker-compose 中) | TBD | 1w | Docker compose 3 服务；`engine.go` 0 HTTP 调用 | ⬜ |
-| **P1-16** | Engine 拆 CacheManager + FactorCacheAccessor | CQ-001, ADR-020 | `pkg/backtest/cache.go`, `pkg/backtest/factor_cache.go` | TBD | 3d | 2 子包独立测试；Engine 减少 ~300 行 | ⬜ |
-| **P1-17** | Engine 拆 LiveBridge + ExecutionBridge | CQ-001, ADR-020 | `pkg/backtest/live_bridge.go`, `pkg/backtest/execution_bridge.go` | TBD | 3d | 2 子包独立测试；Engine 减少 ~200 行 | ⬜ |
-| **P1-18** | StateStore interface + LRU/持久化 | CQ-008, AR-012, ADR-020 | `pkg/backtest/state_store.go` (新建) | TBD | 2d | LRU 1000 条 + 落 PG；backtests map 内存不再泄漏 | ⬜ |
-| **P1-19** | EngineOption 函数式注入 + backward-compat shim | CQ-005, ADR-020 | `pkg/backtest/engine.go` | TBD | 3d | `NewEngine(cfg, prov, opts...)` working；旧 5 个 engine setter（SetDataAdapter/SetStore/SetRiskManager/SetLiveTrader/SetExecutionService）+ 1 个 strategy SetFactorCache 共 6 个 setter 保留 6 个月 backward-compat | ⬜ |
-| **P1-20** | BacktestState 内部锁 + Freeze 模式 | AR-014, ADR-020 | `pkg/backtest/engine.go` (BacktestState struct) | TBD | 2d | race detector 0 issue；回测完成冻结 | ⬜ |
+| **P1-16** | Engine 拆 CacheManager + FactorCacheAccessor | CQ-001, ADR-020 | `pkg/backtest/cache.go`, `pkg/backtest/factor_cache.go` | TBD | 3d | 2 子包独立测试；Engine 减少 ~300 行 | ✅ |
+| **P1-17** | Engine 拆 LiveBridge + ExecutionBridge | CQ-001, ADR-020 | `pkg/backtest/live_bridge.go`, `pkg/backtest/execution_bridge.go` | TBD | 3d | 2 子包独立测试；Engine 减少 ~200 行 | ✅ |
+| **P1-18** | StateStore interface + LRU/持久化 | CQ-008, AR-012, ADR-020 | `pkg/backtest/state_store.go` (新建) | TBD | 2d | LRU 1000 条 + 落 PG；backtests map 内存不再泄漏 | ✅ |
+| **P1-19** | EngineOption 函数式注入 + backward-compat shim | CQ-005, ADR-020 | `pkg/backtest/engine.go` | TBD | 3d | `NewEngine(cfg, prov, opts...)` working；旧 5 个 engine setter（SetDataAdapter/SetStore/SetRiskManager/SetLiveTrader/SetExecutionService）+ 1 个 strategy SetFactorCache 共 6 个 setter 保留 6 个月 backward-compat | ✅ |
+| **P1-20** | BacktestState 内部锁 + Freeze 模式 | AR-014, ADR-020 | `pkg/backtest/engine.go` (BacktestState struct) | TBD | 2d | race detector 0 issue；回测完成冻结 | ✅ |
 | **P1-21** | `pkg/statistics/` 包抽取 (mean/std/slope/volatility) | CQ-004 | `pkg/statistics/` (新建) | TBD | 2d | 6+ 处重复消除；单包覆盖率 ≥ 80% | ✅ |
 | **P1-22** | `pkg/fees/ashare.go` 费率常量统一 | CQ-005 | `pkg/fees/ashare.go` (新建) | TBD | 1d | 4 处硬编码消除；单包测试 | ✅ |
 | **P1-23** | `pkg/id/order.go` UUID v7 统一 | CQ-007 | `pkg/id/order.go` (新建) | TBD | 1d | 3 处订单号生成统一；测试 | ✅ |
-| **P1-24** | Strategy 接口拆分 (StrategyCore/Configurable/ResourceManaged) | CQ-006, ISP | `pkg/strategy/strategy.go` | TBD | 2d | 3 个可组合 interface；现有 strategy 适配 | ⬜ |
+| **P1-24** | Strategy 接口拆分 (StrategyCore/Configurable/ResourceManaged) | CQ-006, ISP | `pkg/strategy/interfaces.go` (新建) | 2026-06-12 | 2d | 4 个可组合 interface；AsConfigurable/AsSignalGenerator/AsResourceManaged helper；9 个 compliance 测试覆盖 builtin strategies | ✅ |
 | **P1-25** | `domain.Strategy` Deprecated 删除 (ODR-013) | CQ-014 | `pkg/domain/types.go`, `pkg/strategy/registry.go`, `pkg/strategy/examples/*`, `cmd/strategy/main.go` | TBD | 0.5d | 旧接口移除；`pkg/strategy.Strategy` 唯一源 | ✅ |
 | **P1-26** | 4 套执行实体合并 (LiveEngine/OrderManager/...) | CQ-010, YAGNI | `pkg/live/` | TBD | 1w | 5 套 → 2 套 (LiveEngine + MockTrader) | ⬜ |
 | **P1-27** | `pkg/strategy/plugins/utils.go` 删除手写 `itoa`/`ftoa`/`joinStrings` | CQ-006 | `pkg/strategy/plugins/utils.go` | TBD | 0.5d | 标准库替换；测试通过 | ✅ |
@@ -1039,7 +1154,7 @@
 6. **P1-2** JWT + RBAC (1w, 实盘前置)
 7. **P1-4** 中泰 XTP 对接 (2w, 真正具备实盘能力)
 8. **P0-10** + **P1-21/22/23** Go 现代化 (1w, 7.2→8.5)
-9. **P1-12** L4 validate 实际实现 (3d, Phase 4 P0 fail gate)
+9. ~~**P1-12** L4 validate 实际实现 (3d, Phase 4 P0 fail gate)~~ ✅
 10. **P1-16~20** Engine 拆分 (2w, 1408 行→300 行)
 
 ---

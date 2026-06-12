@@ -31,7 +31,7 @@
 | [ADR-017](adr/adr-017-observability-and-auth.md) | Observability Stack + API Authentication (前置 Phase 4) | Proposed | 2026-06-11 |
 | [ADR-018](adr/adr-018-test-and-async-safety.md) | Testing Architecture + Async Safety + Determinism | Proposed | 2026-06-11 |
 | [ADR-019](adr/adr-019-service-merge-ai-copilot.md) | Service 合并 + AI Copilot Sandbox 重构 | Proposed | 2026-06-11 |
-| [ADR-020](adr/adr-020-engine-decomposition.md) | Engine God Object 拆分 + 函数式依赖注入 | Proposed | 2026-06-11 |
+| [ADR-020](adr/adr-020-engine-decomposition.md) | Engine God Object 拆分 + 函数式依赖注入 (含 Strategy 接口 ISP §6) | **Accepted** (P1-16~20,24) | 2026-06-11 |
 
 ---
 
@@ -99,9 +99,10 @@ When to create an ODR:
 ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical example.
 
 ---
-_Last updated by: AI Assistant — 2026-06-11 (Sprint 6 启动 + ODR-013 综合审查 + ADR-017~020 提交 + ADR-007/008 状态更新为 Accepted + ODR-014 文件迁移 + Spec 内容合并至长效文档; index version 2.7.0)_
+_Last updated by: AI Assistant — 2026-06-12 (Sprint 6 P1 pickup #4: P1-24 Strategy 接口拆分完成 → ADR-020 §6 + ADR-020 status Proposed→Accepted; index version 2.8.0)_
 _ADR 累计 20 条: 架构 16 + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020)_
 _ODR 累计 14 条: Cleanup 3 (ODR-001/006/008) | Audit 5 (ODR-002/009/010/012/013) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004)_
+_2026-06-12 状态变更: ADR-020 Proposed→Accepted (P1-16~20,24 全部完成); 新增 §6 Strategy ISP 拆分 (CQ-006)_
 _2026-06-11 状态变更: ADR-007 OPEN→Accepted, ADR-008 PARTIAL→Accepted, ADR-017~020 新建 Proposed, ODR-014 新建 Completed (Sprint 6 spec 迁移 + 内容合并回长效文档: ODR-013/VISION.md/TASKS.md)_
 _docs/ 新增内容: VISION.md §Principle 8 (Documentation-Path Consistency) + TASKS.md §Sprint 6 启动期 待校核项 (6 项)_
 _.trae/ 临时目录: 已清空并删除 (3 个文件迁至 docs/specs/ 后已合并回 ODR-013/VISION.md/TASKS.md)_

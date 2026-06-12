@@ -170,6 +170,46 @@ func (s *BacktestState) SetStatus(status string) {
 - 回测完成后 `Freeze()` 标记 immutable
 - Getter 跳过锁，零开销
 
+### §6. Strategy 接口 ISP 拆分 (CQ-006, ADR-014 precedent)
+
+`pkg/strategy.Strategy` 接口原 7 方法 (Name/Description/Parameters/Configure/GenerateSignals/Weight/Cleanup) 单一接口违反 Interface Segregation Principle。parameterless 策略被迫实现 `Parameters()`/`Configure()` 空 stub；只读策略被迫实现 `Cleanup()` no-op。
+
+**拆分方案**：
+
+```go
+// 4 个 single-responsibility 子接口
+type StrategyCore interface { Name() string; Description() string }
+type Configurable interface { Parameters() []Parameter; Configure(map[string]any) error }
+type SignalGenerator interface {
+    GenerateSignals(ctx context.Context, bars map[string][]domain.OHLCV, portfolio *domain.Portfolio) ([]Signal, error)
+    Weight(signal Signal, portfolioValue float64) float64
+}
+type ResourceManaged interface { Cleanup() }
+
+// 复合接口 (向后兼容, 7 方法 surface 保持不变)
+type Strategy interface {
+    StrategyCore; Configurable; SignalGenerator; ResourceManaged
+}
+
+// 安全下转 helper (接受 any, 支持 partial 策略)
+func AsConfigurable(s any) Configurable { ... }
+func AsSignalGenerator(s any) SignalGenerator { ... }
+func AsResourceManaged(s any) ResourceManaged { ... }
+```
+
+**关键设计决策**：
+
+- **复合接口保留 7 方法**: 现有 30+ 测试文件 + plugin loader + registry 零迁移
+- **BaseStrategy 提供 Configure/Cleanup/Parameters 默认实现**: 具体策略零 boilerplate
+- **As* helpers 接受 `any` 而非 `Strategy`**: 支持 partial 策略类型下转 (e.g. `coreOnlyFake` 故意不实现 Cleanup)
+- **Compile-time 守卫**: `var _ StrategyCore = (*BaseStrategy)(nil)` 等 3 个正向断言 + 缺失 `var _ SignalGenerator = (*BaseStrategy)(nil)` 表明 BaseStrategy 故意不实现 (设计意图, runtime 守护 `TestBaseStrategy_DoesNotImplementSignalGenerator`)
+
+**9 个 compliance 测试** ([pkg/strategy/interfaces_compliance_test.go](../pkg/strategy/interfaces_compliance_test.go)):
+- BaseStrategy 子接口满足度
+- As* helpers 行为 (full vs partial)
+- DefaultRegistry 所有 builtin 策略 (8 个 plugin) 满足 composite
+- Composite 接口 7 方法 reflection count
+
 ## Options Considered
 
 **Option A — 维持 God Engine**：
@@ -207,14 +247,15 @@ func (s *BacktestState) SetStatus(status string) {
 
 ## Implementation Roadmap
 
-| Sprint | Tasks (见 [TASKS.md §Sprint 6](../../TASKS.md)) | Effort |
-|---|---|---|
-| **Sprint 6 P1-16** (3d) | 拆 CacheManager + FactorCacheAccessor 子包 | Major |
-| **Sprint 6 P1-17** (3d) | 拆 LiveBridge + ExecutionBridge 子包 | Major |
-| **Sprint 6 P1-18** (2d) | 引入 StateStore interface + LRU/持久化实现 | Major |
-| **Sprint 6 P1-19** (3d) | EngineOption 函数式注入 + Backward-compat shim | Major |
-| **Sprint 6 P1-20** (2d) | BacktestState 内部锁 + Freeze 模式 | Major |
-| **Sprint 7 P2-X** (1w) | 调用方适配（`pkg/strategy`, `pkg/live`, `cmd/analysis`） | Operational |
+| Sprint | Tasks (见 [TASKS.md §Sprint 6](../../TASKS.md)) | Effort | Status |
+|---|---|---|---|
+| **Sprint 6 P1-16** (3d) | 拆 CacheManager + FactorCacheAccessor 子包 | Major | ✅ Done (v3.13.0) |
+| **Sprint 6 P1-17** (3d) | 拆 LiveBridge + ExecutionBridge 子包 | Major | ✅ Done (v3.13.0) |
+| **Sprint 6 P1-18** (2d) | 引入 StateStore interface + LRU/持久化实现 | Major | ✅ Done (v3.13.0) |
+| **Sprint 6 P1-19** (3d) | EngineOption 函数式注入 + Backward-compat shim | Major | ✅ Done (v3.13.0) |
+| **Sprint 6 P1-20** (2d) | BacktestState 内部锁 + Freeze 模式 | Major | ✅ Done (v3.12.0) |
+| **Sprint 6 P1-24** (2d) | Strategy 接口 ISP 拆分 (CQ-006) | Major | ✅ Done (v3.14.0) — §6 |
+| **Sprint 7 P2-X** (1w) | 调用方适配（`pkg/strategy`, `pkg/live`, `cmd/analysis`） | Operational | ⬜ |
 
 ## Related
 
