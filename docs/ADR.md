@@ -59,6 +59,7 @@
 | [ODR-018](odr/odr-018-p1-5-p1-6-ashare-microstructure.md) | P1-5 + P1-6 A 股交易所微观结构 — 价格笼子 + 集合竞价 | Completed | Implementation | 2026-06-12 |
 | [ODR-019](odr/odr-019-p1-2-rbac-jwt-auth.md) | P1-2 + P1-8 RBAC + JWT auth + audit_logs (HS256 / bcrypt cost 12 / 3 角色) | Completed | Implementation | 2026-06-12 |
 | [ODR-020](odr/odr-020-p1-11-copilot-sandbox.md) | P1-11 AI Copilot 进程隔离 sandbox (subprocess + rlimit + 30s timeout + setsid) | Completed | Implementation | 2026-06-12 |
+| [ODR-021](odr/odr-021-p1-15-service-merge-risk-execution.md) | P1-15 risk + execution 服务合并到 analysis (7→5 服务) — in-process 注入 + legacy alias + 12 TestXxx | Completed | Implementation | 2026-06-12 |
 
 ---
 
@@ -105,10 +106,11 @@ When to create an ODR:
 ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical example.
 
 ---
-_Last updated by: AI Assistant — 2026-06-12 (P1-1 文档一致化完成 → ODR-015 新建 Completed (Strategy 4-way 同步 + Phase 3/4 编号统一 + 文件路径引用更新); index version 2.7.0)_
+_Last updated by: AI Assistant — 2026-06-12 (P1-15 服务合并完成 → ODR-021 新建 Completed (in-process 注入 + legacy alias + 12 TestXxx + Docker 7→5); index version 2.8.0)_
 _ADR 累计 20 条: 架构 16 + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020)_
-_ODR 累计 15 条: Cleanup 3 (ODR-001/006/008) | Audit 6 (ODR-002/009/010/012/013/015) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004)_
-_2026-06-12 状态变更 (本次): ADR-020 Proposed→Accepted (P1-16~20,24 全部完成); ODR-015 新建 (P1-1 文档一致化完成)_
+_ODR 累计 21 条: Cleanup 3 (ODR-001/006/008) | Audit 6 (ODR-002/009/010/012/013/015) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004) | Implementation 6 (ODR-016/017/018/019/020/021)_
+_2026-06-12 状态变更 (本次): ODR-021 新建 (P1-15 服务合并 7→5 完成)_
+_2026-06-12 状态变更: ADR-020 Proposed→Accepted (P1-16~20,24 全部完成); ODR-015 新建 (P1-1 文档一致化完成)_
 _2026-06-11 状态变更: ADR-007 OPEN→Accepted, ADR-008 PARTIAL→Accepted, ADR-017~020 新建 Proposed, ODR-014 新建 Completed (Sprint 6 spec 迁移 + 内容合并回长效文档: ODR-013/VISION.md/TASKS.md)_
 _docs/ 新增内容: VISION.md §Principle 8 (Documentation-Path Consistency) + TASKS.md §Sprint 6 启动期 待校核项 (6 项)_
 _.trae/ 临时目录: 已清空并删除 (3 个文件迁至 docs/specs/ 后已合并回 ODR-013/VISION.md/TASKS.md)_

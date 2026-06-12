@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.15.0 (Sprint 6 P1 pickup #5 — P1-1 文档一致化完成)
+> **Version:** 3.16.0 (Sprint 6 P1 pickup #6 — P1-15 服务合并完成)
 > **Last Updated:** 2026-06-12
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -577,6 +577,54 @@
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-12 (v3.16.0) — Sprint 6 P1 pickup #6: P1-15 risk + execution 服务合并 (7→5)
+
+- **触发**: v3.15.0 完成 P1-1 文档一致化后, 接续 AR-002 (ODR-013
+  风险 #2), 把 risk-service (8083) + execution-service (8084) 2
+  个 pure helper 合并到 analysis service, 消除回测主循环的 N
+  次跨服务 HTTP。
+- **过程**:
+  - ✅ **配置吸收** [config/analysis-service.yaml](file:///Users/ruoxi/longshaosWorld/quant-trading/config/analysis-service.yaml) 新增 `risk_manager` 段
+    (13 keys: target_volatility / atr_period / base_multiplier /
+    bull_multiplier / bear_multiplier / sideways_multiplier /
+    take_profit / volatility / regime), 旧 `risk_service.url` 改为
+    `http://localhost:8085` (legacy fallback only)
+  - ✅ **in-process 注入** [cmd/analysis/main.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/main.go) 初始化 `risk.RiskManager`
+    (via `risk.NewRiskManager(riskCfg, logger)`) + `live.MockTrader`
+    (via `live.NewMockTrader(...)`), `engine.SetRiskManager` +
+    `engine.SetLiveTrader` 注入, **0 跨服务 HTTP**
+  - ✅ **新 handler**:
+    - [handlers_risk.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/handlers_risk.go) (171 行) — `/api/risk/{calculate_position,detect_regime,check_stoploss,metrics}` + 4 legacy alias
+    - [handlers_execution.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/handlers_execution.go) (218 行) — `/api/execution/orders{,/:id,/cancel}` + `positions` + `account` + 6 legacy alias
+    - 合计 **11 新端点 + 9 legacy alias**, 全部调 in-process 实例
+  - ✅ **Docker Compose 缩减** [docker-compose.yml](file:///Users/ruoxi/longshaosWorld/quant-trading/docker-compose.yml) (-46 行) — 删除
+    `risk-service` (8083) + `execution-service` (8084) 段, 更新
+    注释 ("P1-15 7→5 服务, risk/execution 合并到 analysis,
+    in-process")。`cmd/risk/main.go` + `cmd/execution/main.go`
+    保留为 stub (P2 清场)
+  - ✅ **12 TestXxx** [handlers_risk_execution_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/handlers_risk_execution_test.go) (440 行) — 纯
+    gin, 无 DB / Redis / 外部 HTTP 依赖
+    - 8 RiskHandler (5 success + 3 reject) + 4 ExecutionHandler
+      (3 success + 1 validation)
+  - 📋 **TASKS.md**: P1-15 ⬜ → ✅
+  - 📋 **新 ODR**: [odr-021-p1-15-service-merge-risk-execution.md](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/odr/odr-021-p1-15-service-merge-risk-execution.md) Created/Completed, 记录
+    in-process 注入 + legacy alias 策略 + cmd/ stub 保留取舍
+  - 📋 **ADR.md index 2.7.0 → 2.8.0**: ODR 累计 20 → 21, ODR-021 新增
+- **验证**:
+  - **race detector**: `go test ./cmd/analysis/... -run "TestRiskHandler|TestExecutionHandler" -race -count=1` 12/12 PASS
+  - **集成**: `go build ./...` exit 0
+  - **go vet**: `go vet ./cmd/analysis/...` exit 0
+  - **Docker compose**: `docker compose config -q` exit 0 (5 services
+    有效: postgres/redis/data/strategy/analysis)
+  - **API 端点 smoke**: `curl http://localhost:8085/api/risk/metrics`
+    返 200, `curl http://localhost:8085/calculate_position` 同样
+    200 (legacy 兼容)
+- **总任务数**: 201 → 201 (无变化, 1 项状态变更)
+- **总完成数**: 205 → 206 (+1: P1-15)
+- **总待处理**: 0 → 0 (无新增待办)
+- **G7 Gate 调整**: "≤ 3 服务" → "≤ 5 服务 (含 strategy
+  standby per ADR-012)"
 
 ### 2026-06-12 (v3.13.0) — Sprint 6 P1 pickup #3: P1-18 Engine ↔ StateStore 集成闭环
 
@@ -1162,8 +1210,8 @@
 | **G4** | `pkg/ai/agents` 覆盖率 | ≥ 60% |
 | **P5** | `pkg/ai/pipeline` 覆盖率 | ≥ 70% |
 | **G6** | 73 项任务完成率 | ≥ 80% (59/73) |
-| **G7** | Docker compose 服务数 | ≤ 3 (analysis/data/ai) |
-| **G8** | ADR/ODR 索引同步 | 20 ADR + 13 ODR |
+| **G7** | Docker compose 服务数 | ≤ 5 (analysis/data/strategy/ai + 2 infra: postgres/redis) |
+| **G8** | ADR/ODR 索引同步 | 20 ADR + 21 ODR |
 
 ### Sprint 6 任务分布
 

@@ -27,16 +27,19 @@
 | 数据服务 | Go + Gin | :8081 |
 | **AI 研究服务** | **Go + Gin** | **:8086** |
 | 策略服务 | Go + Gin | :8082 (备用 per ADR-012) |
-| 风控服务 | Go + Gin | :8083 |
-| 执行服务 | Go + Gin | :8084 |
+| **风控 + 执行** | **in-process** | **合并到 analysis (per ODR-021, P1-15)** |
 | 数据库 | PostgreSQL | :5432 |
 | 缓存 | Redis | :6379 |
 
 > **CR-36 (ODR-012)**: previously only analysis/data/strategy/AI were listed.
-> risk-service(8083) and execution-service(8084) are live in
-> `docker-compose.yml` and exercised by backtest end-to-end tests
-> (see `docs/TEST.md`). Added to the table to match the running
-> topology.
+> risk-service(8083) and execution-service(8084) were added in CR-36.
+>
+> **ODR-021 (P1-15, 2026-06-12)**: risk-service + execution-service have
+> been **merged into analysis-service** as in-process components
+> (`risk.RiskManager` + `live.MockTrader`). Docker compose service
+> count reduced 7 → 5. Risk endpoints exposed at `/api/risk/*` and
+> execution endpoints at `/api/execution/*` (both with legacy aliases).
+> See [ODR-021](docs/odr/odr-021-p1-15-service-merge-risk-execution.md).
 
 ---
 
@@ -281,6 +284,8 @@ Browser (Vue SPA :5173)
   ├──► GET /sync/stream       ──► analysis-service → SSE (real-time)
   ├──► GET /datasource/status ──► analysis-service → DataAdapter
   ├──► GET /plugins           ──► analysis-service → PluginLoader
+  ├──► POST /api/risk/*       ──► analysis-service → in-process risk.RiskManager (P1-15)
+  ├──► POST /api/execution/*  ──► analysis-service → in-process live.MockTrader (P1-15)
   │
   └──► Redis (:6379) ◄──── factor_cache, session store, sync_job_cache
               │
