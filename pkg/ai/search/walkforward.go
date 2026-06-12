@@ -23,6 +23,26 @@ func NewWalkForwardValidator() *WalkForwardValidator {
 	}
 }
 
+// WithSizes returns a copy of the validator with the given minimum
+// window sizes. The original is not modified (P1-12: validate_l4.go
+// needs to tune the window sizes per-call without mutating the
+// shared agent's instance).
+//
+// Values <= 0 are ignored, preserving the existing setting.
+func (w *WalkForwardValidator) WithSizes(minTrain, minTest int) *WalkForwardValidator {
+	if w == nil {
+		w = NewWalkForwardValidator()
+	}
+	cp := *w
+	if minTrain > 0 {
+		cp.minTrainSize = minTrain
+	}
+	if minTest > 0 {
+		cp.minTestSize = minTest
+	}
+	return &cp
+}
+
 // WalkForwardResult holds the result of walk-forward analysis.
 type WalkForwardResult struct {
 	Windows      []WindowResult `json:"windows"`

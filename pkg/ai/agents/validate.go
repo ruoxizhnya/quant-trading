@@ -9,6 +9,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/expression"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/metrics"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/search"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/validator"
 	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 )
@@ -41,17 +42,38 @@ type ValidationResult struct {
 	Formula     string          `json:"formula"`
 	Inputs      []string        `json:"inputs"`
 	Description string          `json:"description"`
+
+	// P1-12 L4 walk-forward fields. Populated only when level >= L4
+	// and a BacktestRunner is configured. Empty otherwise.
+	ISSharpe    float64 `json:"is_sharpe,omitempty"`
+	OOSSharpe   float64 `json:"oos_sharpe,omitempty"`
+	SharpeGap   float64 `json:"sharpe_gap,omitempty"`
+	Robustness  float64 `json:"robustness,omitempty"`
+	OverfitRisk string  `json:"overfit_risk,omitempty"`
+	WindowCount int     `json:"window_count,omitempty"`
 }
 
 // ValidateAgent validates factor hypotheses through multiple levels.
 type ValidateAgent struct {
-	parser       *expression.Parser
-	evaluator    *expression.Evaluator
-	icCalc       *metrics.ICCalculator
-	turnoverCalc *metrics.TurnoverCalculator
-	dataProvider expression.DataProvider
-	btClient     *client.BacktestClient
+	parser        *expression.Parser
+	evaluator     *expression.Evaluator
+	icCalc        *metrics.ICCalculator
+	turnoverCalc  *metrics.TurnoverCalculator
+	dataProvider  expression.DataProvider
+	btClient      *client.BacktestClient
 	codeValidator *validator.CodeValidator
+
+	// P1-12 (ODR-013 Sprint 6): L4 walk-forward dependencies.
+	// btRunner is the pluggable backtest surface. nil disables L4
+	// (validateL4 falls back to the legacy "requires walk-forward
+	// integration" warning). Set via SetBacktestRunner.
+	btRunner BacktestRunner
+	// walkForward is the underlying search.WalkForwardValidator.
+	// nil → runWalkForward uses a fresh default (no shared state).
+	walkForward *search.WalkForwardValidator
+	// l4Cfg is the active L4 window / gap config. nil → package
+	// defaults from validate_l4.go. Set via SetL4Config.
+	l4Cfg *L4Config
 }
 
 // NewValidateAgent creates a new ValidateAgent.
@@ -66,15 +88,47 @@ func NewValidateAgent(dataProvider expression.DataProvider) *ValidateAgent {
 }
 
 // NewValidateAgentWithBacktest creates a ValidateAgent with backtest client.
+// P1-12: also auto-wires a BacktestRunner from the client so L4 walk-forward
+// works out of the box when the backtest service is reachable.
 func NewValidateAgentWithBacktest(dataProvider expression.DataProvider, btClient *client.BacktestClient) *ValidateAgent {
-	return &ValidateAgent{
+	a := &ValidateAgent{
 		parser:        expression.NewParser(),
 		icCalc:        metrics.NewICCalculator(),
 		turnoverCalc:  metrics.NewTurnoverCalculator(),
 		dataProvider:  dataProvider,
 		btClient:      btClient,
 		codeValidator: validator.NewCodeValidator(),
+		btRunner:      NewHTTPBacktestRunner(btClient),
+		walkForward:   search.NewWalkForwardValidator(),
 	}
+	return a
+}
+
+// SetBacktestRunner overrides the BacktestRunner. Pass nil to disable
+// L4 (validateL4 falls back to the legacy warning).
+func (a *ValidateAgent) SetBacktestRunner(r BacktestRunner) {
+	a.btRunner = r
+}
+
+// SetWalkForwardValidator overrides the WalkForwardValidator. Pass
+// nil to use a fresh default per call.
+func (a *ValidateAgent) SetWalkForwardValidator(w *search.WalkForwardValidator) {
+	a.walkForward = w
+}
+
+// SetL4Config sets the active L4 window / gap config. Pass nil to
+// reset to the package defaults.
+func (a *ValidateAgent) SetL4Config(cfg *L4Config) {
+	a.l4Cfg = cfg
+}
+
+// l4Config returns the active L4Config, applying package defaults
+// to a value copy if no config was set.
+func (a *ValidateAgent) l4Config() L4Config {
+	if a.l4Cfg == nil {
+		return applyL4Defaults(L4Config{})
+	}
+	return applyL4Defaults(*a.l4Cfg)
 }
 
 // Validate runs validation at the specified level.
@@ -222,11 +276,17 @@ func (a *ValidateAgent) validateL2(ctx context.Context, result *ValidationResult
 }
 
 // validateL3 performs standard backtest validation.
+//
+// P1-12 (ODR-013 Sprint 6): when no btClient is configured we still
+// must reach validateL4 — the L4 walk-forward is independently driven
+// by the BacktestRunner. We keep the legacy warning for diagnostics
+// but do NOT propagate an error (returning nil lets Validate()
+// proceed to validateL4).
 func (a *ValidateAgent) validateL3(ctx context.Context, result *ValidationResult) error {
 	if a.btClient == nil {
 		result.Warnings = append(result.Warnings, "No backtest client available for L3 validation")
 		result.Score = 3.0
-		return fmt.Errorf("no backtest client")
+		return nil
 	}
 
 	// Run quick backtest via API
@@ -253,10 +313,65 @@ func (a *ValidateAgent) validateL3(ctx context.Context, result *ValidationResult
 }
 
 // validateL4 performs walk-forward validation.
+//
+// P1-12 (ODR-013 Sprint 6): replaced the previous stub with an actual
+// walk-forward loop. The fail-gate is the SharpeGap: when
+// (ISSharpe - OOSSharpe) / |ISSharpe| exceeds L4Config.SharpeGapLimit
+// (default 0.30), the result is marked as failed with a clear error.
+//
+// Backward compatibility: when no BacktestRunner is configured
+// (agent built via NewValidateAgent without SetBacktestRunner), the
+// legacy warning is preserved so existing call-sites that pass nil
+// to L4 still get a non-fatal result.
 func (a *ValidateAgent) validateL4(ctx context.Context, result *ValidationResult) error {
-	// L4 requires walk-forward engine - placeholder for now
-	result.Warnings = append(result.Warnings, "L4 validation requires walk-forward integration")
-	result.Score = 4.0
+	if a.btRunner == nil {
+		result.Warnings = append(result.Warnings,
+			"L4 validation requires BacktestRunner (use NewValidateAgentWithBacktest or SetBacktestRunner)")
+		result.Score = 4.0
+		return nil
+	}
+
+	cfg := a.l4Config()
+	outcome, err := a.runWalkForward(ctx, result.Formula, cfg)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("L4 walk-forward failed: %v", err))
+		result.Score = 4.0
+		return err
+	}
+
+	// Populate the L4 fields on the result for downstream consumers
+	// (UI dashboard, gene pool, pipeline orchestrator).
+	result.ISSharpe = outcome.ISSharpe
+	result.OOSSharpe = outcome.OOSSharpe
+	result.SharpeGap = outcome.SharpeGap
+	result.Robustness = outcome.Robustness
+	result.OverfitRisk = outcome.OverfitRisk
+	result.WindowCount = len(outcome.Windows)
+
+	// Score: base 4.0 (passed L4) plus the better of (OOS, IS) but
+	// capped so a high IS Sharpe can't mask a high gap.
+	sharpe := outcome.OOSSharpe
+	if outcome.ISSharpe < outcome.OOSSharpe {
+		sharpe = outcome.ISSharpe
+	}
+	result.Score = 4.0 + math.Max(0, sharpe)
+
+	// P1-12 fail-gate: Sharpe degradation > configured limit.
+	if outcome.SharpeGap > outcome.Limit {
+		result.Errors = append(result.Errors, fmt.Sprintf(
+			"P1-12 fail-gate: IS/OOS Sharpe gap %.2f%% exceeds limit %.2f%% (IS=%.3f, OOS=%.3f, risk=%s)",
+			outcome.SharpeGap*100, outcome.Limit*100, outcome.ISSharpe, outcome.OOSSharpe, outcome.OverfitRisk,
+		))
+		result.Passed = false
+		// Keep the warnings array for non-fatal diagnostics
+		result.Warnings = append(result.Warnings, fmt.Sprintf(
+			"Walk-forward robustness %.2f across %d window(s)",
+			outcome.Robustness, len(outcome.Windows),
+		))
+		return nil
+	}
+
+	result.Passed = len(result.Errors) == 0 && result.Score > 0
 	return nil
 }
 
