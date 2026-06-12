@@ -179,6 +179,22 @@
         >
           <pre>{{ currentResult.backtest_error }}</pre>
         </n-alert>
+
+        <!-- P1-13 (ODR-017): L5 人工审查操作栏.
+             仅在 status=complete 时显示 (failed / 步骤中 不可审查).
+             reviewed 事件触发后, 父组件用 server 返回的 updated 替换 currentResult. -->
+        <n-card
+          v-if="currentResult && isReviewable"
+          title="人工审查 (L5)"
+          size="small"
+        >
+          <ReviewActions
+            :job-id="currentResult.id"
+            :yaml-config="currentResult.yaml_config"
+            :review="currentResult.review"
+            @reviewed="onReviewed"
+          />
+        </n-card>
       </n-space>
     </n-card>
 
@@ -229,6 +245,7 @@ import {
 import { runPipeline } from '@/api/copilot'
 import type { PipelineResult } from '@/types/pipeline'
 import BacktestResultCard from './BacktestResultCard.vue'
+import ReviewActions from './ReviewActions.vue'
 
 const message = useMessage()
 
@@ -277,6 +294,12 @@ const stepStatus = computed(() => {
 
 const logsText = computed(() => {
   return currentResult.value?.logs?.join('\n') || ''
+})
+
+// P1-13 (ODR-017): L5 审查只对 `complete` 状态开放.
+// failed / in-progress 状态的 job 不应被审查 (语义上无效).
+const isReviewable = computed(() => {
+  return currentResult.value?.status === 'complete'
 })
 
 // Table columns
@@ -375,6 +398,16 @@ function copyCode() {
   if (!currentResult.value?.generated_code) return
   navigator.clipboard.writeText(currentResult.value.generated_code)
   message.success('代码已复制到剪贴板')
+}
+
+// P1-13 (ODR-017): 子组件审查成功后, 用 server 返回的最新快照替换 currentResult
+// 并同步更新 jobHistory 中对应条目.
+function onReviewed(updated: PipelineResult) {
+  currentResult.value = updated
+  const idx = jobHistory.value.findIndex(j => j.id === updated.id)
+  if (idx >= 0) {
+    jobHistory.value[idx] = updated
+  }
 }
 
 // Watch for status changes to update step
