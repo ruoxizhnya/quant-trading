@@ -589,6 +589,17 @@ GET  /api/paper/portfolio          - Get portfolio summary
 GET  /api/paper/trades             - Get trade history
 ```
 
+**Order types (P1-3 / ODR-016)** — `pkg/live/engine.go:tryFillOrder`:
+- `market` — 立即按 Ask/Bid 成交
+- `limit` — 限价单: `Buy: Ask <= LimitPrice` 时成交, `Sell: Bid >= LimitPrice` 时成交; 成交价为限价或更优
+- `stop` — 止损单: `Buy: Ask >= StopPrice` 触发后转市价; `Sell: Bid <= StopPrice` 触发后转市价
+- `trailing` — 跟踪止损: HWM 单调递增, 触发价 = `HWM - TrailOffset` (TrailAmount 优先于 TrailPercent); 触发后转市价
+
+字段要求 (server-side validation in `OrderManager.SubmitOrder`):
+- `limit`     → `LimitPrice > 0`
+- `stop`      → `StopPrice > 0`
+- `trailing`  → `TrailAmount > 0` 或 `TrailPercent > 0`
+
 ### 6. Analysis Service (port 8085)
 **Responsibilities**:
 - API Gateway (proxies to data-service and strategy-service)

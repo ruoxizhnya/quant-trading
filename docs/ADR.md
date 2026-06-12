@@ -54,6 +54,7 @@
 | [ODR-013](odr/odr-013-comprehensive-audit-2026-06-11.md) | Sprint 6 — 全项目 4 维度综合审查 (业务/架构/代码/测试) | Accepted | Audit | 2026-06-11 |
 | [ODR-014](odr/odr-014-sprint6-spec-migration.md) | Sprint 6 对齐审查 Spec 文件迁移 + 合并回长效文档 | Completed | Migration | 2026-06-11 |
 | [ODR-015](odr/odr-015-p1-1-docs-consistency.md) | P1-1 文档一致化 — Strategy 接口 ISP 拆分 + Phase 3/4 编号统一 | Completed | Audit | 2026-06-12 |
+| [ODR-016](odr/odr-016-p1-3-live-limit-orders.md) | P1-3 LiveEngine 限价单 (Limit / Stop / Trailing) — 撮合语义 + HWM 跟踪 | Completed | Implementation | 2026-06-12 |
 
 ---
 

@@ -47,6 +47,9 @@ func (om *OrderManager) Run(ctx context.Context) {
 
 // SubmitOrder submits a new order
 func (om *OrderManager) SubmitOrder(order domain.Order) (string, error) {
+	if err := validateOrderShape(&order); err != nil {
+		return "", err
+	}
 	order.ID = generateOrderID()
 	order.Status = "pending"
 	order.Timestamp = time.Now()
@@ -140,6 +143,25 @@ func (om *OrderManager) UpdateOrderStatus(orderID string, status string) {
 	}
 }
 
+// UpdateOrder replaces an order's record in place. Used by the engine to
+// persist running state on the order (e.g. trailing-stop HWM) so that
+// subsequent reads see the updated snapshot.
+//
+// P1-3 (ODR-016) — added for LiveEngine trailing-stop bookkeeping.
+func (om *OrderManager) UpdateOrder(orderID string, order *domain.Order) {
+	if order == nil {
+		return
+	}
+	om.mu.Lock()
+	defer om.mu.Unlock()
+	// Preserve identity by aligning the map key with the supplied ID.
+	aligned := *order
+	if aligned.ID == "" {
+		aligned.ID = orderID
+	}
+	om.orders[orderID] = aligned
+}
+
 func (om *OrderManager) saveOrder(order domain.Order) {
 	om.mu.Lock()
 	defer om.mu.Unlock()
@@ -201,4 +223,38 @@ func (om *OrderManager) AddTrade(trade domain.Trade) {
 
 func generateOrderID() string {
 	return fmt.Sprintf("ORD-%d", time.Now().UnixNano())
+}
+
+// validateOrderShape enforces the type-specific invariants of an Order
+// before it is forwarded to the broker. Returns an error if the order
+// is missing a required trigger field (e.g. LimitPrice for a limit order).
+//
+// P1-3 (ODR-016) — added so misconfigured limit / stop / trailing orders
+// are rejected at submission time rather than silently sitting in
+// pending without ever filling.
+func validateOrderShape(order *domain.Order) error {
+	if order == nil {
+		return fmt.Errorf("nil order")
+	}
+	if order.Symbol == "" {
+		return fmt.Errorf("order symbol is required")
+	}
+	if order.Quantity <= 0 {
+		return fmt.Errorf("order quantity must be positive, got %v", order.Quantity)
+	}
+	switch order.OrderType {
+	case domain.OrderTypeLimit:
+		if order.LimitPrice <= 0 {
+			return fmt.Errorf("limit order requires LimitPrice > 0")
+		}
+	case domain.OrderTypeStop:
+		if order.StopPrice <= 0 {
+			return fmt.Errorf("stop order requires StopPrice > 0")
+		}
+	case domain.OrderTypeTrailing:
+		if order.TrailAmount <= 0 && order.TrailPercent <= 0 {
+			return fmt.Errorf("trailing order requires TrailAmount or TrailPercent > 0")
+		}
+	}
+	return nil
 }

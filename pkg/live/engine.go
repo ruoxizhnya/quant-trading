@@ -228,38 +228,198 @@ func (e *LiveEngine) run(ctx context.Context) {
 
 func (e *LiveEngine) handleQuote(quote Quote) {
 	orders := e.orderManager.GetPendingOrders()
-	for _, order := range orders {
-		if order.Symbol == quote.Symbol {
-			e.tryFillOrder(order, quote)
+	for i := range orders {
+		order := orders[i]
+		if order.Symbol != quote.Symbol {
+			continue
 		}
+		e.tryFillOrder(&order, quote)
 	}
 }
 
-func (e *LiveEngine) tryFillOrder(order domain.Order, quote Quote) {
-	if order.OrderType == domain.OrderTypeMarket {
-		fillPrice := quote.Close
+// tryFillOrder evaluates whether a pending order should fill against the
+// incoming quote and, if so, executes the fill at the appropriate price.
+//
+// P1-3 (ODR-016) — LiveEngine 限价单实现.
+//
+// Order-type semantics:
+//
+//   - Market:   fill at Ask (buy) / Bid (sell) immediately.
+//   - Limit:    fill only when the market crosses the limit price.
+//                  Buy  → Ask <= LimitPrice
+//                  Sell → Bid >= LimitPrice
+//               (crossing the spread, conservative for the taker side.)
+//   - Stop:     a stop order. Once the market touches the stop price, it
+//               becomes a market order and fills at the next available
+//               price. StopBuy triggers on Ask >= StopPrice, StopSell on
+//               Bid <= StopPrice.
+//   - Trailing: a trailing stop. We track a high water mark (HWM) per
+//               pending order. The trigger price is HWM - TrailOffset.
+//                  Buy  triggers when Ask <= trigger
+//                  Sell triggers when Bid <= trigger
+//               Only meaningful for Sell/Close direction in practice but
+//               the engine supports both for symmetry.
+//
+// The function updates the in-memory order (HWM for trailing orders,
+// status transition) via the OrderManager and emits the onTrade callback
+// when a fill occurs.
+func (e *LiveEngine) tryFillOrder(order *domain.Order, quote Quote) {
+	if order == nil {
+		return
+	}
+
+	// Trailing orders require per-quote HWM bookkeeping regardless of fill.
+	if order.OrderType == domain.OrderTypeTrailing {
+		e.updateTrailingHWM(order, quote)
+	}
+
+	if !e.shouldFill(order, quote) {
+		return
+	}
+
+	fillPrice := e.computeFillPrice(order, quote)
+
+	trade := domain.Trade{
+		ID:         generateID(),
+		Symbol:     order.Symbol,
+		Direction:  order.Direction,
+		Quantity:   order.Quantity,
+		Price:      fillPrice,
+		Commission: calculateCommission(fillPrice*order.Quantity, e.config),
+		Timestamp:  quote.Timestamp,
+	}
+
+	e.orderManager.UpdateOrderStatus(order.ID, "filled")
+	e.positionManager.UpdateFromTrade(trade)
+
+	if e.onOrderUpdate != nil {
+		filled := *order
+		filled.FillPrice = fillPrice
+		filled.FilledQty = order.Quantity
+		filled.Status = "filled"
+		e.onOrderUpdate(filled)
+	}
+	if e.onTrade != nil {
+		e.onTrade(trade)
+	}
+}
+
+// shouldFill returns true when the order's trigger condition is met by the
+// current quote. It is order-type and direction aware.
+func (e *LiveEngine) shouldFill(order *domain.Order, quote Quote) bool {
+	switch order.OrderType {
+	case domain.OrderTypeMarket:
+		return true
+
+	case domain.OrderTypeLimit:
+		// Crossing-the-spread semantics: a buy limit is fillable when the
+		// ask is at or below the limit; a sell limit is fillable when the
+		// bid is at or above the limit.
+		if order.LimitPrice <= 0 {
+			// Misconfigured limit order — skip rather than silently fill.
+			return false
+		}
+		switch order.Direction {
+		case domain.DirectionLong:
+			return quote.Ask > 0 && quote.Ask <= order.LimitPrice
+		case domain.DirectionShort, domain.DirectionClose:
+			return quote.Bid > 0 && quote.Bid >= order.LimitPrice
+		}
+
+	case domain.OrderTypeStop:
+		if order.StopPrice <= 0 {
+			return false
+		}
+		switch order.Direction {
+		case domain.DirectionLong:
+			// Stop buy: triggered when price breaks out upward.
+			return quote.Ask >= order.StopPrice
+		case domain.DirectionShort, domain.DirectionClose:
+			// Stop sell / protective stop: triggered when price breaks down.
+			return quote.Bid > 0 && quote.Bid <= order.StopPrice
+		}
+
+	case domain.OrderTypeTrailing:
+		trigger := e.trailingTriggerPrice(order)
+		if trigger <= 0 {
+			return false
+		}
+		switch order.Direction {
+		case domain.DirectionLong:
+			// Defensive trailing-buy: only fill when ask is sane.
+			return quote.Ask > 0 && quote.Ask <= trigger
+		case domain.DirectionShort, domain.DirectionClose:
+			return quote.Bid > 0 && quote.Bid <= trigger
+		}
+	}
+	return false
+}
+
+// computeFillPrice picks the execution price based on order type.
+// Stop / Trailing orders convert to a market fill once triggered.
+func (e *LiveEngine) computeFillPrice(order *domain.Order, quote Quote) float64 {
+	// For stop / trailing that have been triggered, fill at the market side
+	// the taker would naturally hit.
+	if order.OrderType == domain.OrderTypeStop ||
+		order.OrderType == domain.OrderTypeTrailing {
 		if order.Direction == domain.DirectionLong {
-			fillPrice = quote.Ask
-		} else {
-			fillPrice = quote.Bid
+			return quote.Ask
 		}
-
-		trade := domain.Trade{
-			ID:         generateID(),
-			Symbol:     order.Symbol,
-			Direction:  order.Direction,
-			Quantity:   order.Quantity,
-			Price:      fillPrice,
-			Commission: calculateCommission(fillPrice*order.Quantity, e.config),
-			Timestamp:  time.Now(),
+		return quote.Bid
+	}
+	if order.OrderType == domain.OrderTypeLimit {
+		// Limit fill at limit price or better — for a buy, "better" is lower,
+		// so we cap at the actual ask (conservative for the buyer).
+		if order.Direction == domain.DirectionLong {
+			if quote.Ask > 0 && quote.Ask < order.LimitPrice {
+				return quote.Ask
+			}
+		} else if quote.Bid > 0 && quote.Bid > order.LimitPrice {
+			return quote.Bid
 		}
+		return order.LimitPrice
+	}
+	// Market
+	if order.Direction == domain.DirectionLong {
+		return quote.Ask
+	}
+	return quote.Bid
+}
 
-		e.orderManager.UpdateOrderStatus(order.ID, "filled")
-		e.positionManager.UpdateFromTrade(trade)
+// trailingTriggerPrice returns the price at which a trailing order would
+// trigger given the current HWM. TrailAmount and TrailPercent are mutually
+// exclusive; if both are set, TrailAmount wins (deterministic precedence).
+func (e *LiveEngine) trailingTriggerPrice(order *domain.Order) float64 {
+	if order.HighWaterMark <= 0 {
+		return 0
+	}
+	offset := order.TrailAmount
+	if offset <= 0 && order.TrailPercent > 0 {
+		offset = order.HighWaterMark * order.TrailPercent
+	}
+	return order.HighWaterMark - offset
+}
 
-		if e.onTrade != nil {
-			e.onTrade(trade)
-		}
+// updateTrailingHWM moves the order's high water mark up to the new high
+// observed in the quote, but never down. It also persists the updated
+// order back to the manager so future reads see the new HWM.
+func (e *LiveEngine) updateTrailingHWM(order *domain.Order, quote Quote) {
+	// Use the most aggressive side (Bid/Ask) for HWM tracking so the
+	// trailing offset reflects the worst-case price for the holder.
+	candidate := quote.Bid
+	if quote.Ask > candidate {
+		candidate = quote.Ask
+	}
+	if quote.High > candidate {
+		candidate = quote.High
+	}
+	if candidate <= 0 {
+		return
+	}
+	if order.HighWaterMark == 0 || candidate > order.HighWaterMark {
+		order.HighWaterMark = candidate
+		// Persist HWM back to the order store so a re-read sees it.
+		e.orderManager.UpdateOrder(order.ID, order)
 	}
 }
 

@@ -17,12 +17,20 @@ const (
 	DirectionHold  Direction = "hold"
 )
 
-// OrderType represents the type of order
+// OrderType represents the type of order.
+//
+// P1-3 (ODR-016) — LiveEngine 限价单支持:
+//   - Market:  市价单, 立即按当前价成交
+//   - Limit:   限价单, 仅在价格穿越限价时成交
+//   - Stop:    止损/止损买入单, 价格触及 StopPrice 后转为市价单
+//   - Trailing: 跟踪止损单, 跟踪市场价 HWM (High Water Mark) 后动态调整
 type OrderType string
 
 const (
-	OrderTypeMarket OrderType = "market"
-	OrderTypeLimit  OrderType = "limit"
+	OrderTypeMarket   OrderType = "market"
+	OrderTypeLimit    OrderType = "limit"
+	OrderTypeStop     OrderType = "stop"
+	OrderTypeTrailing OrderType = "trailing"
 )
 
 // OHLCV represents daily candlestick data
@@ -188,19 +196,38 @@ type RiskMetrics struct {
 	CVaR95          float64   `json:"cvar_95"` // Conditional VaR
 }
 
-// Order represents a trading order
+// Order represents a trading order.
+//
+// P1-3 (ODR-016) — LiveEngine 限价单: 扩展了 Stop/Trailing 字段.
+//   - StopPrice:    触发价 (OrderType=Stop 或 Trailing)
+//   - TrailAmount:  跟踪止损绝对偏移 (单位: 元, 与 TrailPercent 互斥, 二者择一)
+//   - TrailPercent: 跟踪止损百分比偏移 (0.05 = 5%, 与 TrailAmount 互斥)
+//   - HighWaterMark: 跟踪止损运行期 HWM (由 LiveEngine 内部维护, 调用方不应预设)
+//
+// 限价单 / 止损单 的撮合语义:
+//   - Limit Buy:   Ask <= LimitPrice        时成交
+//   - Limit Sell:  Bid >= LimitPrice        时成交
+//   - Stop Buy:    Ask >= StopPrice         时按市价成交 (突破追涨)
+//   - Stop Sell:   Bid <= StopPrice         时按市价成交 (破位止损)
+//   - Trailing Buy:  HWM 上升且 (HWM - TrailOffset) 触发后转市价单
+//   - Trailing Sell: HWM 上升且 (HWM - TrailOffset) 触发后转市价单 (回撤到位止损)
 type Order struct {
-	ID         string    `json:"id"`
-	Symbol     string    `json:"symbol"`
-	Direction  Direction `json:"direction"` // long or short
-	OrderType  OrderType `json:"order_type"`
-	Quantity   float64   `json:"quantity"`
-	LimitPrice float64   `json:"limit_price"` // 0 for market orders
-	Timestamp  time.Time `json:"timestamp"`
-	FilledQty  float64   `json:"filled_qty"`
-	FillPrice  float64   `json:"fill_price"`
-	Status     string    `json:"status"` // "filled" / "partial" / "cancelled" / "expired"
-	Notes      string    `json:"notes"`
+	ID            string    `json:"id"`
+	Symbol        string    `json:"symbol"`
+	Direction     Direction `json:"direction"` // long or short
+	OrderType     OrderType `json:"order_type"`
+	Quantity      float64   `json:"quantity"`
+	LimitPrice    float64   `json:"limit_price"` // 0 for market orders
+	// P1-3 扩展字段
+	StopPrice     float64 `json:"stop_price,omitempty"`      // 触发价
+	TrailAmount   float64 `json:"trail_amount,omitempty"`    // 跟踪绝对偏移
+	TrailPercent  float64 `json:"trail_percent,omitempty"`   // 跟踪百分比偏移
+	HighWaterMark float64 `json:"high_water_mark,omitempty"` // 跟踪止损 HWM (内部维护)
+	Timestamp     time.Time `json:"timestamp"`
+	FilledQty     float64   `json:"filled_qty"`
+	FillPrice     float64   `json:"fill_price"`
+	Status        string    `json:"status"` // "filled" / "partial" / "cancelled" / "expired"
+	Notes         string    `json:"notes"`
 }
 
 // TargetPosition tracks the target vs actual position for execution gap management.
