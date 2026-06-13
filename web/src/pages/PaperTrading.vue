@@ -47,7 +47,7 @@
         <n-grid :cols="4" :x-gap="12">
           <n-gi>
             <n-form-item label="股票代码" path="symbol">
-              <n-input v-model:value="orderForm.symbol" placeholder="如: 000001.SZ" />
+              <n-input v-model:value="orderForm.symbol" placeholder="如: 000001.SZ" @blur="refreshSuitability" />
             </n-form-item>
           </n-gi>
           <n-gi>
@@ -69,8 +69,44 @@
         <n-form-item v-if="orderForm.order_type === 'limit'" label="限价" path="limit_price">
           <n-input-number v-model:value="orderForm.limit_price" :min="0" placeholder="10.5" />
         </n-form-item>
+
+        <!-- P2-4 (ODR-028): investor-suitability precheck banner.
+             Renders the verdict of POST /api/compliance/check for
+             the current symbol. When the verdict is "rejected", the
+             submit button is disabled and the operator must read
+             the reasons before they can resubmit a different symbol
+             or a same-symbol adjusted order. -->
+        <n-alert
+          v-if="suitabilityState.visible"
+          :type="suitabilityState.allowed ? 'success' : 'error'"
+          :title="suitabilityState.title"
+          :show-icon="true"
+          class="suitability-alert"
+          style="margin-bottom: 12px"
+        >
+          <template v-if="suitabilityState.allowed">
+            当前账户已通过 <strong>{{ suitabilityState.boardName }}</strong> 适当性检查，可正常下单。
+          </template>
+          <template v-else>
+            <p style="margin: 0 0 4px 0">
+              当前账户不符合 <strong>{{ suitabilityState.boardName }}</strong> 准入要求，下单按钮已禁用。
+            </p>
+            <ul style="margin: 4px 0 0 20px; padding: 0">
+              <li v-for="(reason, idx) in suitabilityState.reasons" :key="idx">{{ reason }}</li>
+            </ul>
+            <p v-if="suitabilityState.requiredDescription" class="suitability-desc">
+              {{ suitabilityState.requiredDescription }}
+            </p>
+          </template>
+        </n-alert>
+
         <n-form-item>
-          <n-button type="primary" @click="handleSubmitOrder" :loading="submitting">
+          <n-button
+            type="primary"
+            :loading="submitting"
+            :disabled="suitabilityState.checked && !suitabilityState.allowed"
+            @click="handleSubmitOrder"
+          >
             提交订单
           </n-button>
         </n-form-item>
@@ -147,6 +183,8 @@ import {
   getTrades,
 } from '@/api/paper-trading'
 import type { Position, Trade, Order, PaperTradingStatus, Portfolio } from '@/api/paper-trading'
+import { checkSuitability } from '@/api/compliance'
+import type { CheckResponse } from '@/api/compliance'
 import EmergencyFlatten from '@/components/paper/EmergencyFlatten.vue'
 
 const message = useMessage()
@@ -295,6 +333,20 @@ async function handleSubmitOrder() {
     // Form validation errors are surfaced by n-form-item rules; no toast needed.
     return
   }
+
+  // P2-4 (ODR-028): defensive precheck. The symbol input box already
+  // runs `refreshSuitability` on blur, but the operator may type
+  // a new symbol and click "submit" before the blur fires. We
+  // re-run the check synchronously here so a rejected symbol can
+  // never reach /api/execution/orders through the UI.
+  if (orderForm.symbol) {
+    const ok = await ensureSuitability(orderForm.symbol)
+    if (!ok) {
+      message.warning('当前账户不符合该板块适当性要求，下单已拦截')
+      return
+    }
+  }
+
   submitting.value = true
   try {
     await submitOrder({
@@ -308,11 +360,106 @@ async function handleSubmitOrder() {
     orderForm.symbol = ''
     orderForm.quantity = 100
     orderForm.limit_price = undefined
+    // Reset the banner so the next order starts in a neutral state.
+    resetSuitability()
     await fetchData()
   } catch (error) {
     message.error(extractErrorMessage(error, '提交失败'))
   } finally {
     submitting.value = false
+  }
+}
+
+// ============================================================
+// P2-4 (ODR-028): investor-suitability precheck logic.
+//
+// The flow is:
+//   1. User types a symbol → @blur fires refreshSuitability()
+//   2. refreshSuitability() calls /api/compliance/check
+//   3. The verdict is stored in `suitabilityState` and rendered
+//   4. The submit button is disabled when allowed=false
+//   5. handleSubmitOrder() re-runs the check as a safety net
+//
+// The "checked" flag distinguishes "we haven't run the check yet"
+// (no banner, button enabled — operator can still submit; the
+// precheck runs on submit) from "we ran it and got rejected" (banner
+// red, button disabled) from "we ran it and got approved" (banner
+// green, button enabled).
+// ============================================================
+
+interface SuitabilityState {
+  visible: boolean
+  checked: boolean
+  allowed: boolean
+  title: string
+  boardName: string
+  reasons: string[]
+  requiredDescription: string
+}
+
+const initialSuitability = (): SuitabilityState => ({
+  visible: false,
+  checked: false,
+  allowed: false,
+  title: '',
+  boardName: '',
+  reasons: [],
+  requiredDescription: '',
+})
+
+const suitabilityState = reactive<SuitabilityState>(initialSuitability())
+
+function resetSuitability() {
+  Object.assign(suitabilityState, initialSuitability())
+}
+
+function applySuitabilityResult(result: CheckResponse) {
+  // Re-classify the verdict for the UI.
+  if (result.allowed) {
+    suitabilityState.allowed = true
+    suitabilityState.title = `适当性检查通过 (${result.board_name || result.board})`
+    suitabilityState.boardName = result.board_name || result.board
+    suitabilityState.reasons = []
+    suitabilityState.requiredDescription = ''
+  } else {
+    suitabilityState.allowed = false
+    suitabilityState.title = `适当性检查未通过 (${result.board_name || result.board})`
+    suitabilityState.boardName = result.board_name || result.board
+    suitabilityState.reasons = result.reasons || []
+    suitabilityState.requiredDescription = result.required?.Description || ''
+  }
+  suitabilityState.checked = true
+  suitabilityState.visible = true
+}
+
+async function refreshSuitability() {
+  const symbol = orderForm.symbol.trim()
+  if (!symbol) {
+    resetSuitability()
+    return
+  }
+  // Fire the precheck. We swallow errors here and let the submit
+  // path re-raise them; the banner just won't render.
+  try {
+    const result = await checkSuitability({ symbol })
+    applySuitabilityResult(result)
+  } catch {
+    resetSuitability()
+  }
+}
+
+// ensureSuitability is the synchronous-style wrapper used by
+// handleSubmitOrder. Returns true if the order is allowed to
+// proceed (either the verdict was already allowed, or the
+// precheck just came back allowed), false otherwise.
+async function ensureSuitability(symbol: string): Promise<boolean> {
+  try {
+    const result = await checkSuitability({ symbol })
+    applySuitabilityResult(result)
+    return result.allowed
+  } catch (error) {
+    message.error(extractErrorMessage(error, '适当性预检失败'))
+    return false
   }
 }
 
@@ -355,5 +502,12 @@ onUnmounted(() => {
 .orders-card,
 .trades-card {
   margin-top: 16px;
+}
+
+.suitability-alert .suitability-desc {
+  margin: 8px 0 0 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  line-height: 1.5;
 }
 </style>
