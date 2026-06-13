@@ -17,6 +17,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/alert"
 	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/compliance"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/live"
@@ -347,7 +348,7 @@ func main() {
 		router.Use(authSvc.AuditMiddleware())
 	}
 
-	registerRoutes(router, engine, jobService, wfEngine, batchEngine, strategyDB, copilotService, copilotRunner, factorAttributor, pluginLoader, authSvc, riskManager, executionTrader, v.GetString("trading.emergency_token"), logger)
+	registerRoutes(router, engine, jobService, wfEngine, batchEngine, strategyDB, copilotService, copilotRunner, factorAttributor, pluginLoader, authSvc, riskManager, executionTrader, v.GetString("trading.emergency_token"), logger, v)
 
 	// P2 alert (ODR-025): register the alert HTTP endpoints and
 	// start the periodic evaluation loop. The loop is a single
@@ -471,7 +472,8 @@ func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 	}
 }
 
-func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, wfEngine *backtest.WalkForwardEngine, batchEngine *backtest.BatchEngine, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, pluginLoader *strategy.PluginLoader, authSvc *auth.Service, riskManager *risk.RiskManager, executionTrader live.LiveTrader, emergencyToken string, logger zerolog.Logger) {
+func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, wfEngine *backtest.WalkForwardEngine, batchEngine *backtest.BatchEngine, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, pluginLoader *strategy.PluginLoader, authSvc *auth.Service, riskManager *risk.RiskManager, executionTrader live.LiveTrader, emergencyToken string, logger zerolog.Logger, v *viper.Viper) {
+
 	router.Static("/static", "./cmd/analysis/static")
 
 	router.GET("/", func(c *gin.Context) {
@@ -565,4 +567,48 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 	// through to the execution handler. Empty token disables the
 	// kill-switch endpoint (returns 503 instead of 404).
 	NewExecutionHandler(executionTrader, logger, emergencyToken).RegisterRoutes(router)
+
+	// P2-4 (ODR-028): investor suitability (compliance) endpoints.
+	// The handler is read-only — it does not block order submission
+	// in the execution path; the frontend does the precheck before
+	// calling POST /api/execution/orders. The default profile is
+	// loaded from `trading.default_user_profile.*` in the analysis
+	// config; in production this is replaced by a JWT-driven DB
+	// lookup (P1-2 + a future `users` table column set).
+	defaultProfile := loadDefaultSuitabilityProfile(v)
+	// P2-6 (ODR-028): large-transaction reporter config from
+	// `compliance.reporter.*` viper keys. Defaults are regulatory
+	// (2M / 5M) but the operator can override per environment.
+	reporterCfg := compliance.LargeTradeConfig{
+		SingleThresholdCNY:     v.GetFloat64("compliance.reporter.single_threshold_cny"),
+		CumulativeThresholdCNY: v.GetFloat64("compliance.reporter.cumulative_threshold_cny"),
+		OutputPath:             v.GetString("compliance.reporter.output_path"),
+		AccountWhitelist:       map[string]bool{},
+	}
+	NewComplianceHandler(logger, defaultProfile, reporterCfg).RegisterRoutes(router)
+}
+
+// loadDefaultSuitabilityProfile reads the suitability profile from
+// the analysis-service viper config under `trading.default_user_profile.*`.
+// Missing keys resolve to zero values — a zero-valued profile
+// represents the most conservative "default-reject" stance (no asset,
+// no experience, no risk level → nothing passes for restricted boards).
+func loadDefaultSuitabilityProfile(v *viper.Viper) compliance.SuitabilityProfile {
+	p := compliance.SuitabilityProfile{
+		UserID:           v.GetString("trading.default_user_profile.user_id"),
+		AssetDailyAvgCNY: v.GetFloat64("trading.default_user_profile.asset_daily_avg_cny"),
+		RiskLevel:        compliance.RiskLevel(v.GetInt("trading.default_user_profile.risk_level")),
+		BoardsEnabled:    v.GetStringSlice("trading.default_user_profile.boards_enabled"),
+	}
+	if firstTrade := v.GetString("trading.default_user_profile.first_trade_at"); firstTrade != "" {
+		if t, err := time.Parse(time.RFC3339, firstTrade); err == nil {
+			p.FirstTradeAt = t
+		}
+	}
+	if rte := v.GetString("trading.default_user_profile.risk_test_expired_at"); rte != "" {
+		if t, err := time.Parse(time.RFC3339, rte); err == nil {
+			p.RiskTestExpiredAt = t
+		}
+	}
+	return p
 }
