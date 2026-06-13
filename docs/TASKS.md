@@ -572,12 +572,49 @@
 | Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
-| **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **2** | **0** | **1** | **0** | **0** | **3** | |
-| **总计**          | **2** | **0** | **211** | **1** | **0** | **214** | (v3.21.0 P2-3 紧急平仓 +970 行, ODR-026 Created) |
+| **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
+| **总计**          | **2** | **0** | **213** | **1** | **0** | **216** | (v3.21.0 P2-1+P2-2 完成, ODR-027 Created) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-06-12 (v3.21.1) — Sprint 6 P2 pickup #3: P2-1 HTML 报告导出 + P2-2 多策略对比
+
+- **触发**: v3.21.0 完成 P2-3 紧急平仓后, 接续 ODR-013 BR-014
+  (回测报告分享) + 用户研究员的"5 个 tab 切来切去对指标"痛点
+- **过程**:
+  - ✅ **P2-1 后端** [pkg/backtest/export.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/export.go) (新建, 320 行) —
+    `RenderHTML(resp, opts) ([]byte, string, error)` + 嵌入 SVG 权益
+    曲线 + 12 行指标表 + 交易明细 + light/dark theme + footer
+    水印; 完全自包含 (无 CDN / 客户端 JS)
+  - ✅ **P2-1 endpoint** [cmd/analysis/handlers_backtest.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/handlers_backtest.go) —
+    `GET /api/backtest/:id/export/html` + query opt-out
+    (`?equity=0&trades=0&theme=dark&footer=...`) +
+    Content-Disposition attachment + X-Backtest-* 自定义头
+  - ✅ **P2-1 前端** [web/src/api/backtest.ts](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/backtest.ts) +
+    [client.ts](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/api/client.ts) —
+    `api.download()` 绕过 JSON parse + `extractFilename` 解析
+    Content-Disposition; BacktestEngine.vue 加 "导出 HTML" 按钮 +
+    "加入对比" checkbox + 跳转 compare 按钮
+  - ✅ **P2-2 后端** [pkg/backtest/compare.go](file:///Users/ruoxi/longshaosWorld/quant-trading/pkg/backtest/compare.go) (新建, 200 行) —
+    `CompareReports(ctx, ids, resolver)` + 11 个 TestXxx; min/max
+    校验 (2-8) + dedup + 部分成功 (200 + Missing 列表) + per-metric
+    best 选出 + 默认 TotalReturn desc 排序
+  - ✅ **P2-2 endpoint** `GET /api/backtest/compare?ids=bt-1,bt-2,...` +
+    [handlers_compare_test.go](file:///Users/ruoxi/longshaosWorld/quant-trading/cmd/analysis/handlers_compare_test.go) (6 TestXxx)
+  - ✅ **P2-2 前端** [BacktestCompare.vue](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/pages/BacktestCompare.vue) (新建, 320 行) —
+    4 列指标卡片 (已加载/最佳收益/最佳 Sharpe/最低回撤) + 12 行
+    × N 列对比表 (best 高亮浅绿底) + Chart.js 8 色 palette
+    权益叠加 (示意)
+  - ✅ **持久化** [web/src/constants/backtest.ts](file:///Users/ruoxi/longshaosWorld/quant-trading/web/src/constants/backtest.ts) —
+    localStorage key `quantlab:backtest:compare_ids` (FIFO 8 cap)
+  - ✅ **ODR-027** [docs/odr/odr-027-p2-1-p2-2-export-compare.md](file:///Users/ruoxi/longshaosWorld/quant-trading/docs/odr/odr-027-p2-1-p2-2-export-compare.md) — 完整记录
+- **结果**:
+  - P2-1 + P2-2 从 ⬜ → ✅
+  - Sprint 6 P1+P2 累计 13 项全部 ✅
+  - 新增 17 TestXxx (compare 11 + handler 6)
+  - 文档同步: TASKS.md §P2-1/§P2-2 状态, ADR.md ODR index, ODR-027 新建
 
 ### 2026-06-12 (v3.21.0) — Sprint 6 P2 pickup #2: P2-3 远程紧急平仓 kill-switch
 
@@ -1411,8 +1448,8 @@
 
 | ID | 任务 | 关联问题 | 文件 | Owner | 估时 | 验收标准 | 状态 |
 |---|---|---|---|---|---|---|---|
-| **P2-1** | backtest 报告 PDF/HTML 导出 | BR-014 | `pkg/backtest/export.go` (新建) | TBD | 3d | `/api/backtest/:id/export/{pdf,html}` | ⬜ |
-| **P2-2** | 多策略对比 UI (`/backtest/compare`) | BR-014 | `web/src/pages/BacktestCompare.vue` (新建) | TBD | 3d | 2-N 曲线叠加 | ⬜ |
+| **P2-1** | backtest 报告 HTML 导出 (PDF via 浏览器打印) | BR-014 | `pkg/backtest/export.go`, `cmd/analysis/handlers_backtest.go:/export/:format` | 2026-06-12 | 3d | `GET /api/backtest/:id/export/html` + 自包含 SVG + 17 TestXxx | ✅ (ODR-027) |
+| **P2-2** | 多策略对比 UI (`/backtest/compare`) | BR-014 | `pkg/backtest/compare.go`, `web/src/pages/BacktestCompare.vue` | 2026-06-12 | 3d | `GET /api/backtest/compare?ids=...` + 2-8 策略对比表 + best 高亮 + 17 TestXxx | ✅ (ODR-027) |
 | **P2-3** | 远程紧急平仓 (EMERGENCY FLATTEN 按钮) | BR-018 | `pkg/live/trader.go:EmergencyFlatten`, `web/src/components/paper/EmergencyFlatten.vue` | 2026-06-12 | 2d | 3 重身份验证 (Bearer + body confirmation + 浏览器 confirm) + BypassedT1 审计标记 + 12 TestXxx | ✅ |
 | **P2-4** | 投资者适当性 (创业板/科创板/北交所) | BR-005, BR-011 | `pkg/compliance/appropriateness.go` (新建) | TBD | 1w | 10/50/100 万 + 24 月验证 | ⬜ |
 | **P2-5** | 异常交易监控 (6 类) | BR-011 | `pkg/compliance/abnormal_trade.go` (新建) | TBD | 1w | 频繁撤单/自成交/对倒/洗售/虚假申报/拉抬打压 检测 | ⬜ |
