@@ -252,3 +252,186 @@ func TestHandler_ReportDaily_BadDateFormat(t *testing.T) {
 		t.Fatalf("expected 400 (bad date), got %d", w.Code)
 	}
 }
+
+// ============================================================
+// P2-7: /api/compliance/divestment/*
+// ============================================================
+
+func TestHandler_DivestmentCheck_Allowed(t *testing.T) {
+	h := newTestComplianceHandler(t)
+	w := doRequest(h, "POST", "/api/compliance/divestment/check", map[string]any{
+		"profile": map[string]any{
+			"user_id":        "u-1",
+			"symbol":         "000001.SZ",
+			"holder_type":    "controlling",
+			"holdings_pct":   10.0,
+			"holdings_share": 10_000_000.0,
+		},
+		"plan": map[string]any{
+			"symbol":   "000001.SZ",
+			"method":   "auction",
+			"quantity": 500_000.0,
+			"at":       time.Now().Format(time.RFC3339Nano),
+		},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp compliance.DivestmentCheckResult
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !resp.Allowed {
+		t.Fatalf("expected allowed, got %v", resp.Reasons)
+	}
+	if resp.ApprovedQty != 500_000 {
+		t.Fatalf("expected approved 500000, got %.0f", resp.ApprovedQty)
+	}
+}
+
+func TestHandler_DivestmentCheck_Rejected(t *testing.T) {
+	h := newTestComplianceHandler(t)
+	// Pre-IPO 股东 + 无 lockup 条目 → 引擎硬拒
+	w := doRequest(h, "POST", "/api/compliance/divestment/check", map[string]any{
+		"profile": map[string]any{
+			"user_id":        "u-1",
+			"symbol":         "000001.SZ",
+			"holder_type":    "pre_ipo",
+			"holdings_pct":   8.0,
+			"holdings_share": 8_000_000.0,
+		},
+		"plan": map[string]any{
+			"symbol":   "000001.SZ",
+			"method":   "auction",
+			"quantity": 100.0,
+			"at":       time.Now().Format(time.RFC3339Nano),
+		},
+	})
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp compliance.DivestmentCheckResult
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Allowed {
+		t.Fatal("expected reject")
+	}
+	if len(resp.Reasons) == 0 {
+		t.Fatal("expected non-empty reasons on reject")
+	}
+}
+
+func TestHandler_DivestmentCheck_BadBody(t *testing.T) {
+	h := newTestComplianceHandler(t)
+	w := doRequest(h, "POST", "/api/compliance/divestment/check", map[string]any{
+		"profile": "not-an-object",
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandler_DivestmentCheck_DirectorAnnualCap(t *testing.T) {
+	h := newTestComplianceHandler(t)
+	// 董监高: 一年内已减 24%, 拟再减 2% → 累计 26% > 25% → 拒
+	now := time.Now()
+	w := doRequest(h, "POST", "/api/compliance/divestment/check", map[string]any{
+		"profile": map[string]any{
+			"user_id":        "u-dir",
+			"symbol":         "000001.SZ",
+			"holder_type":    "director",
+			"holdings_pct":   30.0,
+			"holdings_share": 3_000_000.0,
+		},
+		"plan": map[string]any{
+			"symbol":   "000001.SZ",
+			"method":   "auction",
+			"quantity": 200_000.0,
+			"at":       now.Format(time.RFC3339Nano),
+		},
+		"recent": []map[string]any{{
+			"symbol":   "000001.SZ",
+			"method":   "auction",
+			"quantity": 2_400_000.0, // 24%
+			"price":    10.0,
+			"at":       now.AddDate(0, -3, 0).Format(time.RFC3339Nano),
+		}},
+	})
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 (annual cap), got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandler_DivestmentHolderTypes(t *testing.T) {
+	h := newTestComplianceHandler(t)
+	w := doRequest(h, "GET", "/api/compliance/divestment/holder-types", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp struct {
+		HolderTypes []gin.H `json:"holder_types"`
+		Count       int     `json:"count"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Count != 5 {
+		t.Fatalf("expected 5 holder types, got %d", resp.Count)
+	}
+	if len(resp.HolderTypes) != 5 {
+		t.Fatalf("expected 5 entries, got %d", len(resp.HolderTypes))
+	}
+	// Spot-check: controlling 应有中文 label
+	var foundCtrl bool
+	for _, ht := range resp.HolderTypes {
+		if id, _ := ht["id"].(string); id == "controlling" {
+			if label, _ := ht["label"].(string); strings.Contains(label, "控股") {
+				foundCtrl = true
+			}
+		}
+	}
+	if !foundCtrl {
+		t.Fatal("expected controlling with 控股 label")
+	}
+}
+
+func TestHandler_DivestmentMethods(t *testing.T) {
+	h := newTestComplianceHandler(t)
+	w := doRequest(h, "GET", "/api/compliance/divestment/methods", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp struct {
+		Methods []gin.H `json:"methods"`
+		Count   int     `json:"count"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Count != 3 {
+		t.Fatalf("expected 3 methods, got %d", resp.Count)
+	}
+}
+
+func TestHandler_DivestmentRules(t *testing.T) {
+	h := newTestComplianceHandler(t)
+	w := doRequest(h, "GET", "/api/compliance/divestment/rules", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp struct {
+		Rules       map[string]compliance.DivestmentRule `json:"rules"`
+		GeneratedAt time.Time                            `json:"generated_at"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Rules) != 5 {
+		t.Fatalf("expected 5 rules, got %d", len(resp.Rules))
+	}
+	// Spot-check: controlling 集中竞价 cap = 1.0
+	if got := resp.Rules["controlling"].AuctionWindowCapPct; got != 1.0 {
+		t.Fatalf("expected controlling auction cap=1.0, got %.4f", got)
+	}
+}

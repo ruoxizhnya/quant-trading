@@ -56,6 +56,11 @@ type ComplianceHandler struct {
 	// with the default thresholds; the output directory is read
 	// from the analysis-service viper config.
 	reporter *compliance.LargeTraderReporter
+	// divestmentChecker is the P2-7 shareholder-reduction engine.
+	// Constructed once with the regulatory defaults + the shared
+	// clock; clients may override individual rules via viper (see
+	// main.go).
+	divestmentChecker *compliance.DivestmentChecker
 	// now is injectable so tests can pin the clock.
 	now func() time.Time
 }
@@ -72,11 +77,12 @@ func NewComplianceHandler(
 	reporterCfg compliance.LargeTradeConfig,
 ) *ComplianceHandler {
 	return &ComplianceHandler{
-		logger:           logger.With().Str("component", "compliance_handler").Logger(),
-		defaultProfile:   defaultProfile,
-		abnormalDetector: compliance.NewAbnormalDetector(),
-		reporter:         compliance.NewLargeTraderReporter(reporterCfg),
-		now:              func() time.Time { return time.Now() },
+		logger:            logger.With().Str("component", "compliance_handler").Logger(),
+		defaultProfile:    defaultProfile,
+		abnormalDetector:  compliance.NewAbnormalDetector(),
+		reporter:          compliance.NewLargeTraderReporter(reporterCfg),
+		divestmentChecker: compliance.NewDivestmentChecker(nil),
+		now:               func() time.Time { return time.Now() },
 	}
 }
 
@@ -95,6 +101,11 @@ func (h *ComplianceHandler) RegisterRoutes(router *gin.Engine) {
 		group.POST("/abnormal/run", h.abnormalRun)
 		// P2-6: large-transaction daily report
 		group.POST("/report/daily", h.reportDaily)
+		// P2-7: shareholder reduction rules
+		group.POST("/divestment/check", h.divestmentCheck)
+		group.GET("/divestment/holder-types", h.divestmentHolderTypes)
+		group.GET("/divestment/methods", h.divestmentMethods)
+		group.GET("/divestment/rules", h.divestmentRules)
 	}
 }
 
@@ -323,4 +334,99 @@ func (h *ComplianceHandler) reportDaily(c *gin.Context) {
 		Int("cumulative_accounts", len(report.CumulativeByAccount)).
 		Msg("daily large-trade report generated (P2-6)")
 	c.JSON(http.StatusOK, reportDailyResponse{Path: path, Report: report})
+}
+
+// ============================================================
+// P2-7: 减持规则 — HTTP 端点
+// ============================================================
+
+// divestmentCheckRequest is the input shape for POST
+// /api/compliance/divestment/check. The client supplies a
+// ShareholderProfile + a ReductionPlan + an optional history of
+// recent reductions (the latter is required for rolling-window
+// capacity checks; the handler does NOT scan the database on
+// behalf of the caller — separation of concerns keeps this
+// endpoint stateless and test-friendly).
+type divestmentCheckRequest struct {
+	Profile       compliance.ShareholderProfile `json:"profile"`
+	Plan          compliance.ReductionPlan      `json:"plan"`
+	Recent        []compliance.Reduction        `json:"recent,omitempty"`
+}
+
+// divestmentCheck runs the P2-7 engine and returns the structured
+// result. HTTP status mirrors the verdict:
+//   - 200 OK           — result.Allowed == true
+//   - 422 Unprocessable — result.Allowed == false (legitimate reject)
+//
+// "Allowed == false + Reasons empty" is a non-event (defensive
+// 500 — would only happen if the engine returned garbage).
+func (h *ComplianceHandler) divestmentCheck(c *gin.Context) {
+	var req divestmentCheckRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	result := h.divestmentChecker.Check(req.Profile, req.Plan, req.Recent)
+	if !result.Allowed {
+		// Reasons is non-empty by construction (Check always appends
+		// at least one reason when rejecting); but if for any reason
+		// the engine returned Allowed=false with no reason, fall
+		// back to 500 to surface the bug.
+		if len(result.Reasons) == 0 {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "divestment engine rejected with no reason",
+				"profile": req.Profile,
+				"plan":    req.Plan,
+			})
+			return
+		}
+		c.JSON(http.StatusUnprocessableEntity, result)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// divestmentHolderTypes returns the 5 holder types (controller /
+// director / major_5pct / pre_ipo / placement) for UI dropdowns.
+func (h *ComplianceHandler) divestmentHolderTypes(c *gin.Context) {
+	types := compliance.AllHolderTypes()
+	out := make([]gin.H, 0, len(types))
+	for _, t := range types {
+		out = append(out, gin.H{
+			"id":    string(t),
+			"label": compliance.HolderTypeLabel(t),
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"holder_types": out,
+		"count":        len(out),
+	})
+}
+
+// divestmentMethods returns the 3 reduction methods (auction /
+// block / agreement) for UI dropdowns.
+func (h *ComplianceHandler) divestmentMethods(c *gin.Context) {
+	methods := compliance.AllReductionMethods()
+	out := make([]gin.H, 0, len(methods))
+	for _, m := range methods {
+		out = append(out, gin.H{
+			"id":    string(m),
+			"label": compliance.MethodLabel(m),
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"methods": out,
+		"count":   len(out),
+	})
+}
+
+// divestmentRules returns the current per-holder-type rule set
+// (snapshot). The frontend uses this to render the rule editor
+// and to show "current vs. regulatory default" diff in
+// compliance dashboards.
+func (h *ComplianceHandler) divestmentRules(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"rules":       h.divestmentChecker.Rules(),
+		"generated_at": h.now(),
+	})
 }
