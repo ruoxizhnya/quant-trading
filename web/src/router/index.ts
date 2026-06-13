@@ -19,6 +19,16 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '回测引擎' },
       },
       {
+        // P2-2 (ODR-027): multi-strategy comparison page. Must be
+        // registered BEFORE any `/backtest/:id` style catch-all if one
+        // is added later. For now it sits next to the engine page
+        // because both are static paths.
+        path: 'backtest/compare',
+        name: 'backtest-compare',
+        component: () => import('@/pages/BacktestCompare.vue'),
+        meta: { title: '多策略对比' },
+      },
+      {
         path: 'screener',
         name: 'screener',
         component: () => import('@/pages/Screener.vue'),

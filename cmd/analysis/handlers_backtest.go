@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -205,9 +207,137 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 				"equity_curve": stored.PortfolioValues,
 			})
 		})
+
+		api.GET("/:id/export/:format", func(c *gin.Context) {
+			backtestID := c.Param("id")
+			format := c.Param("format")
+			if format != "html" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported format, only 'html' is supported (use browser Print → PDF for PDF export)"})
+				return
+			}
+
+			resp, lookupErr := lookupBacktestResponse(c, backtestID, engine, jobService, logger)
+			if lookupErr != nil {
+				// lookupBacktestResponse already wrote the error response
+				return
+			}
+
+			opts := backtest.HTMLReportOptions{
+				Theme:           c.DefaultQuery("theme", "light"),
+				FooterNote:      c.Query("footer"),
+				IncludeEquityChart: c.Query("equity") != "0",  // default true
+				IncludeTrades:      c.Query("trades") != "0",  // default true
+			}
+			body, contentType, err := backtest.RenderHTML(resp, opts)
+			if err != nil {
+				logger.Error().Err(err).Str("backtest_id", backtestID).Msg("Failed to render HTML report")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to render report"})
+				return
+			}
+
+			filename := fmt.Sprintf("backtest-%s-%s.html", backtestID, time.Now().Format("20060102"))
+			c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+			c.Header("X-Backtest-Id", backtestID)
+			c.Header("X-Backtest-Strategy", resp.Strategy)
+			c.Data(http.StatusOK, contentType, body)
+		})
+
+		// P2-2 (ODR-027): multi-strategy comparison endpoint.
+		// Query string: ?ids=bt-1,bt-2,bt-3
+		// The same in-memory-first / DB-fallback resolver used by
+		// `/report` is applied per-ID, so a freshly-completed backtest
+		// (still in the Engine's state store) and a historical one
+		// (DB only) can be compared on equal footing.
+		api.GET("/compare", func(c *gin.Context) {
+			rawIDs := c.Query("ids")
+			if rawIDs == "" {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": "missing 'ids' query parameter (comma-separated list of 2-8 backtest IDs)",
+				})
+				return
+			}
+			ids := strings.Split(rawIDs, ",")
+			for i := range ids {
+				ids[i] = strings.TrimSpace(ids[i])
+			}
+			resolver := backtest.NewCompareResolver(engine, jobService, logger)
+			report, err := backtest.CompareReports(c.Request.Context(), ids, resolver)
+			if err != nil {
+				// Min/Max count errors are user-facing (400).
+				// Anything else is an internal failure (500).
+				if strings.Contains(err.Error(), "at least") || strings.Contains(err.Error(), "at most") || strings.Contains(err.Error(), "distinct") {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+				logger.Error().Err(err).Strs("ids", ids).Msg("Compare failed")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "compare failed", "details": err.Error()})
+				return
+			}
+			// Partial-resolution is not an error — the payload itself
+			// carries a `Missing` list so the UI can render the
+			// "loaded N of M" banner.
+			c.JSON(http.StatusOK, report)
+		})
 	}
 
 	registerBacktestLegacyRedirects(router)
+}
+
+// lookupBacktestResponse fetches a backtest result by ID, falling back from
+// in-memory (Engine) to stored job (JobService) when the in-memory copy
+// has been evicted. On error, writes the error response to the gin context
+// and returns the error to the caller (which should just `return`).
+func lookupBacktestResponse(c *gin.Context, backtestID string, engine *backtest.Engine, jobService *backtest.JobService, logger zerolog.Logger) (backtest.BacktestResponse, error) {
+	status, err := engine.GetBacktestStatus(backtestID)
+	if err == nil && status == "completed" {
+		result, err := engine.GetBacktestResult(backtestID)
+		if err == nil && result != nil {
+			params, _ := engine.GetBacktestParams(backtestID)
+			return backtest.BacktestResponse{
+				ID:              backtestID,
+				Status:          "completed",
+				Strategy:        params.StrategyName,
+				StartDate:       result.StartDate.Format("2006-01-02"),
+				EndDate:         result.EndDate.Format("2006-01-02"),
+				TotalReturn:     result.TotalReturn,
+				AnnualReturn:    result.AnnualReturn,
+				SharpeRatio:     result.SharpeRatio,
+				SortinoRatio:    result.SortinoRatio,
+				MaxDrawdown:     result.MaxDrawdown,
+				MaxDrawdownDate: result.MaxDrawdownDate.Format("2006-01-02"),
+				WinRate:         result.WinRate,
+				TotalTrades:     result.TotalTrades,
+				WinTrades:       result.WinTrades,
+				LoseTrades:      result.LoseTrades,
+				AvgHoldingDays:  result.AvgHoldingDays,
+				CalmarRatio:     result.CalmarRatio,
+				StockPool:       params.StockPool,
+				InitialCapital:  params.InitialCapital,
+				PortfolioValues: result.PortfolioValues,
+				Trades:          result.Trades,
+			}, nil
+		}
+	}
+
+	job, err := jobService.GetJob(c.Request.Context(), backtestID)
+	if err != nil {
+		logger.Error().Err(err).Str("backtest_id", backtestID).Msg("Failed to load backtest job")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return backtest.BacktestResponse{}, err
+	}
+	if job == nil || job.Status != "completed" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "backtest not found or not completed"})
+		return backtest.BacktestResponse{}, err
+	}
+	var stored backtest.BacktestResponse
+	if err := json.Unmarshal(job.Result, &stored); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse stored result"})
+		return backtest.BacktestResponse{}, err
+	}
+	if stored.ID == "" {
+		stored.ID = backtestID
+	}
+	return stored, nil
 }
 
 func registerBacktestLegacyRedirects(router *gin.Engine) {

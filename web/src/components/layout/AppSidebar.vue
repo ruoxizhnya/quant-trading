@@ -47,6 +47,7 @@ import {
   TrendingUpOutline,
   CloudDownloadOutline,
   NotificationsOutline,
+  GitCompareOutline,
 } from '@vicons/ionicons5'
 import { NSpace, NIcon } from 'naive-ui'
 
@@ -62,6 +63,7 @@ function isActive(path: string): boolean {
 const navItems = [
   { path: '/', label: '控制台', icon: markRaw(HomeOutline) },
   { path: '/backtest', label: '回测引擎', icon: markRaw(AnalyticsOutline) },
+  { path: '/backtest/compare', label: '多策略对比', icon: markRaw(GitCompareOutline) },
   { path: '/screener', label: '选股器', icon: markRaw(SearchOutline) },
   { path: '/copilot', label: '策略 Copilot', icon: markRaw(ChatbubbleEllipsesOutline) },
   { path: '/strategy-lab', label: '策略实验室', icon: markRaw(BeakerOutline) },

@@ -156,6 +156,53 @@ class ApiClient {
     return this.request<T>(path, { ...options, method: 'DELETE' })
   }
 
+  /**
+   * P2-1 (ODR-027): Raw blob download — bypasses JSON parsing so the caller
+   * can save binary/text content (HTML report, future PDF, CSV, ...).
+   * Resolves with the blob and the response's Content-Disposition filename
+   * (extracted from the header when present, otherwise empty).
+   */
+  async download(path: string, options: RequestOptions = {}): Promise<{ blob: Blob; filename: string }> {
+    const { timeout = API_TIMEOUT, signal, ...init } = options
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeout)
+    if (signal) {
+      signal.addEventListener('abort', () => controller.abort(), { once: true })
+    }
+    inFlightControllers.add(controller)
+    try {
+      const url = path.startsWith('http') ? path : `${this.baseURL}${path}`
+      const res = await fetch(url, {
+        ...init,
+        signal: controller.signal,
+        headers: { ...init.headers },
+      })
+      clearTimeout(timer)
+      if (!res.ok) {
+        let errMsg = res.statusText
+        try {
+          const body = (await res.json()) as Record<string, unknown>
+          errMsg = (body?.error as string) || (body?.message as string) || errMsg
+        } catch { /* not JSON, keep statusText */ }
+        throw new ApiError(res.status, getStatusMessage(res.status, errMsg))
+      }
+      const blob = await res.blob()
+      const filename = extractFilename(res.headers.get('Content-Disposition'))
+      return { blob, filename }
+    } catch (e: unknown) {
+      clearTimeout(timer)
+      if (e instanceof DOMException || (e instanceof Error && e.name === 'AbortError')) {
+        const abortErr = new ApiError(0, '请求已取消')
+        abortErr.isAbort = true
+        throw abortErr
+      }
+      throw e
+    } finally {
+      inFlightControllers.delete(controller)
+    }
+  }
+
   createCancellableRequest<T>(path: string, method: string = 'GET', body?: unknown) {
     const controller = new AbortController()
     const promise = this.request<T>(path, {
@@ -172,3 +219,18 @@ class ApiClient {
 
 export const api = new ApiClient()
 export default api
+
+// P2-1 (ODR-027): parse `filename="x"` / `filename=x` / `filename*=UTF-8''x`
+// out of a Content-Disposition header. Empty string when absent.
+function extractFilename(header: string | null): string {
+  if (!header) return ''
+  // RFC 5987 extended form first
+  const ext = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (ext) {
+    try {
+      return decodeURIComponent(ext[1].replace(/^"|"$/g, ''))
+    } catch { /* fall through */ }
+  }
+  const basic = header.match(/filename\s*=\s*"?([^";]+)"?/i)
+  return basic ? basic[1].trim() : ''
+}

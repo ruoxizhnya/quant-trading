@@ -38,6 +38,40 @@
     />
 
     <div v-if="result" class="results-section">
+      <n-space class="result-actions" align="center" justify="space-between">
+        <n-space align="center">
+          <n-tag :type="result.id ? 'success' : 'default'" size="small">
+            {{ result.id ? `ID: ${result.id}` : '未持久化' }}
+          </n-tag>
+          <n-text depth="3" style="font-size: 12px">
+            <n-checkbox v-model:checked="compareSelected" :disabled="!result.id">
+              加入对比
+            </n-checkbox>
+          </n-text>
+        </n-space>
+        <n-space>
+          <n-button
+            size="small"
+            ghost
+            :disabled="!result.id || exporting"
+            :loading="exporting"
+            @click="onExportHtml"
+          >
+            <n-icon><DownloadOutline /></n-icon>
+            导出 HTML
+          </n-button>
+          <n-button
+            size="small"
+            type="primary"
+            ghost
+            :disabled="compareIds.length < 2"
+            @click="goCompare"
+          >
+            <n-icon><GitCompareOutline /></n-icon>
+            对比所选 ({{ compareIds.length }})
+          </n-button>
+        </n-space>
+      </n-space>
       <MetricsCards :metrics="resultMetrics" />
       <EquityChart
         :portfolio-values="result.portfolio_values || []"
@@ -69,12 +103,14 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, nextTick, shallowRef, triggerRef, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { NEmpty, NAlert, NButton, NButtonGroup, useMessage } from 'naive-ui'
+import { useRoute, useRouter } from 'vue-router'
+import { NEmpty, NAlert, NButton, NButtonGroup, NCheckbox, NSpace, NTag, NText, NIcon, useMessage } from 'naive-ui'
+import { DownloadOutline, GitCompareOutline } from '@vicons/ionicons5'
 import { useBacktestStore } from '@/stores/backtest'
-import { runBacktest as apiRunBacktest, getBacktestReport, getOHLCV, type OHLCVAPIResponse, type OHLCVDataPoint } from '@/api/backtest'
+import { runBacktest as apiRunBacktest, getBacktestReport, getOHLCV, exportHtml, type OHLCVAPIResponse, type OHLCVDataPoint } from '@/api/backtest'
 import { getStrategies } from '@/api/strategy'
 import { fmtPercent, fmtNumber } from '@/utils/format'
+import { loadCompareIds, saveCompareIds } from '@/constants/backtest'
 import type { BacktestResult, PortfolioPoint, Trade, Strategy } from '@/types/api'
 import BacktestForm from '@/components/backtest/BacktestForm.vue'
 import MetricsCards from '@/components/backtest/MetricsCards.vue'
@@ -86,6 +122,7 @@ import BacktestProgress from '@/components/backtest/BacktestProgress.vue'
 import { useAsyncBacktest } from '@/composables/useAsyncBacktest'
 
 const route = useRoute()
+const router = useRouter()
 const message = useMessage()
 const backtestStore = useBacktestStore()
 
@@ -95,6 +132,25 @@ const loadError = ref('')
 const showTrades = ref(true)
 const result = shallowRef<BacktestResult | null>(null)
 const asyncMode = ref(true)
+const exporting = ref(false)
+
+// P2-2 (ODR-027): multi-select backtest IDs that participate in the
+// "compare" page. Persisted in localStorage via constants/backtest.ts
+// so the selection survives route changes / page reloads.
+const compareIds = ref<string[]>(loadCompareIds())
+const compareSelected = computed({
+  get: () => !!(result.value?.id && compareIds.value.includes(result.value.id)),
+  set: (on: boolean) => {
+    const id = result.value?.id
+    if (!id) return
+    if (on) {
+      if (!compareIds.value.includes(id)) compareIds.value = [...compareIds.value, id]
+    } else {
+      compareIds.value = compareIds.value.filter(x => x !== id)
+    }
+    saveCompareIds(compareIds.value)
+  },
+})
 interface StockPricePoint {
   date: string
   price: number
@@ -311,6 +367,46 @@ async function loadReport(id: string) {
   } finally {
     loading.value = false
   }
+}
+
+// P2-1 (ODR-027): trigger an HTML export for the current backtest.
+// The browser save dialog appears via a synthetic `<a download>` click;
+// the Blob is revoked once the user has had a chance to start the
+// download (revoke-after-click is the safe pattern in Chromium).
+async function onExportHtml() {
+  const id = result.value?.id
+  if (!id) {
+    message.warning('当前结果尚未持久化，无法导出')
+    return
+  }
+  exporting.value = true
+  try {
+    const { blob, filename } = await exportHtml(id)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename || `backtest-${id}.html`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    message.success(`已下载: ${a.download}`)
+  } catch (e: unknown) {
+    message.error('导出失败: ' + (e instanceof Error ? e.message : String(e)))
+  } finally {
+    exporting.value = false
+  }
+}
+
+// P2-2 (ODR-027): jump to the multi-strategy comparison page with the
+// current selection. We pass IDs through the query string so a deep
+// link (e.g. shared URL) can recreate the same view.
+function goCompare() {
+  if (compareIds.value.length < 2) {
+    message.warning('请至少选择 2 个回测进行对比')
+    return
+  }
+  router.push({ path: '/backtest/compare', query: { ids: compareIds.value.join(',') } })
 }
 </script>
 

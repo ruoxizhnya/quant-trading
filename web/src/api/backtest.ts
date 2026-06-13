@@ -53,6 +53,100 @@ export function getOHLCV(symbol: string, start: string, end: string): Promise<OH
   return api.get(`/api/ohlcv/${symbol}?start_date=${start}&end_date=${end}`)
 }
 
+/**
+ * P2-1 (ODR-027): Download a self-contained HTML report for a completed
+ * backtest. The backend (handlers_backtest.go) returns the file with a
+ * `Content-Disposition: attachment; filename="backtest-<id>-<date>.html"`
+ * header, which `client.ts:download()` parses for the caller.
+ *
+ * The browser is responsible for triggering the save dialog — we resolve
+ * with a Blob + suggested filename so the UI layer can do the actual
+ * `<a download>` dance.
+ */
+export interface ExportHtmlOptions {
+  theme?: 'light' | 'dark'
+  footer?: string
+  includeEquity?: boolean
+  includeTrades?: boolean
+}
+
+export async function exportHtml(
+  id: string,
+  opts: ExportHtmlOptions = {},
+): Promise<{ blob: Blob; filename: string }> {
+  const params = new URLSearchParams()
+  if (opts.theme) params.set('theme', opts.theme)
+  if (opts.footer) params.set('footer', opts.footer)
+  // API defaults both to "include"; the query opt-out is `=0`.
+  if (opts.includeEquity === false) params.set('equity', '0')
+  if (opts.includeTrades === false) params.set('trades', '0')
+  const qs = params.toString()
+  const path = `/api/backtest/${id}/export/html${qs ? `?${qs}` : ''}`
+  return api.download(path)
+}
+
+/**
+ * P2-2 (ODR-027): Multi-strategy comparison. The backend endpoint is
+ * registered in handlers_backtest.go:api.GET("/compare") and accepts
+ * 2-8 backtest IDs. Resolves with the merged report (or a
+ * partial-resolution payload with a `Missing` list when at least one
+ * ID is bad). Throws on 4xx (min/max count violations).
+ */
+export interface CompareEntry {
+  id: string
+  strategy: string
+  start_date?: string
+  end_date?: string
+  total_return: number
+  annual_return: number
+  sharpe_ratio: number
+  sortino_ratio: number
+  max_drawdown: number
+  calmar_ratio: number
+  win_rate: number
+  total_trades: number
+  win_trades: number
+  lose_trades: number
+  avg_holding_days: number
+  initial_capital: number
+  universe?: string
+  has_equity_data: boolean
+}
+
+export interface CompareMissing {
+  id: string
+  reason: string
+}
+
+export interface CompareBest {
+  total_return_id?: string
+  sharpe_ratio_id?: string
+  sortino_ratio_id?: string
+  max_drawdown_id?: string
+  calmar_ratio_id?: string
+  win_rate_id?: string
+  annual_return_id?: string
+}
+
+export interface CompareReport {
+  generated_at: string
+  requested: number
+  resolved: number
+  entries: CompareEntry[]
+  missing: CompareMissing[]
+  best: CompareBest
+}
+
+export function compareBacktests(ids: string[]): Promise<CompareReport> {
+  if (ids.length < 2) {
+    return Promise.reject(new Error('比较至少需要 2 个回测 ID'))
+  }
+  if (ids.length > 8) {
+    return Promise.reject(new Error('比较最多支持 8 个回测 ID'))
+  }
+  return api.get<CompareReport>(`/api/backtest/compare?ids=${ids.join(',')}`)
+}
+
 export interface OHLCVAPIResponse {
   ohlcv?: OHLCVDataPoint[] | null
   data?: OHLCVDataPoint[] | null
