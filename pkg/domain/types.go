@@ -165,6 +165,12 @@ type Position struct {
 	BuyDate           time.Time `json:"buy_date"`           // Last buy date for this position
 	QuantityToday     float64   `json:"quantity_today"`     // Shares bought today (not yet sellable)
 	QuantityYesterday float64   `json:"quantity_yesterday"` // Shares from previous days (sellable today)
+	// Metadata is an open extension slot used by risk / strategy
+	// modules to persist per-position state. P2-14 take-profit rules
+	// use it to track trailing-stop activation / high-water mark /
+	// tiered-take-profit current level. Keys are namespaced strings
+	// (e.g. "trailing_high", "tiered_current_level").
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // Portfolio represents the current portfolio state
