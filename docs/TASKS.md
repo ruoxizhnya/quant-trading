@@ -1454,7 +1454,7 @@
 | **P2-4** | 投资者适当性 (创业板/科创板/北交所) | BR-005, BR-011 | `pkg/compliance/appropriateness.go` + handlers | 2026-06-13 | 1w | 10/50/100 万 + 24 月 + 5 道门禁 (过期/风险/资产/经验/白名单) + 23 TestXxx | ✅ (ODR-028) |
 | **P2-5** | 异常交易监控 (6 类) | BR-011 | `pkg/compliance/abnormal_trade.go` + handlers | 2026-06-13 | 1w | 频繁撤单/自成交/对倒/洗售/虚假申报/拉抬打压 + 20 TestXxx | ✅ (ODR-028) |
 | **P2-6** | 大额交易报告 (单笔 ≥200万 / 累计 ≥500万) | BR-011 | `pkg/compliance/reporter.go` + handlers | 2026-06-13 | 3d | 日终 reporter 生成 report.json (0600 权限) + 17 TestXxx | ✅ (ODR-028) |
-| **P2-7** | 减持规则引擎 (控股股东 ≤3月 ≤1%) | BR-011 | `pkg/compliance/divestment.go` (新建) | TBD | 1w | 3 类股东减持规则 | ⬜ |
+| **P2-7** | 减持规则引擎 (控股股东 ≤3月 ≤1%) | BR-011 | `pkg/compliance/divestment.go` + handlers | 2026-06-13 | 1w | 5 类股东 + 3 种方式 + 90 日滚动窗 + 限售期 + 协议 ≥5% + 25% 年内 + 举牌告警 + 33 TestXxx | ✅ (ODR-029) |
 | **P2-8** | 券资金对账 Worker (每 15min) | BR-012 | `pkg/live/reconciliation.go` (新建) | TBD | 1w | 偏差 > 阈值报警 | ⬜ |
 | **P2-9** | 融资融券 + 做空 | BR-005, BR-007 | `pkg/live/margin.go` (新建) | TBD | 2w | MarginAccount + ShortableList | ⬜ |
 | **P2-10** | 可转债策略 | BR-005 | `pkg/strategy/plugins/convertible_bond.go` (新建) | TBD | 1w | 转股价值/纯债价值/赎回回售 | ⬜ |

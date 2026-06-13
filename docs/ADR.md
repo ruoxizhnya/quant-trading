@@ -67,6 +67,7 @@
 | [ODR-026](odr/odr-026-p2-3-emergency-flatten.md) | P2-3 远程紧急平仓 kill-switch — LiveTrader.EmergencyFlatten 绕过 T+1 (BypassedT1 审计标记) + /api/execution/emergency-flatten 三重鉴权 (Bearer + body confirmation + 浏览器 confirm) + EmergencyFlatten.vue arm-and-confirm UI + 12 TestXxx 全过 race detector | Completed | Implementation | 2026-06-12 |
 | [ODR-027](odr/odr-027-p2-1-p2-2-export-compare.md) | P2-1 HTML 自包含报告导出 (RenderHTML + 17 TestXxx) + P2-2 多策略对比 (`/api/backtest/compare?ids=` + 2-8 best 高亮 + BacktestCompare.vue 路由 + localStorage 持久化选择) | Completed | Implementation | 2026-06-12 |
 | [ODR-028](odr/odr-028-p2-4-p2-5-p2-6-compliance.md) | P2-4 投资者适当性 (5 道门禁 + Registry) + P2-5 异常交易监控 (6 detector Orchestrator) + P2-6 大额交易报告 (单笔/累计 + 0600 落盘) — 共享 `pkg/compliance` 包 + 60 TestXxx race-clean | Completed | Implementation | 2026-06-13 |
+| [ODR-029](odr/odr-029-p2-7-divestment-engine.md) | P2-7 减持规则引擎 — 5 类股东 (controlling/director/major_5pct/pre_ipo/placement) × 3 种方式 (auction/block/agreement) = 15 情形, 90 日 1%/2% 滚动窗 + 限售期半开区间 + 协议 ≥5% + 董监高 25% 年内 + 举牌 1%/5% 告警 — 33 单元 + 7 handler = 40 TestXxx race-clean | Completed | Implementation | 2026-06-13 |
 
 ---
 
