@@ -4,7 +4,7 @@
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Version:** 3.1.0
 > **Created:** 2026-03-24
-> **Updated:** 2026-06-12
+> **Updated:** 2026-06-13
 
 ---
 
@@ -66,6 +66,7 @@
 | [ODR-025](odr/odr-025-p2-alert-integration.md) | P2 alert 接入 — PeriodicAlertLoop (5min tick) + AlertHistory (ring buffer 100) + /api/alerts/{history,force-check,stats}; RecorderChannel.Snapshot/DrainAndReset; 16 TestXxx; in-process 注入零运维开销 | Completed | Implementation | 2026-06-12 |
 | [ODR-026](odr/odr-026-p2-3-emergency-flatten.md) | P2-3 远程紧急平仓 kill-switch — LiveTrader.EmergencyFlatten 绕过 T+1 (BypassedT1 审计标记) + /api/execution/emergency-flatten 三重鉴权 (Bearer + body confirmation + 浏览器 confirm) + EmergencyFlatten.vue arm-and-confirm UI + 12 TestXxx 全过 race detector | Completed | Implementation | 2026-06-12 |
 | [ODR-027](odr/odr-027-p2-1-p2-2-export-compare.md) | P2-1 HTML 自包含报告导出 (RenderHTML + 17 TestXxx) + P2-2 多策略对比 (`/api/backtest/compare?ids=` + 2-8 best 高亮 + BacktestCompare.vue 路由 + localStorage 持久化选择) | Completed | Implementation | 2026-06-12 |
+| [ODR-028](odr/odr-028-p2-4-p2-5-p2-6-compliance.md) | P2-4 投资者适当性 (5 道门禁 + Registry) + P2-5 异常交易监控 (6 detector Orchestrator) + P2-6 大额交易报告 (单笔/累计 + 0600 落盘) — 共享 `pkg/compliance` 包 + 60 TestXxx race-clean | Completed | Implementation | 2026-06-13 |
 
 ---
 

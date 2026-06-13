@@ -1451,9 +1451,9 @@
 | **P2-1** | backtest 报告 HTML 导出 (PDF via 浏览器打印) | BR-014 | `pkg/backtest/export.go`, `cmd/analysis/handlers_backtest.go:/export/:format` | 2026-06-12 | 3d | `GET /api/backtest/:id/export/html` + 自包含 SVG + 17 TestXxx | ✅ (ODR-027) |
 | **P2-2** | 多策略对比 UI (`/backtest/compare`) | BR-014 | `pkg/backtest/compare.go`, `web/src/pages/BacktestCompare.vue` | 2026-06-12 | 3d | `GET /api/backtest/compare?ids=...` + 2-8 策略对比表 + best 高亮 + 17 TestXxx | ✅ (ODR-027) |
 | **P2-3** | 远程紧急平仓 (EMERGENCY FLATTEN 按钮) | BR-018 | `pkg/live/trader.go:EmergencyFlatten`, `web/src/components/paper/EmergencyFlatten.vue` | 2026-06-12 | 2d | 3 重身份验证 (Bearer + body confirmation + 浏览器 confirm) + BypassedT1 审计标记 + 12 TestXxx | ✅ |
-| **P2-4** | 投资者适当性 (创业板/科创板/北交所) | BR-005, BR-011 | `pkg/compliance/appropriateness.go` (新建) | TBD | 1w | 10/50/100 万 + 24 月验证 | ⬜ |
-| **P2-5** | 异常交易监控 (6 类) | BR-011 | `pkg/compliance/abnormal_trade.go` (新建) | TBD | 1w | 频繁撤单/自成交/对倒/洗售/虚假申报/拉抬打压 检测 | ⬜ |
-| **P2-6** | 大额交易报告 (单笔 ≥200万 / 累计 ≥500万) | BR-011 | `pkg/compliance/reporter.go` (新建) | TBD | 3d | 日终 reporter 生成 report.json | ⬜ |
+| **P2-4** | 投资者适当性 (创业板/科创板/北交所) | BR-005, BR-011 | `pkg/compliance/appropriateness.go` + handlers | 2026-06-13 | 1w | 10/50/100 万 + 24 月 + 5 道门禁 (过期/风险/资产/经验/白名单) + 23 TestXxx | ✅ (ODR-028) |
+| **P2-5** | 异常交易监控 (6 类) | BR-011 | `pkg/compliance/abnormal_trade.go` + handlers | 2026-06-13 | 1w | 频繁撤单/自成交/对倒/洗售/虚假申报/拉抬打压 + 20 TestXxx | ✅ (ODR-028) |
+| **P2-6** | 大额交易报告 (单笔 ≥200万 / 累计 ≥500万) | BR-011 | `pkg/compliance/reporter.go` + handlers | 2026-06-13 | 3d | 日终 reporter 生成 report.json (0600 权限) + 17 TestXxx | ✅ (ODR-028) |
 | **P2-7** | 减持规则引擎 (控股股东 ≤3月 ≤1%) | BR-011 | `pkg/compliance/divestment.go` (新建) | TBD | 1w | 3 类股东减持规则 | ⬜ |
 | **P2-8** | 券资金对账 Worker (每 15min) | BR-012 | `pkg/live/reconciliation.go` (新建) | TBD | 1w | 偏差 > 阈值报警 | ⬜ |
 | **P2-9** | 融资融券 + 做空 | BR-005, BR-007 | `pkg/live/margin.go` (新建) | TBD | 2w | MarginAccount + ShortableList | ⬜ |
