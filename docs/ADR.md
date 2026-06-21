@@ -68,6 +68,10 @@
 | [ODR-027](odr/odr-027-p2-1-p2-2-export-compare.md) | P2-1 HTML 自包含报告导出 (RenderHTML + 17 TestXxx) + P2-2 多策略对比 (`/api/backtest/compare?ids=` + 2-8 best 高亮 + BacktestCompare.vue 路由 + localStorage 持久化选择) | Completed | Implementation | 2026-06-12 |
 | [ODR-028](odr/odr-028-p2-4-p2-5-p2-6-compliance.md) | P2-4 投资者适当性 (5 道门禁 + Registry) + P2-5 异常交易监控 (6 detector Orchestrator) + P2-6 大额交易报告 (单笔/累计 + 0600 落盘) — 共享 `pkg/compliance` 包 + 60 TestXxx race-clean | Completed | Implementation | 2026-06-13 |
 | [ODR-029](odr/odr-029-p2-7-divestment-engine.md) | P2-7 减持规则引擎 — 5 类股东 (controlling/director/major_5pct/pre_ipo/placement) × 3 种方式 (auction/block/agreement) = 15 情形, 90 日 1%/2% 滚动窗 + 限售期半开区间 + 协议 ≥5% + 董监高 25% 年内 + 举牌 1%/5% 告警 — 33 单元 + 7 handler = 40 TestXxx race-clean | Completed | Implementation | 2026-06-13 |
+| [ODR-030](odr/odr-030-p2-13-delisting-forced-liquidation.md) | P2-13 退市整理期 + 强制清仓引擎 — StockState 4 状态机 (Listed/Suspended/Delisting/Delisted) + StockStateRegistry + ForcedLiquidator (复用 P2-3 EmergencyFlatten + BypassedT1 审计) + 15 日整理期 + 5 日 LiquidationWindow + DryRun 模式 — 23 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
+| [ODR-031](odr/odr-031-p2-14-take-profit.md) | P2-14 止盈三件套 — FixedTakeProfit (固定阈值) + TrailingTakeProfit (移动 HWM 跟踪) + TieredTakeProfit (分批 + 100 股取整) + TakeProfitChecker (Registry 模式) + 无状态 Rule + Position.Metadata 持久化 — 29 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
+| [ODR-032](odr/odr-032-p2-15-corporate-action.md) | P2-15 公司行为 — CashDividend + BonusShare + CorporateActionSplit + RightsIssue (两阶段 Apply: 默认放弃 + ApplyPaid) + Placement + ActionEngine (apply 顺序 Split→Bonus→Rights→Cash→Placement, 同 ex-date 多 action 排序固定) + appliedLog 幂等去重 — 22 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
+| [ODR-033](odr/odr-033-p2-16-api-versioning.md) | P2-16 API 版本化 — `pkg/api` 新建 leaf package + APIVersionMiddleware (URL 重写 + engine.HandleContext re-dispatch, gin radix-tree 路由在 middleware 前匹配必须 re-dispatch) + DeprecationHeader (RFC 8594 / 9745 / 8288 合规: Deprecation / Sunset / Link 头) + DiscoveryHandler + 两阶段迁移 (软 deprecation → LegacyRedirect 严格重定向) + 零侵入 13 handler 不改 — 25 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
 
 ---
 
@@ -114,10 +118,15 @@ When to create an ODR:
 ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical example.
 
 ---
-_Last updated by: AI Assistant — 2026-06-12 (P2-1 HTML 报告导出 + P2-2 多策略对比完成 → ODR-027 新建 Completed; RenderHTML + /api/backtest/compare + BacktestCompare.vue 路由 + localStorage 持久化选择 + 17 TestXxx; Sprint 6 P1+P2 累计 13 项全部 ✅)_
+_Last updated by: AI Assistant — 2026-06-14 (P2-13/14/15/16 退市+止盈+公司行为+API版本化完成 → ODR-030/031/032/033 新建 Completed; Sprint 6 P2 累计 8 项全部 ✅)_
 _ADR 累计 20 条: 架构 16 + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020)_
-_ODR 累计 27 条: Cleanup 3 (ODR-001/006/008) | Audit 6 (ODR-002/009/010/012/013/015) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004) | Implementation 11 (ODR-016/017/018/019/020/021/023/024/025/026/027) | Refactor 1 (ODR-022)_
-_2026-06-12 状态变更 (本次): ODR-027 新建 (P2-1 HTML 导出 + P2-2 多策略对比 17 TestXxx + 路由 + 持久化完成)_
+_ODR 累计 31 条: Cleanup 3 (ODR-001/006/008) | Audit 6 (ODR-002/009/010/012/013/015) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004) | Implementation 15 (ODR-016/017/018/019/020/021/023/024/025/026/027/028/029/030/031/032/033) | Refactor 1 (ODR-022)_
+_2026-06-14 状态变更 (本次): ODR-030 新建 (P2-13 退市+强制清仓 23 TestXxx + 5 日 LiquidationWindow + DryRun 完成)_
+_2026-06-14 状态变更: ODR-031 新建 (P2-14 止盈三件套 29 TestXxx + Fixed/Trailing/Tiered + Metadata 持久化完成)_
+_2026-06-14 状态变更: ODR-032 新建 (P2-15 公司行为 22 TestXxx + 5 Action + ActionEngine apply 顺序固定 + 配股两阶段完成)_
+_2026-06-14 状态变更: ODR-033 新建 (P2-16 API 版本化 25 TestXxx + pkg/api 新建 leaf package + URL 重写 + RFC 8594 头 + Discovery 完成)_
+_2026-06-13 状态变更: ODR-029 新建 (P2-7 减持规则 40 TestXxx + 5 类股东 + 3 种方式完成); ODR-028 新建 (P2-4/5/6 合规三件套 60 TestXxx 完成); Sprint 6 P2 累计 4 项全部 ✅_
+_2026-06-12 状态变更: ODR-027 新建 (P2-1 HTML 导出 + P2-2 多策略对比 17 TestXxx + 路由 + 持久化完成)_
 _2026-06-12 状态变更: ODR-026 新建 (P2-3 紧急平仓 kill-switch 12 TestXxx + 三重鉴权完成)_
 _2026-06-12 状态变更: ODR-025 新建 (P2 alert 接入 PeriodicAlertLoop + /api/alerts + 16 TestXxx 完成)_
 _2026-06-12 状态变更: ODR-024 新建 (P1-30 E2E AI Copilot 13 TestXxx + SSE 契约完成); Sprint 6 P1 全部完成_

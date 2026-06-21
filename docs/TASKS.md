@@ -1460,10 +1460,10 @@
 | **P2-10** | 可转债策略 | BR-005 | `pkg/strategy/plugins/convertible_bond.go` (新建) | TBD | 1w | 转股价值/纯债价值/赎回回售 | ⬜ |
 | **P2-11** | 期权定价 + Greeks | BR-005 | `pkg/strategy/options/` (新建) | TBD | 2w | Black-Scholes + Binomial | ⬜ |
 | **P2-12** | 港股通/北向因子 | BR-005 | `pkg/data/source/hkex/` (新建) | TBD | 1w | 陆股通净流入 + 汇率换算 | ⬜ |
-| **P2-13** | 退市 + 北交所 30% 涨跌停 | BR-005, BR-006 | `pkg/live/stock_state.go` (新建) | TBD | 3d | delisted_date 字段 + 强制清仓逻辑 | ⬜ |
-| **P2-14** | 止盈/移动止盈/分批止盈 | BR-007 | `pkg/risk/take_profit.go` (新建) | TBD | 1w | TakeProfitRule 接口 + 3 种实现 | ⬜ |
-| **P2-15** | 分红/送股/拆股/配股/增发 | BR-006 | `pkg/domain/corporate_action.go` (新建) | TBD | 1w | CorporateAction 接口 + 5 种行为 | ⬜ |
-| **P2-16** | API 版本化 (`/api/v1` 强制) | AR-020 | `cmd/analysis/main.go` | TBD | 1d | legacy 路由 301 → v1 | ⬜ |
+| **P2-13** | 退市 + 北交所 30% 涨跌停 | BR-005, BR-006 | `pkg/live/stock_state.go` (新建) | 2026-06-14 | 3d | StockState 4 状态机 + Registry + ForcedLiquidator (接 P2-3 EmergencyFlatten) + 5 日 LiquidationWindow + DryRun 模式 + 23 TestXxx race-clean | ✅ (ODR-030) |
+| **P2-14** | 止盈/移动止盈/分批止盈 | BR-007 | `pkg/risk/take_profit.go` (新建) | 2026-06-14 | 1w | FixedTakeProfit + TrailingTakeProfit (HWM 跟踪) + TieredTakeProfit (100 股取整) + TakeProfitChecker (Registry) + 无状态 Rule + Position.Metadata 持久化 + 29 TestXxx race-clean | ✅ (ODR-031) |
+| **P2-15** | 分红/送股/拆股/配股/增发 | BR-006 | `pkg/domain/corporate_action.go` (新建) | 2026-06-14 | 1w | CashDividend + BonusShare + CorporateActionSplit + RightsIssue (两阶段 Apply) + Placement + ActionEngine (apply 顺序固定) + appliedLog 幂等去重 + 22 TestXxx race-clean | ✅ (ODR-032) |
+| **P2-16** | API 版本化 (`/api/v1` 强制) | AR-020 | `pkg/api/versioning.go` (新建 leaf package) | 2026-06-14 | 1d | APIVersionMiddleware (URL 重写 + re-dispatch) + DeprecationHeader (RFC 8594) + DiscoveryHandler + 两阶段迁移 (软→严格) + 零侵入 13 handler 不改 + 25 TestXxx race-clean | ✅ (ODR-033) |
 | **P2-17** | OpenAPI 3.0 spec 自动生成 | AR-020 | `docs/openapi.yaml` (新建) | TBD | 2d | swagger 端点可用 | ⬜ |
 | **P2-18** | pkg/data/source ETL 真实集成测试 (dockertest) | TQ-016 | `pkg/data/source/integration_test.go` (新建) | TBD | 2d | 9 个 adapter 真实测试 | ⬜ |
 | **P2-19** | pkg/ai/gene_pool 持久化测试 (覆盖 41.3%→60%) | TQ-011 | `pkg/ai/gene_pool/integration_test.go` (新建) | TBD | 2d | 覆盖率 ≥ 60% | ⬜ |
