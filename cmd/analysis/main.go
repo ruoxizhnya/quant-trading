@@ -545,6 +545,11 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 		})
 	})
 
+	// P2-17: OpenAPI 3.0 spec + Swagger UI. The spec is embedded
+	// from docs/openapi.yaml (via docs/embed.go) and served at
+	// /api/openapi.yaml; the Swagger UI is served at /api/docs.
+	registerOpenAPIRoutes(router)
+
 	registerProxyRoutes(router, httpClient, logger)
 	registerBacktestRoutes(router, engine, jobService, logger)
 	registerWalkForwardRoutes(router, wfEngine, logger)

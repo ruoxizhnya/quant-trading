@@ -1,0 +1,3033 @@
+openapi: 3.0.3
+info:
+  title: Quant Lab Analysis Service API
+  version: 1.0.0
+  description: |
+    A-share quantitative trading platform REST API.
+
+    The Analysis Service acts as the API gateway, coordinating backtest,
+    strategy, data, risk, execution, compliance, and AI research endpoints.
+
+    ## Authentication
+    Most endpoints are open in dev mode. When `auth.jwt_secret` is configured,
+    protected endpoints require a `Bearer` JWT token obtained via `POST /api/auth/login`.
+
+    ## Conventions
+    - All dates use `YYYY-MM-DD` unless noted otherwise.
+    - Monetary values are in CNY (Chinese Yuan).
+    - Symbols follow the `XXXXXX.SH` / `XXXXXX.SZ` convention.
+  contact:
+    name: Quant Lab
+    url: https://github.com/ruoxizhnya/quant-trading
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8085
+    description: Local development server
+  - url: http://analysis-service:8085
+    description: Docker compose internal URL
+
+tags:
+  - name: Health
+    description: Service health and metrics endpoints
+  - name: Backtest
+    description: Backtest execution, reports, and comparison
+  - name: WalkForward
+    description: Walk-forward validation
+  - name: Batch
+    description: Batch backtest execution
+  - name: Strategies
+    description: Strategy configuration CRUD
+  - name: Datasource
+    description: Market data source management
+  - name: Plugins
+    description: Strategy plugin hot-loading
+  - name: Factor
+    description: Factor analysis and IC computation
+  - name: Copilot
+    description: AI-driven strategy generation
+  - name: AI Pipeline
+    description: AI strategy generation pipeline
+  - name: Auth
+    description: Authentication and user management
+  - name: Risk
+    description: Position sizing, regime detection, stop-loss
+  - name: Execution
+    description: Order submission, positions, account, kill-switch
+  - name: Compliance
+    description: Investor suitability, abnormal-trade, large-trade reports
+  - name: Alerts
+    description: Risk alert history and stats
+  - name: Data Proxy
+    description: Proxied data-service endpoints (OHLCV, screen, calendar)
+
+paths:
+  # ============================================================
+  # Health
+  # ============================================================
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      description: Returns the current health status of the analysis service.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /metrics:
+    get:
+      tags: [Health]
+      summary: Prometheus metrics
+      description: Exposes the four ADR-017 core metrics plus Go runtime collectors.
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Prometheus-format metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /api/v1:
+    get:
+      tags: [Health]
+      summary: API version info
+      description: Returns service name, version, and a list of available endpoints.
+      operationId: getApiVersion
+      responses:
+        '200':
+          description: API version information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiVersionInfo'
+
+  # ============================================================
+  # Backtest
+  # ============================================================
+  /api/backtest:
+    get:
+      tags: [Backtest]
+      summary: List backtest jobs
+      description: Returns the most recent backtest jobs.
+      operationId: listBacktests
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of jobs to return (1-100, default 20).
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: List of backtest jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BacktestJob'
+                  total:
+                    type: integer
+    post:
+      tags: [Backtest]
+      summary: Run a backtest or create a backtest job
+      description: |
+        Accepts two request formats:
+
+        1. **Sync (legacy)**: `strategy` + `stock_pool` + `start_date` + `end_date` —
+           runs the backtest synchronously and returns the result.
+        2. **Async (job)**: `strategy_id` + `universe` + `start_date` + `end_date` —
+           creates an async job and returns the job ID immediately.
+      operationId: runBacktest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/BacktestRequest'
+                - $ref: '#/components/schemas/CreateJobRequest'
+      responses:
+        '200':
+          description: Synchronous backtest result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BacktestResponse'
+        '202':
+          description: Async job created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                  status:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/backtest/{id}:
+    get:
+      tags: [Backtest]
+      summary: Get a backtest job by ID
+      operationId: getBacktest
+      parameters:
+        - $ref: '#/components/parameters/BacktestId'
+      responses:
+        '200':
+          description: Backtest job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BacktestJob'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/backtest/{id}/report:
+    get:
+      tags: [Backtest]
+      summary: Get backtest report
+      description: Returns the full backtest report including metrics, trades, and equity curve.
+      operationId: getBacktestReport
+      parameters:
+        - $ref: '#/components/parameters/BacktestId'
+      responses:
+        '200':
+          description: Backtest report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BacktestResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/backtest/{id}/trades:
+    get:
+      tags: [Backtest]
+      summary: Get backtest trades
+      operationId: getBacktestTrades
+      parameters:
+        - $ref: '#/components/parameters/BacktestId'
+      responses:
+        '200':
+          description: List of trades
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backtest_id:
+                    type: string
+                  total:
+                    type: integer
+                  trades:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Trade'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/backtest/{id}/equity:
+    get:
+      tags: [Backtest]
+      summary: Get backtest equity curve
+      operationId: getBacktestEquity
+      parameters:
+        - $ref: '#/components/parameters/BacktestId'
+      responses:
+        '200':
+          description: Equity curve data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backtest_id:
+                    type: string
+                  total_points:
+                    type: integer
+                  equity_curve:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PortfolioValue'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/backtest/{id}/export/{format}:
+    get:
+      tags: [Backtest]
+      summary: Export backtest report
+      description: Exports the backtest report in the specified format (currently only `html`).
+      operationId: exportBacktest
+      parameters:
+        - $ref: '#/components/parameters/BacktestId'
+        - name: format
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [html]
+        - name: theme
+          in: query
+          schema:
+            type: string
+            enum: [light, dark]
+            default: light
+        - name: equity
+          in: query
+          schema:
+            type: string
+            default: "1"
+        - name: trades
+          in: query
+          schema:
+            type: string
+            default: "1"
+      responses:
+        '200':
+          description: HTML report file
+          content:
+            text/html:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/backtest/compare:
+    get:
+      tags: [Backtest]
+      summary: Compare multiple backtest results
+      description: Compares 2-8 backtest results side by side.
+      operationId: compareBacktests
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          description: Comma-separated list of 2-8 backtest IDs.
+          schema:
+            type: string
+          example: bt-001,bt-002,bt-003
+      responses:
+        '200':
+          description: Comparison report
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ============================================================
+  # WalkForward
+  # ============================================================
+  /api/walkforward:
+    post:
+      tags: [WalkForward]
+      summary: Run walk-forward validation
+      operationId: runWalkForward
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WalkForwardRequest'
+      responses:
+        '200':
+          description: Walk-forward report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalkForwardReport'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [WalkForward]
+      summary: List walk-forward reports
+      operationId: listWalkForwardReports
+      responses:
+        '200':
+          description: List of walk-forward reports
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reports:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WalkForwardReport'
+                  count:
+                    type: integer
+
+  /api/walkforward/{strategy_id}:
+    get:
+      tags: [WalkForward]
+      summary: Get latest walk-forward report for a strategy
+      operationId: getWalkForwardReport
+      parameters:
+        - name: strategy_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Walk-forward report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalkForwardReport'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # Batch
+  # ============================================================
+  /api/batch:
+    post:
+      tags: [Batch]
+      summary: Run batch backtests
+      description: Runs multiple backtest tasks concurrently with optional walk-forward validation.
+      operationId: runBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRunRequest'
+      responses:
+        '200':
+          description: Batch report
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/batch/{batch_id}:
+    get:
+      tags: [Batch]
+      summary: Get batch report
+      operationId: getBatchReport
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Batch report
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/batch/{batch_id}/export/{format}:
+    get:
+      tags: [Batch]
+      summary: Export batch report
+      operationId: exportBatchReport
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [json, csv]
+      responses:
+        '200':
+          description: Exported file
+          content:
+            application/json:
+              schema:
+                type: object
+            text/csv:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # Strategies
+  # ============================================================
+  /api/strategies:
+    get:
+      tags: [Strategies]
+      summary: List strategies
+      description: Returns all strategies, optionally filtered by type or active status.
+      operationId: listStrategies
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: active
+          in: query
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        '200':
+          description: List of strategies
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  strategies:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StrategyConfig'
+    post:
+      tags: [Strategies]
+      summary: Create a strategy
+      operationId: createStrategy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStrategyRequest'
+      responses:
+        '200':
+          description: Strategy created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  strategy_id:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/strategies/{id}:
+    get:
+      tags: [Strategies]
+      summary: Get a strategy by ID
+      operationId: getStrategy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Strategy configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrategyConfig'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Strategies]
+      summary: Update a strategy
+      operationId: updateStrategy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStrategyRequest'
+      responses:
+        '200':
+          description: Strategy updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  strategy_id:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Strategies]
+      summary: Delete a strategy
+      operationId: deleteStrategy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Strategy deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  strategy_id:
+                    type: string
+
+  # ============================================================
+  # Datasource
+  # ============================================================
+  /api/datasource/status:
+    get:
+      tags: [Datasource]
+      summary: Get data source status
+      operationId: getDatasourceStatus
+      responses:
+        '200':
+          description: Data source status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                  primary:
+                    type: string
+                  stopped:
+                    type: array
+                    items:
+                      type: string
+
+  /api/datasource/switch:
+    post:
+      tags: [Datasource]
+      summary: Switch data source
+      description: Switches the active market data provider at runtime.
+      operationId: switchDatasource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name:
+                  type: string
+                type:
+                  type: string
+                  enum: [http, inmemory]
+                url:
+                  type: string
+                token:
+                  type: string
+      responses:
+        '200':
+          description: Data source switched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+                  type:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/datasource/health:
+    get:
+      tags: [Datasource]
+      summary: Check data source connectivity
+      operationId: checkDatasourceHealth
+      responses:
+        '200':
+          description: Data source is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  primary:
+                    type: string
+        '503':
+          description: Data source unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================
+  # Plugins
+  # ============================================================
+  /api/plugins:
+    get:
+      tags: [Plugins]
+      summary: List all plugins
+      operationId: listPlugins
+      responses:
+        '200':
+          description: List of plugins
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plugins:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+
+  /api/plugins/active:
+    get:
+      tags: [Plugins]
+      summary: List active plugins
+      operationId: listActivePlugins
+      responses:
+        '200':
+          description: List of active plugins
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plugins:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+
+  /api/plugins/{name}:
+    get:
+      tags: [Plugins]
+      summary: Get plugin info
+      operationId: getPlugin
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plugin info
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/plugins/load:
+    post:
+      tags: [Plugins]
+      summary: Load a plugin from file
+      operationId: loadPlugin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+      responses:
+        '200':
+          description: Plugin loaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  plugin:
+                    type: object
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/plugins/{name}/unload:
+    post:
+      tags: [Plugins]
+      summary: Unload a plugin
+      operationId: unloadPlugin
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plugin unloaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/plugins/{name}/reload:
+    post:
+      tags: [Plugins]
+      summary: Reload a plugin by name
+      operationId: reloadPluginByName
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plugin reloaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  plugin:
+                    type: object
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/plugins/reload:
+    post:
+      tags: [Plugins]
+      summary: Reload a plugin from file path
+      operationId: reloadPluginByPath
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+      responses:
+        '200':
+          description: Plugin reloaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  plugin:
+                    type: object
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/plugins/load-all:
+    post:
+      tags: [Plugins]
+      summary: Load all plugins from watch directory
+      operationId: loadAllPlugins
+      responses:
+        '200':
+          description: Load-all completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  loaded:
+                    type: array
+                    items:
+                      type: string
+                  errors:
+                    type: array
+                    items:
+                      type: string
+                  count:
+                    type: integer
+                  errCount:
+                    type: integer
+
+  /api/plugins/watch-dir:
+    get:
+      tags: [Plugins]
+      summary: Get watch directory
+      operationId: getWatchDir
+      responses:
+        '200':
+          description: Watch directory
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  watch_dir:
+                    type: string
+    post:
+      tags: [Plugins]
+      summary: Set watch directory
+      operationId: setWatchDir
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dir]
+              properties:
+                dir:
+                  type: string
+      responses:
+        '200':
+          description: Watch directory set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  dir:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ============================================================
+  # Factor
+  # ============================================================
+  /api/factor/list:
+    get:
+      tags: [Factor]
+      summary: List available factors
+      operationId: listFactors
+      responses:
+        '200':
+          description: List of factors
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  factors:
+                    type: array
+                    items:
+                      type: string
+
+  /api/factor/returns/{factor}:
+    get:
+      tags: [Factor]
+      summary: Get factor returns time series
+      operationId: getFactorReturns
+      parameters:
+        - name: factor
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [momentum, value, quality, volatility, size, growth]
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Factor returns time series
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  factor:
+                    type: string
+                  start_date:
+                    type: string
+                  end_date:
+                    type: string
+                  total:
+                    type: integer
+                  data:
+                    type: array
+                    items:
+                      type: object
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/factor/ic/{factor}:
+    get:
+      tags: [Factor]
+      summary: Get factor IC time series
+      operationId: getFactorIC
+      parameters:
+        - name: factor
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [momentum, value, quality, volatility, size, growth]
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: IC time series
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  factor:
+                    type: string
+                  start_date:
+                    type: string
+                  end_date:
+                    type: string
+                  total:
+                    type: integer
+                  data:
+                    type: array
+                    items:
+                      type: object
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/factor/compute-returns:
+    post:
+      tags: [Factor]
+      summary: Compute factor returns for a date
+      operationId: computeFactorReturns
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [factor, trade_date]
+              properties:
+                factor:
+                  type: string
+                trade_date:
+                  type: string
+                  format: date
+      responses:
+        '200':
+          description: Factor returns computed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  factor:
+                    type: string
+                  trade_date:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/factor/compute-ic:
+    post:
+      tags: [Factor]
+      summary: Compute factor IC for a date
+      operationId: computeFactorIC
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [factor, trade_date]
+              properties:
+                factor:
+                  type: string
+                trade_date:
+                  type: string
+                  format: date
+                forward_days:
+                  type: integer
+                  default: 20
+      responses:
+        '200':
+          description: IC computed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  factor:
+                    type: string
+                  trade_date:
+                    type: string
+                  forward_days:
+                    type: integer
+                  ic:
+                    type: number
+                  p_value:
+                    type: number
+                  top_ic:
+                    type: number
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ============================================================
+  # Copilot (AI strategy generation)
+  # ============================================================
+  /api/copilot/generate:
+    post:
+      tags: [Copilot]
+      summary: Generate strategy via AI
+      description: Submits a natural-language description and starts AI strategy generation.
+      operationId: generateStrategy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CopilotGenerateRequest'
+      responses:
+        '202':
+          description: Generation job started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                  status:
+                    type: string
+        '503':
+          description: AI not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/copilot/generate/{job_id}:
+    get:
+      tags: [Copilot]
+      summary: Get generation job status
+      operationId: getGenerationJob
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job status and result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                  status:
+                    type: string
+                  generated_code:
+                    type: string
+                  build_error:
+                    type: string
+                  strategy_name:
+                    type: string
+                  backtest_error:
+                    type: string
+                  backtest_result:
+                    type: object
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/copilot/stats:
+    get:
+      tags: [Copilot]
+      summary: Get copilot statistics
+      operationId: getCopilotStats
+      responses:
+        '200':
+          description: Copilot statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generated:
+                    type: integer
+                  buildable:
+                    type: integer
+                  backtest_valid:
+                    type: integer
+                  acceptance_rate:
+                    type: number
+
+  /api/copilot/save:
+    post:
+      tags: [Copilot]
+      summary: Save generated strategy to disk
+      operationId: saveStrategy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, strategy_name]
+              properties:
+                code:
+                  type: string
+                strategy_name:
+                  type: string
+      responses:
+        '200':
+          description: Strategy saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  strategy_name:
+                    type: string
+                  file_path:
+                    type: string
+
+  # ============================================================
+  # AI Pipeline
+  # ============================================================
+  /api/pipeline/run:
+    post:
+      tags: [AI Pipeline]
+      summary: Run AI strategy generation pipeline
+      description: |
+        Executes the full pipeline: intent parsing → YAML generation →
+        code generation → compilation → backtest.
+      operationId: runPipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PipelineRunRequest'
+      responses:
+        '200':
+          description: Pipeline execution result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineJobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/pipeline/jobs:
+    get:
+      tags: [AI Pipeline]
+      summary: List pipeline jobs
+      operationId: listPipelineJobs
+      responses:
+        '200':
+          description: List of pipeline jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PipelineJobResponse'
+
+  /api/pipeline/jobs/{id}:
+    get:
+      tags: [AI Pipeline]
+      summary: Get pipeline job by ID
+      operationId: getPipelineJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Pipeline job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineJobResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # Auth
+  # ============================================================
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and obtain JWT tokens
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Token pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Account disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user info
+      operationId: getMe
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                  username:
+                    type: string
+                  role:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/auth/admin/users:
+    get:
+      tags: [Auth]
+      summary: List users (admin only)
+      operationId: listUsers
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      type: object
+    post:
+      tags: [Auth]
+      summary: Create a user (admin only)
+      operationId: createUser
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                  username:
+                    type: string
+                  role:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Username already taken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/auth/admin/audit:
+    get:
+      tags: [Auth]
+      summary: List audit log (admin only)
+      operationId: listAudit
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  audit:
+                    type: array
+                    items:
+                      type: object
+
+  # ============================================================
+  # Risk
+  # ============================================================
+  /api/risk/calculate_position:
+    post:
+      tags: [Risk]
+      summary: Calculate position size
+      description: Computes position size, stop-loss, and take-profit for a single signal.
+      operationId: calculatePosition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CalculatePositionRequest'
+      responses:
+        '200':
+          description: Position sizing result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalculatePositionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/risk/detect_regime:
+    post:
+      tags: [Risk]
+      summary: Detect market regime
+      description: Analyzes OHLCV data to determine the current market regime (bull/bear/sideways).
+      operationId: detectRegime
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/OHLCV'
+      responses:
+        '200':
+          description: Market regime
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketRegime'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/risk/check_stoploss:
+    post:
+      tags: [Risk]
+      summary: Check stop-loss conditions
+      description: Evaluates current positions against prices and returns stop-loss/take-profit events.
+      operationId: checkStopLoss
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [positions, prices]
+              properties:
+                positions:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Position'
+                prices:
+                  type: object
+                  additionalProperties:
+                    type: number
+      responses:
+        '200':
+          description: Stop-loss events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StopLossEvent'
+                  count:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/risk/metrics:
+    get:
+      tags: [Risk]
+      summary: Get risk manager configuration metrics
+      operationId: getRiskMetrics
+      responses:
+        '200':
+          description: Risk metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskMetricsResponse'
+
+  # ============================================================
+  # Execution
+  # ============================================================
+  /api/execution/orders:
+    post:
+      tags: [Execution]
+      summary: Submit an order
+      description: Submits a paper-trading order to the in-process MockTrader.
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    get:
+      tags: [Execution]
+      summary: List orders
+      operationId: listOrders
+      responses:
+        '200':
+          description: List of orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OrderResult'
+                  count:
+                    type: integer
+
+  /api/execution/orders/{id}:
+    get:
+      tags: [Execution]
+      summary: Get an order by ID
+      operationId: getOrder
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/execution/orders/{id}/cancel:
+    post:
+      tags: [Execution]
+      summary: Cancel an order
+      operationId: cancelOrder
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Order cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order_id:
+                    type: string
+                  status:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/execution/positions:
+    get:
+      tags: [Execution]
+      summary: Get current positions
+      operationId: getPositions
+      responses:
+        '200':
+          description: Current positions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  positions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Position'
+                  count:
+                    type: integer
+
+  /api/execution/account:
+    get:
+      tags: [Execution]
+      summary: Get account summary
+      operationId: getAccount
+      responses:
+        '200':
+          description: Account summary
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/execution/emergency-flatten:
+    post:
+      tags: [Execution]
+      summary: Emergency flatten (kill-switch)
+      description: |
+        Liquidates all positions immediately. Requires:
+        1. Server-side `trading.emergency_token` configured.
+        2. Bearer token in Authorization header matching the server token.
+        3. JSON body with `reason` and `confirmation_token`.
+      operationId: emergencyFlatten
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, confirmation_token]
+              properties:
+                reason:
+                  type: string
+                confirmation_token:
+                  type: string
+      responses:
+        '200':
+          description: Flatten result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmergencyFlattenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Invalid token or confirmation mismatch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Kill-switch disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================
+  # Compliance
+  # ============================================================
+  /api/compliance/check:
+    post:
+      tags: [Compliance]
+      summary: Check investor suitability for a symbol
+      description: Returns the structured eligibility verdict for the given symbol.
+      operationId: checkCompliance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplianceCheckRequest'
+      responses:
+        '200':
+          description: Suitability check passed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceCheckResponse'
+        '422':
+          description: Suitability check rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceCheckResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/compliance/requirements:
+    get:
+      tags: [Compliance]
+      summary: List all per-board suitability requirements
+      operationId: listComplianceRequirements
+      responses:
+        '200':
+          description: Board requirements
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requirements:
+                    type: array
+                    items:
+                      type: object
+                  generated_at:
+                    type: string
+                    format: date-time
+
+  /api/compliance/boards:
+    get:
+      tags: [Compliance]
+      summary: List boards requiring suitability
+      operationId: listComplianceBoards
+      responses:
+        '200':
+          description: Boards
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  boards:
+                    type: array
+                    items:
+                      type: string
+                  count:
+                    type: integer
+
+  /api/compliance/abnormal/run:
+    post:
+      tags: [Compliance]
+      summary: Run abnormal-trade detection
+      description: Runs the 6-category detector over the supplied orders and trades.
+      operationId: runAbnormalDetection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                account_id:
+                  type: string
+                orders:
+                  type: array
+                  items:
+                    type: object
+                trades:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        '200':
+          description: Detection results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alerts:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+                  run_at:
+                    type: string
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/compliance/report/daily:
+    post:
+      tags: [Compliance]
+      summary: Generate large-transaction daily report
+      operationId: generateDailyReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                trading_date:
+                  type: string
+                  format: date
+                trades:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        '200':
+          description: Report generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path:
+                    type: string
+                  report:
+                    type: object
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/compliance/divestment/check:
+    post:
+      tags: [Compliance]
+      summary: Check shareholder reduction (divestment) rules
+      operationId: checkDivestment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                profile:
+                  type: object
+                plan:
+                  type: object
+                recent:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        '200':
+          description: Divestment allowed
+          content:
+            application/json:
+              schema:
+                type: object
+        '422':
+          description: Divestment rejected
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/compliance/divestment/holder-types:
+    get:
+      tags: [Compliance]
+      summary: List shareholder types
+      operationId: listHolderTypes
+      responses:
+        '200':
+          description: Holder types
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  holder_types:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+
+  /api/compliance/divestment/methods:
+    get:
+      tags: [Compliance]
+      summary: List reduction methods
+      operationId: listReductionMethods
+      responses:
+        '200':
+          description: Reduction methods
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  methods:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+
+  /api/compliance/divestment/rules:
+    get:
+      tags: [Compliance]
+      summary: Get current divestment rules
+      operationId: getDivestmentRules
+      responses:
+        '200':
+          description: Divestment rules
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules:
+                    type: object
+                  generated_at:
+                    type: string
+                    format: date-time
+
+  # ============================================================
+  # Alerts
+  # ============================================================
+  /api/alerts/history:
+    get:
+      tags: [Alerts]
+      summary: Get recent alerts
+      description: Returns the most recent alerts from the in-memory ring buffer.
+      operationId: getAlertHistory
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 50
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [info, warning, critical]
+      responses:
+        '200':
+          description: Alert history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertHistoryResponse'
+
+  /api/alerts/force-check:
+    post:
+      tags: [Alerts]
+      summary: Force an immediate alert evaluation cycle
+      operationId: forceAlertCheck
+      responses:
+        '200':
+          description: Evaluation completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dispatched:
+                    type: integer
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/alerts/stats:
+    get:
+      tags: [Alerts]
+      summary: Get alert statistics
+      operationId: getAlertStats
+      responses:
+        '200':
+          description: Alert statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertStatsResponse'
+
+  # ============================================================
+  # Data Proxy (proxied to data-service)
+  # ============================================================
+  /api/ohlcv/{symbol}:
+    get:
+      tags: [Data Proxy]
+      summary: Get OHLCV data (proxied)
+      description: Proxied to the data-service. Returns daily candlestick data.
+      operationId: getOHLCV
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "000001.SZ"
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "20240101"
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "20240601"
+      responses:
+        '200':
+          description: OHLCV data
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          description: Data service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/screen:
+    post:
+      tags: [Data Proxy]
+      summary: Screen stocks (proxied)
+      operationId: screenStocks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Screen results
+          content:
+            application/json:
+              schema:
+                type: object
+        '502':
+          description: Data service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/stocks/count:
+    get:
+      tags: [Data Proxy]
+      summary: Get stock count (proxied)
+      operationId: getStockCount
+      responses:
+        '200':
+          description: Stock count
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/market/index:
+    get:
+      tags: [Data Proxy]
+      summary: Get market index (proxied)
+      operationId: getMarketIndex
+      responses:
+        '200':
+          description: Market index data
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/sync/calendar:
+    post:
+      tags: [Data Proxy]
+      summary: Sync trading calendar (proxied)
+      operationId: syncCalendar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Calendar sync result
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/trading/calendar:
+    get:
+      tags: [Data Proxy]
+      summary: Get trading calendar (proxied)
+      operationId: getTradingCalendar
+      parameters:
+        - name: start
+          in: query
+          schema:
+            type: string
+        - name: end
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trading calendar
+          content:
+            application/json:
+              schema:
+                type: object
+
+components:
+  # ============================================================
+  # Security
+  # ============================================================
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT Bearer token obtained via POST /api/auth/login.
+
+  # ============================================================
+  # Parameters
+  # ============================================================
+  parameters:
+    BacktestId:
+      name: id
+      in: path
+      required: true
+      description: Backtest job ID.
+      schema:
+        type: string
+
+  # ============================================================
+  # Responses
+  # ============================================================
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Authentication required or failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  # ============================================================
+  # Schemas
+  # ============================================================
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+        status:
+          type: string
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          example: healthy
+        service:
+          type: string
+          example: analysis-service
+        timestamp:
+          type: string
+          format: date-time
+
+    ApiVersionInfo:
+      type: object
+      properties:
+        service:
+          type: string
+        version:
+          type: string
+        endpoints:
+          type: array
+          items:
+            type: string
+
+    OHLCV:
+      type: object
+      properties:
+        symbol:
+          type: string
+        date:
+          type: string
+          format: date-time
+        open:
+          type: number
+        high:
+          type: number
+        low:
+          type: number
+        close:
+          type: number
+        volume:
+          type: number
+        turnover:
+          type: number
+        trade_days:
+          type: integer
+        limit_up:
+          type: boolean
+        limit_down:
+          type: boolean
+
+    Signal:
+      type: object
+      properties:
+        symbol:
+          type: string
+        date:
+          type: string
+          format: date-time
+        direction:
+          type: string
+          enum: [long, short, close, hold]
+        strength:
+          type: number
+        composite_score:
+          type: number
+        factors:
+          type: object
+          additionalProperties:
+            type: number
+        limit_price:
+          type: number
+        order_type:
+          type: string
+          enum: [market, limit, stop, trailing]
+
+    Position:
+      type: object
+      properties:
+        symbol:
+          type: string
+        quantity:
+          type: number
+        avg_cost:
+          type: number
+        current_price:
+          type: number
+        market_value:
+          type: number
+        unrealized_pnl:
+          type: number
+        realized_pnl:
+          type: number
+        weight:
+          type: number
+        entry_date:
+          type: string
+          format: date-time
+        buy_date:
+          type: string
+          format: date-time
+        quantity_today:
+          type: number
+        quantity_yesterday:
+          type: number
+
+    Portfolio:
+      type: object
+      properties:
+        cash:
+          type: number
+        positions:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/Position'
+        total_value:
+          type: number
+        daily_return:
+          type: number
+        updated_at:
+          type: string
+          format: date-time
+
+    MarketRegime:
+      type: object
+      properties:
+        trend:
+          type: string
+          enum: [bull, bear, sideways]
+        volatility:
+          type: string
+          enum: [low, medium, high]
+        sentiment:
+          type: number
+          minimum: -1
+          maximum: 1
+        timestamp:
+          type: string
+          format: date-time
+
+    StopLossEvent:
+      type: object
+      properties:
+        symbol:
+          type: string
+        type:
+          type: string
+          enum: [stop_loss, take_profit]
+        price:
+          type: number
+        quantity:
+          type: number
+        reason:
+          type: string
+
+    BacktestRequest:
+      type: object
+      required: [strategy, start_date, end_date]
+      properties:
+        strategy:
+          type: string
+          example: momentum
+        stock_pool:
+          type: array
+          items:
+            type: string
+          example: ["000001.SZ", "600000.SH"]
+        index_code:
+          type: string
+          example: "000300.SH"
+        start_date:
+          type: string
+          example: "2024-01-01"
+        end_date:
+          type: string
+          example: "2024-06-01"
+        initial_capital:
+          type: number
+          default: 1000000
+        risk_free_rate:
+          type: number
+          default: 0.03
+
+    CreateJobRequest:
+      type: object
+      required: [strategy_id, universe, start_date, end_date]
+      properties:
+        strategy_id:
+          type: string
+        params:
+          type: object
+          additionalProperties: true
+        universe:
+          type: string
+          example: "000300.SH"
+        start_date:
+          type: string
+        end_date:
+          type: string
+        initial_capital:
+          type: number
+        commission_rate:
+          type: number
+        slippage_rate:
+          type: number
+
+    BacktestResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        strategy:
+          type: string
+        start_date:
+          type: string
+        end_date:
+          type: string
+        total_return:
+          type: number
+        annual_return:
+          type: number
+        sharpe_ratio:
+          type: number
+        sortino_ratio:
+          type: number
+        max_drawdown:
+          type: number
+        max_drawdown_date:
+          type: string
+        win_rate:
+          type: number
+        total_trades:
+          type: integer
+        win_trades:
+          type: integer
+        lose_trades:
+          type: integer
+        avg_holding_days:
+          type: number
+        calmar_ratio:
+          type: number
+        stock_pool:
+          type: array
+          items:
+            type: string
+        initial_capital:
+          type: number
+        portfolio_values:
+          type: array
+          items:
+            $ref: '#/components/schemas/PortfolioValue'
+        trades:
+          type: array
+          items:
+            $ref: '#/components/schemas/Trade'
+
+    BacktestJob:
+      type: object
+      properties:
+        id:
+          type: string
+        strategy_id:
+          type: string
+        universe:
+          type: string
+        start_date:
+          type: string
+        end_date:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        result:
+          type: object
+
+    PortfolioValue:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date-time
+        total_value:
+          type: number
+        cash:
+          type: number
+        positions:
+          type: number
+
+    Trade:
+      type: object
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        direction:
+          type: string
+          enum: [long, short, close, hold]
+        quantity:
+          type: number
+        price:
+          type: number
+        commission:
+          type: number
+        transfer_fee:
+          type: number
+        stamp_tax:
+          type: number
+        timestamp:
+          type: string
+          format: date-time
+        pending_qty:
+          type: number
+        filled_qty:
+          type: number
+
+    WalkForwardRequest:
+      type: object
+      properties:
+        strategy:
+          type: string
+        stock_pool:
+          type: array
+          items:
+            type: string
+        start_date:
+          type: string
+        end_date:
+          type: string
+        walk_forward_params:
+          type: object
+          properties:
+            train_days:
+              type: integer
+              default: 250
+            test_days:
+              type: integer
+              default: 60
+            step_days:
+              type: integer
+              default: 60
+            min_train_days:
+              type: integer
+
+    WalkForwardReport:
+      type: object
+      properties:
+        strategy_id:
+          type: string
+        universe:
+          type: string
+        windows:
+          type: array
+          items:
+            type: object
+        avg_test_sharpe:
+          type: number
+        avg_test_return:
+          type: number
+        avg_test_max_drawdown:
+          type: number
+        avg_degradation:
+          type: number
+        pass_rate:
+          type: number
+        overall_pass:
+          type: boolean
+
+    BatchRunRequest:
+      type: object
+      required: [tasks]
+      properties:
+        tasks:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              strategy:
+                type: string
+              stock_pool:
+                type: array
+                items:
+                  type: string
+              start_date:
+                type: string
+              end_date:
+                type: string
+              capital:
+                type: number
+              risk_free_rate:
+                type: number
+        config:
+          type: object
+          properties:
+            concurrency:
+              type: integer
+            run_walk_forward:
+              type: boolean
+            wf_train_days:
+              type: integer
+            wf_test_days:
+              type: integer
+            wf_step_days:
+              type: integer
+
+    StrategyConfig:
+      type: object
+      properties:
+        id:
+          type: integer
+        strategy_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        strategy_type:
+          type: string
+          enum: [momentum, value, quality, composite]
+        params:
+          type: string
+          description: JSON string of parameters schema.
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateStrategyRequest:
+      type: object
+      required: [strategy_id, name, strategy_type]
+      properties:
+        strategy_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        strategy_type:
+          type: string
+        params:
+          type: object
+
+    UpdateStrategyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        strategy_type:
+          type: string
+        params:
+          type: object
+        is_active:
+          type: boolean
+
+    CopilotGenerateRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          example: "20日动量策略，在沪深300中选出最强10只股票"
+        language:
+          type: string
+          default: go
+
+    PipelineRunRequest:
+      type: object
+      required: [description]
+      properties:
+        description:
+          type: string
+          example: "20日动量策略，在沪深300中选出最强10只股票"
+
+    PipelineJobResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        intent:
+          type: object
+        yaml_config:
+          type: string
+        generated_code:
+          type: string
+        build_error:
+          type: string
+        backtest_result:
+          type: object
+        backtest_error:
+          type: string
+        started_at:
+          type: string
+        completed_at:
+          type: string
+        duration_ms:
+          type: integer
+        logs:
+          type: array
+          items:
+            type: string
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          description: Access token TTL in seconds.
+        username:
+          type: string
+        role:
+          type: string
+          enum: [viewer, trader, admin]
+
+    CreateUserRequest:
+      type: object
+      required: [username, password, role]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+          minLength: 8
+        role:
+          type: string
+          enum: [viewer, trader, admin]
+
+    CalculatePositionRequest:
+      type: object
+      properties:
+        signal:
+          $ref: '#/components/schemas/Signal'
+        portfolio:
+          $ref: '#/components/schemas/Portfolio'
+        regime:
+          $ref: '#/components/schemas/MarketRegime'
+        current_price:
+          type: number
+        ohlcv:
+          type: array
+          items:
+            $ref: '#/components/schemas/OHLCV'
+
+    CalculatePositionResponse:
+      type: object
+      properties:
+        size:
+          type: number
+        weight:
+          type: number
+        stop_loss:
+          type: number
+        take_profit:
+          type: number
+        risk_score:
+          type: number
+
+    RiskMetricsResponse:
+      type: object
+      properties:
+        portfolio_volatility:
+          type: number
+        target_volatility:
+          type: number
+        max_position_weight:
+          type: number
+        min_position_weight:
+          type: number
+        timestamp:
+          type: string
+          format: date-time
+
+    CreateOrderRequest:
+      type: object
+      required: [symbol, side, quantity]
+      properties:
+        symbol:
+          type: string
+          example: "000001.SZ"
+        side:
+          type: string
+          enum: [long, short, close]
+        type:
+          type: string
+          enum: [market, limit, stop, trailing]
+          default: market
+        quantity:
+          type: number
+          minimum: 0
+        price:
+          type: number
+
+    OrderResult:
+      type: object
+      properties:
+        order_id:
+          type: string
+        symbol:
+          type: string
+        status:
+          type: string
+        filled_qty:
+          type: number
+        avg_price:
+          type: number
+        commission:
+          type: number
+        timestamp:
+          type: string
+          format: date-time
+
+    EmergencyFlattenResponse:
+      type: object
+      properties:
+        sold:
+          type: array
+          items:
+            type: object
+        skipped:
+          type: array
+          items:
+            type: object
+        sold_total:
+          type: number
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        latency_ms:
+          type: integer
+
+    ComplianceCheckRequest:
+      type: object
+      required: [symbol]
+      properties:
+        symbol:
+          type: string
+          example: "688981.SH"
+        user_id:
+          type: string
+        asset_daily_avg_cny:
+          type: number
+        first_trade_at:
+          type: string
+          format: date-time
+        risk_level:
+          type: integer
+        boards_enabled:
+          type: array
+          items:
+            type: string
+        risk_test_expired_at:
+          type: string
+          format: date-time
+
+    ComplianceCheckResponse:
+      type: object
+      properties:
+        allowed:
+          type: boolean
+        board:
+          type: string
+        board_name:
+          type: string
+        reasons:
+          type: array
+          items:
+            type: string
+        user_id:
+          type: string
+        profile_age_months:
+          type: integer
+        asset_daily_avg_cny:
+          type: number
+        risk_level:
+          type: string
+        required:
+          type: object
+        checked_at:
+          type: string
+          format: date-time
+
+    AlertHistoryResponse:
+      type: object
+      properties:
+        alerts:
+          type: array
+          items:
+            type: object
+        count:
+          type: integer
+        limit:
+          type: integer
+
+    AlertStatsResponse:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        channel_count:
+          type: integer
+        recorder_len:
+          type: integer
+        recorder_evicted:
+          type: integer
+        history_len:
+          type: integer
+        history_limit:
+          type: integer
+        by_rule:
+          type: object
+          additionalProperties:
+            type: integer
+        by_severity:
+          type: object
+          additionalProperties:
+            type: integer
