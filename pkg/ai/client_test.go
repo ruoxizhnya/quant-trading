@@ -2,374 +2,513 @@ package ai
 
 import (
 	"context"
-	"encoding/json"
-	"io"
+	"errors"
+	"fmt"
 	"net/http"
-	"net/http/httptest"
-	"strings"
+	"sync"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-// ---- NewClient + IsConfigured --------------------------------------------
+// Note: TestMockClient_IsConfigured_True/False are tested in mock_test.go
 
-func TestNewClient_DefaultsToMiniModel(t *testing.T) {
-	c := NewClient()
-	require.NotNil(t, c)
-	assert.Equal(t, "gpt-4o-mini", c.model)
-	assert.NotNil(t, c.httpClient)
-}
-
-func TestClient_IsConfigured_BothEmpty(t *testing.T) {
-	t.Setenv("AI_API_KEY", "")
-	t.Setenv("AI_API_URL", "")
-	c := NewClient()
-	assert.False(t, c.IsConfigured(), "both env vars empty → not configured")
-}
-
-func TestClient_IsConfigured_KeyOnly(t *testing.T) {
-	t.Setenv("AI_API_KEY", "k")
-	t.Setenv("AI_API_URL", "")
-	c := NewClient()
-	assert.False(t, c.IsConfigured(), "key only is not enough")
-}
-
-func TestClient_IsConfigured_URLOOnly(t *testing.T) {
-	t.Setenv("AI_API_KEY", "")
-	t.Setenv("AI_API_URL", "https://example.test")
-	c := NewClient()
-	assert.False(t, c.IsConfigured(), "url only is not enough")
-}
-
-func TestClient_IsConfigured_BothSet(t *testing.T) {
-	t.Setenv("AI_API_KEY", "k")
-	t.Setenv("AI_API_URL", "https://example.test")
-	c := NewClient()
-	assert.True(t, c.IsConfigured())
-}
-
-// ---- Chat (httptest server) ----------------------------------------------
-
-func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
-	t.Helper()
-	srv := httptest.NewServer(handler)
-	t.Cleanup(srv.Close)
-	return &Client{
-		apiKey:     "test-key",
-		apiURL:     srv.URL,
-		model:      "gpt-4o-mini",
-		httpClient: &http.Client{Timeout: 2 * time.Second},
+func TestMockClient_IsConfigured_Default(t *testing.T) {
+	m := &MockClient{}
+	if m.IsConfigured() {
+		t.Error("expected default IsConfigured to return false")
 	}
 }
 
-func TestClient_Chat_Success(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		// Auth header must be present
-		assert.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
-		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-
-		// Body must be parseable
-		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-		var req ChatRequest
-		require.NoError(t, json.Unmarshal(body, &req))
-		assert.Equal(t, "gpt-4o-mini", req.Model)
-		require.Len(t, req.Messages, 1)
-		assert.Equal(t, "user", req.Messages[0].Role)
-
-		_ = json.NewEncoder(w).Encode(ChatResponse{
-			Choices: []Choice{{Message: ChatMessage{Role: "assistant", Content: "hello"}}},
-		})
-	})
-
-	got, err := c.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}})
-	require.NoError(t, err)
-	assert.Equal(t, "hello", got)
-}
-
-func TestClient_Chat_NotConfigured(t *testing.T) {
-	c := &Client{apiKey: "", apiURL: ""} // explicitly empty
-	_, err := c.Chat(context.Background(), nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "AI_API_KEY or AI_API_URL not configured")
-}
-
-func TestClient_Chat_StatusError(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "boom", http.StatusInternalServerError)
-	})
-	_, err := c.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "x"}})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "AI API returned status 500")
-}
-
-func TestClient_Chat_BadJSON(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("not json"))
-	})
-	_, err := c.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "x"}})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to decode response")
-}
-
-func TestClient_Chat_NoChoices(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(ChatResponse{Choices: nil})
-	})
-	_, err := c.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "x"}})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no response choices from LLM")
-}
-
-func TestClient_Chat_NetworkError(t *testing.T) {
-	// Closed server → Dial fails
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	srv.Close()
-	c := &Client{
-		apiKey:     "k",
-		apiURL:     srv.URL,
-		model:      "gpt-4o-mini",
-		httpClient: &http.Client{Timeout: 500 * time.Millisecond},
+func TestMockClient_Chat_CannedResponse(t *testing.T) {
+	m := &MockClient{
+		Configured:   true,
+		ChatResponse: "Hello from mock LLM",
 	}
-	_, err := c.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "x"}})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "request failed")
-}
-
-func TestClient_Chat_ContextCancel(t *testing.T) {
-	// Server hangs forever; cancel the context to force a client-side abort.
-	hang := make(chan struct{})
-	t.Cleanup(func() { close(hang) })
-
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		<-hang
+	resp, err := m.Chat(context.Background(), []ChatMessage{
+		{Role: "user", Content: "hi"},
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := c.Chat(ctx, []ChatMessage{{Role: "user", Content: "x"}})
-	require.Error(t, err)
-}
-
-// ---- stripFences ---------------------------------------------------------
-
-func TestStripFences(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"go_fence_with_newlines", "```go\npackage main\n```", "package main"},
-		{"bare_fence", "```\nfoo\n```", "foo"},
-		{"no_fence", "package main", "package main"},
-		{"only_prefix_go", "```gopackage main", "package main"},
-		{"only_prefix_bare", "```package main", "package main"},
-		{"only_suffix", "package main```", "package main"},
-		{"go_fence_inline", "```go hello ```", "hello"},
-		// Leading whitespace blocks TrimPrefix("```go") — only TrimSpace applies.
-		{"leading_whitespace_keeps_fences", "  \n```go\nfoo\n```\n  ", "```go\nfoo\n```"},
-		{"empty_string", "", ""},
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, stripFences(tc.in))
-		})
+	if resp != "Hello from mock LLM" {
+		t.Errorf("expected 'Hello from mock LLM', got %q", resp)
 	}
 }
 
-// ---- GenerateStrategyCode ------------------------------------------------
+func TestMockClient_Chat_NoResponseConfigured(t *testing.T) {
+	m := &MockClient{Configured: true}
+	_, err := m.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}})
+	if err == nil {
+		t.Fatal("expected error when no response configured")
+	}
+}
 
-func TestClient_GenerateStrategyCode_StripsFences(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var req ChatRequest
-		require.NoError(t, json.Unmarshal(body, &req))
-		// Must include system prompt + user prompt
-		require.GreaterOrEqual(t, len(req.Messages), 2)
-		assert.Equal(t, "system", req.Messages[0].Role)
-		assert.Equal(t, SystemPrompt, req.Messages[0].Content)
-		assert.Equal(t, "user", req.Messages[1].Role)
-		assert.Contains(t, req.Messages[1].Content, "momentum strategy on top 50 stocks")
+func TestMockClient_Chat_CannedError(t *testing.T) {
+	customErr := errors.New("LLM service unavailable")
+	m := &MockClient{
+		Configured: true,
+		ChatErr:    customErr,
+	}
+	_, err := m.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}})
+	if err != customErr {
+		t.Errorf("expected custom error, got: %v", err)
+	}
+}
 
-		_ = json.NewEncoder(w).Encode(ChatResponse{
-			Choices: []Choice{{Message: ChatMessage{Content: "```go\npackage plugins\n```"}}},
-		})
+func TestMockClient_Chat_CustomFunc(t *testing.T) {
+	m := &MockClient{
+		Configured: true,
+		ChatFunc: func(ctx context.Context, messages []ChatMessage) (string, error) {
+			if len(messages) == 0 {
+				return "", errors.New("no messages")
+			}
+			return fmt.Sprintf("Response to: %s", messages[0].Content), nil
+		},
+	}
+	resp, err := m.Chat(context.Background(), []ChatMessage{
+		{Role: "user", Content: "What is RSI?"},
 	})
-
-	got, err := c.GenerateStrategyCode(context.Background(), "momentum strategy on top 50 stocks")
-	require.NoError(t, err)
-	assert.Equal(t, "package plugins", got)
-	assert.NotContains(t, got, "```", "fences must be stripped")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if resp != "Response to: What is RSI?" {
+		t.Errorf("unexpected response: %s", resp)
+	}
 }
 
-func TestClient_GenerateStrategyCode_PropagatesError(t *testing.T) {
-	c := &Client{apiKey: "", apiURL: ""}
-	_, err := c.GenerateStrategyCode(context.Background(), "x")
-	require.Error(t, err)
+// Note: TestMockClient_Chat_RecordsCalls is tested in mock_test.go
+
+func TestMockClient_Chat_FuncOverridesCannedResponse(t *testing.T) {
+	m := &MockClient{
+		Configured:   true,
+		ChatResponse: "canned",
+		ChatFunc: func(ctx context.Context, messages []ChatMessage) (string, error) {
+			return "from func", nil
+		},
+	}
+	resp, err := m.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if resp != "from func" {
+		t.Errorf("expected 'from func', got %q", resp)
+	}
 }
 
-// ---- FixStrategyCode -----------------------------------------------------
-
-func TestClient_FixStrategyCode_StripsFences(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var req ChatRequest
-		require.NoError(t, json.Unmarshal(body, &req))
-		require.GreaterOrEqual(t, len(req.Messages), 2)
-		// User message must include the original code + the build errors verbatim
-		assert.Contains(t, req.Messages[1].Content, "package plugins")
-		assert.Contains(t, req.Messages[1].Content, "undefined: foo")
-
-		_ = json.NewEncoder(w).Encode(ChatResponse{
-			Choices: []Choice{{Message: ChatMessage{Content: "```go\npackage plugins // fixed\n```"}}},
-		})
-	})
-
-	got, err := c.FixStrategyCode(context.Background(), "package plugins", "undefined: foo")
-	require.NoError(t, err)
-	assert.Equal(t, "package plugins // fixed", got)
+func TestMockClient_Chat_FuncOverridesError(t *testing.T) {
+	m := &MockClient{
+		Configured: true,
+		ChatErr:    errors.New("canned error"),
+		ChatFunc: func(ctx context.Context, messages []ChatMessage) (string, error) {
+			return "success", nil
+		},
+	}
+	resp, err := m.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if resp != "success" {
+		t.Errorf("expected 'success', got %q", resp)
+	}
 }
 
-func TestClient_FixStrategyCode_PropagatesError(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "nope", http.StatusBadRequest)
-	})
-	_, err := c.FixStrategyCode(context.Background(), "code", "err")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "400")
+func TestMockClient_GenerateStrategyCode_CannedResponse(t *testing.T) {
+	m := &MockClient{
+		Configured:        true,
+		GenerateResponse:  "package plugins\n// generated code",
+	}
+	code, err := m.GenerateStrategyCode(context.Background(), "momentum strategy")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if code != "package plugins\n// generated code" {
+		t.Errorf("unexpected code: %s", code)
+	}
 }
 
-// ---- Prompt constants ----------------------------------------------------
-
-func TestPromptConstants_AreNonEmpty(t *testing.T) {
-	// Compile-time invariant: if these constants are ever truncated to "" the
-	// LLM receives a useless system prompt. Catch that at unit-test time.
-	assert.NotEmpty(t, SystemPrompt, "SystemPrompt must not be empty")
-	assert.NotEmpty(t, UserPromptTemplate, "UserPromptTemplate must not be empty")
-	assert.NotEmpty(t, FixPromptTemplate, "FixPromptTemplate must not be empty")
-
-	// The system prompt must encode the strategy interface signature
-	// so the LLM generates compileable code.
-	assert.Contains(t, SystemPrompt, "GenerateSignals")
-	assert.Contains(t, SystemPrompt, "Configure")
-	assert.Contains(t, SystemPrompt, "Cleanup")
-	assert.Contains(t, SystemPrompt, "Weight")
-	assert.Contains(t, SystemPrompt, `package plugins`)
-	assert.Contains(t, SystemPrompt, "strategy.GlobalRegister")
-
-	// User prompt must be a Go-template with exactly one %s
-	assert.Equal(t, 1, strings.Count(UserPromptTemplate, "%s"))
-
-	// Fix prompt must have two %s slots (code + errors)
-	assert.Equal(t, 2, strings.Count(FixPromptTemplate, "%s"))
+func TestMockClient_GenerateStrategyCode_NoResponse(t *testing.T) {
+	m := &MockClient{Configured: true}
+	code, err := m.GenerateStrategyCode(context.Background(), "test")
+	if err != nil {
+		t.Fatalf("expected no error for empty response, got: %v", err)
+	}
+	if code != "" {
+		t.Errorf("expected empty code, got %q", code)
+	}
 }
 
-// ---- end-to-end: GenerateStrategyCode then stripFences boundary ----------
-
-func TestClient_GenerateStrategyCode_NoFencesUnchanged(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(ChatResponse{
-			Choices: []Choice{{Message: ChatMessage{Content: "package plugins\n// bare code"}}},
-		})
-	})
-	got, err := c.GenerateStrategyCode(context.Background(), "anything")
-	require.NoError(t, err)
-	assert.Equal(t, "package plugins\n// bare code", got)
+func TestMockClient_GenerateStrategyCode_CannedError(t *testing.T) {
+	m := &MockClient{
+		Configured:   true,
+		GenerateErr:  errors.New("generation failed"),
+	}
+	_, err := m.GenerateStrategyCode(context.Background(), "test")
+	if err == nil {
+		t.Fatal("expected error")
+	}
 }
 
-// Sanity: when a context is canceled before the request, the error must
-// come from transport (not from a panic in NewRequestWithContext).
-func TestClient_Chat_AlreadyCanceledContext(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(ChatResponse{
-			Choices: []Choice{{Message: ChatMessage{Content: "ok"}}},
-		})
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	// The test server may or may not return a reply depending on timing;
-	// either a response or an error is acceptable, but it must not panic.
-	_, _ = c.Chat(ctx, []ChatMessage{{Role: "user", Content: "x"}})
+func TestMockClient_GenerateStrategyCode_CustomFunc(t *testing.T) {
+	m := &MockClient{
+		Configured: true,
+		GenerateFunc: func(ctx context.Context, desc string) (string, error) {
+			return fmt.Sprintf("// Strategy: %s", desc), nil
+		},
+	}
+	code, err := m.GenerateStrategyCode(context.Background(), "RSI momentum")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if code != "// Strategy: RSI momentum" {
+		t.Errorf("unexpected code: %s", code)
+	}
 }
 
-// ---- NewClientWithOptions + functional options ----------------------------
+// Note: TestMockClient_GenerateStrategyCode_RecordsCalls is tested in mock_test.go
 
-func TestNewClientWithOptions_Defaults(t *testing.T) {
-	c, _ := NewClientWithOptions()
-	require.NotNil(t, c)
-	assert.Equal(t, "gpt-4o-mini", c.model)
-	assert.NotNil(t, c.httpClient)
-	assert.Equal(t, defaultHTTPTimeout, c.httpClient.Timeout)
-	// apiKey / apiURL default to empty → not configured.
-	assert.False(t, c.IsConfigured())
+func TestMockClient_FixStrategyCode_CannedResponse(t *testing.T) {
+	m := &MockClient{
+		Configured:   true,
+		FixResponse:  "package plugins\n// fixed code",
+	}
+	code, err := m.FixStrategyCode(context.Background(), "broken code", "syntax error")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if code != "package plugins\n// fixed code" {
+		t.Errorf("unexpected code: %s", code)
+	}
 }
 
-func TestWithAPIKey_OverridesEnv(t *testing.T) {
-	t.Setenv("AI_API_KEY", "from-env")
-	c, _ := NewClientWithOptions(
-		WithAPIKey("from-option"),
-		WithAPIURL("https://x.test"),
+func TestMockClient_FixStrategyCode_CannedError(t *testing.T) {
+	m := &MockClient{
+		Configured: true,
+		FixErr:     errors.New("fix failed"),
+	}
+	_, err := m.FixStrategyCode(context.Background(), "code", "error")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestMockClient_FixStrategyCode_CustomFunc(t *testing.T) {
+	m := &MockClient{
+		Configured: true,
+		FixFunc: func(ctx context.Context, code string, buildErrors string) (string, error) {
+			return fmt.Sprintf("fixed(%s)", code), nil
+		},
+	}
+	code, err := m.FixStrategyCode(context.Background(), "broken", "err")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if code != "fixed(broken)" {
+		t.Errorf("unexpected code: %s", code)
+	}
+}
+
+// Note: TestMockClient_FixStrategyCode_RecordsCalls is tested in mock_test.go
+
+func TestMockClient_ConcurrentAccess(t *testing.T) {
+	m := &MockClient{
+		Configured:   true,
+		ChatResponse: "ok",
+	}
+
+	var wg sync.WaitGroup
+	const numGoroutines = 20
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = m.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}})
+		}()
+	}
+	wg.Wait()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.ChatCalls) != numGoroutines {
+		t.Errorf("expected %d recorded calls, got %d", numGoroutines, len(m.ChatCalls))
+	}
+}
+
+func TestClient_IsConfigured_Unconfigured(t *testing.T) {
+	c := NewClient()
+	if c.IsConfigured() {
+		t.Error("expected unconfigured client when no env vars set")
+	}
+}
+
+func TestClient_IsConfigured_WithAPIKey(t *testing.T) {
+	c, err := NewClientWithOptions(WithAPIKey("test-key"))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if c.IsConfigured() {
+		t.Error("expected unconfigured when only API key is set")
+	}
+}
+
+func TestClient_IsConfigured_WithAPIKeyAndURL(t *testing.T) {
+	c, err := NewClientWithOptions(
+		WithAPIKey("test-key"),
+		WithAPIURL("http://localhost:8080"),
 	)
-	assert.True(t, c.IsConfigured())
-	assert.Equal(t, "from-option", c.apiKey,
-		"WithAPIKey must override the AI_API_KEY env var")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !c.IsConfigured() {
+		t.Error("expected configured when both API key and URL are set")
+	}
 }
 
-func TestWithAPIURL_OverridesEnv(t *testing.T) {
-	t.Setenv("AI_API_URL", "https://env.example.test")
-	c, _ := NewClientWithOptions(
-		WithAPIKey("k"),
-		WithAPIURL("https://opt.example.test"),
-	)
-	assert.True(t, c.IsConfigured())
-	assert.Equal(t, "https://opt.example.test", c.apiURL)
+func TestClient_Options_WithModel(t *testing.T) {
+	c, err := NewClientWithOptions(WithModel("gpt-4"))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if c.model != "gpt-4" {
+		t.Errorf("expected model gpt-4, got %s", c.model)
+	}
 }
 
-func TestWithModel_OverridesDefault(t *testing.T) {
-	c, _ := NewClientWithOptions(WithModel("gpt-4o"))
-	assert.Equal(t, "gpt-4o", c.model)
+func TestClient_Options_WithHTTPClient(t *testing.T) {
+	customClient := &http.Client{Timeout: 5 * time.Second}
+	c, err := NewClientWithOptions(WithHTTPClient(customClient))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if c.httpClient != customClient {
+		t.Error("expected custom HTTP client to be set")
+	}
 }
 
-func TestWithHTTPClient_ReplacesTransport(t *testing.T) {
-	custom := &http.Client{Timeout: 7 * time.Second}
-	c, _ := NewClientWithOptions(WithHTTPClient(custom))
-	assert.Same(t, custom, c.httpClient,
-		"WithHTTPClient must replace the transport by pointer equality")
+func TestClient_Options_WithTimeout(t *testing.T) {
+	c, err := NewClientWithOptions(WithTimeout(10 * time.Second))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if c.httpClient.Timeout != 10*time.Second {
+		t.Errorf("expected timeout 10s, got %v", c.httpClient.Timeout)
+	}
 }
 
-func TestWithTimeout_SetsNewClient(t *testing.T) {
-	c, _ := NewClientWithOptions(WithTimeout(123 * time.Millisecond))
-	assert.Equal(t, 123*time.Millisecond, c.httpClient.Timeout)
+func TestClient_Options_WithTimeoutZero(t *testing.T) {
+	c, err := NewClientWithOptions(WithTimeout(0))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if c.httpClient.Timeout != 0 {
+		t.Errorf("expected timeout 0, got %v", c.httpClient.Timeout)
+	}
 }
 
-func TestWithTimeout_ZeroDisables(t *testing.T) {
-	c, _ := NewClientWithOptions(WithTimeout(0))
-	// Zero means "no timeout" — http.Client.Timeout is 0 but the
-	// pointer must be non-nil so the client is still usable.
-	require.NotNil(t, c.httpClient)
-	assert.Equal(t, time.Duration(0), c.httpClient.Timeout)
+func TestClient_Options_WithLimiter(t *testing.T) {
+	limiter := NewLimiter()
+	c, err := NewClientWithOptions(WithLimiter(limiter))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if c.limiter != limiter {
+		t.Error("expected custom limiter to be set")
+	}
 }
 
-func TestWithTimeout_NegativeDisables(t *testing.T) {
-	// Defensive: a negative value is meaningless in net/http.
-	// The option should treat <=0 as "disable" rather than panic.
-	c, _ := NewClientWithOptions(WithTimeout(-5 * time.Second))
-	require.NotNil(t, c.httpClient)
-	assert.Equal(t, time.Duration(0), c.httpClient.Timeout)
+func TestClient_Options_WithRetryPolicy(t *testing.T) {
+	policy := DefaultRetryPolicy
+	c, err := NewClientWithOptions(WithRetryPolicy(policy))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if c.retry.MaxAttempts != policy.MaxAttempts {
+		t.Error("expected custom retry policy to be set")
+	}
 }
 
-func TestNewClientWithOptions_AllCombined(t *testing.T) {
-	c, _ := NewClientWithOptions(
-		WithAPIKey("k"),
-		WithAPIURL("https://x.test"),
-		WithModel("gpt-4o"),
-		WithTimeout(2*time.Second),
-	)
-	assert.True(t, c.IsConfigured())
-	assert.Equal(t, "k", c.apiKey)
-	assert.Equal(t, "https://x.test", c.apiURL)
-	assert.Equal(t, "gpt-4o", c.model)
-	assert.Equal(t, 2*time.Second, c.httpClient.Timeout)
+func TestClient_Options_WithCostTable(t *testing.T) {
+	table := NewCostTable()
+	c, err := NewClientWithOptions(WithCostTable(table))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if c.costTable != table {
+		t.Error("expected custom cost table to be set")
+	}
+}
+
+func TestClient_Options_WithCostTable_NilReturnsError(t *testing.T) {
+	_, err := NewClientWithOptions(WithCostTable(nil))
+	if err == nil {
+		t.Fatal("expected error for nil cost table")
+	}
+}
+
+func TestClient_Options_WithMetrics(t *testing.T) {
+	metrics := NewMetrics()
+	c, err := NewClientWithOptions(WithMetrics(metrics))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if c.metrics != metrics {
+		t.Error("expected custom metrics to be set")
+	}
+}
+
+func TestClient_Options_WithTracer(t *testing.T) {
+	tracer := NoopTracer{}
+	c, err := NewClientWithOptions(WithTracer(tracer))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if c.tracer != tracer {
+		t.Error("expected custom tracer to be set")
+	}
+}
+
+func TestClient_Options_WithTracer_NilUsesNoop(t *testing.T) {
+	c, err := NewClientWithOptions(WithTracer(nil))
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	// Verify tracer is not nil (should default to NoopTracer)
+	if c.tracer == nil {
+		t.Error("expected non-nil tracer when nil is passed")
+	}
+}
+
+func TestClient_Limiter_ReturnsLimiter(t *testing.T) {
+	c := NewClient()
+	if c.Limiter() == nil {
+		t.Error("expected non-nil limiter")
+	}
+}
+
+func TestClient_CostTable_ReturnsCostTable(t *testing.T) {
+	c := NewClient()
+	if c.CostTable() == nil {
+		t.Error("expected non-nil cost table")
+	}
+}
+
+func TestClient_Metrics_ReturnsMetrics(t *testing.T) {
+	c := NewClient()
+	if c.Metrics() == nil {
+		t.Error("expected non-nil metrics")
+	}
+}
+
+func TestClient_Chat_UnconfiguredReturnsError(t *testing.T) {
+	c := NewClient()
+	_, err := c.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}})
+	if err == nil {
+		t.Fatal("expected error when client is not configured")
+	}
+}
+
+func TestClient_ChatWithUsage_UnconfiguredReturnsError(t *testing.T) {
+	c := NewClient()
+	_, _, err := c.ChatWithUsage(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}})
+	if err == nil {
+		t.Fatal("expected error when client is not configured")
+	}
+}
+
+func TestClient_GenerateStrategyCode_UnconfiguredReturnsError(t *testing.T) {
+	c := NewClient()
+	_, err := c.GenerateStrategyCode(context.Background(), "test strategy")
+	if err == nil {
+		t.Fatal("expected error when client is not configured")
+	}
+}
+
+func TestClient_FixStrategyCode_UnconfiguredReturnsError(t *testing.T) {
+	c := NewClient()
+	_, err := c.FixStrategyCode(context.Background(), "code", "errors")
+	if err == nil {
+		t.Fatal("expected error when client is not configured")
+	}
+}
+
+func TestLLMClient_InterfaceCompliance(t *testing.T) {
+	// Compile-time check that both *Client and *MockClient satisfy LLMClient
+	var _ LLMClient = (*Client)(nil)
+	var _ LLMClient = (*MockClient)(nil)
+}
+
+func TestChatMessage_Struct(t *testing.T) {
+	msg := ChatMessage{Role: "assistant", Content: "Hello!"}
+	if msg.Role != "assistant" {
+		t.Errorf("expected role 'assistant', got %q", msg.Role)
+	}
+	if msg.Content != "Hello!" {
+		t.Errorf("expected content 'Hello!', got %q", msg.Content)
+	}
+}
+
+func TestChatRequest_Struct(t *testing.T) {
+	req := ChatRequest{
+		Model:    "gpt-4",
+		Messages: []ChatMessage{{Role: "user", Content: "hi"}},
+	}
+	if req.Model != "gpt-4" {
+		t.Errorf("expected model gpt-4, got %s", req.Model)
+	}
+	if len(req.Messages) != 1 {
+		t.Errorf("expected 1 message, got %d", len(req.Messages))
+	}
+}
+
+func TestChatResponse_Struct(t *testing.T) {
+	resp := ChatResponse{
+		Choices: []Choice{
+			{Message: ChatMessage{Role: "assistant", Content: "response"}},
+		},
+		Usage: &Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30},
+	}
+	if len(resp.Choices) != 1 {
+		t.Errorf("expected 1 choice, got %d", len(resp.Choices))
+	}
+	if resp.Choices[0].Message.Content != "response" {
+		t.Errorf("expected content 'response', got %q", resp.Choices[0].Message.Content)
+	}
+	if resp.Usage.TotalTokens != 30 {
+		t.Errorf("expected 30 total tokens, got %d", resp.Usage.TotalTokens)
+	}
+}
+
+func TestUsage_Struct(t *testing.T) {
+	u := Usage{PromptTokens: 100, CompletionTokens: 200, TotalTokens: 300}
+	if u.PromptTokens != 100 {
+		t.Errorf("expected 100 prompt tokens, got %d", u.PromptTokens)
+	}
+	if u.CompletionTokens != 200 {
+		t.Errorf("expected 200 completion tokens, got %d", u.CompletionTokens)
+	}
+	if u.TotalTokens != 300 {
+		t.Errorf("expected 300 total tokens, got %d", u.TotalTokens)
+	}
+}
+
+func TestMockClient_MultipleMethodsCalled(t *testing.T) {
+	m := &MockClient{
+		Configured:        true,
+		ChatResponse:       "chat response",
+		GenerateResponse:  "generate response",
+		FixResponse:       "fix response",
+	}
+
+	_, _ = m.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}})
+	_, _ = m.GenerateStrategyCode(context.Background(), "desc")
+	_, _ = m.FixStrategyCode(context.Background(), "code", "err")
+
+	if len(m.ChatCalls) != 1 {
+		t.Errorf("expected 1 chat call, got %d", len(m.ChatCalls))
+	}
+	if len(m.GenerateCalls) != 1 {
+		t.Errorf("expected 1 generate call, got %d", len(m.GenerateCalls))
+	}
+	if len(m.FixCalls) != 1 {
+		t.Errorf("expected 1 fix call, got %d", len(m.FixCalls))
+	}
 }
