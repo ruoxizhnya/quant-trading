@@ -1414,7 +1414,7 @@
 | **P1-1** | 文档一致化 (VISION/SPEC/AGENTS 覆盖率 + Phase 状态对齐) | BR-001/008, TQ-009 | `docs/VISION.md`, `docs/SPEC.md`, `docs/AGENTS.md` | 2026-06-12 | 2d | ODR-015 文档一致化创建；3 处状态冲突消除 (Strategy 4-way + Phase 3/4 + 文件路径) | ✅ |
 | **P1-2** | RBAC + JWT auth + audit_logs 表 + bcrypt login | AR-004, BR-002, ADR-017 §2 | `cmd/analysis/main.go`, migrations/019_*.sql | 2026-06-12 | 1w | `POST /api/auth/login` 工作；mutating 端点需 token | ✅ |
 | **P1-3** | LiveEngine 限价单实现 (Limit / Stop / Trailing) | AR-015 | `pkg/live/engine.go:tryFillOrder` | 2026-06-12 | 3d | tryFillOrder 接受 OrderTypeLimit/Stop/Trailing；价格匹配 + HWM 跟踪 17 项单测全通过；ODR-016 创建 | ✅ |
-| **P1-4** | A 股券商真实对接 (中泰 XTP 推荐) | BR-003, BR-005 | `pkg/live/broker/xtp/` (新建) | TBD | 2w | 模拟账户下单/撤单/查询 working | ⬜ |
+| **P1-4** | A 股券商真实对接 (中泰 XTP 推荐) | BR-003, BR-005 | `pkg/live/broker/xtp/` (新建) | 2026-06-14 | 2w | XTPTrader 接口 + Config + 状态机 + OfflineMode stub + 30 TestXxx; SDK CGo binding 待接入 | ✅ |
 | **P1-5** | A 股价格笼子校验 (沪深/创/科/北 4 套) | BR-004 | `pkg/live/price_cage.go` (新建) | 2026-06-12 | 1w | 4 套笼子规则测试 + 主板 ±2% 模拟 | ✅ |
 | **P1-6** | 集合竞价撮合 (9:15-9:25 + 14:57-15:00) | BR-004, BR-017 | `pkg/backtest/auction.go` (新建) | 2026-06-12 | 1w | 开盘集合 + 收盘集合状态机测试 | ✅ |
 | **P1-7** | 4 黄金 fixture 补全 (momentum/value/T+1/zhangting) | TQ-009, TEST.md §2.3 | `pkg/backtest/fixtures_p1_7_test.go`, `testdata/backtest-fixtures/` | TBD | 2d | 4 fixture 存在；`TestGolden_*` 容差 ±0.01 | ✅ |

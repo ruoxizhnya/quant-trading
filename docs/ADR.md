@@ -80,6 +80,7 @@
 | [ODR-039](odr/odr-039-p2-18-p2-26-test-quality.md) | P2-18~P2-26 测试质量提升 — 9 个测试文件 (数据源集成/基因池持久化/风控边界/Pipeline E2E/领域类型/HTTP客户端/日志脱敏/LLM客户端/视觉回归) + 日志脱敏功能 — ~200+ TestXxx | Completed | Implementation | 2026-06-14 |
 | [ODR-040](odr/odr-040-p2-27-p2-30-infrastructure.md) | P2-27~P2-30 基础设施 — WASM sandbox (InProcessRuntime 回退) + EventBus backpressure (drop-oldest) + 跨日状态持久化 (DiskStateStore) + Decimal 定点数 — 127 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
 | [ODR-041](odr/odr-041-p2-31-p2-33-code-quality.md) | P2-31~P2-33 代码质量 — 拆 3 个长函数为 11 个子函数 + 删 4 个空测试 + 替换 placeholder 为 7 个 SQL 构建子测试 | Completed | Implementation | 2026-06-14 |
+| [ODR-042](odr/odr-042-p1-4-xtp-broker.md) | P1-4 中泰 XTP 券商对接 — XTPTrader 接口层 + Config + 7 状态机 + OfflineMode stub + A 股 100 股校验 + EmergencyFlatten + 30 TestXxx race-clean; SDK CGo binding 待接入 | Completed | Implementation | 2026-06-14 |
 
 ---
 
@@ -128,7 +129,7 @@ ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical examp
 ---
 _Last updated by: AI Assistant — 2026-06-14 (P2-9~P2-12 + P2-17~P2-33 全部完成 → ODR-034~041 新建 Completed; Sprint 6 P2 累计 33 项全部 ✅)_
 _ADR 累计 20 条: 架构 16 + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020)_
-_ODR 累计 41 条: Cleanup 3 (ODR-001/006/008) | Audit 6 (ODR-002/009/010/012/013/015) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004) | Implementation 25 (ODR-016/017/018/019/020/021/023/024/025/026/027/028/029/030/031/032/033/034/035/036/037/038/039/040/041) | Refactor 1 (ODR-022)_
+_ODR 累计 42 条: Cleanup 3 (ODR-001/006/008) | Audit 6 (ODR-002/009/010/012/013/015) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004) | Implementation 26 (ODR-016~042) | Refactor 1 (ODR-022)_
 _2026-06-14 状态变更 (本次): ODR-034~041 新建 (P2-9 融资融券 + P2-10 可转债 + P2-11 期权 + P2-12 港股通 + P2-17 OpenAPI + P2-18~26 测试质量 + P2-27~30 基础设施 + P2-31~33 代码质量; P1-15/P1-30 状态修正 ✅; 预存测试失败修复 2 处)_
 _2026-06-13 状态变更: ODR-029 新建 (P2-7 减持规则 40 TestXxx + 5 类股东 + 3 种方式完成); ODR-028 新建 (P2-4/5/6 合规三件套 60 TestXxx 完成); Sprint 6 P2 累计 4 项全部 ✅_
 _2026-06-12 状态变更: ODR-027 新建 (P2-1 HTML 导出 + P2-2 多策略对比 17 TestXxx + 路由 + 持久化完成)_
