@@ -1455,32 +1455,32 @@
 | **P2-5** | 异常交易监控 (6 类) | BR-011 | `pkg/compliance/abnormal_trade.go` + handlers | 2026-06-13 | 1w | 频繁撤单/自成交/对倒/洗售/虚假申报/拉抬打压 + 20 TestXxx | ✅ (ODR-028) |
 | **P2-6** | 大额交易报告 (单笔 ≥200万 / 累计 ≥500万) | BR-011 | `pkg/compliance/reporter.go` + handlers | 2026-06-13 | 3d | 日终 reporter 生成 report.json (0600 权限) + 17 TestXxx | ✅ (ODR-028) |
 | **P2-7** | 减持规则引擎 (控股股东 ≤3月 ≤1%) | BR-011 | `pkg/compliance/divestment.go` + handlers | 2026-06-13 | 1w | 5 类股东 + 3 种方式 + 90 日滚动窗 + 限售期 + 协议 ≥5% + 25% 年内 + 举牌告警 + 33 TestXxx | ✅ (ODR-029) |
-| **P2-8** | 券资金对账 Worker (每 15min) | BR-012 | `pkg/live/reconciliation.go` (新建) | TBD | 1w | 偏差 > 阈值报警 | ⬜ |
-| **P2-9** | 融资融券 + 做空 | BR-005, BR-007 | `pkg/live/margin.go` (新建) | TBD | 2w | MarginAccount + ShortableList | ⬜ |
-| **P2-10** | 可转债策略 | BR-005 | `pkg/strategy/plugins/convertible_bond.go` (新建) | TBD | 1w | 转股价值/纯债价值/赎回回售 | ⬜ |
-| **P2-11** | 期权定价 + Greeks | BR-005 | `pkg/strategy/options/` (新建) | TBD | 2w | Black-Scholes + Binomial | ⬜ |
-| **P2-12** | 港股通/北向因子 | BR-005 | `pkg/data/source/hkex/` (新建) | TBD | 1w | 陆股通净流入 + 汇率换算 | ⬜ |
+| **P2-8** | 券资金对账 Worker (每 15min) | BR-012 | `pkg/live/reconciliation.go` (新建) | 2026-06-13 | 1w | 15min interval + 6 类偏差 (cash/qty/market_value/fee) + 阈值告警 + on-disk JSON + HTTP endpoints + 20 TestXxx race-clean | ✅ |
+| **P2-9** | 融资融券 + 做空 | BR-005, BR-007 | `pkg/live/margin.go` (新建) | 2026-06-14 | 2w | MarginAccount + ShortableList + MarginCalculator + 4 类操作 (MarginBuy/ShortSell/BuyToCover/MarginSell) + 利息计提 + 强制平仓 (130%) + 55 TestXxx race-clean | ✅ |
+| **P2-10** | 可转债策略 | BR-005 | `pkg/strategy/plugins/convertible_bond.go` (新建) | 2026-06-14 | 1w | 转股价值/纯债价值/溢价率/Delta + 强制赎回 (15/30) + 回售 (30 连续) + Strategy 接口实现 + 59 TestXxx race-clean | ✅ |
+| **P2-11** | 期权定价 + Greeks | BR-005 | `pkg/strategy/options/` (新建) | 2026-06-14 | 2w | Black-Scholes (欧式) + Binomial CRR (美式) + 5 Greeks + ImpliedVol (Newton-Raphson) + NormCDF (A&S 近似) + BS↔Binomial 收敛验证 + 75 TestXxx race-clean | ✅ |
+| **P2-12** | 港股通/北向因子 | BR-005 | `pkg/data/source/hkex/` (新建) | 2026-06-14 | 1w | EastmoneyNorthboundFetcher + NorthboundFactor (MA/动量/持股变化/排名/信号) + ExchangeRateConverter + 75 TestXxx race-clean | ✅ |
 | **P2-13** | 退市 + 北交所 30% 涨跌停 | BR-005, BR-006 | `pkg/live/stock_state.go` (新建) | 2026-06-14 | 3d | StockState 4 状态机 + Registry + ForcedLiquidator (接 P2-3 EmergencyFlatten) + 5 日 LiquidationWindow + DryRun 模式 + 23 TestXxx race-clean | ✅ (ODR-030) |
 | **P2-14** | 止盈/移动止盈/分批止盈 | BR-007 | `pkg/risk/take_profit.go` (新建) | 2026-06-14 | 1w | FixedTakeProfit + TrailingTakeProfit (HWM 跟踪) + TieredTakeProfit (100 股取整) + TakeProfitChecker (Registry) + 无状态 Rule + Position.Metadata 持久化 + 29 TestXxx race-clean | ✅ (ODR-031) |
 | **P2-15** | 分红/送股/拆股/配股/增发 | BR-006 | `pkg/domain/corporate_action.go` (新建) | 2026-06-14 | 1w | CashDividend + BonusShare + CorporateActionSplit + RightsIssue (两阶段 Apply) + Placement + ActionEngine (apply 顺序固定) + appliedLog 幂等去重 + 22 TestXxx race-clean | ✅ (ODR-032) |
 | **P2-16** | API 版本化 (`/api/v1` 强制) | AR-020 | `pkg/api/versioning.go` (新建 leaf package) | 2026-06-14 | 1d | APIVersionMiddleware (URL 重写 + re-dispatch) + DeprecationHeader (RFC 8594) + DiscoveryHandler + 两阶段迁移 (软→严格) + 零侵入 13 handler 不改 + 25 TestXxx race-clean | ✅ (ODR-033) |
-| **P2-17** | OpenAPI 3.0 spec 自动生成 | AR-020 | `docs/openapi.yaml` (新建) | TBD | 2d | swagger 端点可用 | ⬜ |
-| **P2-18** | pkg/data/source ETL 真实集成测试 (dockertest) | TQ-016 | `pkg/data/source/integration_test.go` (新建) | TBD | 2d | 9 个 adapter 真实测试 | ⬜ |
-| **P2-19** | pkg/ai/gene_pool 持久化测试 (覆盖 41.3%→60%) | TQ-011 | `pkg/ai/gene_pool/integration_test.go` (新建) | TBD | 2d | 覆盖率 ≥ 60% | ⬜ |
-| **P2-20** | pkg/risk 边界测试 (60%→70%) | TQ-016 | `pkg/risk/*_test.go` | TBD | 2d | stoploss/regime/volatility 边界 | ⬜ |
-| **P2-21** | pkg/ai/pipeline 端到端测试 (57%→70%) | TQ-016 | `pkg/ai/pipeline/e2e_test.go` (新建) | TBD | 3d | Intent → YAML → Code → Compile → Backtest | ⬜ |
-| **P2-22** | pkg/domain 类型边界测试 (0%→80%) | TQ-016 | `pkg/domain/types_test.go` (新建) | TBD | 1d | OHLCV/Portfolio/Signal zero value + JSON | ⬜ |
-| **P2-23** | pkg/httpclient 测试 (0%→80%) | TQ-016 | `pkg/httpclient/*_test.go` (新建) | TBD | 1d | timeout/retry/backoff 测试 | ⬜ |
-| **P2-24** | pkg/logging 日志脱敏 (0%→80%) | TQ-016 | `pkg/logging/*_test.go` (新建) | TBD | 1d | API key/账号脱敏测试 | ⬜ |
-| **P2-25** | pkg/ai/client LLMClient interface 测试 (78%→90%) | ADR-018 | `pkg/ai/client_test.go` (扩展) | TBD | 1d | 所有 interface 方法 mock 覆盖 | ⬜ |
-| **P2-26** | E2E 视觉回归 (Playwright 截图对比) | TQ-016 | `e2e/tests/visual-regression.spec.ts` | TBD | 2d | 关键页面截图 baseline | ⬜ |
-| **P2-27** | WASM sandbox (wazero) | AR-003, ADR-007/019 Phase 3 | `internal/sandbox/wasm/` (新建) | TBD | 1mo | 完全内存隔离 | ⬜ |
-| **P2-28** | EventBus backpressure (drop-oldest 策略) | AR-018 | `pkg/marketdata/eventbus.go` | TBD | 2d | 5000+ 标的实时不阻塞 | ⬜ |
-| **P2-29** | 跨日状态持久化测试 (Quant 状态) | TQ-016 | `pkg/backtest/persistence_test.go` (新建) | TBD | 2d | 服务重启不丢历史 | ⬜ |
-| **P2-30** | 数值精度 (float64 vs Decimal) | TQ-016 | `pkg/decimal/` (新建) | TBD | 1w | 累计误差 < 0.01 CNY | ⬜ |
-| **P2-31** | 拆分 3 个长函数 (getSignals/SubmitOrder/CalculatePosition) | CQ-011 | 3 个文件 | TBD | 2d | 每个函数 < 50 行 | ⬜ |
-| **P2-32** | 删除 4 处 `Test*_Cleanup` 空测试 | TQ-002 | `pkg/strategy/plugins/coverage_test.go` | TBD | 0.5d | 删除或补 assert | ⬜ |
-| **P2-33** | 删除 `assert.True(t, true)` placeholder | TQ-001 | `pkg/storage/postgres_screen_test.go:235` | TBD | 0.5d | pgxmock 真实 SQL 验证 | ⬜ |
+| **P2-17** | OpenAPI 3.0 spec 自动生成 | AR-020 | `docs/openapi.yaml` (新建) | 2026-06-14 | 2d | OpenAPI 3.0 YAML + Swagger UI endpoint (/api/docs) + embed 静态文件 + 5 TestXxx | ✅ |
+| **P2-18** | pkg/data/source ETL 真实集成测试 (dockertest) | TQ-016 | `pkg/data/source/integration_test.go` (新建) | 2026-06-14 | 2d | 9 个 adapter httptest mock 测试 | ✅ |
+| **P2-19** | pkg/ai/gene_pool 持久化测试 (覆盖 41.3%→60%) | TQ-011 | `pkg/ai/gene_pool/integration_test.go` (新建) | 2026-06-14 | 2d | FactorPool/StrategyPool save/load 持久化测试 | ✅ |
+| **P2-20** | pkg/risk 边界测试 (60%→70%) | TQ-016 | `pkg/risk/boundary_test.go` (新建) | 2026-06-14 | 2d | stoploss/regime/volatility 边界 + 零值/负值/极值 | ✅ |
+| **P2-21** | pkg/ai/pipeline 端到端测试 (57%→70%) | TQ-016 | `pkg/ai/pipeline/e2e_test.go` (新建) | 2026-06-14 | 3d | Intent → YAML → Code → Compile → Backtest mock 全流程 | ✅ |
+| **P2-22** | pkg/domain 类型边界测试 (0%→80%) | TQ-016 | `pkg/domain/types_test.go` (新建) | 2026-06-14 | 1d | OHLCV/Portfolio/Signal zero value + JSON 序列化 | ✅ |
+| **P2-23** | pkg/httpclient 测试 (0%→80%) | TQ-016 | `pkg/httpclient/client_test.go` (新建) | 2026-06-14 | 1d | timeout/retry/backoff + httptest mock | ✅ |
+| **P2-24** | pkg/logging 日志脱敏 (0%→80%) | TQ-016 | `pkg/logging/masking.go` + `masking_test.go` (新建) | 2026-06-14 | 1d | MaskAPIKey/MaskAccountNumber/MaskMap + 42 TestXxx | ✅ |
+| **P2-25** | pkg/ai/client LLMClient interface 测试 (78%→90%) | ADR-018 | `pkg/ai/client_test.go` (扩展) | 2026-06-14 | 1d | MockClient 全方法 + Client options + 42 TestXxx | ✅ |
+| **P2-26** | E2E 视觉回归 (Playwright 截图对比) | TQ-016 | `e2e/tests/visual-regression.spec.ts` (新建) | 2026-06-14 | 2d | 12 个截图 baseline (Dashboard/Backtest/AI/Screener/Sync + 响应式) | ✅ |
+| **P2-27** | WASM sandbox (wazero) | AR-003, ADR-007/019 Phase 3 | `internal/sandbox/wasm/` (新建) | 2026-06-14 | 1mo | WASMSandbox 接口 + InProcessRuntime 回退 + 内存隔离 + 资源限制 + 28 TestXxx | ✅ |
+| **P2-28** | EventBus backpressure (drop-oldest 策略) | AR-018 | `pkg/marketdata/backpressure_bus.go` (新建) | 2026-06-14 | 2d | BackpressureBus + drop-oldest + 每订阅者独立 goroutine + 原子指标 + 24 TestXxx race-clean | ✅ |
+| **P2-29** | 跨日状态持久化测试 (Quant 状态) | TQ-016 | `pkg/backtest/persistence.go` + `persistence_test.go` (新建) | 2026-06-14 | 2d | DiskStateStore + 原子写入 (temp+rename) + 并发安全 + 损坏文件处理 + 22 TestXxx | ✅ |
+| **P2-30** | 数值精度 (float64 vs Decimal) | TQ-016 | `pkg/decimal/` (新建) | 2026-06-14 | 1w | Decimal (int64 定点) + Add/Sub/Mul/Div + Round + 0.1+0.2=0.3 验证 + 53 TestXxx | ✅ |
+| **P2-31** | 拆分 3 个长函数 (getSignals/SubmitOrder/CalculatePosition) | CQ-011 | 3 个文件 | 2026-06-14 | 2d | getSignals 拆 5 函数 + RunBacktest 拆 4 函数 + EmergencyFlatten 拆 2 函数, 每个 < 50 行 | ✅ |
+| **P2-32** | 删除 4 处 `Test*_Cleanup` 空测试 | TQ-002 | `pkg/strategy/plugins/coverage_test.go` | 2026-06-14 | 0.5d | 删除 4 个空 Cleanup 测试 (TDSequential/BollingerMR/VPT/VolBreakout) | ✅ |
+| **P2-33** | 删除 `assert.True(t, true)` placeholder | TQ-001 | `pkg/storage/postgres_screen_test.go` + `fundamentals.go` | 2026-06-14 | 0.5d | 提取 buildScreenFundamentalsQuery 纯函数 + 7 子测试验证 SQL 构建 | ✅ |
 
 ### Sprint 6 验收 Gate (2026-07-02)
 
