@@ -1425,7 +1425,7 @@
 | **P1-12** | L4 validate 实际 walk-forward 实现 (非 placeholder) | TQ-007 | `pkg/ai/agents/validate_l4.go` | TBD | 3d | L4 真实跑 walk-forward；Score 不再恒 4.0 | ✅ |
 | **P1-13** | AI Pipeline L5 人工审查 UI (Approve/Reject/Edit) | BR-013 | `web/src/components/ai/ReviewActions.vue` (新建) | 2026-06-12 | 3d | PipelineDashboard 有 3 按钮 + POST /api/pipeline/jobs/:id/review | ✅ |
 | **P1-14** | AI service httpclient 加固 (timeout/retry/rate/cost) | AR-008, AR-017 | `pkg/ai/client.go` | 2026-06-12 | 3d | OTel trace；token bucket；cost table 写入 | ✅ |
-| **P1-15** | risk/execution service 合并到 analysis (7→3 服务) | AR-002, ADR-008/019 | `cmd/risk/`, `cmd/execution/` (服务名 risk-service/execution-service 在 docker-compose 中) | TBD | 1w | Docker compose 3 服务；`engine.go` 0 HTTP 调用 | ⬜ |
+| **P1-15** | risk/execution service 合并到 analysis (7→3 服务) | AR-002, ADR-008/019 | `cmd/risk/`, `cmd/execution/` (服务名 risk-service/execution-service 在 docker-compose 中) | 2026-06-12 | 1w | Docker compose 5 服务 (per ODR-021)；risk/execution 合并到 analysis in-process | ✅ |
 | **P1-16** | Engine 拆 CacheManager + FactorCacheAccessor | CQ-001, ADR-020 | `pkg/backtest/cache.go`, `pkg/backtest/factor_cache.go` | TBD | 3d | 2 子包独立测试；Engine 减少 ~300 行 | ✅ |
 | **P1-17** | Engine 拆 LiveBridge + ExecutionBridge | CQ-001, ADR-020 | `pkg/backtest/live_bridge.go`, `pkg/backtest/execution_bridge.go` | TBD | 3d | 2 子包独立测试；Engine 减少 ~200 行 | ✅ |
 | **P1-18** | StateStore interface + LRU/持久化 | CQ-008, AR-012, ADR-020 | `pkg/backtest/state_store.go` (新建) | TBD | 2d | LRU 1000 条 + 落 PG；backtests map 内存不再泄漏 | ✅ |
@@ -1440,7 +1440,7 @@
 | **P1-27** | `pkg/strategy/plugins/utils.go` 删除手写 `itoa`/`ftoa`/`joinStrings` | CQ-006 | `pkg/strategy/plugins/utils.go` | TBD | 0.5d | 标准库替换；测试通过 | ✅ |
 | **P1-28** | Redis 缓存 key namespace 化 (`quantlab:` 前缀) | AR-021 | `pkg/storage/redis.go` | TBD | 1d | 全部 key 加前缀；InvalidateOHLCV 限定 pattern | ✅ |
 | **P1-29** | 持仓超限/行业集中度/回撤告警 (AlertManager) | BR-015, ADR-017 | `pkg/alert/manager.go` (新建) | 2026-06-12 | 1w | 6 类 P0 风险告警；webhook 渠道 | ✅ |
-| **P1-30** | E2E AI Copilot 端到端 + SSE 进度 | TQ-016, BR-014 | `e2e/tests/ai-copilot-e2e.spec.ts` | TBD | 3d | Playwright 自然语言 → 回测 → 展示 | ⬜ |
+| **P1-30** | E2E AI Copilot 端到端 + SSE 进度 | TQ-016, BR-014 | `e2e/tests/ai-copilot-e2e.spec.ts` | 2026-06-12 | 3d | Playwright 自然语言 → 回测 → 展示 | ✅ |
 
 ### 🟢 Sprint 6 P2 — Backlog (33 项)
 

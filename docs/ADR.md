@@ -72,6 +72,14 @@
 | [ODR-031](odr/odr-031-p2-14-take-profit.md) | P2-14 止盈三件套 — FixedTakeProfit (固定阈值) + TrailingTakeProfit (移动 HWM 跟踪) + TieredTakeProfit (分批 + 100 股取整) + TakeProfitChecker (Registry 模式) + 无状态 Rule + Position.Metadata 持久化 — 29 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
 | [ODR-032](odr/odr-032-p2-15-corporate-action.md) | P2-15 公司行为 — CashDividend + BonusShare + CorporateActionSplit + RightsIssue (两阶段 Apply: 默认放弃 + ApplyPaid) + Placement + ActionEngine (apply 顺序 Split→Bonus→Rights→Cash→Placement, 同 ex-date 多 action 排序固定) + appliedLog 幂等去重 — 22 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
 | [ODR-033](odr/odr-033-p2-16-api-versioning.md) | P2-16 API 版本化 — `pkg/api` 新建 leaf package + APIVersionMiddleware (URL 重写 + engine.HandleContext re-dispatch, gin radix-tree 路由在 middleware 前匹配必须 re-dispatch) + DeprecationHeader (RFC 8594 / 9745 / 8288 合规: Deprecation / Sunset / Link 头) + DiscoveryHandler + 两阶段迁移 (软 deprecation → LegacyRedirect 严格重定向) + 零侵入 13 handler 不改 — 25 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
+| [ODR-034](odr/odr-034-p2-9-margin-trading.md) | P2-9 融资融券 + 做空 — MarginAccount + ShortableList (RWMutex) + MarginCalculator 纯函数 + 4 类操作 (MarginBuy/ShortSell/BuyToCover/MarginSell) + 利息计提 + 强制平仓 (130%) — 55 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
+| [ODR-035](odr/odr-035-p2-10-convertible-bond.md) | P2-10 可转债策略 — 转股价值/纯债价值/溢价率/Delta + 强制赎回 (15/30) + 回售 (30 连续) + Strategy 接口实现 — 59 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
+| [ODR-036](odr/odr-036-p2-11-options-pricing.md) | P2-11 期权定价 + Greeks — Black-Scholes (欧式) + Binomial CRR (美式) + 5 Greeks + ImpliedVol (Newton-Raphson) + NormCDF (A&S 近似) — 75 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
+| [ODR-037](odr/odr-037-p2-12-hkex-northbound.md) | P2-12 港股通/北向因子 — EastmoneyNorthboundFetcher + 5 类北向因子 (MA/动量/持股变化/排名/信号) + ExchangeRateConverter — 75 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
+| [ODR-038](odr/odr-038-p2-17-openapi-spec.md) | P2-17 OpenAPI 3.0 spec + Swagger UI — docs/openapi.yaml + /api/docs 端点 + Go embed 静态文件 + /api/version discovery — 5 TestXxx | Completed | Implementation | 2026-06-14 |
+| [ODR-039](odr/odr-039-p2-18-p2-26-test-quality.md) | P2-18~P2-26 测试质量提升 — 9 个测试文件 (数据源集成/基因池持久化/风控边界/Pipeline E2E/领域类型/HTTP客户端/日志脱敏/LLM客户端/视觉回归) + 日志脱敏功能 — ~200+ TestXxx | Completed | Implementation | 2026-06-14 |
+| [ODR-040](odr/odr-040-p2-27-p2-30-infrastructure.md) | P2-27~P2-30 基础设施 — WASM sandbox (InProcessRuntime 回退) + EventBus backpressure (drop-oldest) + 跨日状态持久化 (DiskStateStore) + Decimal 定点数 — 127 TestXxx race-clean | Completed | Implementation | 2026-06-14 |
+| [ODR-041](odr/odr-041-p2-31-p2-33-code-quality.md) | P2-31~P2-33 代码质量 — 拆 3 个长函数为 11 个子函数 + 删 4 个空测试 + 替换 placeholder 为 7 个 SQL 构建子测试 | Completed | Implementation | 2026-06-14 |
 
 ---
 
@@ -118,13 +126,10 @@ When to create an ODR:
 ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical example.
 
 ---
-_Last updated by: AI Assistant — 2026-06-14 (P2-13/14/15/16 退市+止盈+公司行为+API版本化完成 → ODR-030/031/032/033 新建 Completed; Sprint 6 P2 累计 8 项全部 ✅)_
+_Last updated by: AI Assistant — 2026-06-14 (P2-9~P2-12 + P2-17~P2-33 全部完成 → ODR-034~041 新建 Completed; Sprint 6 P2 累计 33 项全部 ✅)_
 _ADR 累计 20 条: 架构 16 + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020)_
-_ODR 累计 31 条: Cleanup 3 (ODR-001/006/008) | Audit 6 (ODR-002/009/010/012/013/015) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004) | Implementation 15 (ODR-016/017/018/019/020/021/023/024/025/026/027/028/029/030/031/032/033) | Refactor 1 (ODR-022)_
-_2026-06-14 状态变更 (本次): ODR-030 新建 (P2-13 退市+强制清仓 23 TestXxx + 5 日 LiquidationWindow + DryRun 完成)_
-_2026-06-14 状态变更: ODR-031 新建 (P2-14 止盈三件套 29 TestXxx + Fixed/Trailing/Tiered + Metadata 持久化完成)_
-_2026-06-14 状态变更: ODR-032 新建 (P2-15 公司行为 22 TestXxx + 5 Action + ActionEngine apply 顺序固定 + 配股两阶段完成)_
-_2026-06-14 状态变更: ODR-033 新建 (P2-16 API 版本化 25 TestXxx + pkg/api 新建 leaf package + URL 重写 + RFC 8594 头 + Discovery 完成)_
+_ODR 累计 41 条: Cleanup 3 (ODR-001/006/008) | Audit 6 (ODR-002/009/010/012/013/015) | Migration 5 (ODR-003/005/007/011/014) | Process 1 (ODR-004) | Implementation 25 (ODR-016/017/018/019/020/021/023/024/025/026/027/028/029/030/031/032/033/034/035/036/037/038/039/040/041) | Refactor 1 (ODR-022)_
+_2026-06-14 状态变更 (本次): ODR-034~041 新建 (P2-9 融资融券 + P2-10 可转债 + P2-11 期权 + P2-12 港股通 + P2-17 OpenAPI + P2-18~26 测试质量 + P2-27~30 基础设施 + P2-31~33 代码质量; P1-15/P1-30 状态修正 ✅; 预存测试失败修复 2 处)_
 _2026-06-13 状态变更: ODR-029 新建 (P2-7 减持规则 40 TestXxx + 5 类股东 + 3 种方式完成); ODR-028 新建 (P2-4/5/6 合规三件套 60 TestXxx 完成); Sprint 6 P2 累计 4 项全部 ✅_
 _2026-06-12 状态变更: ODR-027 新建 (P2-1 HTML 导出 + P2-2 多策略对比 17 TestXxx + 路由 + 持久化完成)_
 _2026-06-12 状态变更: ODR-026 新建 (P2-3 紧急平仓 kill-switch 12 TestXxx + 三重鉴权完成)_

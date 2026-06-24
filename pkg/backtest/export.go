@@ -340,7 +340,7 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid {{.ColorMute
 </style>
 </head>
 <body>
-<header>
+<header id="{{.Report.ID}}">
   <h1>{{.Report.Strategy}} 回测报告</h1>
   <div class="subtitle">区间: {{.Report.StartDate}} ~ {{.Report.EndDate}} · 报告 ID: <span class="symbol">{{.Report.ID}}</span> · 生成于 {{.GeneratedAt}}</div>
   <div class="subtitle">股票池: {{if .Report.StockPool}}{{range $i, $s := .Report.StockPool}}{{if $i}}, {{end}}<span class="symbol">{{$s}}</span>{{end}}{{else}}<span class="muted">未指定</span>{{end}} · 初始资金: {{.Report.InitialCapital}}</div>
