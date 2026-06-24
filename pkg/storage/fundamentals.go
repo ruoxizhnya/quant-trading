@@ -314,6 +314,36 @@ func (s *PostgresStore) GetFundamentalDataHistory(ctx context.Context, tsCode st
 
 // ScreenFundamentals filters stocks by fundamental criteria.
 func (s *PostgresStore) ScreenFundamentals(ctx context.Context, filters domain.ScreenFilters, date *time.Time, limit int) ([]domain.ScreenResult, error) {
+	query, args := buildScreenFundamentalsQuery(filters, date, limit)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to screen fundamentals: %w", err)
+	}
+	defer rows.Close()
+
+	var results []domain.ScreenResult
+	for rows.Next() {
+		var r domain.ScreenResult
+		if err := rows.Scan(
+			&r.TsCode, &r.PE, &r.PB, &r.PS, &r.ROE, &r.ROA,
+			&r.DebtToEquity, &r.GrossMargin, &r.NetMargin, &r.MarketCap,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan screen result row: %w", err)
+		}
+		results = append(results, r)
+	}
+
+	return results, rows.Err()
+}
+
+// buildScreenFundamentalsQuery constructs the parameterized SQL query and
+// argument list for ScreenFundamentals. Extracted as a pure function so
+// the query-building logic can be unit-tested without a live database
+// (pgxpool.Query cannot be mocked with sqlmock; pgxmock is not a project
+// dependency). The returned query uses PostgreSQL positional parameters
+// ($1, $2, ...) aligned with the returned args slice.
+func buildScreenFundamentalsQuery(filters domain.ScreenFilters, date *time.Time, limit int) (string, []interface{}) {
 	query := `
 		SELECT sf.ts_code, sf.pe, sf.pb, sf.ps, sf.roe, sf.roa, sf.debt_to_equity,
 			sf.gross_margin, sf.net_margin, st.market_cap
@@ -416,23 +446,5 @@ func (s *PostgresStore) ScreenFundamentals(ctx context.Context, filters domain.S
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
-	rows, err := s.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to screen fundamentals: %w", err)
-	}
-	defer rows.Close()
-
-	var results []domain.ScreenResult
-	for rows.Next() {
-		var r domain.ScreenResult
-		if err := rows.Scan(
-			&r.TsCode, &r.PE, &r.PB, &r.PS, &r.ROE, &r.ROA,
-			&r.DebtToEquity, &r.GrossMargin, &r.NetMargin, &r.MarketCap,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan screen result row: %w", err)
-		}
-		results = append(results, r)
-	}
-
-	return results, rows.Err()
+	return query, args
 }

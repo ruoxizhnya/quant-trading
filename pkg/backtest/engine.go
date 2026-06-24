@@ -447,36 +447,74 @@ func (e *Engine) effectiveProvider() marketdata.Provider {
 
 // RunBacktest executes a backtest with the given parameters.
 func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*BacktestResponse, error) {
-	// Parse dates
-	startDate, err := time.Parse("2006-01-02", req.StartDate)
+	startDate, endDate, err := e.parseBacktestDateRange(ctx, req)
 	if err != nil {
-		return nil, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "invalid start_date format: "+req.StartDate, "RunBacktest")
-	}
-	endDate, err := time.Parse("2006-01-02", req.EndDate)
-	if err != nil {
-		return nil, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "invalid end_date format: "+req.EndDate, "RunBacktest")
+		return nil, err
 	}
 
-	// Pre-check: verify trading calendar has data for the requested date range
-	hasCalendar, err := e.checkCalendarExists(ctx, startDate, endDate)
-	if err != nil {
-		e.logger.Warn().Err(err).Msg("Calendar check error, proceeding anyway")
-	} else if !hasCalendar {
-		return nil, apperrors.New(apperrors.ErrCodeInvalidInput, "trading calendar not synced, please run POST /sync/calendar first (with exchange 'SSE' or 'both')").WithOperation("RunBacktest")
-	}
-
-	// Use default initial capital if not provided
 	initialCapital := req.InitialCapital
 	if initialCapital <= 0 {
 		initialCapital = e.config.InitialCapital
 	}
-
 	riskFreeRate := req.RiskFreeRate
 	if riskFreeRate <= 0 {
 		riskFreeRate = e.config.RiskFreeRate
 	}
 
-	// Create backtest state
+	stockPool, err := e.resolveStockPool(ctx, req, startDate)
+	if err != nil {
+		return nil, err
+	}
+
+	backtestID := uuid.New().String()
+	state := e.newBacktestState(backtestID, req, stockPool, startDate, endDate, initialCapital, riskFreeRate)
+	e.stateStore.Put(backtestID, state)
+
+	result, err := e.runBacktestInternal(ctx, state)
+	if err != nil {
+		state.SetStatus("failed")
+		state.SetError(err)
+		state.Freeze()
+		return &BacktestResponse{
+			ID:        backtestID,
+			Status:    "failed",
+			Error:     err.Error(),
+			StartedAt: state.StartedAt.Format(time.RFC3339),
+		}, err
+	}
+
+	state.SetResult(result)
+	state.SetCompletedAt(time.Now())
+	state.SetStatus("completed")
+	state.Freeze()
+
+	return e.buildBacktestResponse(backtestID, req, state, result, initialCapital), nil
+}
+
+// parseBacktestDateRange parses and validates the request date range and
+// verifies the trading calendar has data for it.
+func (e *Engine) parseBacktestDateRange(ctx context.Context, req BacktestRequest) (time.Time, time.Time, error) {
+	startDate, err := time.Parse("2006-01-02", req.StartDate)
+	if err != nil {
+		return time.Time{}, time.Time{}, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "invalid start_date format: "+req.StartDate, "RunBacktest")
+	}
+	endDate, err := time.Parse("2006-01-02", req.EndDate)
+	if err != nil {
+		return time.Time{}, time.Time{}, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "invalid end_date format: "+req.EndDate, "RunBacktest")
+	}
+
+	hasCalendar, err := e.checkCalendarExists(ctx, startDate, endDate)
+	if err != nil {
+		e.logger.Warn().Err(err).Msg("Calendar check error, proceeding anyway")
+	} else if !hasCalendar {
+		return time.Time{}, time.Time{}, apperrors.New(apperrors.ErrCodeInvalidInput, "trading calendar not synced, please run POST /sync/calendar first (with exchange 'SSE' or 'both')").WithOperation("RunBacktest")
+	}
+	return startDate, endDate, nil
+}
+
+// resolveStockPool returns the stock pool from the request, expanding index
+// constituents when an IndexCode is supplied and StockPool is empty.
+func (e *Engine) resolveStockPool(ctx context.Context, req BacktestRequest, startDate time.Time) ([]string, error) {
 	stockPool := req.StockPool
 	if len(stockPool) == 0 && req.IndexCode != "" {
 		e.mu.RLock()
@@ -495,9 +533,12 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 	if len(stockPool) == 0 {
 		return nil, apperrors.New(apperrors.ErrCodeInvalidInput, "stock_pool or index_code is required").WithOperation("RunBacktest")
 	}
+	return stockPool, nil
+}
 
-	backtestID := uuid.New().String()
-	state := &BacktestState{
+// newBacktestState constructs the initial BacktestState for a run.
+func (e *Engine) newBacktestState(backtestID string, req BacktestRequest, stockPool []string, startDate, endDate time.Time, initialCapital, riskFreeRate float64) *BacktestState {
+	return &BacktestState{
 		ID:     backtestID,
 		Status: "running",
 		Params: domain.BacktestParams{
@@ -518,28 +559,11 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 		),
 		targetPositions: make(map[string]*domain.TargetPosition),
 	}
+}
 
-	e.stateStore.Put(backtestID, state)
-
-	// Run the backtest
-	result, err := e.runBacktestInternal(ctx, state)
-	if err != nil {
-		state.SetStatus("failed")
-		state.SetError(err)
-		state.Freeze()
-		return &BacktestResponse{
-			ID:        backtestID,
-			Status:    "failed",
-			Error:     err.Error(),
-			StartedAt: state.StartedAt.Format(time.RFC3339),
-		}, err
-	}
-
-	state.SetResult(result)
-	state.SetCompletedAt(time.Now())
-	state.SetStatus("completed")
-	state.Freeze()
-
+// buildBacktestResponse assembles the success BacktestResponse from the
+// completed state and result.
+func (e *Engine) buildBacktestResponse(backtestID string, req BacktestRequest, state *BacktestState, result *domain.BacktestResult, initialCapital float64) *BacktestResponse {
 	return &BacktestResponse{
 		ID:              backtestID,
 		Status:          "completed",
@@ -564,7 +588,7 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 		Trades:          result.Trades,
 		StockPool:       req.StockPool,
 		InitialCapital:  initialCapital,
-	}, nil
+	}
 }
 
 // runBacktestInternal contains the core backtest loop.
@@ -833,95 +857,127 @@ func (e *Engine) detectRegime(ctx context.Context, marketData map[string][]domai
 }
 
 // getSignals retrieves trading signals from strategy service.
+// It first tries the local strategy registry (plugins/ directory) and
+// falls back to the external strategy service on miss.
 func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool []string, marketData map[string][]domain.OHLCV, date time.Time, tracker *Tracker) ([]domain.Signal, error) {
 	// Step 1: Try local strategy registry first (plugins/ directory)
 	if strat, err := strategy.DefaultRegistry.Get(strategyName); err == nil {
-		if fa, ok := strat.(strategy.FactorAware); ok {
-			fa.SetFactorCache(e.GetFactorZScore)
-		}
+		return e.getSignalsFromLocalStrategy(ctx, strat, strategyName, marketData, date, tracker)
+	}
+	// Step 2: Fall back to external strategy service
+	return e.getSignalsFromStrategyService(ctx, strategyName, stockPool, marketData, date)
+}
 
-		prices := make(map[string]float64)
-		for sym, bars := range marketData {
-			if len(bars) > 0 {
-				prices[sym] = bars[len(bars)-1].Close
-			}
-		}
-		portfolio := tracker.GetPortfolio(prices)
-
-		signals, err := strat.GenerateSignals(ctx, marketData, portfolio)
-		if err != nil {
-			return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, fmt.Sprintf("local strategy %s failed", strategyName), "getSignals")
-		}
-
-		domainSignals := make([]domain.Signal, 0, len(signals))
-		for _, s := range signals {
-			if s.Action == "hold" {
-				continue
-			}
-			dir := s.Direction
-			if dir == "" || dir == domain.DirectionHold {
-				if s.Action == "buy" {
-					dir = domain.DirectionLong
-				} else if s.Action == "sell" {
-					dir = domain.DirectionClose
-				} else {
-					continue
-				}
-			}
-
-			sigDate := date
-			if d, ok := s.Date.(time.Time); ok && !d.IsZero() {
-				sigDate = d
-			}
-
-			factors := s.Factors
-			if factors == nil {
-				factors = make(map[string]float64)
-			}
-			metadata := s.Metadata
-			if metadata == nil {
-				metadata = make(map[string]interface{})
-			}
-
-			limitPrice := s.LimitPrice
-			if limitPrice == 0 {
-				limitPrice = s.Price
-			}
-			orderType := s.OrderType
-			if orderType == "" {
-				orderType = domain.OrderTypeMarket
-			}
-
-			domainSignals = append(domainSignals, domain.Signal{
-				Symbol:         s.Symbol,
-				Date:           sigDate,
-				Direction:      dir,
-				Strength:       s.Strength,
-				Factors:        factors,
-				Metadata:       metadata,
-				LimitPrice:     limitPrice,
-				OrderType:      orderType,
-				CompositeScore: s.Strength,
-			})
-		}
-
-		e.logger.Debug().
-			Str("strategy", strategyName).
-			Int("signals", len(domainSignals)).
-			Msg("Generated signals from local registry")
-		return domainSignals, nil
+// getSignalsFromLocalStrategy generates signals via a locally-loaded strategy plugin.
+func (e *Engine) getSignalsFromLocalStrategy(ctx context.Context, strat strategy.Strategy, strategyName string, marketData map[string][]domain.OHLCV, date time.Time, tracker *Tracker) ([]domain.Signal, error) {
+	if fa, ok := strat.(strategy.FactorAware); ok {
+		fa.SetFactorCache(e.GetFactorZScore)
 	}
 
-	// Step 2: Fall back to external strategy service
+	prices := extractLatestPrices(marketData)
+	portfolio := tracker.GetPortfolio(prices)
+
+	signals, err := strat.GenerateSignals(ctx, marketData, portfolio)
+	if err != nil {
+		return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, fmt.Sprintf("local strategy %s failed", strategyName), "getSignals")
+	}
+
+	domainSignals := convertStrategySignals(signals, date)
+
+	e.logger.Debug().
+		Str("strategy", strategyName).
+		Int("signals", len(domainSignals)).
+		Msg("Generated signals from local registry")
+	return domainSignals, nil
+}
+
+// extractLatestPrices builds a symbol → latest close price map from market data.
+func extractLatestPrices(marketData map[string][]domain.OHLCV) map[string]float64 {
+	prices := make(map[string]float64)
+	for sym, bars := range marketData {
+		if len(bars) > 0 {
+			prices[sym] = bars[len(bars)-1].Close
+		}
+	}
+	return prices
+}
+
+// convertStrategySignals converts strategy plugin signals into domain Signals,
+// filtering out hold actions and normalizing direction / order type / price.
+func convertStrategySignals(signals []strategy.Signal, defaultDate time.Time) []domain.Signal {
+	domainSignals := make([]domain.Signal, 0, len(signals))
+	for _, s := range signals {
+		if s.Action == "hold" {
+			continue
+		}
+		dir := resolveDirection(s)
+		if dir == "" {
+			continue
+		}
+
+		sigDate := defaultDate
+		if d, ok := s.Date.(time.Time); ok && !d.IsZero() {
+			sigDate = d
+		}
+
+		factors := s.Factors
+		if factors == nil {
+			factors = make(map[string]float64)
+		}
+		metadata := s.Metadata
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+
+		limitPrice := s.LimitPrice
+		if limitPrice == 0 {
+			limitPrice = s.Price
+		}
+		orderType := s.OrderType
+		if orderType == "" {
+			orderType = domain.OrderTypeMarket
+		}
+
+		domainSignals = append(domainSignals, domain.Signal{
+			Symbol:         s.Symbol,
+			Date:           sigDate,
+			Direction:      dir,
+			Strength:       s.Strength,
+			Factors:        factors,
+			Metadata:       metadata,
+			LimitPrice:     limitPrice,
+			OrderType:      orderType,
+			CompositeScore: s.Strength,
+		})
+	}
+	return domainSignals
+}
+
+// resolveDirection maps a strategy signal's Action/Direction to a domain Direction.
+// Returns empty string when the signal should be skipped.
+func resolveDirection(s strategy.Signal) domain.Direction {
+	dir := s.Direction
+	if dir != "" && dir != domain.DirectionHold {
+		return dir
+	}
+	if s.Action == "buy" {
+		return domain.DirectionLong
+	}
+	if s.Action == "sell" {
+		return domain.DirectionClose
+	}
+	return ""
+}
+
+// getSignalsFromStrategyService calls the external strategy service to generate signals.
+func (e *Engine) getSignalsFromStrategyService(ctx context.Context, strategyName string, stockPool []string, marketData map[string][]domain.OHLCV, date time.Time) ([]domain.Signal, error) {
 	url := fmt.Sprintf("%s/strategies/%s/signals", e.strategyServiceURL, strategyName)
 
-	// Get stock info from market data keys (symbol only, no external data needed for momentum)
 	stocks := make([]domain.Stock, len(stockPool))
 	for i, sym := range stockPool {
 		stocks[i] = domain.Stock{Symbol: sym}
 	}
 
-	// Convert market data to the format expected by strategy service
 	reqBody := struct {
 		StockPool   []string                        `json:"stock_pool"`
 		Stocks      []domain.Stock                  `json:"stocks"`

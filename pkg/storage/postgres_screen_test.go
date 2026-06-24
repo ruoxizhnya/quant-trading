@@ -1,11 +1,13 @@
 package storage
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Note: ScreenFundamentals uses pgxpool.Query which cannot be directly mocked
@@ -220,19 +222,102 @@ func TestDomainTypes(t *testing.T) {
 	})
 }
 
-// TestScreenFundamentals_DBRequired is a placeholder noting that full
-// ScreenFundamentals testing requires a real database or pgx-specific mock.
-func TestScreenFundamentals_DBRequired(t *testing.T) {
-	t.Log("ScreenFundamentals uses pgxpool.Pool.Query which requires either:")
-	t.Log("1. A real PostgreSQL database connection")
-	t.Log("2. A pgx-specific mock (pgxmock)")
-	t.Log("sqlmock only works with database/sql, not pgx/v5")
-	t.Log("")
-	t.Log("For full integration tests, run with a live database:")
-	t.Log("  go test ./pkg/storage/... -v -run ScreenFundamentals -db=true")
+// TestBuildScreenFundamentalsQuery verifies the SQL query and argument
+// list produced by buildScreenFundamentalsQuery. This replaces the former
+// placeholder TestScreenFundamentals_DBRequired which only asserted
+// `assert.True(t, true)`. ScreenFundamentals itself uses pgxpool.Query
+// (not database/sql), so it cannot be mocked with sqlmock; pgxmock is not
+// a project dependency. Instead we verify the query-building logic — the
+// part that is actually testable without a live DB — by asserting on the
+// generated SQL string and the positional argument list.
+func TestBuildScreenFundamentalsQuery(t *testing.T) {
+	t.Run("no date uses ROW_NUMBER subquery with rn=1", func(t *testing.T) {
+		query, args := buildScreenFundamentalsQuery(domain.ScreenFilters{}, nil, 0)
+		assert.Contains(t, query, "ROW_NUMBER() OVER (PARTITION BY ts_code")
+		assert.Contains(t, query, "WHERE sf.rn = 1")
+		assert.Empty(t, args, "no filters/date → no args")
+	})
 
-	// This test always passes - it's documentation
-	assert.True(t, true)
+	t.Run("with date uses direct trade_date filter", func(t *testing.T) {
+		d := time.Date(2024, 9, 30, 0, 0, 0, 0, time.UTC)
+		query, args := buildScreenFundamentalsQuery(domain.ScreenFilters{}, &d, 0)
+		assert.NotContains(t, query, "ROW_NUMBER()")
+		assert.Contains(t, query, "sf.trade_date = $1")
+		require.Len(t, args, 1)
+		assert.Equal(t, d, args[0])
+	})
+
+	t.Run("all filters produce sequential positional parameters", func(t *testing.T) {
+		peMin, peMax := 5.0, 30.0
+		pbMin, pbMax := 0.5, 5.0
+		psMin, psMax := 0.3, 10.0
+		roeMin, roaMin := 0.05, 0.02
+		debtMax := 1.0
+		grossMin, netMin := 0.20, 0.10
+		mktCapMin := 1_000_000_000.0
+		filters := domain.ScreenFilters{
+			PE_min: &peMin, PE_max: &peMax,
+			PB_min: &pbMin, PB_max: &pbMax,
+			PS_min: &psMin, PS_max: &psMax,
+			ROE_min: &roeMin, ROA_min: &roaMin,
+			DebtToEquity_max: &debtMax,
+			GrossMargin_min: &grossMin,
+			NetMargin_min:   &netMin,
+			MarketCap_min:    &mktCapMin,
+		}
+
+		query, args := buildScreenFundamentalsQuery(filters, nil, 0)
+		// 12 filter conditions, no date → 12 args, params $1..$12
+		require.Len(t, args, 12)
+		for i := 1; i <= 12; i++ {
+			assert.Contains(t, query, fmt.Sprintf("$%d", i),
+				"query should reference $%d", i)
+		}
+		// args must be in filter-declaration order
+		assert.Equal(t, peMin, args[0])
+		assert.Equal(t, peMax, args[1])
+		assert.Equal(t, netMin, args[10])
+		assert.Equal(t, mktCapMin, args[11])
+		// no-date path uses AND (not WHERE) because base query has WHERE rn=1
+		assert.Contains(t, query, "WHERE sf.rn = 1")
+		assert.Contains(t, query, " AND ")
+	})
+
+	t.Run("with date, filters append via AND to existing WHERE", func(t *testing.T) {
+		d := time.Date(2024, 9, 30, 0, 0, 0, 0, time.UTC)
+		peMax := 20.0
+		filters := domain.ScreenFilters{PE_max: &peMax}
+
+		query, args := buildScreenFundamentalsQuery(filters, &d, 0)
+		// date is $1, pe_max is $2
+		require.Len(t, args, 2)
+		assert.Equal(t, d, args[0])
+		assert.Equal(t, peMax, args[1])
+		assert.Contains(t, query, "sf.trade_date = $1")
+		assert.Contains(t, query, "(sf.pe IS NULL OR sf.pe <= $2)")
+		// date path has no "WHERE sf.rn = 1", so conditions use WHERE
+		assert.NotContains(t, query, "WHERE sf.rn = 1")
+		assert.Contains(t, query, " WHERE ")
+	})
+
+	t.Run("limit appends LIMIT clause", func(t *testing.T) {
+		query, _ := buildScreenFundamentalsQuery(domain.ScreenFilters{}, nil, 50)
+		assert.Contains(t, query, "LIMIT 50")
+	})
+
+	t.Run("zero limit omits LIMIT clause", func(t *testing.T) {
+		query, _ := buildScreenFundamentalsQuery(domain.ScreenFilters{}, nil, 0)
+		assert.NotContains(t, query, "LIMIT")
+	})
+
+	t.Run("MarketCap filter targets stocks table alias", func(t *testing.T) {
+		mktCapMin := 500_000_000.0
+		filters := domain.ScreenFilters{MarketCap_min: &mktCapMin}
+		query, args := buildScreenFundamentalsQuery(filters, nil, 0)
+		assert.Contains(t, query, "st.market_cap IS NULL OR st.market_cap >= $1")
+		require.Len(t, args, 1)
+		assert.Equal(t, mktCapMin, args[0])
+	})
 }
 
 // BenchmarkDomainTypes benchmarks the domain type allocations.
