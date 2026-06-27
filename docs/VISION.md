@@ -218,7 +218,7 @@ Strategies live in `pkg/strategy/plugins/` and auto-register via `init()`. A str
 | Momentum | 20-day price momentum, 12M reversal | ✅ momentum.go exists |
 | Value | PE/PB/PS screening, composite value score | ✅ value_momentum.go exists |
 | Multi-Factor | Value + Momentum + Quality composite | ✅ multi_factor.go exists (live computation; Factor cache needed for production-scale multi-factor evaluation) |
-| Mean Reversion | Bollinger bands, RSI thresholds | ⬜ Planned (Phase 2) |
+| Mean Reversion | Bollinger bands, RSI thresholds | ✅ mean_reversion.go (Bollinger + RSI) |
 | Risk Parity | Volatility-adjusted equal risk contribution | ⬜ Planned (Phase 4) |
 | Event-Driven | Earnings surprises, analyst upgrades | ⬜ Planned (Phase 3) |
 | Sentiment | News/algo sentiment scoring | ⬜ Planned (Phase 3) |
@@ -451,9 +451,9 @@ type Position struct {
 | Index constituents sync | CSI 300/500/800 constituent lists for universe definition | P1 | ✅ Done | tushare index_weight API |
 | Factor cache | Pre-compute factor scores (z-scores, quintiles) per stock per date | P1 | ✅ Done | factor_cache.go (z-score + quintile) |
 | Short selling cost model | Margin interest accrual on short positions (10.6% annual default) | P1 | ✅ Done | margin.go + tracker.go (backtest integration) |
-| Market impact model | Volume-based slippage: `sigma * sqrt(order_fraction / ADV)` | P2 | ⬜ Planned | OHLCV volume data |
-| News/sentiment data | Crawl financial news; AI sentiment score per stock per day | P2 | ⬜ Planned | News API, AI integration |
-| VaR / CVaR calculation | Historical simulation VaR at 95%/99%; CVaR (Expected Shortfall) | P2 | ⬜ Planned | OHLCV returns, Risk service |
+| Market impact model | Volume-based slippage: `sigma * sqrt(order_fraction / ADV)` | P2 | ✅ Done | backtest/market_impact.go |
+| News/sentiment data | Crawl financial news; AI sentiment score per stock per day | P2 | ✅ Done | data/sentiment/sentiment.go |
+| VaR / CVaR calculation | Historical simulation VaR at 95%/99%; CVaR (Expected Shortfall) | P2 | ✅ Done | risk/var.go |
 
 ### B. Strategy Layer
 
@@ -466,11 +466,11 @@ type Position struct {
 | Multi-factor strategy | Configurable weighted factors via YAML ⚠️ | P0 | ⚠️ Experimental | Factor definitions |
 > ⚠️ **Note:** Multi-factor strategy is **experimental** — it requires Factor Cache (P1, planned Phase 2) for production-scale multi-factor evaluation. Currently recomputes z-scores on every backtest, making it slow for large universes. Do not rely on it for production decisions until Factor Cache is built.
 | Mean reversion strategy | Bollinger bands + RSI threshold signals | P1 | ✅ Done | mean_reversion.go (Bollinger + RSI) |
-| Risk parity strategy | Equal risk contribution across positions | P2 | ⬜ Planned | Risk service |
+| Risk parity strategy | Equal risk contribution across positions | P2 | ✅ Done | risk_parity.go (1/vol weighting) |
 | Hot-swap strategy loading | Load/reload strategies at runtime without service restart | P1 | ✅ Done | loader.go (plugin.Open + Watch) |
 | Strategy versioning | Track which strategy version ran which backtest | P1 | ✅ Done | loader.go (filename parse + git hash), BacktestResponse.StrategyGitHash |
 | Strategy DB config | Database-backed strategy parameters (strategies table with JSONB); YAML as import/export | P1 | ✅ Done | db.go, strategies.go (JSONB params) |
-| Strategy correlation analysis | Measure pairwise correlation of strategy returns | P2 | ⬜ Planned | Backtest engine |
+| Strategy correlation analysis | Measure pairwise correlation of strategy returns | P2 | ✅ Done | backtest/correlation.go (Pearson NxN matrix) |
 
 ### C. Execution Layer
 
@@ -503,7 +503,7 @@ type Position struct {
 | Profit factor | Gross profit / gross loss | P1 | ✅ Done | — |
 | Factor attribution | Decompose portfolio return into factor contributions | P1 | ✅ Done | factor_attribution.go |
 | IC (Information Coefficient) | Rank correlation of factor to forward returns | P1 | ✅ Done | factor_attribution.go, ai/metrics/ic.go |
-| Factor decay analysis | Measure factor predictive power over 1M/3M/6M horizons | P2 | ⬜ Planned | Factor cache |
+| Factor decay analysis | Measure factor predictive power over 1M/3M/6M horizons | P2 | ✅ Done | data/factor_decay.go (Spearman IC multi-horizon) |
 | Strategy comparison | Overlay two backtest equity curves | P1 | ✅ Done | compare.go |
 | Strategy monitoring +失效detection | Track deployed strategy rolling Sharpe/drawdown; fire alert when 失效触发条件 met; support auto-retrain trigger | P1 | ✅ Done | strategy/monitor/monitor.go + drift/detector.go |
 | Report export | Generate PDF/HTML report from backtest | P2 | ✅ Done | export.go (HTML), handlers_export.go |
@@ -538,9 +538,9 @@ type Position struct {
 | Data service API | HTTP API for data queries and sync triggers | P0 | ✅ Done | — |
 | Redis caching | Cache hot OHLCV/fundamental data for active sessions | P1 | ✅ Done | storage/redis.go, storage/cache.go |
 | Background backtest worker | Isolated backtest job processor; API returns job_id, worker runs async, results persisted to DB | P1 | ✅ Done | sync/worker.go, backtest/job.go |
-| Kubernetes manifests | Production-grade deployment configs | P2 | ⬜ Planned | — |
-| Prometheus metrics | API latency, backtest duration, sync lag metrics | P2 | ⬜ Planned | — |
-| Alerting system | PagerDuty/Slack alerts for data sync stalls, backtest failures | P2 | ⬜ Planned | — |
+| Kubernetes manifests | Production-grade deployment configs | P2 | ✅ Done | deploy/k8s/ (8 manifests) |
+| Prometheus metrics | API latency, backtest duration, sync lag metrics | P2 | ✅ Done | pkg/metrics/metrics.go |
+| Alerting system | PagerDuty/Slack alerts for data sync stalls, backtest failures | P2 | ✅ Done | pkg/alert/systemalert/ |
 
 ---
 

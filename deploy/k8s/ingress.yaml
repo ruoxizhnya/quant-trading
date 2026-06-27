@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: quant-trading-ingress
+  namespace: quant-trading
+  labels:
+    app.kubernetes.io/name: quant-trading
+    app.kubernetes.io/part-of: quant-trading
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: quant-trading.local
+      http:
+        paths:
+          # Main API + Vue SPA served by analysis-service (port 8085)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: analysis-service
+                port:
+                  number: 8085
+          # AI research service exposed on its own path
+          - path: /ai
+            pathType: Prefix
+            backend:
+              service:
+                name: ai-research-service
+                port:
+                  number: 8086

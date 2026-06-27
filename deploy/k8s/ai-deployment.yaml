@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-research-service
+  namespace: quant-trading
+  labels:
+    app.kubernetes.io/name: ai-research-service
+    app.kubernetes.io/part-of: quant-trading
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ai-research-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ai-research-service
+        app.kubernetes.io/part-of: quant-trading
+    spec:
+      containers:
+        - name: ai
+          image: quant-trading/ai:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8086
+          envFrom:
+            - configMapRef:
+                name: quant-trading-config
+          env:
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-credentials
+                  key: llm-api-key
+                  optional: true
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-research-service
+  namespace: quant-trading
+  labels:
+    app.kubernetes.io/name: ai-research-service
+    app.kubernetes.io/part-of: quant-trading
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ai-research-service
+  ports:
+    - name: http
+      port: 8086
+      targetPort: http

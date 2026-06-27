@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analysis-service
+  namespace: quant-trading
+  labels:
+    app.kubernetes.io/name: analysis-service
+    app.kubernetes.io/part-of: quant-trading
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: analysis-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: analysis-service
+        app.kubernetes.io/part-of: quant-trading
+    spec:
+      containers:
+        - name: analysis
+          image: quant-trading/analysis:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8085
+          envFrom:
+            - configMapRef:
+                name: quant-trading-config
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials
+                  key: password
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analysis-service
+  namespace: quant-trading
+  labels:
+    app.kubernetes.io/name: analysis-service
+    app.kubernetes.io/part-of: quant-trading
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: analysis-service
+  ports:
+    - name: http
+      port: 8085
+      targetPort: http

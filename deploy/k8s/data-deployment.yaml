@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-service
+  namespace: quant-trading
+  labels:
+    app.kubernetes.io/name: data-service
+    app.kubernetes.io/part-of: quant-trading
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: data-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: data-service
+        app.kubernetes.io/part-of: quant-trading
+    spec:
+      containers:
+        - name: data
+          image: quant-trading/data:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: quant-trading-config
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: TUSHARE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: data-source-credentials
+                  key: tushare-token
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-service
+  namespace: quant-trading
+  labels:
+    app.kubernetes.io/name: data-service
+    app.kubernetes.io/part-of: quant-trading
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: data-service
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
