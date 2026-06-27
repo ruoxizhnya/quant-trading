@@ -6,9 +6,12 @@ package backtest
 // 该文件从 pkg/backtest/engine.go 中抽离出以下职责：
 //
 //   - 持有 factorCache (factorType → date → symbol → z-score)
+//   - 持有 quintileCache (factorType → date → symbol → quintile 1-5) — P1-C
 //   - 提供 LoadFactorCache (直接注入)
 //   - 提供 GetFactorZScore (lock-free 读取)
-//   - 提供 Warm (从 storage.PostgresStore 批量预热)
+//   - 提供 GetQuintile (读取预计算的 quintile) — P1-C
+//   - 提供 ComputeQuintile (z-score → 1-5 quintile 映射) — P1-C
+//   - 提供 Warm (从 storage.PostgresStore 批量预热，含 quintile 预计算)
 //
 // Engine 通过 Engine.FactorCache() 访问；旧字段 e.factorCache 与
 // 旧方法 (LoadFactorCache / GetFactorZScore / warmFactorCache) 保留为
@@ -23,6 +26,7 @@ package backtest
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -41,8 +45,77 @@ type FactorStore interface {
 type FactorCacheAccessor struct {
 	mu    sync.RWMutex
 	cache map[domain.FactorType]map[time.Time]map[string]float64
+	// quintileCache mirrors the structure of cache but stores the
+	// pre-computed quintile (1-5) derived from each z-score. Populated
+	// alongside cache in Load / Warm so that GetQuintile is a pure lookup.
+	quintileCache map[domain.FactorType]map[time.Time]map[string]int
 
 	logger zerolog.Logger
+}
+
+// quintileThresholds holds the standard normal distribution quantiles at
+// the 20th / 40th / 60th / 80th percentiles. Used by computeQuintile to
+// map a z-score into one of 5 equipopulated buckets:
+//
+//	q1 (bottom 20%): z < -0.843
+//	q2:              -0.843 <= z < -0.253
+//	q3 (middle 20%): -0.253 <= z < 0.253
+//	q4:              0.253 <= z < 0.843
+//	q5 (top 20%):    z >= 0.843
+//
+// Values are the inverse CDF of N(0,1) at p=0.2/0.4/0.6/0.8 (rounded to
+// 3 decimals, matching the spec in P1-C).
+var quintileThresholds = [4]float64{-0.843, -0.253, 0.253, 0.843}
+
+// ErrQuintileNotFound is returned by GetQuintile when the requested
+// (factor, date, symbol) tuple is absent from the quintile cache — either
+// because the cache is uninitialized or because no z-score was loaded for
+// that key.
+var ErrQuintileNotFound = errors.New("quintile not found in factor cache")
+
+// computeQuintile is the pure, allocation-free implementation backing
+// ComputeQuintile. Split out so buildQuintileCache / Warm can derive
+// quintiles without an accessor receiver.
+func computeQuintile(zScore float64) int {
+	for i, t := range quintileThresholds {
+		if zScore < t {
+			return i + 1
+		}
+	}
+	return 5
+}
+
+// ComputeQuintile maps a z-score to a quintile in [1, 5] using standard
+// normal distribution quantiles (20% / 40% / 60% / 80%). The mapping is
+// pure and deterministic — it does not consult the cache.
+func (f *FactorCacheAccessor) ComputeQuintile(zScore float64) int {
+	return computeQuintile(zScore)
+}
+
+// GetQuintile returns the pre-computed quintile (1-5) for the given
+// factor/date/symbol. The factor string is interpreted as a domain.FactorType
+// (e.g. "momentum", "value"); an unknown factor or a cache miss yields
+// ErrQuintileNotFound. Quintiles are pre-computed during Load / Warm, so
+// this is a constant-time lookup with no per-call computation.
+func (f *FactorCacheAccessor) GetQuintile(symbol string, date time.Time, factor string) (int, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.quintileCache == nil {
+		return 0, ErrQuintileNotFound
+	}
+	dateMap, ok := f.quintileCache[domain.FactorType(factor)]
+	if !ok {
+		return 0, ErrQuintileNotFound
+	}
+	symbolMap, ok := dateMap[date]
+	if !ok {
+		return 0, ErrQuintileNotFound
+	}
+	q, ok := symbolMap[symbol]
+	if !ok {
+		return 0, ErrQuintileNotFound
+	}
+	return q, nil
 }
 
 // NewFactorCacheAccessor 构造一个空 factor cache accessor。
@@ -53,11 +126,41 @@ func NewFactorCacheAccessor(logger zerolog.Logger) *FactorCacheAccessor {
 }
 
 // Load 直接注入数据（典型用法：storage.GetFactorCacheRange 后的结果）。
-// 传 nil 清理缓存。
+// 传 nil 清理缓存。Quintile 缓存从注入的 z-score 派生重建，保持与
+// z-score 缓存同步（P1-C）。
 func (f *FactorCacheAccessor) Load(data map[domain.FactorType]map[time.Time]map[string]float64) {
 	f.mu.Lock()
 	f.cache = data
+	f.quintileCache = buildQuintileCache(data)
 	f.mu.Unlock()
+}
+
+// buildQuintileCache derives a quintile cache from a z-score cache by
+// applying computeQuintile to every entry. Returns nil for nil/empty input
+// so that GetQuintile cleanly reports ErrQuintileNotFound.
+func buildQuintileCache(data map[domain.FactorType]map[time.Time]map[string]float64) map[domain.FactorType]map[time.Time]map[string]int {
+	if len(data) == 0 {
+		return nil
+	}
+	out := make(map[domain.FactorType]map[time.Time]map[string]int, len(data))
+	for factor, dateMap := range data {
+		if len(dateMap) == 0 {
+			continue
+		}
+		outDateMap := make(map[time.Time]map[string]int, len(dateMap))
+		for date, symbolMap := range dateMap {
+			if len(symbolMap) == 0 {
+				continue
+			}
+			outSymbolMap := make(map[string]int, len(symbolMap))
+			for symbol, z := range symbolMap {
+				outSymbolMap[symbol] = computeQuintile(z)
+			}
+			outDateMap[date] = outSymbolMap
+		}
+		out[factor] = outDateMap
+	}
+	return out
 }
 
 // Get 返回 (z-score, exists)。无命中返回 (0, false)。
@@ -128,6 +231,8 @@ func (f *FactorCacheAccessor) Warm(ctx context.Context, start, end time.Time, st
 	if len(combined) > 0 {
 		f.mu.Lock()
 		f.cache = combined
+		// P1-C: 预计算 quintile 并缓存，使 GetQuintile 成为纯查表操作。
+		f.quintileCache = buildQuintileCache(combined)
 		f.mu.Unlock()
 	}
 

@@ -153,29 +153,31 @@ func TestValueStrategy_ConfigureValidation(t *testing.T) {
 func TestMeanReversionStrategy_ConfigureValidation(t *testing.T) {
 	s := &meanReversionStrategy{BaseStrategy: strategy.NewBaseStrategy("mean_reversion", "test")}
 
-	// Test invalid ma_period
-	err := s.Configure(map[string]any{"ma_period": 0})
+	// Test invalid bollinger_period
+	err := s.Configure(map[string]any{"bollinger_period": 0})
 	if err == nil {
-		t.Error("expected error for ma_period=0")
+		t.Error("expected error for bollinger_period=0")
 	}
 
-	// Test invalid buy_threshold_pct (should be negative)
-	err = s.Configure(map[string]any{"buy_threshold_pct": 5.0})
+	// Test invalid rsi_oversold (must be < 50)
+	err = s.Configure(map[string]any{"rsi_oversold": 60.0})
 	if err == nil {
-		t.Error("expected error for buy_threshold_pct=5.0")
+		t.Error("expected error for rsi_oversold=60.0")
 	}
 
-	// Test invalid sell_threshold_pct (should be positive)
-	err = s.Configure(map[string]any{"sell_threshold_pct": -5.0})
+	// Test invalid rsi_overbought (must be > 50)
+	err = s.Configure(map[string]any{"rsi_overbought": 40.0})
 	if err == nil {
-		t.Error("expected error for sell_threshold_pct=-5.0")
+		t.Error("expected error for rsi_overbought=40.0")
 	}
 
 	// Test valid parameters
 	err = s.Configure(map[string]any{
-		"ma_period":           20,
-		"buy_threshold_pct":   -3.0,
-		"sell_threshold_pct":  3.0,
+		"bollinger_period":  20,
+		"bollinger_stddev":  2.0,
+		"rsi_period":         14,
+		"rsi_oversold":       25.0,
+		"rsi_overbought":     75.0,
 	})
 	if err != nil {
 		t.Errorf("expected no error for valid params, got: %v", err)

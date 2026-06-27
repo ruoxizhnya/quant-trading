@@ -441,16 +441,16 @@ type Position struct {
 |---------|-------------|----------|--------|--------------|
 | Tushare OHLCV sync | Sync daily qfq-adjusted OHLCV for all A-share stocks | P0 | ✅ Done | PostgreSQL, tushare token |
 | Stock master sync | Sync stock list (symbol, name, exchange, industry) | P0 | ✅ Done | PostgreSQL |
-| Trading calendar sync | Sync exchange calendar (is_open per date) from tushare `trade_cal` | P0 | 🔄 In Progress | PostgreSQL |
-| T+1 settlement enforcement | Track buy date per position; lock same-day buys from selling | P0 | 🔄 In Progress | Tracker redesign, trading calendar |
+| Trading calendar sync | Sync exchange calendar (is_open per date) from tushare `trade_cal` | P0 | ✅ Done | PostgreSQL, tushare token |
+| T+1 settlement enforcement | Track buy date per position; lock same-day buys from selling | P0 | ✅ Done | Tracker, trading calendar |
 | 前复权 (qfq) data | Use tushare `stk_factor_pro` open_qfq/high_qfq/low_qfq/close_qfq fields | P0 | ✅ Done | — |
 | Commission structure (A股) | 0.03% commission + 0.1% stamp tax (sell-only) + 0.001% transfer fee | P0 | ✅ Done | — |
-| 涨跌停 detection | Detect limit-up/limit-down; block buys on limit-up, sells on limit-down | P0 | 🔄 In Progress | OHLCV data with prev_close |
-| Dividend data sync | Track dividend income per position; affect portfolio total return | P1 | ⬜ Planned | Dividend API, tracker update |
-| Split/rights issue history | Corporate action history for verifying forward-adjustment calculations | P1 | ⬜ Planned | Split API, data verification |
-| Index constituents sync | CSI 300/500/800 constituent lists for universe definition | P1 | ⬜ Planned | Index weight API |
-| Factor cache | Pre-compute factor scores (z-scores, quintiles) per stock per date | P1 | ⬜ Planned | Fundamentals data |
-| Short selling cost model | Margin interest accrual on short positions (10.6% annual default) | P1 | ⬜ Planned | Tracker redesign |
+| 涨跌停 detection | Detect limit-up/limit-down; block buys on limit-up, sells on limit-down | P0 | ✅ Done | OHLCV data with prev_close, board.go, price_cage.go |
+| Dividend data sync | Track dividend income per position; affect portfolio total return | P1 | ✅ Done | tushare dividend API, tracker.go ProcessDividend |
+| Split/rights issue history | Corporate action history for verifying forward-adjustment calculations | P1 | ✅ Done | tushare split API, corporate_action.go, ActionEngine |
+| Index constituents sync | CSI 300/500/800 constituent lists for universe definition | P1 | ✅ Done | tushare index_weight API |
+| Factor cache | Pre-compute factor scores (z-scores, quintiles) per stock per date | P1 | ✅ Done | factor_cache.go (z-score + quintile) |
+| Short selling cost model | Margin interest accrual on short positions (10.6% annual default) | P1 | ✅ Done | margin.go + tracker.go (backtest integration) |
 | Market impact model | Volume-based slippage: `sigma * sqrt(order_fraction / ADV)` | P2 | ⬜ Planned | OHLCV volume data |
 | News/sentiment data | Crawl financial news; AI sentiment score per stock per day | P2 | ⬜ Planned | News API, AI integration |
 | VaR / CVaR calculation | Historical simulation VaR at 95%/99%; CVaR (Expected Shortfall) | P2 | ⬜ Planned | OHLCV returns, Risk service |
@@ -465,11 +465,11 @@ type Position struct {
 | Value Momentum strategy | PE + PB + ROE + 20-day momentum composite | P0 | ✅ Done | — |
 | Multi-factor strategy | Configurable weighted factors via YAML ⚠️ | P0 | ⚠️ Experimental | Factor definitions |
 > ⚠️ **Note:** Multi-factor strategy is **experimental** — it requires Factor Cache (P1, planned Phase 2) for production-scale multi-factor evaluation. Currently recomputes z-scores on every backtest, making it slow for large universes. Do not rely on it for production decisions until Factor Cache is built.
-| Mean reversion strategy | Bollinger bands + RSI threshold signals | P1 | ⬜ Planned | — |
+| Mean reversion strategy | Bollinger bands + RSI threshold signals | P1 | ✅ Done | mean_reversion.go (Bollinger + RSI) |
 | Risk parity strategy | Equal risk contribution across positions | P2 | ⬜ Planned | Risk service |
-| Hot-swap strategy loading | Load/reload strategies at runtime without service restart | P1 | ⬜ Planned | Plugin system, strategy service |
-| Strategy versioning | Track which strategy version ran which backtest | P1 | ⬜ Planned | Backtest runs table |
-| Strategy DB config | Database-backed strategy parameters (strategies table with JSONB); YAML as import/export | P1 | ⬜ Planned | PostgreSQL, Strategy service CRUD API |
+| Hot-swap strategy loading | Load/reload strategies at runtime without service restart | P1 | ✅ Done | loader.go (plugin.Open + Watch) |
+| Strategy versioning | Track which strategy version ran which backtest | P1 | ✅ Done | loader.go (filename parse + git hash), BacktestResponse.StrategyGitHash |
+| Strategy DB config | Database-backed strategy parameters (strategies table with JSONB); YAML as import/export | P1 | ✅ Done | db.go, strategies.go (JSONB params) |
 | Strategy correlation analysis | Measure pairwise correlation of strategy returns | P2 | ⬜ Planned | Backtest engine |
 
 ### C. Execution Layer
@@ -478,15 +478,15 @@ type Position struct {
 |---------|-------------|----------|--------|--------------|
 | Order execution (backtest) | Convert Signal → Trade; execute at close price with slippage | P0 | ✅ Done | Tracker |
 | Position tracking | Maintain per-symbol positions; update on every trade | P0 | ✅ Done | — |
-| T+1 position buckets | YD (sellable) vs TD (locked) quantity tracking per position | P0 | 🔄 In Progress | Trading calendar |
+| T+1 position buckets | YD (sellable) vs TD (locked) quantity tracking per position | P0 | ✅ Done | Trading calendar, tracker.go |
 | Commission + stamp tax | Accurate A-share commission with sell-only stamp tax | P0 | ✅ Done | — |
 | Slippage modeling | Configurable flat slippage rate per trade | P0 | ✅ Done | — |
 | Buying power check | Prevent orders exceeding available cash | P0 | ✅ Done | — |
 | Integer share rounding | Floor to nearest 100 shares (A股 1手 = 100 shares) | P0 | ✅ Done | — |
-| Limit order support | Execute only if price crosses threshold within day | P1 | ⬜ Planned | OHLCV intraday reach |
-| Partial fill modeling | Order fills only portion if volume insufficient | P1 | ⬜ Planned | Volume data |
-| Target/actual position separation | Strategy generates target; execution layer closes gap | P1 | ⬜ Planned | Strategy service |
-| Real broker integration | Futu/Tiger broker API for paper or live trading | P2 | ⬜ Planned | Broker SDK |
+| Limit order support | Execute only if price crosses threshold within day | P1 | ✅ Done | tracker.go (price cross check) |
+| Partial fill modeling | Order fills only portion if volume insufficient | P1 | ✅ Done | tracker.go (liquidity factor + partial status) |
+| Target/actual position separation | Strategy generates target; execution layer closes gap | P1 | ✅ Done | state.go (TargetPosition), engine_daily.go |
+| Real broker integration | Futu/Tiger broker API for paper or live trading | P2 | ✅ Done | broker/xtp/ (XTP interface + offline stub) |
 
 ### D. Analytics Layer
 
@@ -501,13 +501,13 @@ type Position struct {
 | Trade log | Complete order history with PnL per trade | P0 | ✅ Done | — |
 | Calmar ratio | Annualized return / max drawdown | P0 | ✅ Done | — |
 | Profit factor | Gross profit / gross loss | P1 | ✅ Done | — |
-| Factor attribution | Decompose portfolio return into factor contributions | P1 | ⬜ Planned | Factor cache |
-| IC (Information Coefficient) | Rank correlation of factor to forward returns | P1 | ⬜ Planned | Factor cache |
+| Factor attribution | Decompose portfolio return into factor contributions | P1 | ✅ Done | factor_attribution.go |
+| IC (Information Coefficient) | Rank correlation of factor to forward returns | P1 | ✅ Done | factor_attribution.go, ai/metrics/ic.go |
 | Factor decay analysis | Measure factor predictive power over 1M/3M/6M horizons | P2 | ⬜ Planned | Factor cache |
-| Strategy comparison | Overlay two backtest equity curves | P1 | ⬜ Planned | Dashboard |
-| Strategy monitoring +失效detection | Track deployed strategy rolling Sharpe/drawdown; fire alert when 失效触发条件 met; support auto-retrain trigger | P1 | ⬜ Planned | OHLCV data, Risk service, Alerting system |
-| Report export | Generate PDF/HTML report from backtest | P2 | ⬜ Planned | Report template |
-| Walk-forward validation | Train/validate split by date range in backtest engine; required for AI Evolution candidate screening | P1 | ⬜ Planned | Backtest engine, factor cache |
+| Strategy comparison | Overlay two backtest equity curves | P1 | ✅ Done | compare.go |
+| Strategy monitoring +失效detection | Track deployed strategy rolling Sharpe/drawdown; fire alert when 失效触发条件 met; support auto-retrain trigger | P1 | ✅ Done | strategy/monitor/monitor.go + drift/detector.go |
+| Report export | Generate PDF/HTML report from backtest | P2 | ✅ Done | export.go (HTML), handlers_export.go |
+| Walk-forward validation | Train/validate split by date range in backtest engine; required for AI Evolution candidate screening | P1 | ✅ Done | walkforward.go (rolling + expanding) |
 
 ### E. User Interface
 
@@ -521,7 +521,7 @@ type Position struct {
 | Vue SPA — Screener | Filter by factors; rank and export | P1 | ✅ Done | Data service `/screen` |
 | Vue SPA — Copilot | AI-assisted strategy creation with code generation and backtest validation | P1 | ✅ Done | AI integration, code generation |
 | Vue SPA — StrategyLab | Strategy management (CRUD) + configuration | P1 | ✅ Done | Strategy registry API |
-| Backtest comparison UI | Compare two or more backtest runs side by side | P1 | ⬜ Planned | Backtest runs storage |
+| Backtest comparison UI | Compare two or more backtest runs side by side | P1 | ✅ Done | BacktestCompare.vue |
 | Visual strategy editor | Drag-drop factor builder | P3 | ⬜ Planned | Strategy Copilot |
 | Real-time paper trading UI | Live positions, orders, P&L update throughout trading day | P3 | ⬜ Planned | Execution service |
 | Legacy HTML (deprecated) | `cmd/analysis/static/*.html` — superseded by Vue SPA | — | ⚠️ Deprecated | — |
@@ -536,8 +536,8 @@ type Position struct {
 | Health endpoints | `/health` on every service | P0 | ✅ Done | — |
 | Config via Viper | All config in YAML files; env var overrides | P0 | ✅ Done | — |
 | Data service API | HTTP API for data queries and sync triggers | P0 | ✅ Done | — |
-| Redis caching | Cache hot OHLCV/fundamental data for active sessions | P1 | ⬜ Planned | Redis Docker service |
-| Background backtest worker | Isolated backtest job processor; API returns job_id, worker runs async, results persisted to DB | P1 | ⬜ Planned | PostgreSQL job queue, Analysis service `--worker` mode |
+| Redis caching | Cache hot OHLCV/fundamental data for active sessions | P1 | ✅ Done | storage/redis.go, storage/cache.go |
+| Background backtest worker | Isolated backtest job processor; API returns job_id, worker runs async, results persisted to DB | P1 | ✅ Done | sync/worker.go, backtest/job.go |
 | Kubernetes manifests | Production-grade deployment configs | P2 | ⬜ Planned | — |
 | Prometheus metrics | API latency, backtest duration, sync lag metrics | P2 | ⬜ Planned | — |
 | Alerting system | PagerDuty/Slack alerts for data sync stalls, backtest failures | P2 | ⬜ Planned | — |

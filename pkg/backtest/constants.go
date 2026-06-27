@@ -39,6 +39,19 @@ const (
 
 	// DefaultRiskFreeRate is the annual risk-free rate (3%, approx. Chinese bond yield)
 	DefaultRiskFreeRate = 0.03
+
+	// DefaultShortSellingRate is the annual securities lending rate
+	// for short selling (10.6%, per VISION.md). Accrued daily on the
+	// market value of open short positions in Tracker.AdvanceDay using
+	// a 252-trading-day convention.
+	DefaultShortSellingRate = 0.106
+
+	// TradingDaysPerYear is the convention used to convert annual rates
+	// (e.g. short-selling interest) to daily accruals in the backtest
+	// tracker. The live margin module uses 365 (natural days); the
+	// backtest engine advances one trading day at a time, so 252 is the
+	// correct divisor here.
+	TradingDaysPerYear = 252
 )
 
 // Polling and timeout constants

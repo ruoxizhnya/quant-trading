@@ -2,9 +2,11 @@
 package strategy
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"plugin"
 	"strings"
@@ -32,6 +34,7 @@ type PluginInfo struct {
 	LastModTime time.Time `json:"last_mod_time"`
 	Size        int64     `json:"size"`
 	Version     string    `json:"version"`
+	GitHash     string    `json:"git_hash"`
 	Description string    `json:"description"`
 	Status      string    `json:"status"` // active, unloaded, error
 	Error       string    `json:"error,omitempty"`
@@ -133,12 +136,21 @@ func (pl *PluginLoader) Load(path string) (*PluginInfo, error) {
 		Status:      "active",
 	}
 
+	// Track which strategy version ran which backtest (P1-D, VISION.md).
+	// Failure to obtain a git hash is non-fatal — we gracefully degrade
+	// to an empty string so plugin loading never panics on a missing
+	// git binary or a non-tracked file.
+	if gitHash, err := extractGitHash(absPath); err == nil {
+		info.GitHash = gitHash
+	}
+
 	pl.plugins[info.Name] = info
 
 	pl.logger.Info().
 		Str("name", info.Name).
 		Str("path", absPath).
 		Int64("size", info.Size).
+		Str("git_hash", info.GitHash).
 		Msg("Plugin loaded successfully")
 
 	return info, nil
@@ -415,6 +427,50 @@ func extractVersion(path string) string {
 	}
 
 	return "unknown"
+}
+
+// extractGitHash returns the short (8-char) git commit hash of the given
+// file path by shelling out to `git log -1 --format=%H -- <path>`.
+//
+// Semantics:
+//   - If the file is tracked in a git repo, returns the first 8 chars
+//     of the commit hash that last touched the file (short hash).
+//   - If the file is not tracked, or the cwd is not a git repo, or the
+//     git binary is unavailable, returns ("", nil) — graceful degrade.
+//
+// The function is safe to call from Load(); it never panics. The git
+// command is invoked with a fixed deadline via exec.CommandContext to
+// avoid hanging on a broken git installation.
+func extractGitHash(soPath string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%H", "--", soPath)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		// Common non-error cases that should degrade gracefully:
+		//   - not a git repo (git exits 128, "fatal: not a git repository")
+		//   - file not tracked (git exits 128, "fatal: no such path")
+		//   - git binary missing (exec.ErrNotFound)
+		//   - context deadline (broken/slow git installation)
+		// In all of these, we return ("", nil) so callers can skip
+		// git-hash tracking without surfacing an error.
+		return "", nil
+	}
+
+	hash := strings.TrimSpace(stdout.String())
+	if hash == "" {
+		return "", nil
+	}
+
+	// Short hash = first 8 chars. A full SHA-1 is 40 hex chars; we keep
+	// 8 to match `git log --oneline` default and stay compact for logs.
+	if len(hash) > 8 {
+		hash = hash[:8]
+	}
+	return hash, nil
 }
 
 // SetPluginForTesting sets a plugin info for testing purposes.

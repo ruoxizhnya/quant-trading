@@ -187,6 +187,7 @@ type BacktestResponse struct {
 	ID              string                  `json:"id"`
 	Status          string                  `json:"status"`
 	Strategy        string                  `json:"strategy,omitempty"`
+	StrategyGitHash string                  `json:"strategy_git_hash,omitempty"`
 	StartDate       string                  `json:"start_date,omitempty"`
 	EndDate         string                  `json:"end_date,omitempty"`
 	TotalReturn     float64                 `json:"total_return,omitempty"`
@@ -568,6 +569,7 @@ func (e *Engine) buildBacktestResponse(backtestID string, req BacktestRequest, s
 		ID:              backtestID,
 		Status:          "completed",
 		Strategy:        req.Strategy,
+		StrategyGitHash: lookupStrategyGitHash(req.Strategy),
 		StartDate:       req.StartDate,
 		EndDate:         req.EndDate,
 		TotalReturn:     result.TotalReturn,
@@ -589,6 +591,26 @@ func (e *Engine) buildBacktestResponse(backtestID string, req BacktestRequest, s
 		StockPool:       req.StockPool,
 		InitialCapital:  initialCapital,
 	}
+}
+
+// lookupStrategyGitHash returns the short git hash of the currently-loaded
+// strategy plugin with the given name, or "" if the plugin loader is not
+// initialized or the strategy is not loaded as a plugin (e.g. it is
+// served by the external strategy-service).
+//
+// This supports the VISION.md requirement "Track which strategy version
+// ran which backtest": the hash is stamped onto every BacktestResponse
+// so that downstream tooling can correlate a backtest result with the
+// exact source code that produced it.
+func lookupStrategyGitHash(strategyName string) string {
+	if strategy.GlobalPluginLoader == nil {
+		return ""
+	}
+	info, err := strategy.GlobalPluginLoader.Get(strategyName)
+	if err != nil || info == nil {
+		return ""
+	}
+	return info.GitHash
 }
 
 // runBacktestInternal contains the core backtest loop.

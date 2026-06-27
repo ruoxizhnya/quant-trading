@@ -489,3 +489,118 @@ func TestTracker_PortfolioValueCalculation(t *testing.T) {
 		t.Errorf("expected total value ~%.2f, got %.2f", expectedTotal, totalValue)
 	}
 }
+
+// ============================================================
+// Short-selling cost (securities lending interest) tests — P1-B
+// ============================================================
+
+// TestShortSellingCost_Accrual verifies that AdvanceDay accrues one
+// day of securities lending interest on an open short position using
+// the default annual rate (DefaultShortSellingRate = 10.6%) over 252
+// trading days, and deducts the cost from cash.
+func TestShortSellingCost_Accrual(t *testing.T) {
+	tracker := newTestTracker(1_000_000)
+	date := time.Date(2026, 4, 10, 0, 0, 0, 0, time.Local)
+
+	// Default rate must be 10.6%/year.
+	if rate := tracker.GetShortSellingRate(); abs(rate-DefaultShortSellingRate) > 1e-9 {
+		t.Fatalf("default short selling rate = %f, want %f", rate, DefaultShortSellingRate)
+	}
+
+	// Open a short position: 100 shares @ 50.0.
+	if _, err := tracker.ExecuteTrade("600519", domain.DirectionShort, 100, 50.0, date, nil); err != nil {
+		t.Fatalf("short sell failed: %v", err)
+	}
+
+	// Populate CurrentPrice/MarketValue via RecordDailyValue (mirrors the
+	// engine flow where RecordDailyValue runs immediately before AdvanceDay).
+	prices := map[string]float64{"600519": 50.0}
+	tracker.RecordDailyValue(date, prices)
+
+	cashBefore := tracker.GetCash()
+
+	tracker.AdvanceDay(date)
+
+	cashAfter := tracker.GetCash()
+	positionValue := 100 * 50.0
+	expectedCost := positionValue * DefaultShortSellingRate / float64(TradingDaysPerYear)
+	actualCost := cashBefore - cashAfter
+
+	if actualCost <= 0 {
+		t.Fatalf("expected positive lending cost, got %.6f (cashBefore=%.2f, cashAfter=%.2f)",
+			actualCost, cashBefore, cashAfter)
+	}
+	if abs(actualCost-expectedCost) > 1e-6 {
+		t.Errorf("short selling daily cost = %.6f, want %.6f (position_value=%.2f, rate=%f, days=%d)",
+			actualCost, expectedCost, positionValue, DefaultShortSellingRate, TradingDaysPerYear)
+	}
+}
+
+// TestShortSellingCost_ZeroRate verifies that when the rate is set to
+// 0, AdvanceDay does not deduct any short-selling interest from cash.
+func TestShortSellingCost_ZeroRate(t *testing.T) {
+	tracker := newTestTracker(1_000_000)
+	date := time.Date(2026, 4, 10, 0, 0, 0, 0, time.Local)
+
+	tracker.SetShortSellingRate(0)
+	if rate := tracker.GetShortSellingRate(); rate != 0 {
+		t.Fatalf("expected rate 0 after SetShortSellingRate(0), got %f", rate)
+	}
+
+	if _, err := tracker.ExecuteTrade("600519", domain.DirectionShort, 100, 50.0, date, nil); err != nil {
+		t.Fatalf("short sell failed: %v", err)
+	}
+
+	prices := map[string]float64{"600519": 50.0}
+	tracker.RecordDailyValue(date, prices)
+
+	cashBefore := tracker.GetCash()
+	tracker.AdvanceDay(date)
+	cashAfter := tracker.GetCash()
+
+	if cashAfter != cashBefore {
+		t.Errorf("expected no lending cost with zero rate, but cash changed by %.6f (before=%.2f, after=%.2f)",
+			cashBefore-cashAfter, cashBefore, cashAfter)
+	}
+}
+
+// TestShortSellingCost_SetRate verifies that SetShortSellingRate
+// overrides the annual rate used for daily accrual.
+func TestShortSellingCost_SetRate(t *testing.T) {
+	tracker := newTestTracker(1_000_000)
+	date := time.Date(2026, 4, 10, 0, 0, 0, 0, time.Local)
+
+	const customRate = 0.20 // 20%/year
+	tracker.SetShortSellingRate(customRate)
+	if rate := tracker.GetShortSellingRate(); abs(rate-customRate) > 1e-9 {
+		t.Fatalf("expected rate %f after SetShortSellingRate, got %f", customRate, rate)
+	}
+
+	if _, err := tracker.ExecuteTrade("600519", domain.DirectionShort, 100, 50.0, date, nil); err != nil {
+		t.Fatalf("short sell failed: %v", err)
+	}
+
+	prices := map[string]float64{"600519": 50.0}
+	tracker.RecordDailyValue(date, prices)
+
+	cashBefore := tracker.GetCash()
+	tracker.AdvanceDay(date)
+	cashAfter := tracker.GetCash()
+
+	positionValue := 100 * 50.0
+	expectedCost := positionValue * customRate / float64(TradingDaysPerYear)
+	actualCost := cashBefore - cashAfter
+
+	if actualCost <= 0 {
+		t.Fatalf("expected positive lending cost, got %.6f", actualCost)
+	}
+	if abs(actualCost-expectedCost) > 1e-6 {
+		t.Errorf("short selling daily cost with custom rate = %.6f, want %.6f", actualCost, expectedCost)
+	}
+
+	// Sanity check: the custom-rate cost must differ from the default-rate cost.
+	defaultCost := positionValue * DefaultShortSellingRate / float64(TradingDaysPerYear)
+	if abs(actualCost-defaultCost) < 1e-9 {
+		t.Errorf("custom rate cost (%.6f) should differ from default rate cost (%.6f)", actualCost, defaultCost)
+	}
+}

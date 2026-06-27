@@ -67,8 +67,8 @@ func TestMarginConfig_Defaults(t *testing.T) {
 	if cfg.FinancingRate != 0.06 {
 		t.Errorf("FinancingRate = %f, want 0.06", cfg.FinancingRate)
 	}
-	if cfg.SecuritiesLendingRate != 0.08 {
-		t.Errorf("SecuritiesLendingRate = %f, want 0.08", cfg.SecuritiesLendingRate)
+	if cfg.SecuritiesLendingRate != 0.106 {
+		t.Errorf("SecuritiesLendingRate = %f, want 0.106", cfg.SecuritiesLendingRate)
 	}
 	if cfg.DaysPerYear != 365 {
 		t.Errorf("DaysPerYear = %d, want 365", cfg.DaysPerYear)
@@ -256,9 +256,9 @@ func TestMarginCalculator_DailyInterest(t *testing.T) {
 	if !floatEq(got, want, 0.001) {
 		t.Errorf("DailyFinancingInterest(100000) = %f, want %f", got, want)
 	}
-	// Lending: 100000 * 0.08 / 365 = 21.917...
+	// Lending: 100000 * 0.106 / 365 = 29.041...
 	got = calc.DailyLendingInterest(100000)
-	want = 100000 * 0.08 / 365
+	want = 100000 * 0.106 / 365
 	if !floatEq(got, want, 0.001) {
 		t.Errorf("DailyLendingInterest(100000) = %f, want %f", got, want)
 	}
@@ -274,7 +274,7 @@ func TestMarginCalculator_AccruedInterest(t *testing.T) {
 	}
 	// Lending.
 	got = calc.AccruedLendingInterest(100000, 30)
-	want = 100000 * 0.08 / 365 * 30
+	want = 100000 * 0.106 / 365 * 30
 	if !floatEq(got, want, 0.001) {
 		t.Errorf("AccruedLendingInterest(100000, 30) = %f, want %f", got, want)
 	}

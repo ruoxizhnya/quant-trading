@@ -26,9 +26,10 @@ type Tracker struct {
 	equityCurve     []domain.PortfolioValue
 
 	// Configuration
-	commissionRate  float64
-	slippageRate    float64
-	liquidityFactor float64 // fraction of prev day volume used for partial fill threshold
+	commissionRate   float64
+	slippageRate     float64
+	liquidityFactor  float64 // fraction of prev day volume used for partial fill threshold
+	shortSellingRate float64 // annual securities lending rate accrued daily on short positions
 
 	// Trading rules (loaded from config)
 	trading TradingConfig
@@ -47,15 +48,16 @@ func NewTracker(initialCapital, commissionRate, slippageRate float64, trading Tr
 	}
 
 	return &Tracker{
-		cash:           initialCapital,
-		initialCash:    initialCapital,
-		positions:      make(map[string]*domain.Position),
-		commissionRate:  commissionRate,
-		slippageRate:    slippageRate,
-		liquidityFactor: 0.1, // default: 10% of prev day volume
-		trading:        trading,
-		orderLog:       &OrderLog{},
-		logger:         logger.With().Str("component", "tracker").Logger(),
+		cash:             initialCapital,
+		initialCash:      initialCapital,
+		positions:        make(map[string]*domain.Position),
+		commissionRate:   commissionRate,
+		slippageRate:     slippageRate,
+		liquidityFactor:  0.1, // default: 10% of prev day volume
+		shortSellingRate: DefaultShortSellingRate,
+		trading:          trading,
+		orderLog:         &OrderLog{},
+		logger:           logger.With().Str("component", "tracker").Logger(),
 	}
 }
 
@@ -64,6 +66,24 @@ func (t *Tracker) GetCash() float64 {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.cash
+}
+
+// SetShortSellingRate overrides the annual securities lending rate
+// used to accrue daily interest on short positions in AdvanceDay.
+// Pass 0 to disable short-selling cost accrual. The rate is expressed
+// as a fraction (e.g. 0.106 for 10.6%/year) and converted to a daily
+// rate using TradingDaysPerYear (252).
+func (t *Tracker) SetShortSellingRate(rate float64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.shortSellingRate = rate
+}
+
+// GetShortSellingRate returns the configured annual securities lending rate.
+func (t *Tracker) GetShortSellingRate() float64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.shortSellingRate
 }
 
 // GetPosition returns a copy of the position for a symbol.
@@ -643,6 +663,16 @@ func (t *Tracker) ProcessSplit(symbol string, split domain.Split) error {
 
 // AdvanceDay shifts QuantityToday → QuantityYesterday at the end of each trading day.
 // This implements T+1 settlement: shares bought today become sellable tomorrow.
+//
+// In the same pass it accrues one day of securities lending interest on every
+// open short position (Quantity < 0). The daily cost is:
+//
+//	cost = position_value * (shortSellingRate / TradingDaysPerYear)
+//
+// where position_value is abs(Quantity) * CurrentPrice (falling back to AvgCost
+// when CurrentPrice has not been populated). The cost is deducted from cash.
+// The rate defaults to DefaultShortSellingRate (10.6%/year) and can be tuned
+// via SetShortSellingRate.
 func (t *Tracker) AdvanceDay(date time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -660,6 +690,41 @@ func (t *Tracker) AdvanceDay(date time.Time) {
 				Float64("quantity_yesterday", pos.QuantityYesterday).
 				Msg("T+1 rollover: yesterday quantity updated")
 		}
+	}
+
+	// Accrue daily short-selling (securities lending) interest on open
+	// short positions. The cost is deducted from cash.
+	if t.shortSellingRate <= 0 {
+		return
+	}
+	dailyRate := t.shortSellingRate / float64(TradingDaysPerYear)
+	totalLendingCost := 0.0
+	for sym, pos := range t.positions {
+		if pos.Quantity >= 0 {
+			continue
+		}
+		price := pos.CurrentPrice
+		if price <= 0 {
+			price = pos.AvgCost
+		}
+		positionValue := abs(pos.Quantity) * price
+		cost := positionValue * dailyRate
+		t.cash -= cost
+		totalLendingCost += cost
+		t.logger.Debug().
+			Str("symbol", sym).
+			Float64("short_qty", abs(pos.Quantity)).
+			Float64("position_value", positionValue).
+			Float64("lending_cost", cost).
+			Msg("Short-selling interest accrued")
+	}
+	if totalLendingCost > 0 {
+		t.logger.Info().
+			Time("date", date).
+			Float64("total_lending_cost", totalLendingCost).
+			Float64("cash_after", t.cash).
+			Float64("annual_rate", t.shortSellingRate).
+			Msg("Short-selling interest accrued for trading day")
 	}
 }
 

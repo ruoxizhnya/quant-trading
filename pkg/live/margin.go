@@ -45,7 +45,7 @@ import (
 //	MaintenanceRatioFloor:     维持担保比例下限, 默认 1.3 (130%, 强制平仓线)。
 //	WarningRatio:              预警担保比例, 默认 1.5 (150%, 警告线)。
 //	FinancingRate:             融资年化利率, 默认 0.06 (6%)。
-//	SecuritiesLendingRate:    融券年化利率, 默认 0.08 (8%)。
+//	SecuritiesLendingRate:    融券年化利率, 默认 0.106 (10.6%, per VISION.md).
 //	DaysPerYear:               计息天数基准, 默认 365 (自然日)。
 //	Now:                       时钟注入 (测试用)。nil → time.Now。
 type MarginConfig struct {
@@ -68,7 +68,7 @@ func DefaultMarginConfig() MarginConfig {
 		MaintenanceRatioFloor:  1.3,
 		WarningRatio:           1.5,
 		FinancingRate:          0.06,
-		SecuritiesLendingRate:  0.08,
+		SecuritiesLendingRate:  0.106,
 		DaysPerYear:            365,
 	}
 }
