@@ -40,6 +40,12 @@ export interface Order {
   quantity: number
   status: string
   timestamp: string
+  // Optional because the legacy /paper/orders payload omits it; the
+  // P3 real-time UI renders a 价格 column and shows '—' when absent.
+  price?: number
+  // Optional friendly name; populated by the backend when available,
+  // otherwise the UI falls back to a local lookup map.
+  name?: string
 }
 
 export interface Trade {

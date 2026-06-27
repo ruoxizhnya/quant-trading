@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { NConfigProvider, NMessageProvider } from 'naive-ui'
+import type { Plugin } from 'vue'
 import ReviewActions from '../ReviewActions.vue'
 import * as copilotApi from '@/api/copilot'
 import type { PipelineResult } from '@/types/pipeline'
@@ -21,7 +22,10 @@ const createWrapper = (props: Record<string, unknown> = {}) => {
       ...props
     },
     global: {
-      plugins: [NConfigProvider, NMessageProvider]
+      // Naive UI provider components expose an `install` method at
+      // runtime (so app.use() works), but their DefineComponent types
+      // don't surface it — hence the Plugin cast is type-only.
+      plugins: [NConfigProvider, NMessageProvider] as unknown as Plugin[]
     }
   })
 }

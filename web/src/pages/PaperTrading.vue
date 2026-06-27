@@ -1,81 +1,133 @@
 <template>
   <div class="paper-trading-page">
-    <n-page-header title="模拟交易" subtitle="Paper Trading 实盘模拟">
+    <n-page-header title="模拟交易" subtitle="Real-time Paper Trading 实盘模拟仪表盘">
       <template #extra>
-        <n-space>
-          <n-tag v-if="status?.running" type="success">运行中</n-tag>
-          <n-tag v-else type="default">已停止</n-tag>
-          <n-button v-if="!status?.running" type="primary" @click="showStartModal = true">
-            启动模拟交易
+        <n-space align="center">
+          <n-tag v-if="status?.running" type="success" size="small">运行中</n-tag>
+          <n-tag v-else type="default" size="small">已停止</n-tag>
+          <n-space align="center" :size="6">
+            <n-text depth="3" style="font-size: 12px">自动刷新</n-text>
+            <n-switch v-model:value="autoRefresh" size="small" />
+          </n-space>
+          <n-button v-if="!status?.running" type="primary" size="small" @click="showStartModal = true">
+            启动
           </n-button>
-          <n-button v-else type="error" @click="handleStop">
-            停止模拟交易
+          <n-button v-else type="error" size="small" @click="handleStop">
+            停止
           </n-button>
+          <n-button size="small" @click="fetchData" :loading="loading">刷新</n-button>
         </n-space>
       </template>
     </n-page-header>
 
-    <!-- Portfolio Summary -->
-    <n-card title="组合概览" class="portfolio-card">
-      <n-grid :cols="4" :x-gap="12" :y-gap="12">
-        <n-gi>
-          <n-statistic label="总资产" :value="portfolio?.total_value || 0" precision={2}>
+    <!-- Top: account overview -->
+    <n-card title="账户概览" :bordered="false" class="overview-card">
+      <n-grid :cols="5" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
+        <n-gi span="5 m:2 l:1">
+          <n-statistic label="总资产" :value="portfolio?.total_value || 0" :precision="2">
             <template #prefix>¥</template>
           </n-statistic>
         </n-gi>
-        <n-gi>
-          <n-statistic label="可用现金" :value="portfolio?.cash || 0" precision={2}>
+        <n-gi span="5 m:2 l:1">
+          <n-statistic label="可用资金" :value="portfolio?.cash || 0" :precision="2">
             <template #prefix>¥</template>
           </n-statistic>
         </n-gi>
-        <n-gi>
-          <n-statistic label="持仓市值" :value="positionsValue" precision={2}>
+        <n-gi span="5 m:2 l:1">
+          <n-statistic label="持仓市值" :value="positionsValue" :precision="2">
             <template #prefix>¥</template>
           </n-statistic>
         </n-gi>
-        <n-gi>
-          <n-statistic label="初始资金" :value="status?.initial_capital || 1000000" precision={2}>
+        <n-gi span="5 m:2 l:1">
+          <n-statistic
+            label="当日盈亏"
+            :value="dailyPnl"
+            :precision="2"
+            :value-style="{ color: dailyPnl >= 0 ? pnlColorUp : pnlColorDown }"
+          >
+            <template #prefix>¥</template>
+          </n-statistic>
+        </n-gi>
+        <n-gi span="5 m:1 l:1">
+          <n-statistic
+            label="累计盈亏"
+            :value="cumulativePnl"
+            :precision="2"
+            :value-style="{ color: cumulativePnl >= 0 ? pnlColorUp : pnlColorDown }"
+          >
             <template #prefix>¥</template>
           </n-statistic>
         </n-gi>
       </n-grid>
     </n-card>
 
-    <!-- Order Form -->
-    <n-card title="下单" class="order-card">
-      <n-form :model="orderForm" :rules="orderRules" ref="orderFormRef">
-        <n-grid :cols="4" :x-gap="12">
-          <n-gi>
+    <!-- Middle: positions (left) + today's orders (right) -->
+    <n-grid :cols="24" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
+      <n-gi span="24 l:14">
+        <n-card title="持仓列表" size="small" class="panel-card">
+          <template #header-extra>
+            <n-tag size="small" :bordered="false">{{ positions.length }} 只</n-tag>
+          </template>
+          <n-data-table
+            :columns="positionColumns"
+            :data="positions"
+            :loading="loading"
+            :pagination="{ pageSize: 8 }"
+            :row-key="(r: Position) => r.symbol"
+          />
+        </n-card>
+      </n-gi>
+      <n-gi span="24 l:10">
+        <n-card title="当日订单" size="small" class="panel-card">
+          <template #header-extra>
+            <n-tag size="small" :bordered="false">{{ todayOrders.length }} 笔</n-tag>
+          </template>
+          <n-data-table
+            :columns="orderColumns"
+            :data="todayOrders"
+            :loading="loading"
+            :pagination="{ pageSize: 8 }"
+            :row-key="(r: Order) => r.id"
+          />
+        </n-card>
+      </n-gi>
+    </n-grid>
+
+    <!-- Bottom: quick trade panel -->
+    <n-card title="快速交易" size="small" class="trade-card">
+      <n-form :model="orderForm" :rules="orderRules" ref="orderFormRef" label-placement="left" :label-width="80">
+        <n-grid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
+          <n-gi span="24 m:12 l:6">
             <n-form-item label="股票代码" path="symbol">
               <n-input v-model:value="orderForm.symbol" placeholder="如: 000001.SZ" @blur="refreshSuitability" />
             </n-form-item>
           </n-gi>
-          <n-gi>
-            <n-form-item label="方向" path="direction">
+          <n-gi span="24 m:12 l:6">
+            <n-form-item label="买卖" path="direction">
               <n-select v-model:value="orderForm.direction" :options="directionOptions" />
             </n-form-item>
           </n-gi>
-          <n-gi>
-            <n-form-item label="数量" path="quantity">
-              <n-input-number v-model:value="orderForm.quantity" :min="1" placeholder="100" />
+          <n-gi span="24 m:12 l:6">
+            <n-form-item label="价格" path="limit_price">
+              <n-input-number
+                v-model:value="orderForm.limit_price"
+                :min="0"
+                :step="0.01"
+                placeholder="限价 (留空为市价)"
+                style="width: 100%"
+              />
             </n-form-item>
           </n-gi>
-          <n-gi>
-            <n-form-item label="订单类型" path="order_type">
-              <n-select v-model:value="orderForm.order_type" :options="orderTypeOptions" />
+          <n-gi span="24 m:12 l:6">
+            <n-form-item label="数量" path="quantity">
+              <n-input-number v-model:value="orderForm.quantity" :min="1" :step="100" placeholder="100" style="width: 100%" />
             </n-form-item>
           </n-gi>
         </n-grid>
-        <n-form-item v-if="orderForm.order_type === 'limit'" label="限价" path="limit_price">
-          <n-input-number v-model:value="orderForm.limit_price" :min="0" placeholder="10.5" />
-        </n-form-item>
 
         <!-- P2-4 (ODR-028): investor-suitability precheck banner.
-             Renders the verdict of POST /api/compliance/check for
-             the current symbol. When the verdict is "rejected", the
-             submit button is disabled and the operator must read
-             the reasons before they can resubmit a different symbol
-             or a same-symbol adjusted order. -->
+             Renders the verdict of POST /api/compliance/check for the
+             current symbol. When rejected, submit is disabled. -->
         <n-alert
           v-if="suitabilityState.visible"
           :type="suitabilityState.allowed ? 'success' : 'error'"
@@ -94,13 +146,11 @@
             <ul style="margin: 4px 0 0 20px; padding: 0">
               <li v-for="(reason, idx) in suitabilityState.reasons" :key="idx">{{ reason }}</li>
             </ul>
-            <p v-if="suitabilityState.requiredDescription" class="suitability-desc">
-              {{ suitabilityState.requiredDescription }}
-            </p>
           </template>
         </n-alert>
 
-        <n-form-item>
+        <n-space justify="end">
+          <n-button @click="resetOrderForm">重置</n-button>
           <n-button
             type="primary"
             :loading="submitting"
@@ -109,38 +159,8 @@
           >
             提交订单
           </n-button>
-        </n-form-item>
+        </n-space>
       </n-form>
-    </n-card>
-
-    <!-- Positions Table -->
-    <n-card title="当前持仓" class="positions-card">
-      <n-data-table
-        :columns="positionColumns"
-        :data="positions"
-        :loading="loading"
-        :pagination="{ pageSize: 10 }"
-      />
-    </n-card>
-
-    <!-- Orders Table -->
-    <n-card title="订单记录" class="orders-card">
-      <n-data-table
-        :columns="orderColumns"
-        :data="orders"
-        :loading="loading"
-        :pagination="{ pageSize: 10 }"
-      />
-    </n-card>
-
-    <!-- Trades Table -->
-    <n-card title="成交记录" class="trades-card">
-      <n-data-table
-        :columns="tradeColumns"
-        :data="trades"
-        :loading="loading"
-        :pagination="{ pageSize: 10 }"
-      />
     </n-card>
 
     <!-- Start Modal -->
@@ -169,8 +189,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import { useMessage } from 'naive-ui'
+import { h, ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
+import { NTag, useMessage } from 'naive-ui'
 import type { DataTableColumns, FormRules, FormInst } from 'naive-ui'
 import {
   getPaperTradingStatus,
@@ -180,14 +200,21 @@ import {
   getOrders,
   getPositions,
   getPortfolio,
-  getTrades,
 } from '@/api/paper-trading'
-import type { Position, Trade, Order, PaperTradingStatus, Portfolio } from '@/api/paper-trading'
+import type { Position, Order, PaperTradingStatus, Portfolio } from '@/api/paper-trading'
 import { checkSuitability } from '@/api/compliance'
 import type { CheckResponse } from '@/api/compliance'
-import EmergencyFlatten from '@/components/paper/EmergencyFlatten.vue'
+import { fmtNumber } from '@/utils/format'
 
 const message = useMessage()
+
+// A-share convention: red = up/profit, green = down/loss. We expose
+// them as constants so the NStatistic value-style + table cell class
+// stay in sync. The existing BacktestCompare page uses the inverse
+// (Western) convention via --q-success/--q-danger; here we follow the
+// domestic market colour norm since this is a trading dashboard.
+const pnlColorUp = '#e03131'   // 红
+const pnlColorDown = '#2f9e44' // 绿
 
 // Status
 const status = ref<PaperTradingStatus | null>(null)
@@ -199,24 +226,43 @@ const starting = ref(false)
 const portfolio = ref<Portfolio | null>(null)
 const positions = ref<Position[]>([])
 const orders = ref<Order[]>([])
-const trades = ref<Trade[]>([])
+
+// Auto-refresh toggle (default on, 5s interval per spec)
+const autoRefresh = ref(true)
+let pollInterval: ReturnType<typeof setInterval> | null = null
+
+// Local stock-name lookup. The Position/Order types may carry an
+// optional `name` from the backend; when absent we fall back to this
+// map so the 持仓列表/订单 columns aren't full of dashes.
+const STOCK_NAMES: Record<string, string> = {
+  '000001.SZ': '平安银行',
+  '600000.SH': '浦发银行',
+  '600519.SH': '贵州茅台',
+  '300750.SZ': '宁德时代',
+  '002594.SZ': '比亚迪',
+  '601318.SH': '中国平安',
+  '000858.SZ': '五粮液',
+  '600036.SH': '招商银行',
+}
+
+function stockName(symbol: string): string {
+  return STOCK_NAMES[symbol] || symbol
+}
 
 // Methods
 async function fetchData() {
   loading.value = true
   try {
-    const [statusRes, portfolioRes, positionsRes, ordersRes, tradesRes] = await Promise.all([
+    const [statusRes, portfolioRes, positionsRes, ordersRes] = await Promise.all([
       getPaperTradingStatus(),
       getPortfolio(),
       getPositions(),
       getOrders(),
-      getTrades(),
     ])
     status.value = statusRes
     portfolio.value = portfolioRes
     positions.value = positionsRes
     orders.value = ordersRes
-    trades.value = tradesRes
   } catch (error) {
     console.error('Failed to fetch paper trading data:', error)
   } finally {
@@ -224,7 +270,155 @@ async function fetchData() {
   }
 }
 
-// Forms
+// ── Computed account metrics ──────────────────────────────────────
+// 累计盈亏 = 总资产 - 初始资金 (the realised+unrealised P&L since start).
+// 当日盈亏 is approximated by the sum of floating P&L across positions;
+// the backend has no "yesterday's close" snapshot, so unrealised P&L
+// is the closest available proxy for an intraday dashboard.
+const positionsValue = computed(() =>
+  positions.value.reduce((sum, pos) => sum + pos.market_value, 0),
+)
+const dailyPnl = computed(() =>
+  positions.value.reduce((sum, pos) => sum + pos.unrealized_pnl, 0),
+)
+const cumulativePnl = computed(() =>
+  (portfolio.value?.total_value || 0) - (status.value?.initial_capital || 0),
+)
+
+// Today's orders, newest first. The API returns all orders; we filter
+// to the current calendar day so the right-hand panel matches the
+// "当日订单" spec. Sorting is enforced in the column sorter too, but
+// pre-sorting keeps the default view correct before the user clicks.
+const todayOrders = computed(() => {
+  const today = new Date()
+  const yyyy = today.getFullYear()
+  const mm = String(today.getMonth() + 1).padStart(2, '0')
+  const dd = String(today.getDate()).padStart(2, '0')
+  const todayPrefix = `${yyyy}-${mm}-${dd}`
+  return orders.value
+    .filter(o => (o.timestamp || '').startsWith(todayPrefix))
+    .slice()
+    .sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0))
+})
+
+// ── Position table ────────────────────────────────────────────────
+// 可卖量: A-share T+1 means shares bought today cannot be sold today.
+// The Position type has no per-lot lot-date, so we approximate by
+// showing the full quantity — paper trading in this codebase does not
+// enforce T+1 strictly (see pkg/live MockTrader). pnl_pct is derived
+// from cost basis vs current price.
+function pnlPct(p: Position): number {
+  const cost = p.avg_cost * p.quantity
+  if (!cost) return 0
+  return p.unrealized_pnl / cost
+}
+
+const positionColumns: DataTableColumns<Position> = [
+  { title: '股票代码', key: 'symbol', sorter: 'default', width: 110 },
+  {
+    title: '名称',
+    key: 'name',
+    width: 90,
+    render: (row) => row.symbol ? stockName(row.symbol) : '—',
+  },
+  { title: '持仓量', key: 'quantity', sorter: (a, b) => a.quantity - b.quantity, width: 90 },
+  {
+    title: '可卖量',
+    key: 'sellable',
+    width: 90,
+    render: (row) => String(row.quantity),
+  },
+  {
+    title: '成本价',
+    key: 'avg_cost',
+    sorter: (a, b) => a.avg_cost - b.avg_cost,
+    width: 90,
+    render: (row) => fmtNumber(row.avg_cost, 2),
+  },
+  {
+    title: '现价',
+    key: 'current_price',
+    sorter: (a, b) => a.current_price - b.current_price,
+    width: 90,
+    render: (row) => fmtNumber(row.current_price, 2),
+  },
+  {
+    title: '市值',
+    key: 'market_value',
+    sorter: (a, b) => a.market_value - b.market_value,
+    width: 110,
+    render: (row) => '¥' + fmtNumber(row.market_value, 2),
+  },
+  {
+    title: '盈亏',
+    key: 'unrealized_pnl',
+    sorter: (a, b) => a.unrealized_pnl - b.unrealized_pnl,
+    width: 110,
+    render: (row) =>
+      h('span', { style: { color: row.unrealized_pnl >= 0 ? pnlColorUp : pnlColorDown, fontWeight: 600 } },
+        (row.unrealized_pnl >= 0 ? '+' : '') + fmtNumber(row.unrealized_pnl, 2)),
+  },
+  {
+    title: '盈亏%',
+    key: 'pnl_pct',
+    sorter: (a, b) => pnlPct(a) - pnlPct(b),
+    width: 100,
+    render: (row) => {
+      const pct = pnlPct(row)
+      return h('span', { style: { color: pct >= 0 ? pnlColorUp : pnlColorDown, fontWeight: 600 } },
+        (pct >= 0 ? '+' : '') + (pct * 100).toFixed(2) + '%')
+    },
+  },
+]
+
+// ── Order table ───────────────────────────────────────────────────
+const orderColumns: DataTableColumns<Order> = [
+  {
+    title: '时间',
+    key: 'timestamp',
+    sorter: (a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0),
+    defaultSortOrder: 'descend',
+    width: 100,
+    render: (row) => {
+      const t = row.timestamp
+      // Show HH:MM:SS when the backend sent a full ISO timestamp;
+      // otherwise fall back to the raw string.
+      return t && t.includes('T') ? t.slice(t.indexOf('T') + 1, t.indexOf('T') + 9) : (t || '—')
+    },
+  },
+  { title: '股票代码', key: 'symbol', width: 110 },
+  {
+    title: '方向',
+    key: 'direction',
+    width: 80,
+    render: (row) =>
+      h(NTag, {
+        size: 'small',
+        bordered: false,
+        type: row.direction === 'long' ? 'error' : 'success',
+      }, { default: () => row.direction === 'long' ? '买入' : '卖出' }),
+  },
+  {
+    title: '价格',
+    key: 'price',
+    width: 90,
+    render: (row) => (row.price != null ? fmtNumber(row.price, 2) : '—'),
+  },
+  { title: '数量', key: 'quantity', width: 80 },
+  {
+    title: '状态',
+    key: 'status',
+    width: 90,
+    render: (row) =>
+      h(NTag, {
+        size: 'small',
+        bordered: false,
+        type: row.status === 'filled' ? 'success' : row.status === 'rejected' ? 'error' : 'warning',
+      }, { default: () => row.status }),
+  },
+]
+
+// ── Quick trade form ──────────────────────────────────────────────
 const showStartModal = ref(false)
 const orderFormRef = ref<FormInst | null>(null)
 const startFormRef = ref<FormInst | null>(null)
@@ -233,7 +427,6 @@ const orderForm = reactive({
   symbol: '',
   direction: 'long',
   quantity: 100,
-  order_type: 'market',
   limit_price: undefined as number | undefined,
 })
 
@@ -242,15 +435,9 @@ const startForm = reactive({
   initial_capital: 1000000,
 })
 
-// Options
 const directionOptions = [
   { label: '买入', value: 'long' },
   { label: '卖出', value: 'short' },
-]
-
-const orderTypeOptions = [
-  { label: '市价单', value: 'market' },
-  { label: '限价单', value: 'limit' },
 ]
 
 const stockOptions = [
@@ -261,46 +448,19 @@ const stockOptions = [
   { label: '比亚迪 (002594.SZ)', value: '002594.SZ' },
 ]
 
-// Computed
-const positionsValue = computed(() => {
-  return positions.value.reduce((sum, pos) => sum + pos.market_value, 0)
-})
-
-// Rules
 const orderRules: FormRules = {
   symbol: [{ required: true, message: '请输入股票代码', trigger: 'blur' }],
   direction: [{ required: true, message: '请选择方向', trigger: 'change' }],
   quantity: [{ required: true, type: 'number', min: 1, message: '数量必须大于0', trigger: 'blur' }],
 }
 
-// Columns
-const positionColumns: DataTableColumns<Position> = [
-  { title: '股票代码', key: 'symbol' },
-  { title: '数量', key: 'quantity' },
-  { title: '成本价', key: 'avg_cost' },
-  { title: '当前价', key: 'current_price' },
-  { title: '市值', key: 'market_value' },
-  { title: '浮动盈亏', key: 'unrealized_pnl' },
-]
-
-const orderColumns: DataTableColumns<Order> = [
-  { title: '订单ID', key: 'id' },
-  { title: '股票代码', key: 'symbol' },
-  { title: '方向', key: 'direction' },
-  { title: '数量', key: 'quantity' },
-  { title: '状态', key: 'status' },
-  { title: '时间', key: 'timestamp' },
-]
-
-const tradeColumns: DataTableColumns<Trade> = [
-  { title: '交易ID', key: 'id' },
-  { title: '股票代码', key: 'symbol' },
-  { title: '方向', key: 'direction' },
-  { title: '数量', key: 'quantity' },
-  { title: '成交价', key: 'price' },
-  { title: '佣金', key: 'commission' },
-  { title: '时间', key: 'timestamp' },
-]
+function resetOrderForm() {
+  orderForm.symbol = ''
+  orderForm.direction = 'long'
+  orderForm.quantity = 100
+  orderForm.limit_price = undefined
+  resetSuitability()
+}
 
 async function handleStart() {
   starting.value = true
@@ -330,15 +490,12 @@ async function handleSubmitOrder() {
   try {
     await orderFormRef.value?.validate()
   } catch {
-    // Form validation errors are surfaced by n-form-item rules; no toast needed.
     return
   }
 
-  // P2-4 (ODR-028): defensive precheck. The symbol input box already
-  // runs `refreshSuitability` on blur, but the operator may type
-  // a new symbol and click "submit" before the blur fires. We
-  // re-run the check synchronously here so a rejected symbol can
-  // never reach /api/execution/orders through the UI.
+  // P2-4 (ODR-028): defensive precheck on submit so a rejected symbol
+  // can never reach /api/execution/orders through the UI even if the
+  // operator skipped the blur handler.
   if (orderForm.symbol) {
     const ok = await ensureSuitability(orderForm.symbol)
     if (!ok) {
@@ -353,15 +510,11 @@ async function handleSubmitOrder() {
       symbol: orderForm.symbol,
       direction: orderForm.direction,
       quantity: orderForm.quantity,
-      order_type: orderForm.order_type,
+      order_type: orderForm.limit_price != null ? 'limit' : 'market',
       limit_price: orderForm.limit_price,
     })
     message.success('订单已提交')
-    orderForm.symbol = ''
-    orderForm.quantity = 100
-    orderForm.limit_price = undefined
-    // Reset the banner so the next order starts in a neutral state.
-    resetSuitability()
+    resetOrderForm()
     await fetchData()
   } catch (error) {
     message.error(extractErrorMessage(error, '提交失败'))
@@ -372,19 +525,6 @@ async function handleSubmitOrder() {
 
 // ============================================================
 // P2-4 (ODR-028): investor-suitability precheck logic.
-//
-// The flow is:
-//   1. User types a symbol → @blur fires refreshSuitability()
-//   2. refreshSuitability() calls /api/compliance/check
-//   3. The verdict is stored in `suitabilityState` and rendered
-//   4. The submit button is disabled when allowed=false
-//   5. handleSubmitOrder() re-runs the check as a safety net
-//
-// The "checked" flag distinguishes "we haven't run the check yet"
-// (no banner, button enabled — operator can still submit; the
-// precheck runs on submit) from "we ran it and got rejected" (banner
-// red, button disabled) from "we ran it and got approved" (banner
-// green, button enabled).
 // ============================================================
 
 interface SuitabilityState {
@@ -394,7 +534,6 @@ interface SuitabilityState {
   title: string
   boardName: string
   reasons: string[]
-  requiredDescription: string
 }
 
 const initialSuitability = (): SuitabilityState => ({
@@ -404,7 +543,6 @@ const initialSuitability = (): SuitabilityState => ({
   title: '',
   boardName: '',
   reasons: [],
-  requiredDescription: '',
 })
 
 const suitabilityState = reactive<SuitabilityState>(initialSuitability())
@@ -414,19 +552,16 @@ function resetSuitability() {
 }
 
 function applySuitabilityResult(result: CheckResponse) {
-  // Re-classify the verdict for the UI.
   if (result.allowed) {
     suitabilityState.allowed = true
     suitabilityState.title = `适当性检查通过 (${result.board_name || result.board})`
     suitabilityState.boardName = result.board_name || result.board
     suitabilityState.reasons = []
-    suitabilityState.requiredDescription = ''
   } else {
     suitabilityState.allowed = false
     suitabilityState.title = `适当性检查未通过 (${result.board_name || result.board})`
     suitabilityState.boardName = result.board_name || result.board
     suitabilityState.reasons = result.reasons || []
-    suitabilityState.requiredDescription = result.required?.Description || ''
   }
   suitabilityState.checked = true
   suitabilityState.visible = true
@@ -438,8 +573,6 @@ async function refreshSuitability() {
     resetSuitability()
     return
   }
-  // Fire the precheck. We swallow errors here and let the submit
-  // path re-raise them; the banner just won't render.
   try {
     const result = await checkSuitability({ symbol })
     applySuitabilityResult(result)
@@ -448,10 +581,6 @@ async function refreshSuitability() {
   }
 }
 
-// ensureSuitability is the synchronous-style wrapper used by
-// handleSubmitOrder. Returns true if the order is allowed to
-// proceed (either the verdict was already allowed, or the
-// precheck just came back allowed), false otherwise.
 async function ensureSuitability(symbol: string): Promise<boolean> {
   try {
     const result = await checkSuitability({ symbol })
@@ -463,11 +592,6 @@ async function ensureSuitability(symbol: string): Promise<boolean> {
   }
 }
 
-// CR-07 (ODR-012): `catch (error: any)` is replaced by typed `unknown` handling.
-// The `any` escape hatch bypasses TypeScript's null/undefined safety net and
-// silently propagates API client errors as `undefined` when axios structure
-// changes. extractErrorMessage narrows the error and preserves the original
-// server-side message when available.
 function extractErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object') {
     const e = error as { response?: { data?: { error?: string } }; message?: string }
@@ -476,38 +600,55 @@ function extractErrorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
-// Polling
-let pollInterval: ReturnType<typeof setInterval> | null = null
+// ── Polling ───────────────────────────────────────────────────────
+// autoRefresh toggles the 5s poll on/off. We tear the interval down
+// when the switch is flipped off (and on unmount) so the dashboard
+// doesn't keep hammering the API in the background.
+function startPolling() {
+  if (pollInterval) return
+  pollInterval = setInterval(fetchData, 5000)
+}
+
+function stopPolling() {
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
+  }
+}
+
+watch(autoRefresh, (on) => {
+  if (on) startPolling()
+  else stopPolling()
+})
 
 onMounted(() => {
   fetchData()
-  pollInterval = setInterval(fetchData, 5000)
+  if (autoRefresh.value) startPolling()
 })
 
 onUnmounted(() => {
-  if (pollInterval) clearInterval(pollInterval)
+  stopPolling()
 })
 </script>
 
 <style scoped>
 .paper-trading-page {
-  padding: 20px;
+  padding: 16px;
   max-width: 1400px;
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.portfolio-card,
-.order-card,
-.positions-card,
-.orders-card,
-.trades-card {
-  margin-top: 16px;
+.overview-card,
+.panel-card,
+.trade-card {
+  margin-top: 0;
 }
 
-.suitability-alert .suitability-desc {
-  margin: 8px 0 0 0;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.75);
-  line-height: 1.5;
+.suitability-alert :deep(.n-alert__content) {
+  font-size: 13px;
+  line-height: 1.6;
 }
 </style>

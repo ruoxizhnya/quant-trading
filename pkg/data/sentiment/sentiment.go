@@ -83,6 +83,43 @@ func (sa *SentimentAggregator) GetDailyAverage(symbol string, date time.Time) (f
 	return sum / float64(n), nil
 }
 
+// GetDailyScore returns the daily average sentiment score together with
+// the average confidence for a symbol on the given calendar day. The
+// returned SentimentScore carries the averages in Score / Confidence,
+// "aggregated" in Source, and the requested date in Date.
+//
+// Returns an error when the symbol is unknown or has no scores on the
+// requested day (same semantics as GetDailyAverage, but also exposes
+// confidence so callers can filter on it).
+func (sa *SentimentAggregator) GetDailyScore(symbol string, date time.Time) (SentimentScore, error) {
+	sa.mu.RLock()
+	defer sa.mu.RUnlock()
+	scores, ok := sa.scores[symbol]
+	if !ok {
+		return SentimentScore{}, fmt.Errorf("no sentiment scores for symbol %q", symbol)
+	}
+	var sumScore, sumConf float64
+	var n int
+	for _, s := range scores {
+		if !sameDay(s.Date, date) {
+			continue
+		}
+		sumScore += s.Score
+		sumConf += s.Confidence
+		n++
+	}
+	if n == 0 {
+		return SentimentScore{}, fmt.Errorf("no sentiment scores for symbol %q on %s", symbol, date.Format("2006-01-02"))
+	}
+	return SentimentScore{
+		Symbol:     symbol,
+		Date:       date,
+		Score:      sumScore / float64(n),
+		Confidence: sumConf / float64(n),
+		Source:     "aggregated",
+	}, nil
+}
+
 // GetTopPositive returns the top N most positive stocks for a date,
 // ranked by daily average sentiment descending. Results are capped to N
 // and to symbols with scores on that date. Each returned SentimentScore

@@ -47,6 +47,13 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '策略实验室' },
       },
       {
+        // P3: visual drag-drop multi-factor strategy builder.
+        path: 'strategy-builder',
+        name: 'strategy-builder',
+        component: () => import('@/pages/StrategyBuilder.vue'),
+        meta: { title: '策略编辑器' },
+      },
+      {
         path: 'data-sync',
         name: 'data-sync',
         component: () => import('@/pages/DataSync.vue'),

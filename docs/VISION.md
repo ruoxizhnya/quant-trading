@@ -220,8 +220,8 @@ Strategies live in `pkg/strategy/plugins/` and auto-register via `init()`. A str
 | Multi-Factor | Value + Momentum + Quality composite | ✅ multi_factor.go exists (live computation; Factor cache needed for production-scale multi-factor evaluation) |
 | Mean Reversion | Bollinger bands, RSI thresholds | ✅ mean_reversion.go (Bollinger + RSI) |
 | Risk Parity | Volatility-adjusted equal risk contribution | ✅ risk_parity.go (1/vol weighting) |
-| Event-Driven | Earnings surprises, analyst upgrades | ⬜ Planned (Phase 3) |
-| Sentiment | News/algo sentiment scoring | ⬜ Planned (Phase 3) |
+| Event-Driven | Earnings surprises, analyst upgrades | ✅ event_driven.go (price jump + volume spike proxy) |
+| Sentiment | News/algo sentiment scoring | ✅ sentiment.go (contrarian, uses SentimentAggregator) |
 | AI-Generated | LLM-generated strategies from natural language | ✅ Phase 4 — Generate Agent + Code Validator |
 | Evolutionary | Genetic algorithm evolved strategies | ✅ Phase 4 — Evolve Agent + Population framework |
 
@@ -522,8 +522,8 @@ type Position struct {
 | Vue SPA — Copilot | AI-assisted strategy creation with code generation and backtest validation | P1 | ✅ Done | AI integration, code generation |
 | Vue SPA — StrategyLab | Strategy management (CRUD) + configuration | P1 | ✅ Done | Strategy registry API |
 | Backtest comparison UI | Compare two or more backtest runs side by side | P1 | ✅ Done | BacktestCompare.vue |
-| Visual strategy editor | Drag-drop factor builder | P3 | ⬜ Planned | Strategy Copilot |
-| Real-time paper trading UI | Live positions, orders, P&L update throughout trading day | P3 | ⬜ Planned | Execution service |
+| Visual strategy editor | Drag-drop factor builder | P3 | ✅ Done | StrategyBuilder.vue (HTML5 DnD + Naive UI) |
+| Real-time paper trading UI | Live positions, orders, P&L update throughout trading day | P3 | ✅ Done | PaperTrading.vue (auto-refresh + quick trade panel) |
 | Legacy HTML (deprecated) | `cmd/analysis/static/*.html` — superseded by Vue SPA | — | ⚠️ Deprecated | — |
 
 ### F. Infrastructure
@@ -631,10 +631,10 @@ The phases below define the build order. All P0 items must be fully done (not "i
 
 | Category | Deliverables | Status |
 |----------|-------------|--------|
-| Infrastructure | Kubernetes manifests, Prometheus metrics, alerting | ⬜ Planned |
-| Risk | VaR/CVaR, risk parity strategy, market impact model | ⬜ Planned |
-| Data | News/sentiment data pipeline | ⬜ Planned |
-| Strategy | Risk parity strategy, event-driven, sentiment strategies | ⬜ Planned |
+| Infrastructure | Kubernetes manifests, Prometheus metrics, alerting | ✅ Done |
+| Risk | VaR/CVaR, risk parity strategy, market impact model | ✅ Done |
+| Data | News/sentiment data pipeline | ✅ Done |
+| Strategy | Risk parity strategy, event-driven, sentiment strategies | ✅ Done |
 | UI | Real-time paper trading UI (live broker integration) | ✅ `pkg/live/` + Vue components |
 | AI | Multi-modal data fusion (news + price + fundamental), reinforcement learning for execution | ⬜ Planned |
 | AI | Factor discovery batch automation: target 10+ factors with IC > 0.03 | 🔄 In Progress |
