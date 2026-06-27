@@ -219,7 +219,7 @@ Strategies live in `pkg/strategy/plugins/` and auto-register via `init()`. A str
 | Value | PE/PB/PS screening, composite value score | ✅ value_momentum.go exists |
 | Multi-Factor | Value + Momentum + Quality composite | ✅ multi_factor.go exists (live computation; Factor cache needed for production-scale multi-factor evaluation) |
 | Mean Reversion | Bollinger bands, RSI thresholds | ✅ mean_reversion.go (Bollinger + RSI) |
-| Risk Parity | Volatility-adjusted equal risk contribution | ⬜ Planned (Phase 4) |
+| Risk Parity | Volatility-adjusted equal risk contribution | ✅ risk_parity.go (1/vol weighting) |
 | Event-Driven | Earnings surprises, analyst upgrades | ⬜ Planned (Phase 3) |
 | Sentiment | News/algo sentiment scoring | ⬜ Planned (Phase 3) |
 | AI-Generated | LLM-generated strategies from natural language | ✅ Phase 4 — Generate Agent + Code Validator |
