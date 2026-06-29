@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -13,8 +14,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupRouter(s *Service) *gin.Engine {
+// TestMain sets gin to test mode once for the entire package.
+//
+// S7-P0-14 (ODR-043): Individual tests must NOT call gin.SetMode()
+// themselves. The middleware tests all use t.Parallel(), and gin.SetMode()
+// writes to a package-level global (ginMode) — concurrent calls from
+// parallel test goroutines triggered a -race report that failed the
+// entire pkg/auth package. Centralizing the call in TestMain runs it
+// exactly once before any test goroutine starts.
+func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
+	os.Exit(m.Run())
+}
+
+func setupRouter(s *Service) *gin.Engine {
 	r := gin.New()
 	r.Use(s.Middleware())
 	r.GET("/api/secret", func(c *gin.Context) {
@@ -141,7 +154,6 @@ func TestMiddleware_ExpiredToken_401(t *testing.T) {
 
 func TestRequireRole_403(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 	s := NewService(nil, Config{JWTSecret: []byte("test")})
 	r := gin.New()
 	r.Use(s.Middleware())
@@ -163,7 +175,6 @@ func TestRequireRole_403(t *testing.T) {
 
 func TestRequireRole_OK(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 	s := NewService(nil, Config{JWTSecret: []byte("test")})
 	r := gin.New()
 	r.Use(s.Middleware())
@@ -184,7 +195,6 @@ func TestRequireRole_OK(t *testing.T) {
 
 func TestRequireRole_NoUser_401(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/admin", RequireRole(RoleAdmin), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
