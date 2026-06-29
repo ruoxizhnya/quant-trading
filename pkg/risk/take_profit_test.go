@@ -1,6 +1,8 @@
 package risk
 
 import (
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -163,43 +165,65 @@ func TestTrailingTakeProfit_NotYetFiredBeforeDrawdown(t *testing.T) {
 // TieredTakeProfit
 // ============================================================
 
-func TestNewTieredTakeProfit_PanicsOnEmpty(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic on empty tiers")
-		}
-	}()
-	_ = NewTieredTakeProfit(nil)
+// S7-P0-7 (ODR-043): NewTieredTakeProfit must return errors instead
+// of panicking. Production code must never panic (AGENTS.md §6).
+func TestNewTieredTakeProfit_ErrorOnEmpty(t *testing.T) {
+	rule, err := NewTieredTakeProfit(nil)
+	if err == nil {
+		t.Error("expected error on empty tiers, got nil")
+	}
+	if rule != nil {
+		t.Errorf("expected nil rule on error, got %+v", rule)
+	}
 }
 
-func TestNewTieredTakeProfit_PanicsOnBadFraction(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic on SellFraction=0")
-		}
-	}()
-	_ = NewTieredTakeProfit([]TakeProfitTier{
+func TestNewTieredTakeProfit_ErrorOnBadFraction(t *testing.T) {
+	rule, err := NewTieredTakeProfit([]TakeProfitTier{
 		{SellFraction: 0, ProfitPct: 0.10},
 	})
+	if err == nil {
+		t.Error("expected error on SellFraction=0, got nil")
+	}
+	if rule != nil {
+		t.Errorf("expected nil rule on error, got %+v", rule)
+	}
+}
+
+func TestNewTieredTakeProfit_ErrorOnNegativeProfitPct(t *testing.T) {
+	rule, err := NewTieredTakeProfit([]TakeProfitTier{
+		{SellFraction: 0.5, ProfitPct: -0.10},
+	})
+	if err == nil {
+		t.Error("expected error on ProfitPct<0, got nil")
+	}
+	if rule != nil {
+		t.Errorf("expected nil rule on error, got %+v", rule)
+	}
 }
 
 func TestNewTieredTakeProfit_SortsByProfitPct(t *testing.T) {
-	rule := NewTieredTakeProfit([]TakeProfitTier{
+	rule, err := NewTieredTakeProfit([]TakeProfitTier{
 		{SellFraction: 0.4, ProfitPct: 0.30},
 		{SellFraction: 0.3, ProfitPct: 0.10},
 		{SellFraction: 0.3, ProfitPct: 0.20},
 	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if rule.Tiers[0].ProfitPct != 0.10 || rule.Tiers[1].ProfitPct != 0.20 || rule.Tiers[2].ProfitPct != 0.30 {
 		t.Errorf("expected sorted ascending, got %+v", rule.Tiers)
 	}
 }
 
 func TestTieredTakeProfit_FirstLevelTriggers(t *testing.T) {
-	rule := NewTieredTakeProfit([]TakeProfitTier{
+	rule, err := NewTieredTakeProfit([]TakeProfitTier{
 		{SellFraction: 0.3, ProfitPct: 0.10},
 		{SellFraction: 0.3, ProfitPct: 0.20},
 		{SellFraction: 0.4, ProfitPct: 0.30},
 	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	pos := makePos("X", 1000, 10.00)
 	pos.Metadata[TieredOriginalQtyKey] = 1000.0
 	// 11.00 → +10% → 触发 level 1.
@@ -216,10 +240,13 @@ func TestTieredTakeProfit_FirstLevelTriggers(t *testing.T) {
 }
 
 func TestTieredTakeProfit_SecondLevelTriggers(t *testing.T) {
-	rule := NewTieredTakeProfit([]TakeProfitTier{
+	rule, err := NewTieredTakeProfit([]TakeProfitTier{
 		{SellFraction: 0.3, ProfitPct: 0.10},
 		{SellFraction: 0.3, ProfitPct: 0.20},
 	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	pos := makePos("X", 700, 10.00) // 模拟 level 1 已卖出, 剩 700.
 	pos.Metadata[TieredOriginalQtyKey] = 1000.0
 	pos.Metadata[TieredLastTriggeredKey] = 0.0 // tier 0 (level 1) 已触发
@@ -237,9 +264,12 @@ func TestTieredTakeProfit_SecondLevelTriggers(t *testing.T) {
 }
 
 func TestTieredTakeProfit_AllTiersExhausted(t *testing.T) {
-	rule := NewTieredTakeProfit([]TakeProfitTier{
+	rule, err := NewTieredTakeProfit([]TakeProfitTier{
 		{SellFraction: 1.0, ProfitPct: 0.10},
 	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	pos := makePos("X", 1000, 10.00)
 	pos.Metadata[TieredOriginalQtyKey] = 1000.0
 	pos.Metadata[TieredLastTriggeredKey] = 0.0 // tier 0 已触发 (1 层)
@@ -249,9 +279,12 @@ func TestTieredTakeProfit_AllTiersExhausted(t *testing.T) {
 }
 
 func TestTieredTakeProfit_BelowFirstLevel(t *testing.T) {
-	rule := NewTieredTakeProfit([]TakeProfitTier{
+	rule, err := NewTieredTakeProfit([]TakeProfitTier{
 		{SellFraction: 0.3, ProfitPct: 0.10},
 	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	pos := makePos("X", 1000, 10.00)
 	pos.Metadata[TieredOriginalQtyKey] = 1000.0
 	// 10.50 → 5%, 未达 10%.
@@ -263,9 +296,12 @@ func TestTieredTakeProfit_BelowFirstLevel(t *testing.T) {
 func TestTieredTakeProfit_LotRounding(t *testing.T) {
 	// 原始 333 股, SellFraction 0.3 = 99.9 股 → 圆整到 100.
 	// 99.9 < 100 圆整到 0 → 回退到全部.
-	rule := NewTieredTakeProfit([]TakeProfitTier{
+	rule, err := NewTieredTakeProfit([]TakeProfitTier{
 		{SellFraction: 0.3, ProfitPct: 0.10},
 	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	pos := makePos("X", 333, 10.00)
 	pos.Metadata[TieredOriginalQtyKey] = 333.0
 	act, _ := rule.Evaluate(pos, 11.00)
@@ -388,10 +424,13 @@ func TestChecker_Check_SkipsUnboundSymbol(t *testing.T) {
 
 func TestChecker_Check_TieredMultiLevelInOneCall(t *testing.T) {
 	c := newTestChecker()
-	rule := NewTieredTakeProfit([]TakeProfitTier{
+	rule, err := NewTieredTakeProfit([]TakeProfitTier{
 		{SellFraction: 0.3, ProfitPct: 0.10},
 		{SellFraction: 0.3, ProfitPct: 0.20},
 	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	c.SetRule("X.SH", rule)
 	pos := makePos("X.SH", 1000, 10.00)
 	pos.Metadata[TieredOriginalQtyKey] = 1000.0
@@ -430,4 +469,33 @@ func TestChecker_ConcurrentSetAndCheck(t *testing.T) {
 	}
 	wg.Wait()
 	_ = time.Second
+}
+
+// TestNewTieredTakeProfit_SourceHasNoPanic is a regression guard for
+// S7-P0-7 (ODR-043): the constructor must not call panic() — production
+// code must return errors (AGENTS.md §6).
+func TestNewTieredTakeProfit_SourceHasNoPanic(t *testing.T) {
+	source, err := os.ReadFile("take_profit.go")
+	if err != nil {
+		t.Fatalf("read source: %v", err)
+	}
+	if s := string(source); containsPanicInConstructor(s) {
+		t.Errorf("take_profit.go must not call panic() in NewTieredTakeProfit (S7-P0-7)")
+	}
+}
+
+// containsPanicInConstructor checks that the NewTieredTakeProfit
+// function body does not contain a panic call. It scans from the func
+// declaration to the next top-level "func " keyword.
+func containsPanicInConstructor(source string) bool {
+	idx := strings.Index(source, "func NewTieredTakeProfit(")
+	if idx < 0 {
+		return false // function not found; nothing to guard
+	}
+	rest := source[idx:]
+	end := strings.Index(rest, "\nfunc ")
+	if end < 0 {
+		end = len(rest)
+	}
+	return strings.Contains(rest[:end], "panic(")
 }

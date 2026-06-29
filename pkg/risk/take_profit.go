@@ -47,14 +47,14 @@ import (
 //   - Reason:        人类可读的触发原因.
 //   - TriggeredAt:   触发时间 (UTC).
 type TakeProfitAction struct {
-	Symbol        string    `json:"symbol"`
-	Rule          string    `json:"rule"`
-	Level         int       `json:"level"`
-	TriggerPrice  float64   `json:"trigger_price"`
-	SellQuantity  float64   `json:"sell_quantity"`
-	SellFraction  float64   `json:"sell_fraction"`
-	Reason        string    `json:"reason"`
-	TriggeredAt   time.Time `json:"triggered_at"`
+	Symbol       string    `json:"symbol"`
+	Rule         string    `json:"rule"`
+	Level        int       `json:"level"`
+	TriggerPrice float64   `json:"trigger_price"`
+	SellQuantity float64   `json:"sell_quantity"`
+	SellFraction float64   `json:"sell_fraction"`
+	Reason       string    `json:"reason"`
+	TriggeredAt  time.Time `json:"triggered_at"`
 }
 
 // TakeProfitRule 是止盈规则的统一接口.
@@ -114,9 +114,9 @@ func (f *FixedTakeProfit) Evaluate(pos domain.Position, currentPrice float64) (T
 		TriggerPrice: trigger,
 		SellQuantity: pos.Quantity,
 		SellFraction: 1.0,
-		Reason:       fmt.Sprintf("fixed_take_profit: current=%.4f >= entry*%.2f%%=%.4f",
+		Reason: fmt.Sprintf("fixed_take_profit: current=%.4f >= entry*%.2f%%=%.4f",
 			currentPrice, f.ProfitPct*100, trigger),
-		TriggeredAt:  time.Now().UTC(),
+		TriggeredAt: time.Now().UTC(),
 	}, true
 }
 
@@ -241,24 +241,28 @@ type TieredTakeProfit struct {
 }
 
 // NewTieredTakeProfit creates a rule with the supplied tiers; tiers
-// are sorted ascending by ProfitPct. The function panics on invalid
-// input (SellFraction < 0, ProfitPct < 0, empty Tiers).
-func NewTieredTakeProfit(tiers []TakeProfitTier) *TieredTakeProfit {
+// are sorted ascending by ProfitPct. Returns an error on invalid input
+// (empty Tiers, ProfitPct < 0, SellFraction out of (0,1]).
+//
+// S7-P0-7 (ODR-043): previously panicked on invalid input, violating
+// the "production code never panics" rule (AGENTS.md §6). Now returns
+// a descriptive error so callers can handle it gracefully.
+func NewTieredTakeProfit(tiers []TakeProfitTier) (*TieredTakeProfit, error) {
 	if len(tiers) == 0 {
-		panic("tiered take profit: at least one tier required")
+		return nil, fmt.Errorf("tiered take profit: at least one tier required")
 	}
 	cp := make([]TakeProfitTier, len(tiers))
 	copy(cp, tiers)
 	sort.Slice(cp, func(i, j int) bool { return cp[i].ProfitPct < cp[j].ProfitPct })
 	for i, t := range cp {
 		if t.ProfitPct < 0 {
-			panic(fmt.Sprintf("tiered take profit: tier[%d].ProfitPct < 0", i))
+			return nil, fmt.Errorf("tiered take profit: tier[%d].ProfitPct < 0", i)
 		}
 		if t.SellFraction <= 0 || t.SellFraction > 1 {
-			panic(fmt.Sprintf("tiered take profit: tier[%d].SellFraction out of (0,1]", i))
+			return nil, fmt.Errorf("tiered take profit: tier[%d].SellFraction out of (0,1]", i)
 		}
 	}
-	return &TieredTakeProfit{Tiers: cp}
+	return &TieredTakeProfit{Tiers: cp}, nil
 }
 
 // Name returns "tiered".
@@ -360,9 +364,9 @@ func roundToLot(qty float64, lot int) float64 {
 // TakeProfitChecker 维护 symbol → rule 的注册表, 在收到 (positions, prices)
 // 时并行 Evaluate, 汇总所有触发的 actions.
 type TakeProfitChecker struct {
-	mu      sync.RWMutex
-	rules   map[string]TakeProfitRule // symbol → rule (or "default" for all)
-	logger  zerolog.Logger
+	mu     sync.RWMutex
+	rules  map[string]TakeProfitRule // symbol → rule (or "default" for all)
+	logger zerolog.Logger
 }
 
 // NewTakeProfitChecker creates an empty checker.
