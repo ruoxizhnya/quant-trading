@@ -104,11 +104,28 @@ func (p *FactorPool) Get(ctx context.Context, id string) (*FactorGene, error) {
 		return nil, fmt.Errorf("get factor gene: %w", err)
 	}
 
-	if len(parentIDs) > 0 {
-		_ = json.Unmarshal(parentIDs, &gene.ParentIDs)
+	if err := unmarshalFactorGeneFields(gene, parentIDs); err != nil {
+		return nil, err
 	}
 
 	return gene, nil
+}
+
+// unmarshalFactorGeneFields parses the parent_ids JSON blob column
+// scanned from the factor_genes table into the gene struct. An empty
+// blob is skipped. Returns an error if the blob is non-empty but
+// malformed JSON, so callers don't silently get a gene with zero-valued
+// ParentIDs.
+//
+// S7-P0-6 (ODR-043): previously the unmarshal error was discarded,
+// masking data corruption.
+func unmarshalFactorGeneFields(gene *FactorGene, parentIDs []byte) error {
+	if len(parentIDs) > 0 {
+		if err := json.Unmarshal(parentIDs, &gene.ParentIDs); err != nil {
+			return fmt.Errorf("parse factor gene parent_ids: %w", err)
+		}
+	}
+	return nil
 }
 
 // List retrieves factor genes with optional filters.
@@ -257,8 +274,8 @@ func scanFactorRows(rows interface {
 			return nil, fmt.Errorf("scan factor gene: %w", err)
 		}
 
-		if len(parentIDs) > 0 {
-			_ = json.Unmarshal(parentIDs, &gene.ParentIDs)
+		if err := unmarshalFactorGeneFields(gene, parentIDs); err != nil {
+			return nil, err
 		}
 
 		genes = append(genes, gene)

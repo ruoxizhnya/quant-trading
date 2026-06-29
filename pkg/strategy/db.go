@@ -74,7 +74,14 @@ func (db *StrategyDB) ListWithDB(ctx context.Context) ([]StrategyInfo, error) {
 	for _, cfg := range dbConfigs {
 		var params []Parameter
 		if cfg.Params != "" {
-			_ = json.Unmarshal([]byte(cfg.Params), &params)
+			// S7-P0-6 (ODR-043): previously the unmarshal error was
+			// silently discarded, yielding a strategy with zero
+			// parameters and no signal. Now surface the error so a
+			// corrupt params blob fails loudly instead of producing a
+			// silently misconfigured strategy.
+			if err := json.Unmarshal([]byte(cfg.Params), &params); err != nil {
+				return nil, fmt.Errorf("parse strategy %q params: %w", cfg.StrategyID, err)
+			}
 		}
 		result = append(result, StrategyInfo{
 			Name:        cfg.StrategyID,

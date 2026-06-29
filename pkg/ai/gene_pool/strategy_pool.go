@@ -114,17 +114,39 @@ func (p *StrategyPool) Get(ctx context.Context, id string) (*StrategyGene, error
 		return nil, fmt.Errorf("get strategy gene: %w", err)
 	}
 
-	if len(params) > 0 {
-		_ = json.Unmarshal(params, &gene.Params)
-	}
-	if len(factorIDs) > 0 {
-		_ = json.Unmarshal(factorIDs, &gene.FactorIDs)
-	}
-	if len(parentIDs) > 0 {
-		_ = json.Unmarshal(parentIDs, &gene.ParentIDs)
+	if err := unmarshalStrategyGeneFields(gene, params, factorIDs, parentIDs); err != nil {
+		return nil, err
 	}
 
 	return gene, nil
+}
+
+// unmarshalStrategyGeneFields parses the JSON blob columns scanned from
+// the strategy_genes table (params / factor_ids / parent_ids) into the
+// gene struct. Empty blobs are skipped. Returns an error if any blob is
+// non-empty but malformed JSON, so callers don't silently get a gene
+// with zero-valued Params / FactorIDs / ParentIDs.
+//
+// S7-P0-6 (ODR-043): previously each unmarshal call discarded its
+// error, masking data corruption (e.g. a truncated params blob would
+// yield an empty Params map with no signal).
+func unmarshalStrategyGeneFields(gene *StrategyGene, params, factorIDs, parentIDs []byte) error {
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &gene.Params); err != nil {
+			return fmt.Errorf("parse strategy gene params: %w", err)
+		}
+	}
+	if len(factorIDs) > 0 {
+		if err := json.Unmarshal(factorIDs, &gene.FactorIDs); err != nil {
+			return fmt.Errorf("parse strategy gene factor_ids: %w", err)
+		}
+	}
+	if len(parentIDs) > 0 {
+		if err := json.Unmarshal(parentIDs, &gene.ParentIDs); err != nil {
+			return fmt.Errorf("parse strategy gene parent_ids: %w", err)
+		}
+	}
+	return nil
 }
 
 // List retrieves strategy genes with optional filters.
@@ -241,14 +263,8 @@ func scanStrategyRows(rows interface {
 			return nil, fmt.Errorf("scan strategy gene: %w", err)
 		}
 
-		if len(params) > 0 {
-			_ = json.Unmarshal(params, &gene.Params)
-		}
-		if len(factorIDs) > 0 {
-			_ = json.Unmarshal(factorIDs, &gene.FactorIDs)
-		}
-		if len(parentIDs) > 0 {
-			_ = json.Unmarshal(parentIDs, &gene.ParentIDs)
+		if err := unmarshalStrategyGeneFields(gene, params, factorIDs, parentIDs); err != nil {
+			return nil, err
 		}
 
 		genes = append(genes, gene)
