@@ -44,7 +44,19 @@ func TestCopilotService_Generate_RecordsJob(t *testing.T) {
 
 	require.NotNil(t, res)
 	assert.NotEmpty(t, res.JobID)
-	assert.Equal(t, "pending", res.Status)
+
+	// S7-P0-12 (ODR-043): Lock before reading Status. The run() goroutine
+	// writes Status (and other fields) under result.Lock(); any
+	// unsynchronized read is a data race flagged by -race. The value is
+	// "pending" at Generate() return time, but may have already transitioned
+	// to a terminal status (e.g. "sandbox_rejected" since WorkingDir is empty
+	// in this test and run() fails fast) by the time we read it — so we assert
+	// non-empty rather than a specific value.
+	res.Lock()
+	status := res.Status
+	res.Unlock()
+	assert.NotEmpty(t, status,
+		"Generate must initialize Status (to 'pending' or a terminal status)")
 	generated, _, _ := svc.Stats()
 	assert.GreaterOrEqual(t, generated, int64(1),
 		"Generate must bump the generated counter so /stats/acceptance works")

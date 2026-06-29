@@ -211,9 +211,17 @@ func registerCopilotRoutes(router *gin.Engine, copilotService *strategy.CopilotS
 				return
 			}
 			result := copilotService.Generate(c.Request.Context(), req, copilotRunner)
+			// S7-P0-12 (ODR-043): Lock before reading Status. Generate()
+			// spawns a goroutine that writes result.Status under
+			// result.Lock(); reading it without synchronizing is a data
+			// race. JobID is immutable after creation so it's safe to
+			// read unlocked, but Status must be read under the lock.
+			result.Lock()
+			status := result.Status
+			result.Unlock()
 			c.JSON(http.StatusAccepted, gin.H{
 				"job_id": result.JobID,
-				"status": result.Status,
+				"status": status,
 			})
 		})
 
