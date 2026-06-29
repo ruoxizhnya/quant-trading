@@ -1580,7 +1580,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | S7-P0-1 | 修复 AI Pipeline 端到端跑不通 — handlers_pipeline.go:83 传 nil runner | `cmd/analysis/handlers_pipeline.go:83` | ✅ | ODR-043 |
 | S7-P0-2 | 修复 Pipeline 硬编码 buildCmd.Dir 为开发者本机路径 | `pkg/ai/pipeline/pipeline.go` | ✅ | ODR-043 |
 | S7-P0-3 | 修复 ValidateAgent L3 默认股票池为美股（应改为 A 股） | `pkg/ai/agents/validate.go` | ✅ | ODR-043 |
-| S7-P0-4 | 修复 research.go/generate.go 用 extractField 字符串扫描解析 JSON | `pkg/ai/agents/research.go`, `generate.go` | ⬜ | ODR-043 |
+| S7-P0-4 | 修复 research.go/generate.go 用 extractField 字符串扫描解析 JSON | `pkg/ai/agents/research.go`, `generate.go` | ✅ | ODR-043 |
 | S7-P0-5 | 修复 simulated_broker.go:151 硬编码 0.00025 与 fees 包不一致 | `pkg/live/simulated_broker.go:151` | ⬜ | ODR-043 |
 | S7-P0-6 | 修复 9 处 _ = json.Unmarshal 静默吞错 | `pkg/ai/gene_pool/strategy_pool.go` ×6, `factor_pool.go` ×2, `pkg/strategy/db.go` ×1 | ⬜ | ODR-043 |
 | S7-P0-7 | 修复 pkg/risk/take_profit.go 构造器 3 处 panic（违反生产代码不 panic 约定） | `pkg/risk/take_profit.go:248,255,258` | ⬜ | ODR-043 |

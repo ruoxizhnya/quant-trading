@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -24,13 +25,13 @@ func NewResearchAgent() *ResearchAgent {
 
 // FactorHypothesis represents a generated factor hypothesis
 type FactorHypothesis struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Formula     string   `json:"formula"`
-	Category    string   `json:"category"`
-	Confidence  float64  `json:"confidence"`
-	Rationale   string   `json:"rationale"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Formula     string  `json:"formula"`
+	Category    string  `json:"category"`
+	Confidence  float64 `json:"confidence"`
+	Rationale   string  `json:"rationale"`
 }
 
 // GenerateHypothesis generates a factor hypothesis from a research topic
@@ -83,25 +84,63 @@ Output ONLY valid JSON:
 	// Clean and parse response
 	resp = cleanJSONResponse(resp)
 
-	var hypothesis FactorHypothesis
-	// Simple parsing - in production use json.Unmarshal
-	// For now, create a structured response
-	hypothesis = FactorHypothesis{
-		ID:          generateID(),
-		Name:        extractField(resp, "name"),
-		Category:    extractField(resp, "category"),
-		Formula:     extractField(resp, "formula"),
-		Rationale:   extractField(resp, "rationale"),
-		Confidence:  0.7,
-		Description: topic,
-	}
-
-	if hypothesis.Formula == "" {
-		// Fallback: generate a simple formula based on topic
+	hypothesis, err := parseFactorHypothesisJSON(resp)
+	if err != nil || hypothesis.Formula == "" {
+		// Fallback: generate a simple formula based on topic.
+		// S7-P0-4 (ODR-043-4): parseFactorHypothesisJSON now returns
+		// an error on invalid JSON (replacing the old extractField
+		// which silently returned "" on parse failure). Either way
+		// we fall back to a deterministic hypothesis.
 		hypothesis = a.generateFallbackHypothesis(topic)
+	} else {
+		hypothesis.ID = generateID()
+		hypothesis.Description = topic
+		hypothesis.Confidence = 0.7
 	}
 
 	return &hypothesis, nil
+}
+
+// factorHypothesisJSON is the JSON shape the LLM is prompted to emit.
+// It maps the prompt field names to the FactorHypothesis struct fields.
+// "rationale" in the JSON maps to Rationale; "formula" to Formula; etc.
+//
+// S7-P0-4 (ODR-043-4): previously parsed by extractField (a naive
+// string scanner that truncated values at the first comma, escaped
+// quote, or newline). json.Unmarshal handles all JSON edge cases
+// correctly.
+type factorHypothesisJSON struct {
+	Name      string `json:"name"`
+	Category  string `json:"category"`
+	Formula   string `json:"formula"`
+	Rationale string `json:"rationale"`
+}
+
+// parseFactorHypothesisJSON parses an LLM response into a
+// FactorHypothesis using json.Unmarshal. The response may be wrapped
+// in ```json markdown fences (stripped first). Returns an error if the
+// response is not valid JSON so the caller can fall back.
+//
+// S7-P0-4 (ODR-043-4): replaces extractField, which could not handle
+// commas in formulas, escaped quotes in rationales, or newlines in
+// multi-line text.
+func parseFactorHypothesisJSON(resp string) (FactorHypothesis, error) {
+	cleaned := cleanJSONResponse(resp)
+	if cleaned == "" {
+		return FactorHypothesis{}, fmt.Errorf("empty response after cleaning")
+	}
+
+	var parsed factorHypothesisJSON
+	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
+		return FactorHypothesis{}, fmt.Errorf("parse factor hypothesis JSON: %w", err)
+	}
+
+	return FactorHypothesis{
+		Name:      parsed.Name,
+		Category:  parsed.Category,
+		Formula:   parsed.Formula,
+		Rationale: parsed.Rationale,
+	}, nil
 }
 
 // ValidateFormula validates a factor formula by parsing it
@@ -192,24 +231,13 @@ func generateID() string {
 	return fmt.Sprintf("factor_%d", idCounter)
 }
 
-func extractField(jsonStr, field string) string {
-	// Simple field extraction - in production use proper JSON parsing
-	searchStr := fmt.Sprintf("\"%s\":", field)
-	idx := strings.Index(jsonStr, searchStr)
-	if idx == -1 {
-		return ""
-	}
-	start := idx + len(searchStr)
-	// Skip whitespace and quotes
-	for start < len(jsonStr) && (jsonStr[start] == ' ' || jsonStr[start] == '"') {
-		start++
-	}
-	end := start
-	for end < len(jsonStr) && jsonStr[end] != '"' && jsonStr[end] != '\n' && jsonStr[end] != ',' {
-		end++
-	}
-	return strings.TrimSpace(jsonStr[start:end])
-}
+// extractField was removed in S7-P0-4 (ODR-043-4). It was a naive
+// string scanner that truncated JSON values at the first comma,
+// escaped quote, or newline — causing formulas like
+// "rank(close), ts_mean(returns, 5)" to be silently cut to
+// "rank(close)". Replaced by parseFactorHypothesisJSON (research.go)
+// and parseStrategyTemplateJSON (generate.go), both of which use
+// json.Unmarshal for correct, spec-compliant parsing.
 
 func cleanJSONResponse(resp string) string {
 	resp = strings.TrimSpace(resp)

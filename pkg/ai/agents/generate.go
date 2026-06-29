@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -81,18 +82,24 @@ Output ONLY valid JSON:
 
 	resp = cleanJSONResponse(resp)
 
-	// Parse response
-	template := &StrategyTemplate{
-		ID:          generateStrategyID(),
-		Name:        extractField(resp, "name"),
-		Type:        extractField(resp, "type"),
-		Description: description,
-		Code:        extractField(resp, "logic"),
-		Confidence:  0.7,
+	// S7-P0-4 (ODR-043-4): parse with json.Unmarshal instead of the
+	// former extractField string-scanner, which truncated values at
+	// commas, escaped quotes, and newlines.
+	parsed, err := parseStrategyTemplateJSON(resp)
+	if err != nil || parsed.Name == "" {
+		template := a.generateFallbackStrategy(description)
+		return template, nil
 	}
 
-	if template.Name == "" {
-		template = a.generateFallbackStrategy(description)
+	template := &StrategyTemplate{
+		ID:          generateStrategyID(),
+		Name:        parsed.Name,
+		Type:        parsed.Type,
+		Description: description,
+		Code:        parsed.Code,
+		Params:      parsed.Params,
+		Factors:     parsed.Factors,
+		Confidence:  0.7,
 	}
 
 	return template, nil
@@ -130,22 +137,64 @@ Output JSON with fields: name, type, logic, params, factors`, factorsStr, descri
 
 	resp = cleanJSONResponse(resp)
 
+	// S7-P0-4 (ODR-043-4): json.Unmarshal instead of extractField.
+	parsed, err := parseStrategyTemplateJSON(resp)
+	if err != nil || parsed.Name == "" {
+		parsed.Name = fmt.Sprintf("MultiFactor_%d", strategyIDCounter)
+		parsed.Code = "Equal-weighted factor combination"
+	}
+
 	template := &StrategyTemplate{
 		ID:          generateStrategyID(),
-		Name:        extractField(resp, "name"),
+		Name:        parsed.Name,
 		Type:        "multi_factor",
 		Description: description,
-		Code:        extractField(resp, "logic"),
+		Code:        parsed.Code,
 		Factors:     factorFormulas,
 		Confidence:  0.75,
 	}
 
-	if template.Name == "" {
-		template.Name = fmt.Sprintf("MultiFactor_%d", strategyIDCounter)
-		template.Code = "Equal-weighted factor combination"
+	return template, nil
+}
+
+// strategyTemplateJSON is the JSON shape the LLM is prompted to emit
+// for strategy generation. "logic" maps to the Code field (the prompt
+// asks for "logic" as the pseudocode field name).
+//
+// S7-P0-4 (ODR-043-4): replaces extractField, which could not parse
+// arrays (factors/params) or values containing commas / escaped quotes.
+type strategyTemplateJSON struct {
+	Name    string   `json:"name"`
+	Type    string   `json:"type"`
+	Logic   string   `json:"logic"`
+	Params  []Param  `json:"params"`
+	Factors []string `json:"factors"`
+}
+
+// parseStrategyTemplateJSON parses an LLM response into a
+// StrategyTemplate using json.Unmarshal. The response may be wrapped
+// in ```json markdown fences (stripped first). Returns an error if the
+// response is not valid JSON so the caller can fall back.
+//
+// S7-P0-4 (ODR-043-4): replaces extractField in generate.go.
+func parseStrategyTemplateJSON(resp string) (StrategyTemplate, error) {
+	cleaned := cleanJSONResponse(resp)
+	if cleaned == "" {
+		return StrategyTemplate{}, fmt.Errorf("empty response after cleaning")
 	}
 
-	return template, nil
+	var parsed strategyTemplateJSON
+	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
+		return StrategyTemplate{}, fmt.Errorf("parse strategy template JSON: %w", err)
+	}
+
+	return StrategyTemplate{
+		Name:    parsed.Name,
+		Type:    parsed.Type,
+		Code:    parsed.Logic,
+		Params:  parsed.Params,
+		Factors: parsed.Factors,
+	}, nil
 }
 
 // generateFallbackStrategy creates a simple fallback strategy.
