@@ -63,6 +63,14 @@ type ValidateAgent struct {
 	btClient      *client.BacktestClient
 	codeValidator *validator.CodeValidator
 
+	// defaultStockPool is the universe used by validateL3 when running
+	// a quick backtest. S7-P0-3 (ODR-043-3): previously hardcoded to
+	// US tickers (see ODR-043-3 for the exact symbols) which cannot
+	// resolve in the A-share backtest engine. Now defaults to a small
+	// set of liquid A-share large-caps and can be overridden via
+	// SetStockPool.
+	defaultStockPool []string
+
 	// P1-12 (ODR-013 Sprint 6): L4 walk-forward dependencies.
 	// btRunner is the pluggable backtest surface. nil disables L4
 	// (validateL4 falls back to the legacy "requires walk-forward
@@ -76,14 +84,31 @@ type ValidateAgent struct {
 	l4Cfg *L4Config
 }
 
+// defaultAShareStockPool is the default L3 validation universe: a small
+// set of liquid A-share large-caps spanning banking, real estate, and
+// consumer sectors. These symbols resolve in the project's A-share
+// backtest engine (PostgreSQL stocks table) and give a quick but
+// meaningful Sharpe signal during factor validation.
+//
+// S7-P0-3 (ODR-043-3): replaces the prior US-ticker default (see
+// ODR-043-3 for the exact symbols) which produced misleading L3
+// failures because those symbols do not exist in the A-share data store.
+var defaultAShareStockPool = []string{
+	"000001.SZ", // 平安银行 (Ping An Bank)
+	"000002.SZ", // 万科A (Vanke)
+	"600000.SH", // 浦发银行 (SPDB)
+	"600519.SH", // 贵州茅台 (Kweichow Moutai)
+}
+
 // NewValidateAgent creates a new ValidateAgent.
 func NewValidateAgent(dataProvider expression.DataProvider) *ValidateAgent {
 	return &ValidateAgent{
-		parser:        expression.NewParser(),
-		icCalc:        metrics.NewICCalculator(),
-		turnoverCalc:  metrics.NewTurnoverCalculator(),
-		dataProvider:  dataProvider,
-		codeValidator: validator.NewCodeValidator(),
+		parser:           expression.NewParser(),
+		icCalc:           metrics.NewICCalculator(),
+		turnoverCalc:     metrics.NewTurnoverCalculator(),
+		dataProvider:     dataProvider,
+		codeValidator:    validator.NewCodeValidator(),
+		defaultStockPool: append([]string(nil), defaultAShareStockPool...),
 	}
 }
 
@@ -92,14 +117,15 @@ func NewValidateAgent(dataProvider expression.DataProvider) *ValidateAgent {
 // works out of the box when the backtest service is reachable.
 func NewValidateAgentWithBacktest(dataProvider expression.DataProvider, btClient *client.BacktestClient) *ValidateAgent {
 	a := &ValidateAgent{
-		parser:        expression.NewParser(),
-		icCalc:        metrics.NewICCalculator(),
-		turnoverCalc:  metrics.NewTurnoverCalculator(),
-		dataProvider:  dataProvider,
-		btClient:      btClient,
-		codeValidator: validator.NewCodeValidator(),
-		btRunner:      NewHTTPBacktestRunner(btClient),
-		walkForward:   search.NewWalkForwardValidator(),
+		parser:           expression.NewParser(),
+		icCalc:           metrics.NewICCalculator(),
+		turnoverCalc:     metrics.NewTurnoverCalculator(),
+		dataProvider:     dataProvider,
+		btClient:         btClient,
+		codeValidator:    validator.NewCodeValidator(),
+		btRunner:         NewHTTPBacktestRunner(btClient),
+		walkForward:      search.NewWalkForwardValidator(),
+		defaultStockPool: append([]string(nil), defaultAShareStockPool...),
 	}
 	return a
 }
@@ -122,6 +148,22 @@ func (a *ValidateAgent) SetL4Config(cfg *L4Config) {
 	a.l4Cfg = cfg
 }
 
+// SetStockPool overrides the default L3 backtest stock pool. Pass nil
+// or an empty slice to reset to the A-share default
+// (defaultAShareStockPool). This is useful when a caller wants to
+// validate a factor against a different universe (e.g. CSI 500
+// constituents) without modifying the package default.
+//
+// S7-P0-3 (ODR-043-3): the pool was previously a hardcoded literal
+// inside validateL3 and could not be overridden.
+func (a *ValidateAgent) SetStockPool(pool []string) {
+	if len(pool) == 0 {
+		a.defaultStockPool = append([]string(nil), defaultAShareStockPool...)
+		return
+	}
+	a.defaultStockPool = append([]string(nil), pool...)
+}
+
 // l4Config returns the active L4Config, applying package defaults
 // to a value copy if no config was set.
 func (a *ValidateAgent) l4Config() L4Config {
@@ -134,9 +176,9 @@ func (a *ValidateAgent) l4Config() L4Config {
 // Validate runs validation at the specified level.
 func (a *ValidateAgent) Validate(ctx context.Context, formula string, level ValidationLevel) (*ValidationResult, error) {
 	result := &ValidationResult{
-		Level:   level,
-		Formula: formula,
-		Errors:  []string{},
+		Level:    level,
+		Formula:  formula,
+		Errors:   []string{},
 		Warnings: []string{},
 	}
 
@@ -289,10 +331,13 @@ func (a *ValidateAgent) validateL3(ctx context.Context, result *ValidationResult
 		return nil
 	}
 
-	// Run quick backtest via API
+	// Run quick backtest via API.
+	// S7-P0-3 (ODR-043-3): use the configurable A-share stock pool
+	// (defaultStockPool) instead of the former hardcoded US tickers
+	// which could not resolve in the A-share backtest engine.
 	req := client.BacktestRequest{
 		StrategyName: result.Formula,
-		StockPool:    []string{"AAPL", "GOOGL", "MSFT"},
+		StockPool:    a.defaultStockPool,
 		StartDate:    "2023-01-01",
 		EndDate:      "2024-01-01",
 	}
@@ -409,10 +454,10 @@ func computeVariance(results map[string][]float64) float64 {
 func (a *ValidateAgent) ComputeFitness(ic, ir, turnover, sharpe float64) float64 {
 	// Composite fitness: higher IC, higher IR, lower turnover, higher Sharpe
 	// Normalize each component
-	icScore := math.Max(0, ic) * 100       // IC typically 0.01-0.1
-	irScore := math.Max(0, ir) * 50        // IR typically 0.1-1.0
+	icScore := math.Max(0, ic) * 100              // IC typically 0.01-0.1
+	irScore := math.Max(0, ir) * 50               // IR typically 0.1-1.0
 	turnoverScore := math.Max(0, 1-turnover) * 20 // Lower turnover is better
-	sharpeScore := math.Max(0, sharpe) * 30 // Sharpe typically 0.5-2.0
+	sharpeScore := math.Max(0, sharpe) * 30       // Sharpe typically 0.5-2.0
 
 	fitness := icScore + irScore + turnoverScore + sharpeScore
 	return math.Min(fitness, 100.0) // Cap at 100
