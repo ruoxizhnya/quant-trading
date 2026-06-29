@@ -45,6 +45,17 @@ type Result struct {
 	CompletedAt    *time.Time             `json:"completed_at,omitempty"`
 	DurationMs     int64                  `json:"duration_ms"`
 	Logs           []string               `json:"logs,omitempty"`
+	// done is closed when the ExecuteAsync goroutine finishes, giving
+	// callers (especially tests) a safe way to wait for all writes to
+	// the Result fields to complete before reading them. Without this
+	// channel, tests had to use time.Sleep — which is both flaky and a
+	// real data race (the async goroutine writes Status/Logs/etc.
+	// concurrently with the test reading them).
+	//
+	// done is only closed by ExecuteAsync; synchronous Execute and
+	// direct StartJob callers never close it. It is excluded from
+	// JSON serialisation.
+	done chan struct{} `json:"-"`
 }
 
 // BacktestRunner is the interface for running backtests
@@ -58,24 +69,112 @@ type Pipeline struct {
 	yamlGen      *yamlgen.Generator
 	aiClient     *ai.Client
 	jobs         sync.Map // jobID -> *Result
+	// buildDir is the working directory passed to `go build` when
+	// validating AI-generated strategy code. It must point at the
+	// project root (the directory containing go.mod) so that imports
+	// of pkg/domain, pkg/strategy, etc. resolve correctly.
+	//
+	// S7-P0-2 (ODR-043-2): previously hardcoded to a developer-machine
+	// absolute path (see ODR-043-2 for the exact string), which made
+	// the pipeline non-portable. It is now dynamically detected by
+	// findProjectRoot at construction time and can be overridden via
+	// the WithBuildDir option for testing or containerised deployment.
+	buildDir string
 }
 
-// NewPipeline creates a new pipeline instance
-func NewPipeline() *Pipeline {
-	return &Pipeline{
+// PipelineOption configures a Pipeline at construction time using the
+// functional-options pattern.
+type PipelineOption func(*Pipeline)
+
+// WithBuildDir overrides the default project-root detection and sets
+// the working directory used by `go build` during compilation
+// validation. Useful in tests (point at a temp dir) or when the
+// service binary runs from a location where go.mod is not reachable
+// by walking upward from the working directory.
+func WithBuildDir(dir string) PipelineOption {
+	return func(p *Pipeline) {
+		if dir != "" {
+			p.buildDir = dir
+		}
+	}
+}
+
+// findProjectRoot walks upward from the current working directory
+// until it finds a directory containing a go.mod file, which it
+// returns as the project root. This makes the pipeline portable
+// across developer machines and CI/deployment environments.
+//
+// Returns an error if go.mod cannot be found before reaching the
+// filesystem root — in that case the caller should fall back to the
+// current working directory or fail explicitly.
+func findProjectRoot() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get working directory: %w", err)
+	}
+
+	dir := cwd
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached filesystem root without finding go.mod.
+			return "", fmt.Errorf("go.mod not found walking upward from %s", cwd)
+		}
+		dir = parent
+	}
+}
+
+// defaultBuildDir returns the dynamically detected project root, or
+// falls back to the current working directory if detection fails so
+// the pipeline remains usable (with degraded compilation validation)
+// rather than refusing to construct.
+func defaultBuildDir() string {
+	if root, err := findProjectRoot(); err == nil {
+		return root
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return "."
+}
+
+// NewPipeline creates a new pipeline instance. The build directory
+// used for compilation validation defaults to the detected project
+// root; override it with the WithBuildDir option.
+func NewPipeline(opts ...PipelineOption) *Pipeline {
+	p := &Pipeline{
 		intentParser: intent.NewParser(),
 		yamlGen:      yamlgen.NewGenerator(),
 		aiClient:     ai.NewClient(),
+		buildDir:     defaultBuildDir(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(p)
+		}
+	}
+	return p
 }
 
-// NewPipelineWithDeps creates a pipeline with specific dependencies
-func NewPipelineWithDeps(parser *intent.Parser, gen *yamlgen.Generator, client *ai.Client) *Pipeline {
-	return &Pipeline{
+// NewPipelineWithDeps creates a pipeline with specific dependencies.
+// The build directory defaults to the detected project root; override
+// it with the WithBuildDir option.
+func NewPipelineWithDeps(parser *intent.Parser, gen *yamlgen.Generator, client *ai.Client, opts ...PipelineOption) *Pipeline {
+	p := &Pipeline{
 		intentParser: parser,
 		yamlGen:      gen,
 		aiClient:     client,
+		buildDir:     defaultBuildDir(),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(p)
+		}
+	}
+	return p
 }
 
 // IsConfigured returns true if the pipeline can execute (AI client configured)
@@ -150,6 +249,11 @@ func (p *Pipeline) ExecuteAsync(ctx context.Context, description string, runner 
 	result := p.StartJob(description)
 
 	go func() {
+		// Close done when the goroutine exits (on any path) so that
+		// callers waiting on <-result.done can safely read the Result
+		// fields without racing with our writes. The channel close
+		// establishes a happens-before edge per the Go memory model.
+		defer close(result.done)
 		// Stage 1: Parse intent
 		p.log(result, "Stage 1/5: Parsing intent...")
 		parsedIntent, err := p.intentParser.Parse(ctx, description)
@@ -218,6 +322,7 @@ func (p *Pipeline) StartJob(description string) *Result {
 		Status:    StageParse,
 		StartedAt: now,
 		Logs:      []string{fmt.Sprintf("Pipeline started for: %s", description)},
+		done:      make(chan struct{}),
 	}
 	p.jobs.Store(jobID, result)
 	return result
@@ -230,6 +335,21 @@ func (p *Pipeline) GetJob(jobID string) *Result {
 		return nil
 	}
 	return val.(*Result)
+}
+
+// WaitDone blocks until the ExecuteAsync goroutine has finished writing
+// to this Result, then returns. It establishes a happens-before edge so
+// callers can safely read Status/Logs/BacktestResult/etc. without racing
+// with the async goroutine.
+//
+// WaitDone is a no-op for Results that were not created via ExecuteAsync
+// (e.g. synchronous Execute or direct StartJob in tests) — in those cases
+// r.done is nil and the method returns immediately. It is safe to call
+// multiple times.
+func (r *Result) WaitDone() {
+	if r.done != nil {
+		<-r.done
+	}
 }
 
 // generateStrategyCode generates Go strategy code from intent
@@ -292,7 +412,11 @@ func (p *Pipeline) validateCompilation(code string, result *Result) error {
 
 	var stderr bytes.Buffer
 	buildCmd := exec.Command("go", "build", "-o", filepath.Join(tmpDir, "strategy"), outFile)
-	buildCmd.Dir = "/Users/ruoxi/longshaosWorld/quant-trading"
+	// S7-P0-2 (ODR-043-2): use the dynamically detected (or injected)
+	// project root instead of a hardcoded developer-machine path so
+	// the pipeline is portable. p.buildDir is set by NewPipeline /
+	// NewPipelineWithDeps and can be overridden via WithBuildDir.
+	buildCmd.Dir = p.buildDir
 	buildCmd.Stderr = &stderr
 	if err := buildCmd.Run(); err != nil {
 		buildErr := stderr.String()

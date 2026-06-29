@@ -1578,7 +1578,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
 | S7-P0-1 | 修复 AI Pipeline 端到端跑不通 — handlers_pipeline.go:83 传 nil runner | `cmd/analysis/handlers_pipeline.go:83` | ✅ | ODR-043 |
-| S7-P0-2 | 修复 Pipeline 硬编码 buildCmd.Dir 为开发者本机路径 | `pkg/ai/pipeline/pipeline.go` | ⬜ | ODR-043 |
+| S7-P0-2 | 修复 Pipeline 硬编码 buildCmd.Dir 为开发者本机路径 | `pkg/ai/pipeline/pipeline.go` | ✅ | ODR-043 |
 | S7-P0-3 | 修复 ValidateAgent L3 默认股票池为美股（应改为 A 股） | `pkg/ai/agents/validate.go` | ⬜ | ODR-043 |
 | S7-P0-4 | 修复 research.go/generate.go 用 extractField 字符串扫描解析 JSON | `pkg/ai/agents/research.go`, `generate.go` | ⬜ | ODR-043 |
 | S7-P0-5 | 修复 simulated_broker.go:151 硬编码 0.00025 与 fees 包不一致 | `pkg/live/simulated_broker.go:151` | ⬜ | ODR-043 |
@@ -1587,6 +1587,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | S7-P0-8 | 修复 e2e/tests 无 skip guard 导致 go test ./... 永远 FAIL | `e2e/tests/integration_test.go` | ⬜ | ODR-043 |
 | S7-P0-9 | 修复 16 个 ReviewActions.spec.ts 测试失败（缺 MessageProvider） | `web/src/components/ai/__tests__/ReviewActions.spec.ts` | ⬜ | ODR-043 |
 | S7-P0-10 | 一次性 gofmt -w . 格式化 237 个未格式化文件 | 全代码库 | ⬜ | ODR-043 |
+| S7-P0-11 | 修复 pkg/ai/evolution TestPopulation_ConcurrentAccess 数据竞争（pre-existing，-race 下必崩） | `pkg/ai/evolution/` | ⬜ | S7-P0-2 审查发现 |
 
 ### 🟠 P1 — 高优先级重构（1-2 sprint）
 

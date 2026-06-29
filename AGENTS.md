@@ -684,7 +684,6 @@ Please continue from where we left off.
 | `ChatbubbleEllipsisOutline` icon name doesn't exist | Correct name is `ChatbubbleEllipsesOutline` (with 'e' before 's') |
 | Trade markers may not render if portfolio_values is empty | Ensure backtest returns valid data before calling renderChart() |
 | **ODR-011 Multi-Source Risks** (CR-48, ODR-012) | See sub-table below |
-| **ODR-043-2 Pipeline 硬编码开发者本机路径** | `pkg/ai/pipeline/pipeline.go` 的 `buildCmd.Dir` 写死 `/Users/ruoxi/longshaosWorld/...`; 不可移植 |
 | **ODR-043-3 ValidateAgent 默认股票池为美股** | `pkg/ai/agents/validate.go` L3 默认 `["AAPL","GOOGL","MSFT"]`; A 股项目应改为 csi300/csi500 |
 | **ODR-043-4 LLM 输出用字符串扫描解析** | `pkg/ai/agents/research.go` 和 `generate.go` 用 `extractField` 而非 `json.Unmarshal`; 对转义/嵌套必失败 |
 | **ODR-043-5 前端 lint/typecheck 脚本不存在** | `web/package.json` 无 `lint`/`typecheck` 脚本, 未安装 ESLint; AGENTS.md §5/§9 的命令实际无法执行 — 临时用 `npx vue-tsc --noEmit` 替代 |
