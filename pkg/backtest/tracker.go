@@ -259,20 +259,31 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 		tradeDate := timestamp.Truncate(24 * time.Hour)
 
 		if existing, exists := t.positions[symbol]; exists {
-			// Update average cost
 			totalQty := existing.Quantity + filledQty
-			existing.AvgCost = (existing.AvgCost*existing.Quantity + executionPrice*filledQty) / totalQty
-			existing.Quantity = totalQty
-			existing.EntryDate = timestamp
+			if abs(totalQty) < 1e-8 {
+				// S7-P0-17 (ODR-043): the buy exactly offsets an existing
+				// short (e.g. short 100 + buy 100 = flat). Delete the
+				// position so a later close returns "position not found"
+				// instead of the confusing "cannot close position: quantity
+				// is zero", and so AvgCost isn't computed as NaN from the
+				// divide-by-zero below. Only the DirectionClose branch
+				// previously had this cleanup.
+				delete(t.positions, symbol)
+			} else {
+				// Update average cost
+				existing.AvgCost = (existing.AvgCost*existing.Quantity + executionPrice*filledQty) / totalQty
+				existing.Quantity = totalQty
+				existing.EntryDate = timestamp
 
-			// T+1 tracking: if new trading day, reset today's qty (yesterday's already set by AdvanceDay)
-			lastBuyDate := existing.BuyDate.Truncate(24 * time.Hour)
-			if !lastBuyDate.Equal(tradeDate) {
-				// New trading day: today's qty starts fresh (yesterday's carry already in QuantityYesterday)
-				existing.QuantityToday = 0
+				// T+1 tracking: if new trading day, reset today's qty (yesterday's already set by AdvanceDay)
+				lastBuyDate := existing.BuyDate.Truncate(24 * time.Hour)
+				if !lastBuyDate.Equal(tradeDate) {
+					// New trading day: today's qty starts fresh (yesterday's carry already in QuantityYesterday)
+					existing.QuantityToday = 0
+				}
+				existing.QuantityToday += filledQty
+				existing.BuyDate = timestamp
 			}
-			existing.QuantityToday += filledQty
-			existing.BuyDate = timestamp
 		} else {
 			t.positions[symbol] = &domain.Position{
 				Symbol:            symbol,
@@ -292,6 +303,12 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 
 		if existing, exists := t.positions[symbol]; exists {
 			existing.Quantity -= filledQty
+			if abs(existing.Quantity) < 1e-8 {
+				// S7-P0-17 (ODR-043): the short exactly offsets an existing
+				// long (e.g. long 100 + short 100 = flat). Delete the ghost
+				// position; see the matching guard in DirectionLong above.
+				delete(t.positions, symbol)
+			}
 		} else {
 			t.positions[symbol] = &domain.Position{
 				Symbol:    symbol,
@@ -469,19 +486,26 @@ func (t *Tracker) ApplyTrade(trade domain.Trade) (*domain.Trade, error) {
 		tradeDate := timestamp.Truncate(24 * time.Hour)
 
 		if existing, exists := t.positions[symbol]; exists {
-			// Update average cost
 			totalQty := existing.Quantity + quantity
-			existing.AvgCost = (existing.AvgCost*existing.Quantity + executionPrice*quantity) / totalQty
-			existing.Quantity = totalQty
-			existing.EntryDate = timestamp
+			if abs(totalQty) < 1e-8 {
+				// S7-P0-17 (ODR-043): buy exactly offsets existing short
+				// → flat. Delete to avoid ghost zero-quantity position and
+				// AvgCost NaN. See ExecuteTrade for the full rationale.
+				delete(t.positions, symbol)
+			} else {
+				// Update average cost
+				existing.AvgCost = (existing.AvgCost*existing.Quantity + executionPrice*quantity) / totalQty
+				existing.Quantity = totalQty
+				existing.EntryDate = timestamp
 
-			// T+1 tracking
-			lastBuyDate := existing.BuyDate.Truncate(24 * time.Hour)
-			if !lastBuyDate.Equal(tradeDate) {
-				existing.QuantityToday = 0
+				// T+1 tracking
+				lastBuyDate := existing.BuyDate.Truncate(24 * time.Hour)
+				if !lastBuyDate.Equal(tradeDate) {
+					existing.QuantityToday = 0
+				}
+				existing.QuantityToday += quantity
+				existing.BuyDate = timestamp
 			}
-			existing.QuantityToday += quantity
-			existing.BuyDate = timestamp
 		} else {
 			t.positions[symbol] = &domain.Position{
 				Symbol:            symbol,
@@ -501,6 +525,11 @@ func (t *Tracker) ApplyTrade(trade domain.Trade) (*domain.Trade, error) {
 
 		if existing, exists := t.positions[symbol]; exists {
 			existing.Quantity -= quantity
+			if abs(existing.Quantity) < 1e-8 {
+				// S7-P0-17 (ODR-043): short exactly offsets existing long
+				// → flat. Delete the ghost position.
+				delete(t.positions, symbol)
+			}
 		} else {
 			t.positions[symbol] = &domain.Position{
 				Symbol:    symbol,
