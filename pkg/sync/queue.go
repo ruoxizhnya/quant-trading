@@ -203,13 +203,20 @@ func (q *Queue) Unsubscribe(ch chan struct{}) {
 }
 
 // notify sends a non-blocking notification to all subscribers.
+//
+// S7-P0-13 (ODR-043): This acquires the write lock (not RLock) and sends
+// while holding it. The previous implementation copied the notifiers slice
+// under RLock, released the lock, then sent — which raced with
+// Unsubscribe()'s close(ch): the copy could include a channel that
+// Unsubscribe closed after the copy but before the send, causing a
+// "send on closed channel" panic and a -race report. Holding the write
+// lock during the send serializes notify() against Unsubscribe()'s
+// close(). The send is non-blocking (default branch), so the lock is
+// held for a negligible duration.
 func (q *Queue) notify() {
-	q.mu.RLock()
-	notifiers := make([]chan struct{}, len(q.notifiers))
-	copy(notifiers, q.notifiers)
-	q.mu.RUnlock()
-
-	for _, ch := range notifiers {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, ch := range q.notifiers {
 		select {
 		case ch <- struct{}{}:
 		default:
