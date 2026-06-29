@@ -1589,9 +1589,10 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | S7-P0-10 | 一次性 gofmt -w . 格式化 237 个未格式化文件 | 全代码库 | ✅ | ODR-043 |
 | S7-P0-11 | 修复 pkg/ai/evolution TestPopulation_ConcurrentAccess 数据竞争（pre-existing，-race 下必崩） | `pkg/ai/evolution/` | ✅ | S7-P0-2 审查发现 |
 | S7-P0-12 | 修复 pkg/strategy JobResult.Status 数据竞争（test + 生产 POST /api/copilot/generate handler 均 read-without-lock） | `pkg/strategy/copilot_test.go`, `cmd/analysis/handlers_copilot.go` | ✅ | S7-P0-6 审查发现 |
-| S7-P0-13 | 修复 pkg/sync TestQueueOverflow 数据竞争（pre-existing，-race 下偶发，Queue.Enqueue vs worker） | `pkg/sync/queue.go:40,214`, `pkg/sync/fault_test.go:307` | ⬜ | S7-P0-12 验证发现 |
-| S7-P0-14 | 修复 pkg/auth 14 个测试失败（pre-existing，疑似缺 JWT secret 配置，非 race） | `pkg/auth/` | ⬜ | S7-P0-12 验证发现 |
-| S7-P0-15 | 修复 TestGlobalPluginLoader 全局单例泄漏（-count>1 必崩，global state 跨 run 未清理） | `pkg/strategy/plugin_loader_test.go` | ⬜ | S7-P0-12 验证发现 |
+| S7-P0-13 | 修复 pkg/sync TestQueueOverflow 数据竞争（pre-existing，-race 下偶发，Queue.Enqueue vs worker） | `pkg/sync/queue.go:40,214`, `pkg/sync/fault_test.go:307` | ✅ | S7-P0-12 验证发现 |
+| S7-P0-14 | 修复 pkg/auth 14 个测试失败（pre-existing，t.Parallel + gin.SetMode 全局变量竞争） | `pkg/auth/middleware_test.go` | ✅ | S7-P0-12 验证发现 |
+| S7-P0-15 | 修复 TestGlobalPluginLoader 全局单例泄漏（-count>1 必崩，global state 跨 run 未清理） | `pkg/strategy/loader_test.go:276` | ✅ | S7-P0-12 验证发现 |
+| S7-P0-16 | 修复 pkg/data/source flaky 测试（-count=2 或全套偶发 FAIL，单跑通过，非 race） | `pkg/data/source/` | ⬜ | S7-P0-13 验证发现 |
 
 ### 🟠 P1 — 高优先级重构（1-2 sprint）
 
@@ -1645,6 +1646,6 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 ***
 
-_Last updated: 2026-06-30 (v4.0.0) — Sprint 7 (ODR-043) 综合审计任务入库：P0×12 完成 + P0×3 新发现 + P1×6 + P2×9 + P3×6 = 36 子任务; 4 维度审计 (Go 静态质量/模块化/测试/前端); 推翻 brainstorming "ExecutionCore 合并"假设; AGENTS.md §8.3 执行规范确立_
+_Last updated: 2026-06-30 (v4.0.0) — Sprint 7 (ODR-043) 综合审计任务入库：P0×15 完成 + P0×1 新发现 + P1×6 + P2×9 + P3×6 = 37 子任务; 4 维度审计 (Go 静态质量/模块化/测试/前端); 推翻 brainstorming "ExecutionCore 合并"假设; AGENTS.md §8.3 执行规范确立_
 _Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查 + Sprint 6 (ODR-013) 综合审查 + Sprint 7 (ODR-043) 4 维度综合审计_
 
