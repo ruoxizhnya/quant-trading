@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -167,6 +168,13 @@ func (a *AlphaVantageAdapter) fetchDailyForSymbol(ctx context.Context, sym strin
 			},
 		})
 	}
+	// S7-P0-16 (ODR-043): sort by date so output is deterministic. Go map
+	// iteration order is randomized, which made the HappyPath test flaky —
+	// Items[0] could be either bar depending on map ordering. Time-series
+	// data should be chronological (oldest first) anyway.
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].TradeTime.Before(items[j].TradeTime)
+	})
 	return items, nil
 }
 
