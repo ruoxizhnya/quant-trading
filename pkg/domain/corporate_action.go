@@ -129,11 +129,11 @@ func NewCashDividend(symbol string, exDate, recordDate, payDate time.Time, cashP
 	}
 }
 
-func (c *CashDividend) Type() ActionType           { return ActionCashDividend }
-func (c *CashDividend) Symbol() string             { return c.SymbolValue }
-func (c *CashDividend) ExDate() time.Time          { return c.ExDateValue }
-func (c *CashDividend) RecordDate() time.Time      { return c.RecordValue }
-func (c *CashDividend) PayDate() time.Time         { return c.PayValue }
+func (c *CashDividend) Type() ActionType      { return ActionCashDividend }
+func (c *CashDividend) Symbol() string        { return c.SymbolValue }
+func (c *CashDividend) ExDate() time.Time     { return c.ExDateValue }
+func (c *CashDividend) RecordDate() time.Time { return c.RecordValue }
+func (c *CashDividend) PayDate() time.Time    { return c.PayValue }
 func (c *CashDividend) Description() string {
 	return fmt.Sprintf("cash_dividend: %s ex=%s record=%s pay=%s %.4f CNY/share",
 		c.SymbolValue, c.ExDateValue.Format("2006-01-02"),
@@ -215,18 +215,18 @@ func (b *BonusShare) Apply(pos Position, _ float64) (Position, float64) {
 
 // CorporateActionSplit 拆股 / 并股. splitRatio = new_shares / old_shares.
 //
-//   拆股 (splitRatio > 1, e.g. 2): 1 股 → 2 股, 均价减半.
-//   并股 (splitRatio < 1, e.g. 0.5): 2 股 → 1 股, 均价翻倍.
+//	拆股 (splitRatio > 1, e.g. 2): 1 股 → 2 股, 均价减半.
+//	并股 (splitRatio < 1, e.g. 0.5): 2 股 → 1 股, 均价翻倍.
 //
 // Named "CorporateActionSplit" to avoid clash with the historical
 // "Split" struct in types.go (which represents a Tushare-style
 // split record).
 type CorporateActionSplit struct {
-	SymbolValue  string
-	ExDateValue  time.Time
-	RecordValue  time.Time
-	PayValue     time.Time
-	SplitRatio   float64
+	SymbolValue string
+	ExDateValue time.Time
+	RecordValue time.Time
+	PayValue    time.Time
+	SplitRatio  float64
 }
 
 // NewSplit creates a split action. splitRatio must be > 0.
@@ -275,26 +275,28 @@ func (s *CorporateActionSplit) Apply(pos Position, _ float64) (Position, float64
 //
 // 公式: 每 10 股配 rightsPer10 股, 价格 rightsPricePerShare.
 // ex-date 参考价 = (prevClose + rightsPricePerShare * rightsPer10 / 10) /
-//                (1 + rightsPer10 / 10).
+//
+//	(1 + rightsPer10 / 10).
+//
 // 持仓不变, 但 ex-date 起股东可在 pay_date 之前缴款 (call 券商);
 // 逾期未缴款视为放弃, 持股数不变, 但 ex-date 参考价已调整.
 type RightsIssue struct {
-	SymbolValue        string
-	ExDateValue        time.Time
-	RecordValue        time.Time
-	PayValue           time.Time
-	RightsPer10        float64
+	SymbolValue         string
+	ExDateValue         time.Time
+	RecordValue         time.Time
+	PayValue            time.Time
+	RightsPer10         float64
 	RightsPricePerShare float64
 }
 
 // NewRightsIssue creates a rights issue action.
 func NewRightsIssue(symbol string, exDate, recordDate, payDate time.Time, rightsPer10, rightsPricePerShare float64) *RightsIssue {
 	return &RightsIssue{
-		SymbolValue:        symbol,
-		ExDateValue:        exDate,
-		RecordValue:        recordDate,
-		PayValue:           payDate,
-		RightsPer10:        rightsPer10,
+		SymbolValue:         symbol,
+		ExDateValue:         exDate,
+		RecordValue:         recordDate,
+		PayValue:            payDate,
+		RightsPer10:         rightsPer10,
 		RightsPricePerShare: rightsPricePerShare,
 	}
 }
@@ -356,12 +358,12 @@ func (r *RightsIssue) ApplyPaid(pos Position, _ float64) (Position, float64) {
 // 开盘参考价会调整 (市场稀释预期). 引擎在 Apply 中只记录 "增发
 // 事件发生", 持仓不变; UI 端可读 Description() 提示.
 type Placement struct {
-	SymbolValue    string
-	ExDateValue    time.Time
-	RecordValue    time.Time
-	PayValue       time.Time
-	NewShares      float64 // 增发新股数
-	PricePerShare  float64 // 增发价格 (折价)
+	SymbolValue   string
+	ExDateValue   time.Time
+	RecordValue   time.Time
+	PayValue      time.Time
+	NewShares     float64 // 增发新股数
+	PricePerShare float64 // 增发价格 (折价)
 }
 
 // NewPlacement creates a placement action.
@@ -461,8 +463,8 @@ func (e *ActionEngine) IsApplied(a CorporateAction) bool {
 
 // ApplyResultOf bundles the per-position outcome of one action.
 type ApplyOutcome struct {
-	Action   CorporateAction  `json:"-"`
-	Position ApplyResult      `json:"position"`
+	Action   CorporateAction `json:"-"`
+	Position ApplyResult     `json:"position"`
 }
 
 // ApplyAll applies all actions in `actions` whose ex_date <= asOf and

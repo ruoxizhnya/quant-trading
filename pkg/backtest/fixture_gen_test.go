@@ -216,7 +216,7 @@ func generateZhangtingOHLCV(t *testing.T, seed int64, startDateStr, endDateStr s
 				// Normal day with small random walk
 				z := rng.NormFloat64()
 				open = prevClose * (1 + (rng.Float64()-0.5)*0.003)
-				price = prevClose * math.Exp(0.0*1.0/252.0 + 0.20*math.Sqrt(1.0/252.0)*z)
+				price = prevClose * math.Exp(0.0*1.0/252.0+0.20*math.Sqrt(1.0/252.0)*z)
 				high = math.Max(open, price) * (1 + rng.Float64()*0.005)
 				low = math.Min(open, price) * (1 - rng.Float64()*0.005)
 				close = price
@@ -280,20 +280,20 @@ func runAndSaveFixture(t *testing.T, logger zerolog.Logger, seed int64,
 
 	// Run backtest twice to verify determinism
 	run1, err := engine.RunBacktest(context.Background(), BacktestRequest{
-		Strategy:      strategy,
-		StockPool:     symbols,
-		StartDate:     startDateStr,
-		EndDate:       endDateStr,
+		Strategy:       strategy,
+		StockPool:      symbols,
+		StartDate:      startDateStr,
+		EndDate:        endDateStr,
 		InitialCapital: initialCapital,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "completed", run1.Status, "First backtest run failed: %s", run1.Error)
 
 	run2, err := engine.RunBacktest(context.Background(), BacktestRequest{
-		Strategy:      strategy,
-		StockPool:     symbols,
-		StartDate:     startDateStr,
-		EndDate:       endDateStr,
+		Strategy:       strategy,
+		StockPool:      symbols,
+		StartDate:      startDateStr,
+		EndDate:        endDateStr,
 		InitialCapital: initialCapital,
 	})
 	require.NoError(t, err)
@@ -318,7 +318,7 @@ func runAndSaveFixture(t *testing.T, logger zerolog.Logger, seed int64,
 	fixture := map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"name":              fixtureName,
-			"description":        fmt.Sprintf("Determinism golden fixture for %s strategy, %s universe", strategy, fmtSymCount(len(symbols))),
+			"description":       fmt.Sprintf("Determinism golden fixture for %s strategy, %s universe", strategy, fmtSymCount(len(symbols))),
 			"version":           "1.0",
 			"generated":         time.Now().Format("2006-01-02"),
 			"initial_capital":   initialCapital,
@@ -356,15 +356,15 @@ func runAndSaveFixture(t *testing.T, logger zerolog.Logger, seed int64,
 		for _, bar := range bars {
 			ohlcvRecords = append(ohlcvRecords, map[string]interface{}{
 				"trade_date": bar.Date.Format("2006-01-02"),
-				"symbol":      sym,
-				"open":        bar.Open,
-				"high":        bar.High,
-				"low":         bar.Low,
-				"close":       bar.Close,
-				"volume":       int64(bar.Volume),
-				"prev_close":  bar.Close, // use close as proxy for prev_close
-				"limit_up":    bar.LimitUp,
-				"limit_down":  bar.LimitDown,
+				"symbol":     sym,
+				"open":       bar.Open,
+				"high":       bar.High,
+				"low":        bar.Low,
+				"close":      bar.Close,
+				"volume":     int64(bar.Volume),
+				"prev_close": bar.Close, // use close as proxy for prev_close
+				"limit_up":   bar.LimitUp,
+				"limit_down": bar.LimitDown,
 			})
 		}
 	}

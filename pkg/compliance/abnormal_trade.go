@@ -6,18 +6,18 @@
 //   - 《关于完善证券交易异常情况监测与报告机制的通知》(2022)
 //
 // 6 类异常行为 (沪深交易所自律监管关注):
-//   1. 频繁撒单 (Frequent Cancellation) — 同一账户/标的在短窗口内
-//      撤单率超过阈值 (例如 1 分钟内 ≥ 3 笔撤单且撤单率 > 50%)。
-//   2. 自成交 (Self-Trade) — 同一账户对同一标的发出方向相反的
-//      报单且成交 (买方 ≥ 卖方时)。应禁止。
-//   3. 对倒 (Wash / Collusive Trade) — 不同账户在相近价位 +
-//      相近时间 + 相同数量地反向成交, 制造虚假活跃度。
-//   4. 洗售 (Matched Flipping) — 同一账户在短窗口内对同一标的
-//      先买后卖再买 (或反向), 涉嫌拉抬/打压。
-//   5. 虚假申报 (Spoofing) — 在最优买卖价上挂出大额报单但
-//      在 < 500ms 内撤单, 制造虚假买卖深度。
-//   6. 拉抬打压 (Manipulation) — 短时间内连续以高 (或低) 于市价
-//      的价格成交, 显著偏离最近 N 笔 VWAP, 涉嫌操纵股价。
+//  1. 频繁撒单 (Frequent Cancellation) — 同一账户/标的在短窗口内
+//     撤单率超过阈值 (例如 1 分钟内 ≥ 3 笔撤单且撤单率 > 50%)。
+//  2. 自成交 (Self-Trade) — 同一账户对同一标的发出方向相反的
+//     报单且成交 (买方 ≥ 卖方时)。应禁止。
+//  3. 对倒 (Wash / Collusive Trade) — 不同账户在相近价位 +
+//     相近时间 + 相同数量地反向成交, 制造虚假活跃度。
+//  4. 洗售 (Matched Flipping) — 同一账户在短窗口内对同一标的
+//     先买后卖再买 (或反向), 涉嫌拉抬/打压。
+//  5. 虚假申报 (Spoofing) — 在最优买卖价上挂出大额报单但
+//     在 < 500ms 内撤单, 制造虚假买卖深度。
+//  6. 拉抬打压 (Manipulation) — 短时间内连续以高 (或低) 于市价
+//     的价格成交, 显著偏离最近 N 笔 VWAP, 涉嫌操纵股价。
 //
 // 设计目标:
 //   - 自包含: 输入 = 滑窗内的 OrderRecord + TradeRecord,
@@ -45,12 +45,12 @@ import (
 type AbnormalCategory string
 
 const (
-	CategoryFrequentCancel  AbnormalCategory = "frequent_cancel"   // 频繁撒单
-	CategorySelfTrade       AbnormalCategory = "self_trade"        // 自成交
-	CategoryWashTrade       AbnormalCategory = "wash_trade"        // 对倒
-	CategoryMatchedFlipping AbnormalCategory = "matched_flipping"  // 洗售
-	CategorySpoofing        AbnormalCategory = "spoofing"          // 虚假申报
-	CategoryManipulation    AbnormalCategory = "manipulation"      // 拉抬打压
+	CategoryFrequentCancel  AbnormalCategory = "frequent_cancel"  // 频繁撒单
+	CategorySelfTrade       AbnormalCategory = "self_trade"       // 自成交
+	CategoryWashTrade       AbnormalCategory = "wash_trade"       // 对倒
+	CategoryMatchedFlipping AbnormalCategory = "matched_flipping" // 洗售
+	CategorySpoofing        AbnormalCategory = "spoofing"         // 虚假申报
+	CategoryManipulation    AbnormalCategory = "manipulation"     // 拉抬打压
 )
 
 // String returns the canonical Chinese name of the category.
@@ -94,15 +94,15 @@ type AbnormalAlert struct {
 // that contributed to the alert. The detector carries enough
 // IDs and prices for the operator to reconstruct the behavior.
 type AlertEvidence struct {
-	OrderID    string    `json:"order_id,omitempty"`
-	TradeID    string    `json:"trade_id,omitempty"`
-	Symbol     string    `json:"symbol"`
-	Direction  string    `json:"direction"`
-	Quantity   float64   `json:"quantity"`
-	Price      float64   `json:"price"`
-	Timestamp  time.Time `json:"timestamp"`
-	Cancelled  bool      `json:"cancelled,omitempty"` // 仅订单: 是否被撤
-	Note       string    `json:"note,omitempty"`
+	OrderID   string    `json:"order_id,omitempty"`
+	TradeID   string    `json:"trade_id,omitempty"`
+	Symbol    string    `json:"symbol"`
+	Direction string    `json:"direction"`
+	Quantity  float64   `json:"quantity"`
+	Price     float64   `json:"price"`
+	Timestamp time.Time `json:"timestamp"`
+	Cancelled bool      `json:"cancelled,omitempty"` // 仅订单: 是否被撤
+	Note      string    `json:"note,omitempty"`
 }
 
 // ============================================================
@@ -182,8 +182,8 @@ type FrequentCancelConfig struct {
 
 // SelfTradeConfig — 自成交: 在成交流中匹配 (account, symbol, time, qty)。
 type SelfTradeConfig struct {
-	Window        time.Duration // 滑窗长度
-	MinQuantity   float64       // 触发下限 (e.g. 1 手 = 100 股)
+	Window      time.Duration // 滑窗长度
+	MinQuantity float64       // 触发下限 (e.g. 1 手 = 100 股)
 }
 
 // WashTradeConfig — 对倒: 不同账户在相近时间 + 相近价位 + 相同数量反向成交。
@@ -336,7 +336,7 @@ type frequentCancelDetector struct {
 	thresholds FrequentCancelConfig
 }
 
-func (d *frequentCancelDetector) Name() string              { return "frequent_cancel" }
+func (d *frequentCancelDetector) Name() string               { return "frequent_cancel" }
 func (d *frequentCancelDetector) Category() AbnormalCategory { return CategoryFrequentCancel }
 
 func (d *frequentCancelDetector) Detect(_ string, orders []OrderRecord, _ []TradeRecord, now time.Time) []AbnormalAlert {
@@ -402,7 +402,7 @@ type selfTradeDetector struct {
 	thresholds SelfTradeConfig
 }
 
-func (d *selfTradeDetector) Name() string              { return "self_trade" }
+func (d *selfTradeDetector) Name() string               { return "self_trade" }
 func (d *selfTradeDetector) Category() AbnormalCategory { return CategorySelfTrade }
 
 func (d *selfTradeDetector) Detect(accountID string, _ []OrderRecord, trades []TradeRecord, now time.Time) []AbnormalAlert {
@@ -467,7 +467,7 @@ type washTradeDetector struct {
 	thresholds WashTradeConfig
 }
 
-func (d *washTradeDetector) Name() string              { return "wash_trade" }
+func (d *washTradeDetector) Name() string               { return "wash_trade" }
 func (d *washTradeDetector) Category() AbnormalCategory { return CategoryWashTrade }
 
 // accountInTrade looks up an account id attached to a trade.
@@ -498,7 +498,11 @@ func (d *washTradeDetector) Detect(_ string, _ []OrderRecord, trades []TradeReco
 	}
 	sort.Slice(inWindow, func(i, j int) bool { return inWindow[i].TradeTime.Before(inWindow[j].TradeTime) })
 	// Group by (symbol, quantity, rounded-price).
-	type key struct{ sym string; qty float64; priceKey int64 }
+	type key struct {
+		sym      string
+		qty      float64
+		priceKey int64
+	}
 	groups := make(map[key][]TradeRecord)
 	for _, t := range inWindow {
 		priceKey := int64(t.Price * 1000) // 3-decimal rounding for grouping
@@ -538,7 +542,7 @@ func (d *washTradeDetector) Detect(_ string, _ []OrderRecord, trades []TradeReco
 			Severity:   "critical",
 			Summary: fmt.Sprintf("标的 %s 在 %s 窗口内出现 %d 笔同价位+同数量对倒, 单笔 %.0f 股 @ %.2f",
 				k.sym, d.thresholds.Window, len(list), k.qty, float64(k.priceKey)/1000),
-			Evidence:   evidence,
+			Evidence: evidence,
 		})
 	}
 	return out
@@ -552,7 +556,7 @@ type matchedFlippingDetector struct {
 	thresholds MatchedFlippingConfig
 }
 
-func (d *matchedFlippingDetector) Name() string              { return "matched_flipping" }
+func (d *matchedFlippingDetector) Name() string               { return "matched_flipping" }
 func (d *matchedFlippingDetector) Category() AbnormalCategory { return CategoryMatchedFlipping }
 
 func (d *matchedFlippingDetector) Detect(accountID string, _ []OrderRecord, trades []TradeRecord, now time.Time) []AbnormalAlert {
@@ -607,7 +611,7 @@ func (d *matchedFlippingDetector) Detect(accountID string, _ []OrderRecord, trad
 			Severity:   "warning",
 			Summary: fmt.Sprintf("账户 %s 在 %s 内对 %s 方向反复切换 %d 次, 累计成交量 %.0f",
 				accountID, d.thresholds.Window, sym, flips, totalVolume),
-			Evidence:   evidence,
+			Evidence: evidence,
 		})
 	}
 	return out
@@ -630,7 +634,7 @@ type spoofingDetector struct {
 	thresholds SpoofingConfig
 }
 
-func (d *spoofingDetector) Name() string              { return "spoofing" }
+func (d *spoofingDetector) Name() string               { return "spoofing" }
 func (d *spoofingDetector) Category() AbnormalCategory { return CategorySpoofing }
 
 func (d *spoofingDetector) Detect(_ string, orders []OrderRecord, _ []TradeRecord, now time.Time) []AbnormalAlert {
@@ -679,7 +683,7 @@ func (d *spoofingDetector) Detect(_ string, orders []OrderRecord, _ []TradeRecor
 			Severity:   "critical",
 			Summary: fmt.Sprintf("标的 %s 在 %s 内出现 %d 笔大额快速撤单 (申报→撤单 ≤ %s)",
 				sym, d.thresholds.Window, len(list), d.thresholds.CancelLatency),
-			Evidence:   evidence,
+			Evidence: evidence,
 		})
 	}
 	return out
@@ -693,7 +697,7 @@ type manipulationDetector struct {
 	thresholds ManipulationConfig
 }
 
-func (d *manipulationDetector) Name() string              { return "manipulation" }
+func (d *manipulationDetector) Name() string               { return "manipulation" }
 func (d *manipulationDetector) Category() AbnormalCategory { return CategoryManipulation }
 
 func (d *manipulationDetector) Detect(_ string, _ []OrderRecord, trades []TradeRecord, now time.Time) []AbnormalAlert {

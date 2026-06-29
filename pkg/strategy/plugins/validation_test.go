@@ -173,11 +173,11 @@ func TestMeanReversionStrategy_ConfigureValidation(t *testing.T) {
 
 	// Test valid parameters
 	err = s.Configure(map[string]any{
-		"bollinger_period":  20,
-		"bollinger_stddev":  2.0,
-		"rsi_period":         14,
-		"rsi_oversold":       25.0,
-		"rsi_overbought":     75.0,
+		"bollinger_period": 20,
+		"bollinger_stddev": 2.0,
+		"rsi_period":       14,
+		"rsi_oversold":     25.0,
+		"rsi_overbought":   75.0,
 	})
 	if err != nil {
 		t.Errorf("expected no error for valid params, got: %v", err)

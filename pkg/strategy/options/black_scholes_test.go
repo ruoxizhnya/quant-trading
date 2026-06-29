@@ -312,8 +312,8 @@ func TestBS_ImpliedVol_OTMOption(t *testing.T) {
 func TestBS_ImpliedVol_BelowIntrinsic(t *testing.T) {
 	bs := NewBlackScholes()
 	spec := bsATM(t)
-	spec.TimeToExpiry = 0.0001 // ~intrinsic
-	spec.Spot = 110             // ITM call, intrinsic = 10
+	spec.TimeToExpiry = 0.0001          // ~intrinsic
+	spec.Spot = 110                     // ITM call, intrinsic = 10
 	iv, err := bs.ImpliedVol(5.0, spec) // below intrinsic
 	require.NoError(t, err)
 	assert.InDelta(t, 0.0, iv, 1e-12)

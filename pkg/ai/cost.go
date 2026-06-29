@@ -36,12 +36,12 @@ type ModelCost struct {
 // Default cost rates as of 2026-06-12.
 var defaultCostTable = map[string]ModelCost{
 	// OpenAI
-	"gpt-4o-mini":      {InputPer1K: 0.00015, OutputPer1K: 0.0006},
-	"gpt-4o":           {InputPer1K: 0.0025, OutputPer1K: 0.01},
-	"gpt-4-turbo":      {InputPer1K: 0.01, OutputPer1K: 0.03},
-	"gpt-3.5-turbo":    {InputPer1K: 0.0005, OutputPer1K: 0.0015},
-	"o1-preview":       {InputPer1K: 0.015, OutputPer1K: 0.06},
-	"o1-mini":          {InputPer1K: 0.003, OutputPer1K: 0.012},
+	"gpt-4o-mini":   {InputPer1K: 0.00015, OutputPer1K: 0.0006},
+	"gpt-4o":        {InputPer1K: 0.0025, OutputPer1K: 0.01},
+	"gpt-4-turbo":   {InputPer1K: 0.01, OutputPer1K: 0.03},
+	"gpt-3.5-turbo": {InputPer1K: 0.0005, OutputPer1K: 0.0015},
+	"o1-preview":    {InputPer1K: 0.015, OutputPer1K: 0.06},
+	"o1-mini":       {InputPer1K: 0.003, OutputPer1K: 0.012},
 	// Anthropic
 	"claude-3-5-sonnet": {InputPer1K: 0.003, OutputPer1K: 0.015},
 	"claude-3-haiku":    {InputPer1K: 0.00025, OutputPer1K: 0.00125},
@@ -50,8 +50,8 @@ var defaultCostTable = map[string]ModelCost{
 	"deepseek-chat":     {InputPer1K: 0.00014, OutputPer1K: 0.00028},
 	"deepseek-reasoner": {InputPer1K: 0.00055, OutputPer1K: 0.00219},
 	// Qwen
-	"qwen-turbo":        {InputPer1K: 0.0003, OutputPer1K: 0.0006},
-	"qwen-plus":         {InputPer1K: 0.0008, OutputPer1K: 0.002},
+	"qwen-turbo": {InputPer1K: 0.0003, OutputPer1K: 0.0006},
+	"qwen-plus":  {InputPer1K: 0.0008, OutputPer1K: 0.002},
 }
 
 // Fallback cost applied when the model is not in the table. Defaults

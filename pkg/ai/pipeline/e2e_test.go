@@ -19,15 +19,15 @@ import (
 
 // e2eMockRunner implements BacktestRunner for e2e testing.
 type e2eMockRunner struct {
-	mu              sync.Mutex
-	calls           []e2eRunnerCall
-	result          *domain.BacktestResult
-	err             error
-	strategyName    string
-	stockPool       []string
-	startDate       string
-	endDate         string
-	callCount       int
+	mu           sync.Mutex
+	calls        []e2eRunnerCall
+	result       *domain.BacktestResult
+	err          error
+	strategyName string
+	stockPool    []string
+	startDate    string
+	endDate      string
+	callCount    int
 }
 
 type e2eRunnerCall struct {

@@ -16,7 +16,7 @@ type TestDBConfig struct {
 	Host     string
 	Port     int
 	User     string
- Password string
+	Password string
 	Database string
 }
 
@@ -48,11 +48,11 @@ func (c TestDBConfig) DSN() string {
 
 // TestDB provides a managed test database instance
 type TestDB struct {
-	Config    TestDBConfig
-	Pool      *pgxpool.Pool
-	Logger    zerolog.Logger
-	cleanup   []func()
-	t         *testing.T
+	Config  TestDBConfig
+	Pool    *pgxpool.Pool
+	Logger  zerolog.Logger
+	cleanup []func()
+	t       *testing.T
 }
 
 // NewTestDB creates a new test database instance

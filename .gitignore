@@ -43,6 +43,8 @@ coverage.html
 coverage.out
 
 # ── Node.js / Frontend (web/) ──────────────────
+# Root-level node_modules (e.g. from running npx at repo root) — never commit.
+node_modules/
 web/node_modules/
 web/dist/
 web/.vite/

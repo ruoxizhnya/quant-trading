@@ -187,10 +187,10 @@ func NewPlugin(s Strategy) Strategy {
 // All callers should migrate to the canonical strategy.Strategy interface
 // (which is what `Registry` below uses).
 type oldRegistry struct {
-	factories  map[string]StrategyFactory
-	instances  map[string]Strategy
-	mu         sync.RWMutex
-	logger     zerolog.Logger
+	factories map[string]StrategyFactory
+	instances map[string]Strategy
+	mu        sync.RWMutex
+	logger    zerolog.Logger
 }
 
 func newOldRegistry(logger zerolog.Logger) *oldRegistry {
@@ -288,8 +288,8 @@ func ReloadAllFromDB(ctx context.Context, db *StrategyDB) map[string]string {
 
 // ReloadAll is the deprecated bulk reload. It always returns an error.
 func ReloadAll() error {
-	return fmt.Errorf("strategy.ReloadAll is removed in ODR-013 P1-25; "+
-		"use the new strategy.Registry directly", )
+	return fmt.Errorf("strategy.ReloadAll is removed in ODR-013 P1-25; " +
+		"use the new strategy.Registry directly")
 }
 
 // ReloadAllStrategies is an alias for ReloadAll (for backward compatibility).

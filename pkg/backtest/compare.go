@@ -95,7 +95,7 @@ type CompareBest struct {
 	TotalReturn  string `json:"total_return_id,omitempty"`
 	SharpeRatio  string `json:"sharpe_ratio_id,omitempty"`
 	SortinoRatio string `json:"sortino_ratio_id,omitempty"`
-	MaxDrawdown  string `json:"max_drawdown_id,omitempty"`  // lowest (closest to 0) wins
+	MaxDrawdown  string `json:"max_drawdown_id,omitempty"` // lowest (closest to 0) wins
 	CalmarRatio  string `json:"calmar_ratio_id,omitempty"`
 	WinRate      string `json:"win_rate_id,omitempty"`
 	AnnualReturn string `json:"annual_return_id,omitempty"`

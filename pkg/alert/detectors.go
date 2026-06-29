@@ -9,12 +9,12 @@ import (
 // tests, metrics labels, and webhook consumers can reference the rule
 // names without hardcoding strings.
 const (
-	RulePositionConcentration  = "position_concentration"
-	RuleSectorConcentration    = "sector_concentration"
-	RuleDrawdown                = "drawdown"
-	RuleDailyLossLimit          = "daily_loss_limit"
-	RuleOrderFailureRate        = "order_failure_rate"
-	RuleRiskMetricBreach        = "risk_metric_breach"
+	RulePositionConcentration = "position_concentration"
+	RuleSectorConcentration   = "sector_concentration"
+	RuleDrawdown              = "drawdown"
+	RuleDailyLossLimit        = "daily_loss_limit"
+	RuleOrderFailureRate      = "order_failure_rate"
+	RuleRiskMetricBreach      = "risk_metric_breach"
 )
 
 // evaluatePositionConcentration fires when a single position's market
@@ -42,7 +42,7 @@ func evaluatePositionConcentration(snap PortfolioSnapshot, cfg AlertManagerConfi
 					p.MarketValue, snap.TotalValue,
 				),
 				Attributes: map[string]interface{}{
-					"market_value":  p.MarketValue,
+					"market_value":   p.MarketValue,
 					"unrealized_pnl": p.UnrealizedPnL,
 				},
 			})

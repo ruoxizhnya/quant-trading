@@ -307,11 +307,12 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 // then applies a list of EngineOption (functional injection).
 //
 // P1-19 (ADR-020): the new construction path. Preferred for new code:
-//   eng, err := NewEngineWithOptions(cfg, provider,
-//       WithRiskManager(rm),
-//       WithDataAdapter(adapter),
-//       WithLiveTrader(mockTrader),
-//   )
+//
+//	eng, err := NewEngineWithOptions(cfg, provider,
+//	    WithRiskManager(rm),
+//	    WithDataAdapter(adapter),
+//	    WithLiveTrader(mockTrader),
+//	)
 //
 // Backward compat: NewEngine(v, provider, logger) remains as a thin
 // wrapper that parses config from viper and calls NewEngineWithOptions

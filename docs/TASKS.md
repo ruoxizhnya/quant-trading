@@ -1586,7 +1586,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | S7-P0-7 | 修复 pkg/risk/take_profit.go 构造器 3 处 panic（违反生产代码不 panic 约定） | `pkg/risk/take_profit.go:248,255,258` | ✅ | ODR-043 |
 | S7-P0-8 | 修复 e2e/tests 无 skip guard 导致 go test ./... 永远 FAIL | `e2e/tests/integration_test.go` | ✅ | ODR-043 |
 | S7-P0-9 | 修复 16 个 ReviewActions.spec.ts 测试失败（缺 MessageProvider） | `web/src/components/ai/__tests__/ReviewActions.spec.ts` | ✅ | ODR-043 |
-| S7-P0-10 | 一次性 gofmt -w . 格式化 237 个未格式化文件 | 全代码库 | ⬜ | ODR-043 |
+| S7-P0-10 | 一次性 gofmt -w . 格式化 237 个未格式化文件 | 全代码库 | ✅ | ODR-043 |
 | S7-P0-11 | 修复 pkg/ai/evolution TestPopulation_ConcurrentAccess 数据竞争（pre-existing，-race 下必崩） | `pkg/ai/evolution/` | ⬜ | S7-P0-2 审查发现 |
 | S7-P0-12 | 修复 pkg/strategy TestCopilotService_Stats_AtomicRead 数据竞争（pre-existing，-race 全套运行必崩，单独运行通过） | `pkg/strategy/copilot_test.go` | ⬜ | S7-P0-6 审查发现 |
 

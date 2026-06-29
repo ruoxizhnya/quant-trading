@@ -139,12 +139,12 @@ func TestCompareHandler_Success(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp struct {
-		GeneratedAt time.Time                     `json:"generated_at"`
-		Requested   int                           `json:"requested"`
-		Resolved    int                           `json:"resolved"`
-		Entries     []backtest.CompareEntry       `json:"entries"`
+		GeneratedAt time.Time                      `json:"generated_at"`
+		Requested   int                            `json:"requested"`
+		Resolved    int                            `json:"resolved"`
+		Entries     []backtest.CompareEntry        `json:"entries"`
 		Missing     []backtest.CompareMissingEntry `json:"missing"`
-		Best        backtest.CompareBest          `json:"best"`
+		Best        backtest.CompareBest           `json:"best"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 

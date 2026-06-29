@@ -22,10 +22,10 @@ import (
 
 // Config holds the service configuration.
 type Config struct {
-	Server      ServerConfig `mapstructure:"server"`
-	Redis       RedisConfig  `mapstructure:"redis"`
+	Server      ServerConfig      `mapstructure:"server"`
+	Redis       RedisConfig       `mapstructure:"redis"`
 	DataService DataServiceConfig `mapstructure:"data_service"`
-	Logging     LoggingConfig `mapstructure:"logging"`
+	Logging     LoggingConfig     `mapstructure:"logging"`
 }
 
 // ServerConfig holds HTTP server configuration.
@@ -52,28 +52,28 @@ type LoggingConfig struct {
 
 // SignalRequest represents the request body for generating signals.
 type SignalRequest struct {
-	StockPool    []string                       `json:"stock_pool" binding:"required"`
-	Date         string                         `json:"date" binding:"required"`
-	LookbackDays int                            `json:"lookback_days"`
-	MarketData   map[string][]domain.OHLCV     `json:"market_data"`
+	StockPool    []string                  `json:"stock_pool" binding:"required"`
+	Date         string                    `json:"date" binding:"required"`
+	LookbackDays int                       `json:"lookback_days"`
+	MarketData   map[string][]domain.OHLCV `json:"market_data"`
 }
 
 // SignalResponse represents the response for signal generation.
 type SignalResponse struct {
-	Strategy string           `json:"strategy"`
-	Date     string           `json:"date"`
-	Signals  []SignalDetail   `json:"signals"`
-	Count    int              `json:"count"`
+	Strategy string         `json:"strategy"`
+	Date     string         `json:"date"`
+	Signals  []SignalDetail `json:"signals"`
+	Count    int            `json:"count"`
 }
 
 // SignalDetail represents detailed signal information.
 type SignalDetail struct {
-	Symbol          string             `json:"symbol"`
-	Date            time.Time          `json:"date"`
-	Direction       domain.Direction   `json:"direction"`
-	Strength        float64            `json:"strength"`
-	CompositeScore  float64            `json:"composite_score"`
-	Factors         map[string]float64 `json:"factors,omitempty"`
+	Symbol         string             `json:"symbol"`
+	Date           time.Time          `json:"date"`
+	Direction      domain.Direction   `json:"direction"`
+	Strength       float64            `json:"strength"`
+	CompositeScore float64            `json:"composite_score"`
+	Factors        map[string]float64 `json:"factors,omitempty"`
 }
 
 func main() {
@@ -220,7 +220,7 @@ func registerRoutes(router *gin.Engine, logger zerolog.Logger) {
 		strategies.GET("", func(c *gin.Context) {
 			names := strategy.ListStrategies()
 			infos := make([]gin.H, 0, len(names))
-			
+
 			for _, name := range names {
 				info, err := strategy.GetStrategyInfo(name)
 				if err != nil {
@@ -241,7 +241,7 @@ func registerRoutes(router *gin.Engine, logger zerolog.Logger) {
 		// Get strategy info
 		strategies.GET("/:name", func(c *gin.Context) {
 			name := c.Param("name")
-			
+
 			info, err := strategy.GetStrategyInfo(name)
 			if err != nil {
 				c.JSON(http.StatusNotFound, gin.H{

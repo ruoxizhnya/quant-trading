@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/ruoxizhnya/quant-trading/pkg/httpclient"
-	"github.com/rs/zerolog"
 )
 
 type httpProvider struct {
@@ -197,9 +197,9 @@ func (p *httpProvider) BulkLoadOHLCV(ctx context.Context, symbols []string, star
 
 	var result struct {
 		Results []struct {
-			Symbol string          `json:"symbol"`
-			Error  string          `json:"error,omitempty"`
-			OHLCV  []domain.OHLCV  `json:"ohlcv"`
+			Symbol string         `json:"symbol"`
+			Error  string         `json:"error,omitempty"`
+			OHLCV  []domain.OHLCV `json:"ohlcv"`
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(resp.Body, &result); err != nil {

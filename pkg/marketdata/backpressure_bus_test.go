@@ -444,7 +444,7 @@ func TestBackpressureBus_HandlerPanicRecovered(t *testing.T) {
 	})
 
 	b.Publish("test", 1) // will panic
-	b.Publish("test", 2)  // should still be received
+	b.Publish("test", 2) // should still be received
 
 	time.Sleep(50 * time.Millisecond)
 	assert.Equal(t, int64(1), atomic.LoadInt64(&afterPanic),

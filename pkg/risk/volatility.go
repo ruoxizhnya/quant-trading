@@ -6,20 +6,20 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
-	"github.com/rs/zerolog"
 )
 
 // VolatilitySizer calculates position sizes based on volatility targeting.
 type VolatilitySizer struct {
-	targetVolatility   float64 // Target annual volatility (e.g., 0.15 for 15%)
-	maxPositionWeight  float64 // Maximum position weight (e.g., 0.10 for 10%)
-	minPositionWeight  float64 // Minimum position weight (e.g., 0.01 for 1%)
-	lookbackDays       int     // Days for rolling volatility calculation
+	targetVolatility    float64 // Target annual volatility (e.g., 0.15 for 15%)
+	maxPositionWeight   float64 // Maximum position weight (e.g., 0.10 for 10%)
+	minPositionWeight   float64 // Minimum position weight (e.g., 0.01 for 1%)
+	lookbackDays        int     // Days for rolling volatility calculation
 	annualizationFactor float64 // Factor to annualize volatility (sqrt(252))
-	logger             zerolog.Logger
+	logger              zerolog.Logger
 }
 
 // VolatilityConfig holds configuration for the volatility sizer.
@@ -215,8 +215,8 @@ func (vs *VolatilitySizer) CalculatePosition(ctx context.Context, signal domain.
 		Msg("calculated position size")
 
 	return domain.PositionSize{
-		Size:    size,
-		Weight:  weight,
+		Size:      size,
+		Weight:    weight,
 		RiskScore: 1.0 - signal.Strength, // Higher strength = lower risk
 	}, nil
 }

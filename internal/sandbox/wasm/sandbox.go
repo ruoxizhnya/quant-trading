@@ -176,10 +176,10 @@ type PluginHandler func(inst Instance, name string, args []uint64) ([]uint64, er
 // InProcessRuntime is a Runtime that executes plugins in-process.
 // It is safe for concurrent use.
 type InProcessRuntime struct {
-	mu       sync.RWMutex
-	plugins  map[string]PluginHandler
-	exports  map[string][]string // moduleName → exported function names
-	closed   bool
+	mu      sync.RWMutex
+	plugins map[string]PluginHandler
+	exports map[string][]string // moduleName → exported function names
+	closed  bool
 }
 
 // NewInProcessRuntime creates an empty InProcessRuntime.
@@ -246,10 +246,10 @@ func (m *inProcessModule) Instantiate(_ context.Context, memoryLimitBytes int) (
 		memoryLimitBytes = DefaultMaxMemory
 	}
 	return &inProcessInstance{
-		memory:      make([]byte, 0, 4096),
-		memLimit:    memoryLimitBytes,
-		handler:     m.handler,
-		exports:     m.exports,
+		memory:   make([]byte, 0, 4096),
+		memLimit: memoryLimitBytes,
+		handler:  m.handler,
+		exports:  m.exports,
 	}, nil
 }
 
@@ -263,8 +263,8 @@ func (m *inProcessModule) Close(_ context.Context) error { return nil }
 
 // inProcessInstance implements Instance for the in-process runtime.
 type inProcessInstance struct {
-	mu      sync.Mutex
-	memory  []byte
+	mu       sync.Mutex
+	memory   []byte
 	memLimit int
 	handler  PluginHandler
 	exports  []string

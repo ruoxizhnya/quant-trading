@@ -21,12 +21,12 @@ import (
 // with a Prometheus collector if /metrics export is desired.
 type Metrics struct {
 	// Atomic counters — single-writer, multi-reader.
-	callsTotal     atomic.Int64
-	errorsTotal    atomic.Int64
-	retriesTotal   atomic.Int64
-	rateLimited    atomic.Int64
-	costMicros     atomic.Int64 // total cost in micros (1e-6 USD) to avoid float atomics
-	promptTokens   atomic.Int64
+	callsTotal       atomic.Int64
+	errorsTotal      atomic.Int64
+	retriesTotal     atomic.Int64
+	rateLimited      atomic.Int64
+	costMicros       atomic.Int64 // total cost in micros (1e-6 USD) to avoid float atomics
+	promptTokens     atomic.Int64
 	completionTokens atomic.Int64
 
 	// Per-model daily rollup. Mutex-guarded because the inner map
@@ -44,14 +44,14 @@ func NewMetrics() *Metrics {
 
 // CallResult is the per-call summary recorded by Record().
 type CallResult struct {
-	Model            string
-	Usage            Usage
-	CostUSD          float64
-	Duration         time.Duration
-	StatusCode       int    // HTTP status; 0 = network error
-	Err              error  // non-nil for failed calls
-	Retried          bool   // true if this call was a retry (not the first attempt)
-	RateLimited      bool   // true if this call waited on the rate limiter
+	Model       string
+	Usage       Usage
+	CostUSD     float64
+	Duration    time.Duration
+	StatusCode  int   // HTTP status; 0 = network error
+	Err         error // non-nil for failed calls
+	Retried     bool  // true if this call was a retry (not the first attempt)
+	RateLimited bool  // true if this call waited on the rate limiter
 }
 
 // Record persists one CallResult into the metrics tracker. Safe to call

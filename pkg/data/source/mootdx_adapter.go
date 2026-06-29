@@ -51,26 +51,26 @@ type MootdxQuote struct {
 	Volume    int64
 	Amount    float64
 	// 5-level bid/ask
-	Bid1 float64
-	Bid1Vol int32
-	Bid2 float64
-	Bid2Vol int32
-	Bid3 float64
-	Bid3Vol int32
-	Bid4 float64
-	Bid4Vol int32
-	Bid5 float64
-	Bid5Vol int32
-	Ask1 float64
-	Ask1Vol int32
-	Ask2 float64
-	Ask2Vol int32
-	Ask3 float64
-	Ask3Vol int32
-	Ask4 float64
-	Ask4Vol int32
-	Ask5 float64
-	Ask5Vol int32
+	Bid1       float64
+	Bid1Vol    int32
+	Bid2       float64
+	Bid2Vol    int32
+	Bid3       float64
+	Bid3Vol    int32
+	Bid4       float64
+	Bid4Vol    int32
+	Bid5       float64
+	Bid5Vol    int32
+	Ask1       float64
+	Ask1Vol    int32
+	Ask2       float64
+	Ask2Vol    int32
+	Ask3       float64
+	Ask3Vol    int32
+	Ask4       float64
+	Ask4Vol    int32
+	Ask5       float64
+	Ask5Vol    int32
 	ServerTime time.Time
 }
 
@@ -87,11 +87,11 @@ type MootdxBar struct {
 
 // MootdxTransaction represents a single tick transaction.
 type MootdxTransaction struct {
-	Time     time.Time
-	Price    float64
-	Volume   int64
-	Num      int32   // batch count
-	BuyOrSell int32  // 0=buy, 1=sell, 2=neutral
+	Time      time.Time
+	Price     float64
+	Volume    int64
+	Num       int32 // batch count
+	BuyOrSell int32 // 0=buy, 1=sell, 2=neutral
 }
 
 // MootdxFinanceSnapshot is the 37-field quarterly financial snapshot.

@@ -8,12 +8,12 @@ import (
 
 // GeneticOptimizer implements a genetic algorithm for strategy optimization.
 type GeneticOptimizer struct {
-	rng              *rand.Rand
-	populationSize   int
-	generations      int
-	crossoverRate    float64
-	mutationRate     float64
-	eliteCount       int
+	rng            *rand.Rand
+	populationSize int
+	generations    int
+	crossoverRate  float64
+	mutationRate   float64
+	eliteCount     int
 }
 
 // NewGeneticOptimizer creates a new genetic optimizer.
@@ -30,9 +30,9 @@ func NewGeneticOptimizer(seed int64) *GeneticOptimizer {
 
 // Individual represents a candidate solution.
 type Individual struct {
-	Genes    []float64 `json:"genes"`
-	Fitness  float64   `json:"fitness"`
-	Rank     int       `json:"rank"`
+	Genes   []float64 `json:"genes"`
+	Fitness float64   `json:"fitness"`
+	Rank    int       `json:"rank"`
 }
 
 // Optimize runs the genetic algorithm.
@@ -183,9 +183,9 @@ func (g *GeneticOptimizer) GetPopulationStats(population []*Individual) map[stri
 	}
 
 	return map[string]float64{
-		"best":   best,
-		"worst":  worst,
-		"mean":   sum / float64(len(population)),
+		"best":      best,
+		"worst":     worst,
+		"mean":      sum / float64(len(population)),
 		"diversity": best - worst,
 	}
 }

@@ -23,22 +23,22 @@ type StrategyPipeline struct {
 
 // StrategyPipelineConfig configures the strategy pipeline.
 type StrategyPipelineConfig struct {
-	Description        string
-	ValidationLevel    agents.ValidationLevel
-	RunBacktest        bool
-	StockPool          []string
-	StartDate          string
-	EndDate            string
+	Description     string
+	ValidationLevel agents.ValidationLevel
+	RunBacktest     bool
+	StockPool       []string
+	StartDate       string
+	EndDate         string
 }
 
 // StrategyPipelineResult holds the result of strategy pipeline execution.
 type StrategyPipelineResult struct {
-	Generated    int    `json:"generated"`
-	Validated    int    `json:"validated"`
-	Compiled     int    `json:"compiled"`
-	Backtested   int    `json:"backtested"`
-	Errors       []string `json:"errors,omitempty"`
-	StrategyID   string   `json:"strategy_id,omitempty"`
+	Generated  int      `json:"generated"`
+	Validated  int      `json:"validated"`
+	Compiled   int      `json:"compiled"`
+	Backtested int      `json:"backtested"`
+	Errors     []string `json:"errors,omitempty"`
+	StrategyID string   `json:"strategy_id,omitempty"`
 }
 
 // NewStrategyPipeline creates a new strategy pipeline.
@@ -104,14 +104,14 @@ func (p *StrategyPipeline) Run(ctx context.Context, config StrategyPipelineConfi
 			// Save to strategy pool with backtest results
 			if p.strategyPool != nil {
 				gene := &gene_pool.StrategyGene{
-					ID:          template.ID,
-					Name:        template.Name,
-					Description: template.Description,
+					ID:           template.ID,
+					Name:         template.Name,
+					Description:  template.Description,
 					StrategyType: template.Type,
-					Code:        template.Code,
-					TotalReturn: btResult.TotalReturn,
-					Sharpe:      btResult.SharpeRatio,
-					Status:      "validated",
+					Code:         template.Code,
+					TotalReturn:  btResult.TotalReturn,
+					Sharpe:       btResult.SharpeRatio,
+					Status:       "validated",
 				}
 				if err := p.strategyPool.Save(ctx, gene); err != nil {
 					result.Errors = append(result.Errors, fmt.Sprintf("save failed: %v", err))

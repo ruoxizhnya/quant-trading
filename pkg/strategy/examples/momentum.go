@@ -12,12 +12,12 @@ import (
 
 // MomentumConfig holds configuration for the momentum strategy.
 type MomentumConfig struct {
-	LookbackDays       int     `mapstructure:"lookback_days"`        // days to calculate momentum
-	LongThreshold      float64 `mapstructure:"long_threshold"`        // momentum > this → long
-	ShortThreshold     float64 `mapstructure:"short_threshold"`        // momentum < this → short
-	MaxPositions       int     `mapstructure:"max_positions"`         // max signals to return
-	TopN               int     `mapstructure:"top_n"`                 // return top N by momentum
-	RebalanceFrequency string  `mapstructure:"rebalance_frequency"`    // "daily", "weekly", "monthly"
+	LookbackDays       int     `mapstructure:"lookback_days"`       // days to calculate momentum
+	LongThreshold      float64 `mapstructure:"long_threshold"`      // momentum > this → long
+	ShortThreshold     float64 `mapstructure:"short_threshold"`     // momentum < this → short
+	MaxPositions       int     `mapstructure:"max_positions"`       // max signals to return
+	TopN               int     `mapstructure:"top_n"`               // return top N by momentum
+	RebalanceFrequency string  `mapstructure:"rebalance_frequency"` // "daily", "weekly", "monthly"
 }
 
 // momentumStrategy implements a simple price momentum strategy.
@@ -45,38 +45,50 @@ func (s *momentumStrategy) Parameters() []strategy.Parameter {
 func (s *momentumStrategy) Configure(params map[string]interface{}) error {
 	if c, ok := params["lookback_days"]; ok {
 		switch v := c.(type) {
-		case float64: s.config.LookbackDays = int(v)
-		case int: s.config.LookbackDays = v
+		case float64:
+			s.config.LookbackDays = int(v)
+		case int:
+			s.config.LookbackDays = v
 		}
 	}
 	if c, ok := params["long_threshold"]; ok {
 		switch v := c.(type) {
-		case float64: s.config.LongThreshold = v
-		case int: s.config.LongThreshold = float64(v)
+		case float64:
+			s.config.LongThreshold = v
+		case int:
+			s.config.LongThreshold = float64(v)
 		}
 	}
 	if c, ok := params["short_threshold"]; ok {
 		switch v := c.(type) {
-		case float64: s.config.ShortThreshold = v
-		case int: s.config.ShortThreshold = float64(v)
+		case float64:
+			s.config.ShortThreshold = v
+		case int:
+			s.config.ShortThreshold = float64(v)
 		}
 	}
 	if c, ok := params["max_positions"]; ok {
 		switch v := c.(type) {
-		case float64: s.config.MaxPositions = int(v)
-		case int: s.config.MaxPositions = v
+		case float64:
+			s.config.MaxPositions = int(v)
+		case int:
+			s.config.MaxPositions = v
 		}
 	}
 	if c, ok := params["top_n"]; ok {
 		switch v := c.(type) {
-		case float64: s.config.TopN = int(v)
-		case int: s.config.TopN = v
+		case float64:
+			s.config.TopN = int(v)
+		case int:
+			s.config.TopN = v
 		}
 	}
 	if c, ok := params["rebalance_frequency"]; ok {
 		switch v := c.(type) {
-		case string: s.config.RebalanceFrequency = v
-		case float64: s.config.RebalanceFrequency = string(rune(v))
+		case string:
+			s.config.RebalanceFrequency = v
+		case float64:
+			s.config.RebalanceFrequency = string(rune(v))
 		}
 	}
 	// Default to daily if not set

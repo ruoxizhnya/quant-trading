@@ -11,8 +11,8 @@ import (
 )
 
 type RedisOrderStoreConfig struct {
-	Prefix     string
-	KeyExpiry  time.Duration
+	Prefix    string
+	KeyExpiry time.Duration
 }
 
 type RedisOrderStore struct {

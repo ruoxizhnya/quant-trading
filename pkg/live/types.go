@@ -53,8 +53,8 @@ type MarketData struct {
 	PrevClose  float64   `json:"prev_close"`
 	Volume     int64     `json:"volume"`
 	Turnover   float64   `json:"turnover"`
-	BidPrice   []float64 `json:"bid_price"` // bid prices (up to 5 levels)
-	AskPrice   []float64 `json:"ask_price"` // ask prices (up to 5 levels)
+	BidPrice   []float64 `json:"bid_price"`  // bid prices (up to 5 levels)
+	AskPrice   []float64 `json:"ask_price"`  // ask prices (up to 5 levels)
 	BidVolume  []int64   `json:"bid_volume"` // bid volumes
 	AskVolume  []int64   `json:"ask_volume"` // ask volumes
 	UpdateTime time.Time `json:"update_time"`
@@ -73,16 +73,16 @@ type ConnectionStatus struct {
 // PositionDetail extends PositionInfo with additional trading info
 type PositionDetail struct {
 	PositionInfo
-	CanBuyQty   float64 `json:"can_buy_qty"`   // max buyable quantity with available cash
-	CanSellQty  float64 `json:"can_sell_qty"`  // sellable quantity after T+1 check
-	ProfitRatio float64 `json:"profit_ratio"`  // profit/cost ratio in percentage
-	DaysHeld    int     `json:"days_held"`     // number of days position held
+	CanBuyQty   float64 `json:"can_buy_qty"`  // max buyable quantity with available cash
+	CanSellQty  float64 `json:"can_sell_qty"` // sellable quantity after T+1 check
+	ProfitRatio float64 `json:"profit_ratio"` // profit/cost ratio in percentage
+	DaysHeld    int     `json:"days_held"`    // number of days position held
 }
 
 // CashFlow represents a cash movement record
 type CashFlow struct {
 	ID          int64     `json:"id"`
-	Type        string    `json:"type"`        // "deposit", "withdraw", "trade_fee", "dividend", etc.
+	Type        string    `json:"type"` // "deposit", "withdraw", "trade_fee", "dividend", etc.
 	Amount      float64   `json:"amount"`
 	Balance     float64   `json:"balance"`
 	Description string    `json:"description"`

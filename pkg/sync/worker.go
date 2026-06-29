@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 )
 
 // JobExecutor is the interface that must be implemented to execute a specific job type.
@@ -29,10 +29,10 @@ type ProgressReporter interface {
 
 // jobProgressReporter implements ProgressReporter and updates the job in the queue.
 type jobProgressReporter struct {
-	queue  *Queue
-	job    *Job
-	ctx    context.Context
-	mu     sync.Mutex
+	queue      *Queue
+	job        *Job
+	ctx        context.Context
+	mu         sync.Mutex
 	lastReport time.Time
 }
 
@@ -64,13 +64,13 @@ func (r *jobProgressReporter) ReportError(errMsg string) {
 
 // WorkerPool manages a pool of goroutines that process sync jobs.
 type WorkerPool struct {
-	queue     *Queue
-	executors map[JobType]JobExecutor
-	logger    zerolog.Logger
-	mu        sync.RWMutex
-	wg        sync.WaitGroup
-	ctx       context.Context
-	cancel    context.CancelFunc
+	queue      *Queue
+	executors  map[JobType]JobExecutor
+	logger     zerolog.Logger
+	mu         sync.RWMutex
+	wg         sync.WaitGroup
+	ctx        context.Context
+	cancel     context.CancelFunc
 	numWorkers int
 }
 
@@ -248,9 +248,9 @@ func (wp *WorkerPool) HasExecutor(jobType JobType) bool {
 
 // WorkerStats holds statistics about the worker pool.
 type WorkerStats struct {
-	NumWorkers    int                    `json:"num_workers"`
-	RegisteredTypes []string               `json:"registered_types"`
-	IsRunning     bool                   `json:"is_running"`
+	NumWorkers      int      `json:"num_workers"`
+	RegisteredTypes []string `json:"registered_types"`
+	IsRunning       bool     `json:"is_running"`
 }
 
 // Stats returns current worker pool statistics.

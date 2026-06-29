@@ -34,8 +34,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 )
 

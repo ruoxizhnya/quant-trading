@@ -55,9 +55,9 @@ func AllHolderTypes() []ShareholderType {
 type ReductionMethod string
 
 const (
-	MethodAuction    ReductionMethod = "auction"    // 集中竞价 (二级市场)
-	MethodBlockTrade ReductionMethod = "block"      // 大宗交易
-	MethodAgreement  ReductionMethod = "agreement"  // 协议转让 (单笔 ≥ 5%)
+	MethodAuction    ReductionMethod = "auction"   // 集中竞价 (二级市场)
+	MethodBlockTrade ReductionMethod = "block"     // 大宗交易
+	MethodAgreement  ReductionMethod = "agreement" // 协议转让 (单笔 ≥ 5%)
 
 	// MethodUnset == "" — caller forgot to fill; reduction will be rejected.
 	MethodUnset ReductionMethod = ""
@@ -74,12 +74,12 @@ func AllReductionMethods() []ReductionMethod {
 // 监管要求 Pre-IPO 36 月 / 定增竞价 6 月 / 战略定增 18 月 / 控股股东
 // 公开承诺期 (招股书披露) / 董监高任期内。
 type LockupPeriod struct {
-	StartAt  time.Time `json:"start_at"`  // 锁定期起点
-	EndAt    time.Time `json:"end_at"`    // 锁定期终点 (含)
-	Reason   string    `json:"reason"`    // 中文原因 (用于 UI 提示)
-	Source   string    `json:"source"`    // 法规引用 (用于审计)
-	Code     string    `json:"code"`      // 法规代码, e.g. "CSRC-2024-1-4-1"
-	Priority int       `json:"priority"`  // 高优先级覆盖低优先级, 同优先级 union
+	StartAt  time.Time `json:"start_at"` // 锁定期起点
+	EndAt    time.Time `json:"end_at"`   // 锁定期终点 (含)
+	Reason   string    `json:"reason"`   // 中文原因 (用于 UI 提示)
+	Source   string    `json:"source"`   // 法规引用 (用于审计)
+	Code     string    `json:"code"`     // 法规代码, e.g. "CSRC-2024-1-4-1"
+	Priority int       `json:"priority"` // 高优先级覆盖低优先级, 同优先级 union
 }
 
 // IsActive reports whether this lockup is in force at the given moment.
@@ -104,22 +104,22 @@ func (l LockupPeriod) String() string {
 // Reduction is a completed (or pending) reduction in a holder's history.
 // Used to compute "已使用 capacity" within a rolling window.
 type Reduction struct {
-	Symbol   string          `json:"symbol"`     // 股票代码
-	Method   ReductionMethod `json:"method"`     // 减持方式
-	Quantity float64         `json:"quantity"`   // 实际减持股数
-	At       time.Time       `json:"at"`         // 成交时间
-	Price    float64         `json:"price"`      // 实际成交均价 (元)
+	Symbol   string          `json:"symbol"`   // 股票代码
+	Method   ReductionMethod `json:"method"`   // 减持方式
+	Quantity float64         `json:"quantity"` // 实际减持股数
+	At       time.Time       `json:"at"`       // 成交时间
+	Price    float64         `json:"price"`    // 实际成交均价 (元)
 }
 
 // ShareholderProfile describes the subject of a divestment check.
 type ShareholderProfile struct {
-	UserID        string          `json:"user_id"`         // 股东账户 ID
-	Symbol        string          `json:"symbol"`          // 股票代码
-	HolderType    ShareholderType `json:"holder_type"`     // 5 类主体之一
-	HoldingsPct   float64         `json:"holdings_pct"`    // 持股比例 (%), 0–100
-	HoldingsShare float64         `json:"holdings_share"`  // 持股数量 (股)
-	AcquiredAt    time.Time       `json:"acquired_at"`     // 首笔买入时间
-	Lockups       []LockupPeriod  `json:"lockups"`         // 限售期列表 (可空)
+	UserID        string          `json:"user_id"`        // 股东账户 ID
+	Symbol        string          `json:"symbol"`         // 股票代码
+	HolderType    ShareholderType `json:"holder_type"`    // 5 类主体之一
+	HoldingsPct   float64         `json:"holdings_pct"`   // 持股比例 (%), 0–100
+	HoldingsShare float64         `json:"holdings_share"` // 持股数量 (股)
+	AcquiredAt    time.Time       `json:"acquired_at"`    // 首笔买入时间
+	Lockups       []LockupPeriod  `json:"lockups"`        // 限售期列表 (可空)
 
 	// Optional: 持股平台标识 (用于公司内部股东台账, 影响控股股东判定)
 	IsController bool   `json:"is_controller"`
@@ -136,29 +136,29 @@ type ReductionPlan struct {
 
 // DivestmentCheckResult is the full output of a divestment check.
 type DivestmentCheckResult struct {
-	Allowed       bool            `json:"allowed"`
-	UserID        string          `json:"user_id"`
-	Symbol        string          `json:"symbol"`
-	HolderType    ShareholderType `json:"holder_type"`
-	Method        ReductionMethod `json:"method"`
-	CheckedAt     time.Time       `json:"checked_at"`
+	Allowed    bool            `json:"allowed"`
+	UserID     string          `json:"user_id"`
+	Symbol     string          `json:"symbol"`
+	HolderType ShareholderType `json:"holder_type"`
+	Method     ReductionMethod `json:"method"`
+	CheckedAt  time.Time       `json:"checked_at"`
 
 	// 拟减持 vs 实际可减持: Quantity == 0 means fully blocked.
 	RequestedQty float64 `json:"requested_qty"`
 	ApprovedQty  float64 `json:"approved_qty"`
 
 	// 本期 (窗口) 容量状态 — 都用占公司股份比例 (%) 表示
-	WindowStart    time.Time `json:"window_start"`     // 滚动窗起点
-	WindowEnd      time.Time `json:"window_end"`       // 滚动窗终点
-	WindowCapPct   float64   `json:"window_cap_pct"`   // 窗口期内总容量 (%)
-	WindowUsedPct  float64   `json:"window_used_pct"`  // 窗口期内已用 (%)
-	WindowRemainPct float64  `json:"window_remain_pct"`// 窗口期内剩余 (%)
+	WindowStart     time.Time `json:"window_start"`      // 滚动窗起点
+	WindowEnd       time.Time `json:"window_end"`        // 滚动窗终点
+	WindowCapPct    float64   `json:"window_cap_pct"`    // 窗口期内总容量 (%)
+	WindowUsedPct   float64   `json:"window_used_pct"`   // 窗口期内已用 (%)
+	WindowRemainPct float64   `json:"window_remain_pct"` // 窗口期内剩余 (%)
 	// HoldPct    是 ReducePlan 执行后还持的比例 (%)
 	HoldPctAfter float64 `json:"hold_pct_after"`
 
-	Reasons  []string       `json:"reasons"`   // 通过 / 拒绝原因 (audit)
-	Lockups  []LockupPeriod `json:"lockups"`   // 命中的限售期 (透明披露)
-	Warnings []string       `json:"warnings"`  // 软告警 (不阻塞, 仅提示)
+	Reasons  []string       `json:"reasons"`  // 通过 / 拒绝原因 (audit)
+	Lockups  []LockupPeriod `json:"lockups"`  // 命中的限售期 (透明披露)
+	Warnings []string       `json:"warnings"` // 软告警 (不阻塞, 仅提示)
 }
 
 // ============================================================
@@ -210,7 +210,7 @@ func DefaultDivestmentRules() map[ShareholderType]*DivestmentRule {
 		PlacementAuctionMonths:    6,
 		PlacementStrategicMonths:  18,
 		PlacementControllerMonths: 18,
-		Source: "CSRC-2024-减持规定",
+		Source:                    "CSRC-2024-减持规定",
 	}
 	return map[ShareholderType]*DivestmentRule{
 		HolderTypeControlling: {
@@ -222,7 +222,7 @@ func DefaultDivestmentRules() map[ShareholderType]*DivestmentRule {
 			AgreementMinPct:           common.AgreementMinPct,
 			PreIPOLockupMonths:        common.PreIPOLockupMonths,
 			PlacementControllerMonths: common.PlacementControllerMonths,
-			Source: "CSRC-2024-减持规定 第 1 条 / 第 3 条",
+			Source:                    "CSRC-2024-减持规定 第 1 条 / 第 3 条",
 		},
 		HolderTypeDirector: {
 			HolderType:           HolderTypeDirector,
@@ -235,13 +235,13 @@ func DefaultDivestmentRules() map[ShareholderType]*DivestmentRule {
 			Source:               "CSRC-2007-56号 + CSRC-2024-减持规定 第 9 条",
 		},
 		HolderTypeMajor5Pct: {
-			HolderType:           HolderTypeMajor5Pct,
-			AuctionWindowDays:    common.AuctionWindowDays,
-			AuctionWindowCapPct:  common.AuctionWindowCapPct,
-			BlockWindowDays:      common.BlockWindowDays,
-			BlockWindowCapPct:    common.BlockWindowCapPct,
-			AgreementMinPct:      common.AgreementMinPct,
-			Source:               "CSRC-2024-减持规定 第 1 条",
+			HolderType:          HolderTypeMajor5Pct,
+			AuctionWindowDays:   common.AuctionWindowDays,
+			AuctionWindowCapPct: common.AuctionWindowCapPct,
+			BlockWindowDays:     common.BlockWindowDays,
+			BlockWindowCapPct:   common.BlockWindowCapPct,
+			AgreementMinPct:     common.AgreementMinPct,
+			Source:              "CSRC-2024-减持规定 第 1 条",
 		},
 		HolderTypePreIPO: {
 			HolderType:         HolderTypePreIPO,
@@ -343,15 +343,15 @@ func (c *DivestmentChecker) Check(
 ) DivestmentCheckResult {
 	now := c.now()
 	result := DivestmentCheckResult{
-		UserID:     profile.UserID,
-		Symbol:     plan.Symbol,
-		HolderType: profile.HolderType,
-		Method:     plan.Method,
-		CheckedAt:  now,
+		UserID:       profile.UserID,
+		Symbol:       plan.Symbol,
+		HolderType:   profile.HolderType,
+		Method:       plan.Method,
+		CheckedAt:    now,
 		RequestedQty: plan.Quantity,
-		Lockups:   []LockupPeriod{},
-		Reasons:   []string{},
-		Warnings:  []string{},
+		Lockups:      []LockupPeriod{},
+		Reasons:      []string{},
+		Warnings:     []string{},
 	}
 	if profile.Symbol != "" && plan.Symbol != "" && profile.Symbol != plan.Symbol {
 		result.Allowed = false
@@ -540,8 +540,9 @@ func (c *DivestmentChecker) activeLockupsAt(lockups []LockupPeriod, t time.Time)
 // windowUsedPct 累计窗口内同 method / 同 symbol 的历史减持占公司股份比例。
 //
 // 公式: ∑ (quantity_i / totalShares) × 100%
-//  totalShares 优先用 holdingsShare / (holdingsPct/100) 反推; 推不出时
-//  用 totalSharesFromPct 占位。
+//
+//	totalShares 优先用 holdingsShare / (holdingsPct/100) 反推; 推不出时
+//	用 totalSharesFromPct 占位。
 func (c *DivestmentChecker) windowUsedPct(
 	history []Reduction,
 	plan ReductionPlan,

@@ -6,9 +6,9 @@
 // Architecture (Sprint 6 P1-26, ODR-022 — consolidated from 5 to 2 entities):
 //   - LiveTrader: Core interface for order submission, cancellation, and account queries
 //   - MockTrader: In-memory simulation with A-share trading rules (T+1, stamp tax, price limits).
-//                 Supports optional OrderStore for persistence (replaces PersistentMockTrader).
+//     Supports optional OrderStore for persistence (replaces PersistentMockTrader).
 //   - LiveEngine: Real-time quote-driven execution orchestrator for paper/live trading
-//                 (uses Broker + DataFeed interfaces, separate from LiveTrader)
+//     (uses Broker + DataFeed interfaces, separate from LiveTrader)
 //
 // Previously-deleted entities (see ODR-022 for details):
 //   - PersistentMockTrader: merged into MockTrader via OrderStore config field
@@ -119,22 +119,22 @@ type EmergencyFlattenResult struct {
 // EmergencyFlattenOrder describes a single successful close in an
 // EmergencyFlatten call.
 type EmergencyFlattenOrder struct {
-	Symbol       string    `json:"symbol"`
-	OrderID      string    `json:"order_id"`
-	Quantity     float64   `json:"quantity"`
-	FillPrice    float64   `json:"fill_price"`
-	NetProceeds  float64   `json:"net_proceeds"`
-	BypassedT1   bool      `json:"bypassed_t1"` // true if T+1 was overridden
-	SubmittedAt  time.Time `json:"submitted_at"`
+	Symbol      string    `json:"symbol"`
+	OrderID     string    `json:"order_id"`
+	Quantity    float64   `json:"quantity"`
+	FillPrice   float64   `json:"fill_price"`
+	NetProceeds float64   `json:"net_proceeds"`
+	BypassedT1  bool      `json:"bypassed_t1"` // true if T+1 was overridden
+	SubmittedAt time.Time `json:"submitted_at"`
 }
 
 // EmergencyFlattenSkip describes a single failed close in an
 // EmergencyFlatten call. The portfolio retains the position; the
 // operator must intervene manually.
 type EmergencyFlattenSkip struct {
-	Symbol   string `json:"symbol"`
+	Symbol   string  `json:"symbol"`
 	Quantity float64 `json:"quantity"`
-	Reason   string `json:"reason"`
+	Reason   string  `json:"reason"`
 }
 
 // OrderResult represents the outcome of an order submission.

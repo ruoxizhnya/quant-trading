@@ -130,16 +130,16 @@ type checkRequest struct {
 // JSON tags (frontend convention) and a few helper fields the UI
 // needs to render the result without re-walking the result.
 type checkResponse struct {
-	Allowed     bool                              `json:"allowed"`
-	Board       string                            `json:"board"`
-	BoardName   string                            `json:"board_name,omitempty"`
-	Reasons     []string                          `json:"reasons"`
-	UserID      string                            `json:"user_id"`
-	ProfileAge  int                               `json:"profile_age_months"`
-	AssetDaily  float64                           `json:"asset_daily_avg_cny"`
-	RiskLevel   string                            `json:"risk_level"`
-	Required    *compliance.BoardRequirement      `json:"required,omitempty"`
-	CheckedAt   time.Time                         `json:"checked_at"`
+	Allowed    bool                         `json:"allowed"`
+	Board      string                       `json:"board"`
+	BoardName  string                       `json:"board_name,omitempty"`
+	Reasons    []string                     `json:"reasons"`
+	UserID     string                       `json:"user_id"`
+	ProfileAge int                          `json:"profile_age_months"`
+	AssetDaily float64                      `json:"asset_daily_avg_cny"`
+	RiskLevel  string                       `json:"risk_level"`
+	Required   *compliance.BoardRequirement `json:"required,omitempty"`
+	CheckedAt  time.Time                    `json:"checked_at"`
 }
 
 // check returns the structured eligibility verdict for the given
@@ -241,16 +241,16 @@ func (h *ComplianceHandler) boards(c *gin.Context) {
 // implicit (now - detector.Window); the caller is responsible for
 // passing only in-window records.
 type abnormalRunRequest struct {
-	AccountID string                          `json:"account_id"`
-	Orders    []compliance.OrderRecord        `json:"orders"`
-	Trades    []compliance.TradeRecord        `json:"trades"`
+	AccountID string                   `json:"account_id"`
+	Orders    []compliance.OrderRecord `json:"orders"`
+	Trades    []compliance.TradeRecord `json:"trades"`
 }
 
 // abnormalRunResponse wraps the detector output for transport.
 type abnormalRunResponse struct {
-	Alerts  []compliance.AbnormalAlert `json:"alerts"`
-	Count   int                        `json:"count"`
-	RunAt   time.Time                  `json:"run_at"`
+	Alerts []compliance.AbnormalAlert `json:"alerts"`
+	Count  int                        `json:"count"`
+	RunAt  time.Time                  `json:"run_at"`
 }
 
 // abnormalRun runs the 6-category detector over the supplied
@@ -287,7 +287,7 @@ type reportDailyRequest struct {
 // prepended for convenience. The full JSON body is also embedded
 // in `report` so the caller doesn't have to re-read the file.
 type reportDailyResponse struct {
-	Path   string                   `json:"path"`
+	Path   string                       `json:"path"`
 	Report *compliance.LargeTradeReport `json:"report"`
 }
 
@@ -348,9 +348,9 @@ func (h *ComplianceHandler) reportDaily(c *gin.Context) {
 // behalf of the caller — separation of concerns keeps this
 // endpoint stateless and test-friendly).
 type divestmentCheckRequest struct {
-	Profile       compliance.ShareholderProfile `json:"profile"`
-	Plan          compliance.ReductionPlan      `json:"plan"`
-	Recent        []compliance.Reduction        `json:"recent,omitempty"`
+	Profile compliance.ShareholderProfile `json:"profile"`
+	Plan    compliance.ReductionPlan      `json:"plan"`
+	Recent  []compliance.Reduction        `json:"recent,omitempty"`
 }
 
 // divestmentCheck runs the P2-7 engine and returns the structured
@@ -426,7 +426,7 @@ func (h *ComplianceHandler) divestmentMethods(c *gin.Context) {
 // compliance dashboards.
 func (h *ComplianceHandler) divestmentRules(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"rules":       h.divestmentChecker.Rules(),
+		"rules":        h.divestmentChecker.Rules(),
 		"generated_at": h.now(),
 	})
 }

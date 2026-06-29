@@ -224,20 +224,20 @@ func (h *ExecutionHandler) getAccount(c *gin.Context) {
 // second factor is to prevent accidental button-presses from killing
 // the portfolio.
 type emergencyFlattenRequest struct {
-	Reason           string `json:"reason" binding:"required"`
+	Reason            string `json:"reason" binding:"required"`
 	ConfirmationToken string `json:"confirmation_token" binding:"required"`
 }
 
 // emergencyFlattenResponse mirrors live.EmergencyFlattenResult with
 // the audit fields added.
 type emergencyFlattenResponse struct {
-	Sold         []live.EmergencyFlattenOrder `json:"sold"`
-	Skipped      []live.EmergencyFlattenSkip  `json:"skipped"`
-	SoldTotal    float64                      `json:"sold_total"`
-	StartedAt    time.Time                    `json:"started_at"`
-	CompletedAt  time.Time                    `json:"completed_at"`
-	Reason       string                       `json:"reason"`
-	LatencyMS    int64                        `json:"latency_ms"`
+	Sold        []live.EmergencyFlattenOrder `json:"sold"`
+	Skipped     []live.EmergencyFlattenSkip  `json:"skipped"`
+	SoldTotal   float64                      `json:"sold_total"`
+	StartedAt   time.Time                    `json:"started_at"`
+	CompletedAt time.Time                    `json:"completed_at"`
+	Reason      string                       `json:"reason"`
+	LatencyMS   int64                        `json:"latency_ms"`
 }
 
 // emergencyFlattenHandler implements the kill-switch endpoint

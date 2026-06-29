@@ -141,13 +141,13 @@ func (bs *BlackScholes) Greeks(spec OptionSpec) (Greeks, error) {
 	var delta, theta, rho float64
 	if spec.Type == Call {
 		delta = discountQ * NormCDF(d1)
-		theta = (-S*pdfD1*sigma*discountQ/(2*math.Sqrt(T))) -
+		theta = (-S * pdfD1 * sigma * discountQ / (2 * math.Sqrt(T))) -
 			r*K*discountR*NormCDF(d2) +
 			q*S*discountQ*NormCDF(d1)
 		rho = K * T * discountR * NormCDF(d2)
 	} else {
 		delta = -discountQ * NormCDF(-d1)
-		theta = (-S*pdfD1*sigma*discountQ/(2*math.Sqrt(T))) +
+		theta = (-S * pdfD1 * sigma * discountQ / (2 * math.Sqrt(T))) +
 			r*K*discountR*NormCDF(-d2) -
 			q*S*discountQ*NormCDF(-d1)
 		rho = -K * T * discountR * NormCDF(-d2)

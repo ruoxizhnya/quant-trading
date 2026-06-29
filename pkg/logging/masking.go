@@ -8,21 +8,21 @@ import (
 // sensitiveKeys is the set of map keys whose values should be masked when
 // logging structured fields. Matching is case-insensitive.
 var sensitiveKeys = map[string]bool{
-	"api_key":      true,
-	"apikey":       true,
-	"api_secret":   true,
-	"apisecret":    true,
-	"secret":       true,
-	"password":     true,
-	"passwd":       true,
-	"token":        true,
-	"access_token": true,
-	"accesstoken":  true,
+	"api_key":       true,
+	"apikey":        true,
+	"api_secret":    true,
+	"apisecret":     true,
+	"secret":        true,
+	"password":      true,
+	"passwd":        true,
+	"token":         true,
+	"access_token":  true,
+	"accesstoken":   true,
 	"refresh_token": true,
-	"private_key":  true,
-	"privatekey":   true,
-	"credential":   true,
-	"credentials":  true,
+	"private_key":   true,
+	"privatekey":    true,
+	"credential":    true,
+	"credentials":   true,
 }
 
 // accountNumberPattern matches common account-number shapes:

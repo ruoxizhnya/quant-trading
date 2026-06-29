@@ -55,8 +55,8 @@ func TestMultiFactorParameters(t *testing.T) {
 		"value_weight":        {0.4, "float", 0.0, 1.0, "Weight for value score (1/PE), normalized"},
 		"quality_weight":      {0.3, "float", 0.0, 1.0, "Weight for quality score (ROE), normalized"},
 		"momentum_weight":     {0.3, "float", 0.0, 1.0, "Weight for momentum score (return), normalized"},
-		"lookback_days":      {60, "int", 5, 250, "Number of days for momentum lookback"},
-		"top_n":              {10, "int", 1, 50, "Number of top stocks to buy"},
+		"lookback_days":       {60, "int", 5, 250, "Number of days for momentum lookback"},
+		"top_n":               {10, "int", 1, 50, "Number of top stocks to buy"},
 		"rebalance_frequency": {"monthly", "string", 0, 0, "Rebalance frequency: daily, weekly, monthly"},
 	}
 

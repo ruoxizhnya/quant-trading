@@ -192,11 +192,11 @@ type WebhookChannel struct {
 	timeout time.Duration
 	logger  zerolog.Logger
 
-	mu      sync.Mutex
-	client  *http.Client
-	queue   chan Alert
-	closed  bool
-	done    chan struct{}
+	mu     sync.Mutex
+	client *http.Client
+	queue  chan Alert
+	closed bool
+	done   chan struct{}
 }
 
 // NewWebhookChannel constructs a WebhookChannel that posts to url with the

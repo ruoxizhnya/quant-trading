@@ -211,21 +211,21 @@ func TestIntegration_AlphaVantageAdapter_FetchGlobalOHLCV_HappyPath(t *testing.T
 			},
 			"Time Series (Daily)": map[string]map[string]string{
 				"2024-01-02": {
-					"1. open":             "150.00",
-					"2. high":             "152.00",
-					"3. low":              "149.00",
-					"4. close":            "151.00",
+					"1. open":            "150.00",
+					"2. high":            "152.00",
+					"3. low":             "149.00",
+					"4. close":           "151.00",
 					"5. adjusted close":  "151.00",
-					"6. volume":           "1000000",
+					"6. volume":          "1000000",
 					"7. dividend amount": "0.0000",
 				},
 				"2024-01-03": {
-					"1. open":             "151.00",
-					"2. high":             "153.00",
-					"3. low":              "150.00",
-					"4. close":            "152.50",
+					"1. open":            "151.00",
+					"2. high":            "153.00",
+					"3. low":             "150.00",
+					"4. close":           "152.50",
 					"5. adjusted close":  "152.50",
-					"6. volume":           "900000",
+					"6. volume":          "900000",
 					"7. dividend amount": "0.0000",
 				},
 			},
@@ -266,9 +266,9 @@ func TestIntegration_AlphaVantageAdapter_FetchGlobalOHLCV_EmptySeries(t *testing
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// AlphaVantage returns this when rate limited
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"Meta Data":              map[string]string{"1. Information": "Daily Time Series"},
-			"Time Series (Daily)":    map[string]map[string]string{},
-			"Note":                   "Thank you for using Alpha Vantage! Our standard API call frequency is 25 requests per day.",
+			"Meta Data":           map[string]string{"1. Information": "Daily Time Series"},
+			"Time Series (Daily)": map[string]map[string]string{},
+			"Note":                "Thank you for using Alpha Vantage! Our standard API call frequency is 25 requests per day.",
 		})
 	}))
 	defer srv.Close()
@@ -397,14 +397,14 @@ func TestIntegration_MootdxAdapter_FetchRealtime_HappyPath(t *testing.T) {
 	transport := &mockMootdxTransport{
 		quotes: []MootdxQuote{
 			{
-				Symbol:    "600519",
-				Price:     1800.0,
-				Open:      1790.0,
-				High:      1810.0,
-				Low:       1785.0,
-				LastClose: 1788.0,
-				Volume:    100000,
-				Amount:    180000000,
+				Symbol:     "600519",
+				Price:      1800.0,
+				Open:       1790.0,
+				High:       1810.0,
+				Low:        1785.0,
+				LastClose:  1788.0,
+				Volume:     100000,
+				Amount:     180000000,
 				ServerTime: time.Now(),
 			},
 		},
@@ -876,10 +876,10 @@ func TestIntegration_DeduplicateWithCount_DropsDuplicates(t *testing.T) {
 func TestIntegration_ValidatePoints_DropsInvalid(t *testing.T) {
 	now := time.Now().UTC()
 	points := []UnifiedDataPoint{
-		{Symbol: "", DataType: DataTypeGlobalOHLCV, TradeTime: now, Source: "x", Data: map[string]interface{}{"close": 1.0}},   // empty symbol
+		{Symbol: "", DataType: DataTypeGlobalOHLCV, TradeTime: now, Source: "x", Data: map[string]interface{}{"close": 1.0}},             // empty symbol
 		{Symbol: "AAPL", DataType: DataTypeGlobalOHLCV, TradeTime: time.Time{}, Source: "x", Data: map[string]interface{}{"close": 1.0}}, // zero time
-		{Symbol: "AAPL", DataType: DataTypeGlobalOHLCV, TradeTime: now, Source: "x", Data: nil}, // nil data
-		{Symbol: "AAPL", DataType: DataTypeGlobalOHLCV, TradeTime: now, Source: "x", Data: map[string]interface{}{"close": 1.0}}, // valid
+		{Symbol: "AAPL", DataType: DataTypeGlobalOHLCV, TradeTime: now, Source: "x", Data: nil},                                          // nil data
+		{Symbol: "AAPL", DataType: DataTypeGlobalOHLCV, TradeTime: now, Source: "x", Data: map[string]interface{}{"close": 1.0}},         // valid
 	}
 	out, skipped := ValidatePoints(points)
 	if len(out) != 1 {
@@ -1177,7 +1177,7 @@ func TestIntegration_SymbolToEastmoneySecid(t *testing.T) {
 		{"000001.SZ", "0.000001"},
 		{"600519", "1.600519"}, // bare SH
 		{"000001", "0.000001"}, // bare SZ
-		{"900001", "1.900001"},  // starts with 9 → SH
+		{"900001", "1.900001"}, // starts with 9 → SH
 	}
 	for _, c := range cases {
 		got, err := symbolToEastmoneySecid(c.symbol)
@@ -1222,8 +1222,8 @@ func TestIntegration_ParseEastmoneyCapitalFlowKLines(t *testing.T) {
 
 func TestIntegration_ParseEastmoneyCapitalFlowKLines_SkipsMalformed(t *testing.T) {
 	lines := []string{
-		"", // empty
-		"only,three,fields", // too few
+		"",                            // empty
+		"only,three,fields",           // too few
 		"not-a-date,100,1.23,5000000", // bad date
 		"2024-01-02,100.50,1.23,5000000,8000000,3000000,5.5,2000000,1500000,500000,1000000,800000,200000,500000,400000,100000,300000,250000,50000", // valid
 	}
@@ -1256,11 +1256,11 @@ func TestIntegration_KltToDays(t *testing.T) {
 		klt  int
 		want int
 	}{
-		{1, 1},   // daily
-		{5, 1},   // 5min
-		{101, 7}, // weekly
+		{1, 1},    // daily
+		{5, 1},    // 5min
+		{101, 7},  // weekly
 		{102, 30}, // monthly
-		{999, 1}, // unknown → 1
+		{999, 1},  // unknown → 1
 	}
 	for _, c := range cases {
 		got := kltToDays(c.klt)

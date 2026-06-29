@@ -22,7 +22,7 @@ import (
 // override them when pointing an EastmoneyNorthboundFetcher at an
 // httptest.Server via BaseURL.
 const (
-	defaultEastmoneyBaseURL  = "https://push2.eastmoney.com"
+	defaultEastmoneyBaseURL   = "https://push2.eastmoney.com"
 	defaultEastmoneyUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) quant-trading/1.0"
 	defaultRequestInterval    = 300 * time.Millisecond
 )
@@ -286,8 +286,8 @@ type eastmoneyStockFlowResponse struct {
 // we use toFloat64Safe / stringField to tolerate missing keys.
 type eastmoneyRankResponse struct {
 	Data struct {
-		Total int                       `json:"total"`
-		Diff  []map[string]interface{}   `json:"diff"`
+		Total int                      `json:"total"`
+		Diff  []map[string]interface{} `json:"diff"`
 	} `json:"data"`
 	RC int `json:"rc"`
 }
@@ -315,8 +315,9 @@ func findKamtRowByDate(klines []string, date time.Time) (string, bool) {
 // parseKamtRow turns a kamt.kline CSV row into a NorthboundFlow.
 //
 // Column order (1-indexed):
-//  1=date 2:sh_net 3:sz_net 4:sh_buy 5:sh_sell 6:sz_buy 7:sz_sell
-//  8:total_net 9:total_buy 10:total_sell
+//
+//	1=date 2:sh_net 3:sz_net 4:sh_buy 5:sh_sell 6:sz_buy 7:sz_sell
+//	8:total_net 9:total_buy 10:total_sell
 //
 // Eastmoney reports sh_net/sz_net/total_net in 亿元 (100M CNY) and the
 // buy/sell aggregates in 万元 (10K CNY); we preserve those units as
@@ -348,8 +349,9 @@ func parseKamtRow(line string) *NorthboundFlow {
 
 // parseStockFlowKLines turns the per-stock fflow klines into StockFlow
 // records. Column order:
-//  1:date 2:close 3:change_pct 4:main_net 5:main_buy 6:main_sell
-//  7:main_net_ratio ...
+//
+//	1:date 2:close 3:change_pct 4:main_net 5:main_buy 6:main_sell
+//	7:main_net_ratio ...
 //
 // We map main_net → NetBuy, main_buy → BuyAmount, main_sell → SellAmount,
 // and main_net_ratio → HoldingRatio (the latter is a loose mapping: the
@@ -367,10 +369,10 @@ func parseStockFlowKLines(klines []string, symbol, name string) []StockFlow {
 			continue
 		}
 		row := StockFlow{
-			Symbol:     symbol,
-			Name:       name,
-			Date:       date,
-			NetBuy:     parseFloatStr(parts[3]),
+			Symbol: symbol,
+			Name:   name,
+			Date:   date,
+			NetBuy: parseFloatStr(parts[3]),
 		}
 		if len(parts) > 4 {
 			row.BuyAmount = parseFloatStr(parts[4])

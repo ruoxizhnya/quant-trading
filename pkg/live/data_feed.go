@@ -9,7 +9,7 @@ import (
 
 // SimulatedDataFeed implements a simulated real-time data feed for testing
 type SimulatedDataFeed struct {
-	mu        sync.RWMutex
+	mu         sync.RWMutex
 	subscribed map[string]bool
 	quotes     map[string]Quote
 	callback   func(Quote)
@@ -143,7 +143,7 @@ func (df *SimulatedDataFeed) simulatePriceMovement(symbol string) Quote {
 	defer df.mu.Unlock()
 
 	quote := df.quotes[symbol]
-	
+
 	// Simulate small random price movement
 	change := (float64(time.Now().UnixNano()%100) - 50.0) / 1000.0
 	quote.Close = math.Max(0.01, quote.Close+change)

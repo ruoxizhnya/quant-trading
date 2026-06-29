@@ -13,16 +13,16 @@ import (
 
 // DiscoveryPipeline orchestrates the factor discovery process.
 type DiscoveryPipeline struct {
-	researchAgent  *agents.ResearchAgent
-	validateAgent  *agents.ValidateAgent
-	factorPool     *gene_pool.FactorPool
-	mutator        *gene_pool.Mutator
-	dataProvider   expression.DataProvider
+	researchAgent *agents.ResearchAgent
+	validateAgent *agents.ValidateAgent
+	factorPool    *gene_pool.FactorPool
+	mutator       *gene_pool.Mutator
+	dataProvider  expression.DataProvider
 }
 
 // DiscoveryConfig configures the discovery pipeline.
 type DiscoveryConfig struct {
-	Topics          []string
+	Topics             []string
 	MutationsPerFactor int
 	ValidationLevel    agents.ValidationLevel
 	MinIC              float64
@@ -31,12 +31,12 @@ type DiscoveryConfig struct {
 
 // DiscoveryResult holds the results of a discovery run.
 type DiscoveryResult struct {
-	Generated   int                    `json:"generated"`
-	Validated   int                    `json:"validated"`
-	Rejected    int                    `json:"rejected"`
-	TopFactors  []*gene_pool.FactorGene `json:"top_factors"`
-	Errors      []string               `json:"errors,omitempty"`
-	Duration    time.Duration          `json:"duration"`
+	Generated  int                     `json:"generated"`
+	Validated  int                     `json:"validated"`
+	Rejected   int                     `json:"rejected"`
+	TopFactors []*gene_pool.FactorGene `json:"top_factors"`
+	Errors     []string                `json:"errors,omitempty"`
+	Duration   time.Duration           `json:"duration"`
 }
 
 // NewDiscoveryPipeline creates a new discovery pipeline.

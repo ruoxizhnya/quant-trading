@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 )
 
 // Client is a generic HTTP client with timeout, retry, and structured logging.
@@ -29,8 +29,8 @@ func New(baseURL string, timeout time.Duration, maxRetries int) *Client {
 			Timeout: timeout,
 			Transport: &http.Transport{
 				MaxIdleConns:        100,
-				MaxIdleConnsPerHost:  10,
-				IdleConnTimeout:      90 * time.Second,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
 			},
 		},
 		logger:     logging.Logger,
@@ -118,7 +118,7 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 
 		c.logger.Debug().
 			Int("status", resp.StatusCode).
-			Int("body_size", len(body)).Str("body", string(body[:min(len(body),200)])).
+			Int("body_size", len(body)).Str("body", string(body[:min(len(body), 200)])).
 			Msg("HTTP response received")
 
 		// Retry on 5xx errors or rate limiting

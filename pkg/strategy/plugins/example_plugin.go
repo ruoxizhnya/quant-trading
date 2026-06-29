@@ -2,7 +2,8 @@
 // This file provides an example plugin strategy that can be compiled as a .so plugin.
 //
 // Build as plugin:
-//   go build -buildmode=plugin -o example_strategy.so ./example_plugin.go
+//
+//	go build -buildmode=plugin -o example_strategy.so ./example_plugin.go
 //
 // The plugin must export a symbol named "Strategy" that implements strategy.Strategy.
 package plugins
@@ -19,8 +20,8 @@ import (
 
 // ExampleConfig holds configuration for the example strategy.
 type ExampleConfig struct {
-	Period   int
-	TopN     int
+	Period        int
+	TopN          int
 	BuyThreshold  float64
 	SellThreshold float64
 }

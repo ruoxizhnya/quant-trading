@@ -123,17 +123,17 @@ func DefaultAlertThresholds() AlertThresholds {
 // StrategyState tracks a deployed strategy's rolling metrics. Fields
 // are mutated only under the owning StrategyMonitor's mutex.
 type StrategyState struct {
-	Name              string          `json:"name"`
-	Returns           []float64       `json:"returns"`
-	Equities          []float64       `json:"equities"`
-	LastUpdate        time.Time       `json:"last_update"`
-	RollingSharpe     float64         `json:"rolling_sharpe"`
-	RollingMaxDD      float64         `json:"rolling_max_dd"`
-	ConsecutiveLosses int             `json:"consecutive_losses"`
-	Wins              int             `json:"wins"`
-	TotalTrades       int             `json:"total_trades"`
+	Name              string         `json:"name"`
+	Returns           []float64      `json:"returns"`
+	Equities          []float64      `json:"equities"`
+	LastUpdate        time.Time      `json:"last_update"`
+	RollingSharpe     float64        `json:"rolling_sharpe"`
+	RollingMaxDD      float64        `json:"rolling_max_dd"`
+	ConsecutiveLosses int            `json:"consecutive_losses"`
+	Wins              int            `json:"wins"`
+	TotalTrades       int            `json:"total_trades"`
 	Status            StrategyStatus `json:"status"`
-	PeakEquity        float64         `json:"peak_equity"`
+	PeakEquity        float64        `json:"peak_equity"`
 }
 
 // StrategyAlert is the value type produced by CheckStatus.

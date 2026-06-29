@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 func TestATRStopLoss_Calculation(t *testing.T) {
@@ -112,7 +112,7 @@ func TestRiskManager_CalculatePosition_WithATR(t *testing.T) {
 		BaseMultiplier:      2.0,
 		BullMultiplier:      2.5,
 		BearMultiplier:      1.5,
-		SidewaysMultiplier: 2.0,
+		SidewaysMultiplier:  2.0,
 		TakeProfitMult:      3.0,
 		VolLookbackDays:     20,
 		AnnualizationFactor: 252,
@@ -128,9 +128,9 @@ func TestRiskManager_CalculatePosition_WithATR(t *testing.T) {
 
 	ctx := context.Background()
 	signal := domain.Signal{
-		Symbol:        "600000.SH",
-		Direction:     domain.DirectionLong,
-		Strength:      0.8,
+		Symbol:         "600000.SH",
+		Direction:      domain.DirectionLong,
+		Strength:       0.8,
 		CompositeScore: 0.7,
 	}
 	portfolio := &domain.Portfolio{
@@ -206,8 +206,8 @@ func generateTestOHLCV(days int, basePrice float64, volatility float64) []domain
 		change := (0.5 - randFloat()) * 2 * volatility * basePrice
 		currentPrice += change
 
-		high := currentPrice + (randFloat()*volatility*basePrice*0.5)
-		low := currentPrice - (randFloat()*volatility*basePrice*0.5)
+		high := currentPrice + (randFloat() * volatility * basePrice * 0.5)
+		low := currentPrice - (randFloat() * volatility * basePrice * 0.5)
 		open_ := low + randFloat()*(high-low)
 		volume := 1000000 + randFloat()*5000000
 

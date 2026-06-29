@@ -85,10 +85,10 @@ func DefaultReconciliationConfig() ReconciliationConfig {
 // compares the delta and fires a discrepancy when the delta exceeds
 // the configured tolerance.
 type PositionSnap struct {
-	Symbol      string  `json:"symbol"`        // 股票代码
-	Quantity    float64 `json:"quantity"`      // 持仓数量 (股)
-	AvgCost     float64 `json:"avg_cost"`      // 持仓成本 (元/股)
-	MarketValue float64 `json:"market_value"`  // 持仓市值 (元)
+	Symbol      string  `json:"symbol"`       // 股票代码
+	Quantity    float64 `json:"quantity"`     // 持仓数量 (股)
+	AvgCost     float64 `json:"avg_cost"`     // 持仓成本 (元/股)
+	MarketValue float64 `json:"market_value"` // 持仓市值 (元)
 }
 
 // CashSnap is the per-account cash balance. Some brokers split cash
@@ -125,12 +125,12 @@ func (f FeeSnap) Sum() float64 {
 // is the broker-side reconciliation document id (券商对账单编号) when
 // available.
 type AccountSnapshot struct {
-	AccountID        string                 `json:"account_id"`
-	ReconciliationID string                 `json:"reconciliation_id,omitempty"`
-	AsOf             time.Time              `json:"as_of"`
-	Cash             CashSnap               `json:"cash"`
+	AccountID        string                  `json:"account_id"`
+	ReconciliationID string                  `json:"reconciliation_id,omitempty"`
+	AsOf             time.Time               `json:"as_of"`
+	Cash             CashSnap                `json:"cash"`
 	Positions        map[string]PositionSnap `json:"positions"` // key = symbol
-	Fees             FeeSnap                `json:"fees"`
+	Fees             FeeSnap                 `json:"fees"`
 }
 
 // LocalSnapshot is the in-process trading system's view of the same
@@ -192,16 +192,16 @@ const (
 // snapshots. Multiple discrepancies can fire per reconciliation cycle
 // (e.g. cash off by 1.5 CNY AND 2 positions missing locally).
 type Discrepancy struct {
-	Kind       DiscrepancyKind    `json:"kind"`
+	Kind       DiscrepancyKind     `json:"kind"`
 	Severity   DiscrepancySeverity `json:"severity"`
-	Symbol     string             `json:"symbol,omitempty"` // for position-level
-	Field      string             `json:"field,omitempty"`  // for fee breakdown
-	LocalVal   float64            `json:"local_val"`
-	BrokerVal  float64            `json:"broker_val"`
-	Delta      float64            `json:"delta"`
-	Tolerance  float64            `json:"tolerance"`
-	Note       string             `json:"note,omitempty"`
-	DetectedAt time.Time          `json:"detected_at"`
+	Symbol     string              `json:"symbol,omitempty"` // for position-level
+	Field      string              `json:"field,omitempty"`  // for fee breakdown
+	LocalVal   float64             `json:"local_val"`
+	BrokerVal  float64             `json:"broker_val"`
+	Delta      float64             `json:"delta"`
+	Tolerance  float64             `json:"tolerance"`
+	Note       string              `json:"note,omitempty"`
+	DetectedAt time.Time           `json:"detected_at"`
 }
 
 // HasCritical reports whether any of the discrepancies is critical.
@@ -212,20 +212,20 @@ func (d Discrepancy) IsCritical() bool { return d.Severity == SeverityCritical }
 // `rec-YYYYMMDD-HHMM.json`. SchemaVersion is the contract identifier
 // — consumers (audit tools, regulator interfaces) pin to it.
 type ReconciliationReport struct {
-	SchemaVersion  string         `json:"schema_version"`
-	GeneratedAt    time.Time      `json:"generated_at"`
-	AccountID      string         `json:"account_id"`
-	LocalAsOf      time.Time      `json:"local_as_of"`
-	BrokerAsOf     time.Time      `json:"broker_as_of"`
-	BridgeReconcID string         `json:"bridge_reconc_id,omitempty"`
-	Local          LocalSnapshot  `json:"local"`
+	SchemaVersion  string          `json:"schema_version"`
+	GeneratedAt    time.Time       `json:"generated_at"`
+	AccountID      string          `json:"account_id"`
+	LocalAsOf      time.Time       `json:"local_as_of"`
+	BrokerAsOf     time.Time       `json:"broker_as_of"`
+	BridgeReconcID string          `json:"bridge_reconc_id,omitempty"`
+	Local          LocalSnapshot   `json:"local"`
 	Broker         AccountSnapshot `json:"broker"`
-	Discrepancies  []Discrepancy  `json:"discrepancies"`
-	CriticalCount  int            `json:"critical_count"`
-	WarningCount   int            `json:"warning_count"`
-	InfoCount      int            `json:"info_count"`
-	Healthy        bool           `json:"healthy"`
-	Note           string         `json:"note,omitempty"`
+	Discrepancies  []Discrepancy   `json:"discrepancies"`
+	CriticalCount  int             `json:"critical_count"`
+	WarningCount   int             `json:"warning_count"`
+	InfoCount      int             `json:"info_count"`
+	Healthy        bool            `json:"healthy"`
+	Note           string          `json:"note,omitempty"`
 }
 
 // ============================================================

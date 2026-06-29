@@ -27,13 +27,13 @@ func newTestStore(t *testing.T) *DiskStateStore {
 
 func sampleSnapshot(id string) BacktestStateSnapshot {
 	return BacktestStateSnapshot{
-		ID:        id,
-		Status:    "completed",
-		Params:    domain.BacktestParams{StrategyName: "momentum", InitialCapital: 100000},
-		Result:    &domain.BacktestResult{TotalReturn: 0.15, TotalTrades: 42},
-		StartedAt: time.Date(2026, 1, 1, 9, 30, 0, 0, time.UTC),
+		ID:          id,
+		Status:      "completed",
+		Params:      domain.BacktestParams{StrategyName: "momentum", InitialCapital: 100000},
+		Result:      &domain.BacktestResult{TotalReturn: 0.15, TotalTrades: 42},
+		StartedAt:   time.Date(2026, 1, 1, 9, 30, 0, 0, time.UTC),
 		CompletedAt: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC),
-		Frozen:    true,
+		Frozen:      true,
 	}
 }
 
@@ -89,7 +89,7 @@ func TestDiskStateStore_LoadedMatchesOriginal(t *testing.T) {
 	original.Result = &domain.BacktestResult{
 		TotalReturn:  0.2345,
 		AnnualReturn: 0.5678,
-		SharpeRatio: 1.89,
+		SharpeRatio:  1.89,
 		MaxDrawdown:  -0.12,
 		WinRate:      0.55,
 		TotalTrades:  100,

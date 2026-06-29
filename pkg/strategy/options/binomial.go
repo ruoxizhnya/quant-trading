@@ -175,7 +175,7 @@ func (b *Binomial) Greeks(spec OptionSpec, steps int) (Greeks, error) {
 	return Greeks{
 		Delta: delta,
 		Gamma: gamma,
-		Vega:  vegaRaw / 100, // per 1% vol
+		Vega:  vegaRaw / 100,  // per 1% vol
 		Theta: thetaRaw / 365, // per day
 		Rho:   rhoRaw / 100,   // per 1% rate
 	}, nil

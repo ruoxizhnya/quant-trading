@@ -125,10 +125,10 @@ func (h *SyncHandler) syncOHLCVHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusAccepted, gin.H{
-		"message":  "OHLCV sync job created",
-		"job_id":   job.ID,
-		"status":   job.Status,
-		"symbols":  len(req.Symbols),
+		"message": "OHLCV sync job created",
+		"job_id":  job.ID,
+		"status":  job.Status,
+		"symbols": len(req.Symbols),
 	})
 }
 

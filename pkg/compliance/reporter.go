@@ -54,8 +54,8 @@ type LargeTradeConfig struct {
 // before running the report.
 func DefaultLargeTradeConfig() LargeTradeConfig {
 	return LargeTradeConfig{
-		SingleThresholdCNY:     2_000_000,  // 200 万 CNY
-		CumulativeThresholdCNY: 5_000_000,  // 500 万 CNY
+		SingleThresholdCNY:     2_000_000, // 200 万 CNY
+		CumulativeThresholdCNY: 5_000_000, // 500 万 CNY
 		AccountWhitelist:       map[string]bool{},
 		OutputPath:             "compliance/reports",
 	}
@@ -66,17 +66,17 @@ func DefaultLargeTradeConfig() LargeTradeConfig {
 // JSON-serialised directly to the report file without further
 // transformation.
 type LargeTradeEntry struct {
-	TradeID    string    `json:"trade_id"`
-	OrderID    string    `json:"order_id"`
-	AccountID  string    `json:"account_id"`
-	Symbol     string    `json:"symbol"`
-	Direction  string    `json:"direction"`
-	Quantity   float64   `json:"quantity"`
-	Price      float64   `json:"price"`
-	AmountCNY  float64   `json:"amount_cny"`
-	TradeTime  time.Time `json:"trade_time"`
-	Flag       string    `json:"flag"`            // "single" / "cumulative" / "both"
-	Note       string    `json:"note,omitempty"`
+	TradeID   string    `json:"trade_id"`
+	OrderID   string    `json:"order_id"`
+	AccountID string    `json:"account_id"`
+	Symbol    string    `json:"symbol"`
+	Direction string    `json:"direction"`
+	Quantity  float64   `json:"quantity"`
+	Price     float64   `json:"price"`
+	AmountCNY float64   `json:"amount_cny"`
+	TradeTime time.Time `json:"trade_time"`
+	Flag      string    `json:"flag"` // "single" / "cumulative" / "both"
+	Note      string    `json:"note,omitempty"`
 }
 
 // AccountCumulative is the per-account cumulative block in the
@@ -95,16 +95,16 @@ type AccountCumulative struct {
 // contract identifier — consumers (regulator interfaces, audit
 // tools) pin to it. Bumping it is a breaking change.
 type LargeTradeReport struct {
-	SchemaVersion     string             `json:"schema_version"`
-	GeneratedAt       time.Time          `json:"generated_at"`
-	TradingDate       string             `json:"trading_date"` // YYYY-MM-DD
-	SingleThreshold   float64            `json:"single_threshold_cny"`
-	CumulativeThreshold float64          `json:"cumulative_threshold_cny"`
-	TotalTrades       int                `json:"total_trades"`
-	TotalAmountCNY    float64            `json:"total_amount_cny"`
-	LargeTrades       []LargeTradeEntry  `json:"large_trades"`
+	SchemaVersion       string              `json:"schema_version"`
+	GeneratedAt         time.Time           `json:"generated_at"`
+	TradingDate         string              `json:"trading_date"` // YYYY-MM-DD
+	SingleThreshold     float64             `json:"single_threshold_cny"`
+	CumulativeThreshold float64             `json:"cumulative_threshold_cny"`
+	TotalTrades         int                 `json:"total_trades"`
+	TotalAmountCNY      float64             `json:"total_amount_cny"`
+	LargeTrades         []LargeTradeEntry   `json:"large_trades"`
 	CumulativeByAccount []AccountCumulative `json:"cumulative_by_account"`
-	ExcludedAccounts  []string           `json:"excluded_accounts,omitempty"`
+	ExcludedAccounts    []string            `json:"excluded_accounts,omitempty"`
 }
 
 // LargeTraderReporter builds daily large-transaction reports.
@@ -263,8 +263,8 @@ func (r *LargeTraderReporter) BuildReport(trades []TradeRecord, day time.Time) *
 		large = append(large, LargeTradeEntry{
 			AccountID: acctID, Symbol: "(aggregate)", Direction: "(mixed)",
 			AmountCNY: total, TradeTime: cum.LastTradeAt,
-			Flag:  "cumulative",
-			Note:  fmt.Sprintf("账户当日累计 %.2f CNY (≥ %.0f) — 共 %d 笔, 无单笔大额", total, r.config.CumulativeThresholdCNY, cum.TradeCount),
+			Flag: "cumulative",
+			Note: fmt.Sprintf("账户当日累计 %.2f CNY (≥ %.0f) — 共 %d 笔, 无单笔大额", total, r.config.CumulativeThresholdCNY, cum.TradeCount),
 		})
 	}
 

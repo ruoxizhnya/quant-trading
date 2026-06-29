@@ -296,11 +296,11 @@ func TestCheck_ReasonOrder(t *testing.T) {
 	t.Cleanup(ResetRegistry)
 	p := SuitabilityProfile{
 		UserID:            "u",
-		AssetDailyAvgCNY:  10_000, // 资产不足
-		FirstTradeAt:      time.Now().AddDate(0, -6, 0), // 经验不足
-		RiskLevel:         RiskLevelConservative,        // 风险不足
+		AssetDailyAvgCNY:  10_000,                         // 资产不足
+		FirstTradeAt:      time.Now().AddDate(0, -6, 0),   // 经验不足
+		RiskLevel:         RiskLevelConservative,          // 风险不足
 		RiskTestExpiredAt: time.Now().Add(-1 * time.Hour), // 过期
-		BoardsEnabled:     []string{"star"}, // 白名单不含 chinext
+		BoardsEnabled:     []string{"star"},               // 白名单不含 chinext
 	}
 	res := p.Check(live.BoardChiNext, time.Now())
 	if res.Allowed {

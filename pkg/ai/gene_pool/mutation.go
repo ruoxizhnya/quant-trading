@@ -11,13 +11,13 @@ import (
 type MutationType string
 
 const (
-	MutationChangeWindow    MutationType = "change_window"
-	MutationChangeOperator  MutationType = "change_operator"
-	MutationAddOperator     MutationType = "add_operator"
-	MutationRemoveOperator  MutationType = "remove_operator"
-	MutationChangeField     MutationType = "change_field"
-	MutationWrapFunction    MutationType = "wrap_function"
-	MutationUnwrapFunction  MutationType = "unwrap_function"
+	MutationChangeWindow   MutationType = "change_window"
+	MutationChangeOperator MutationType = "change_operator"
+	MutationAddOperator    MutationType = "add_operator"
+	MutationRemoveOperator MutationType = "remove_operator"
+	MutationChangeField    MutationType = "change_field"
+	MutationWrapFunction   MutationType = "wrap_function"
+	MutationUnwrapFunction MutationType = "unwrap_function"
 )
 
 // Mutator performs mutations on factor formulas.

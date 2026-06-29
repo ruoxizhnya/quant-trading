@@ -261,8 +261,8 @@ func TestBuildScreenFundamentalsQuery(t *testing.T) {
 			PS_min: &psMin, PS_max: &psMax,
 			ROE_min: &roeMin, ROA_min: &roaMin,
 			DebtToEquity_max: &debtMax,
-			GrossMargin_min: &grossMin,
-			NetMargin_min:   &netMin,
+			GrossMargin_min:  &grossMin,
+			NetMargin_min:    &netMin,
 			MarketCap_min:    &mktCapMin,
 		}
 

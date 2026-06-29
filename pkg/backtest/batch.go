@@ -19,71 +19,71 @@ import (
 )
 
 type BatchTask struct {
-	ID          string            `json:"id"`
-	Strategy    string            `json:"strategy"`
-	StockPool   []string          `json:"stock_pool"`
-	StartDate   string            `json:"start_date"`
-	EndDate     string            `json:"end_date"`
-	Capital     float64           `json:"capital"`
-	RiskFreeRate float64          `json:"risk_free_rate"`
-	Params      map[string]any    `json:"params,omitempty"`
-	Tags        []string          `json:"tags,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	ID           string            `json:"id"`
+	Strategy     string            `json:"strategy"`
+	StockPool    []string          `json:"stock_pool"`
+	StartDate    string            `json:"start_date"`
+	EndDate      string            `json:"end_date"`
+	Capital      float64           `json:"capital"`
+	RiskFreeRate float64           `json:"risk_free_rate"`
+	Params       map[string]any    `json:"params,omitempty"`
+	Tags         []string          `json:"tags,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
 type BatchResult struct {
-	TaskID       string                `json:"task_id"`
-	Strategy     string                `json:"strategy"`
-	Status       string                `json:"status"`
-	Error        string                `json:"error,omitempty"`
-	DurationMs   int64                 `json:"duration_ms"`
-	Result       *domain.BacktestResult `json:"result,omitempty"`
-	WalkForward  *domain.WalkForwardReport `json:"walk_forward,omitempty"`
-	Score        *BatchScore           `json:"score,omitempty"`
+	TaskID      string                    `json:"task_id"`
+	Strategy    string                    `json:"strategy"`
+	Status      string                    `json:"status"`
+	Error       string                    `json:"error,omitempty"`
+	DurationMs  int64                     `json:"duration_ms"`
+	Result      *domain.BacktestResult    `json:"result,omitempty"`
+	WalkForward *domain.WalkForwardReport `json:"walk_forward,omitempty"`
+	Score       *BatchScore               `json:"score,omitempty"`
 }
 
 type BatchScore struct {
-	Grade           string  `json:"grade"`
-	OverfitScore    float64 `json:"overfit_score"`
-	StabilityScore  float64 `json:"stability_score"`
-	CompositeScore  float64 `json:"composite_score"`
-	Rank            int     `json:"rank"`
+	Grade          string  `json:"grade"`
+	OverfitScore   float64 `json:"overfit_score"`
+	StabilityScore float64 `json:"stability_score"`
+	CompositeScore float64 `json:"composite_score"`
+	Rank           int     `json:"rank"`
 }
 
 type BatchReport struct {
-	BatchID      string                  `json:"batch_id"`
-	CreatedAt    time.Time               `json:"created_at"`
-	CompletedAt time.Time               `json:"completed_at"`
-	Status       string                  `json:"status"`
-	TotalTasks   int                     `json:"total_tasks"`
-	Completed    int                     `json:"completed"`
-	Failed       int                     `json:"failed"`
-	DurationMs   int64                   `json:"duration_ms"`
-	Results      []*BatchResult         `json:"results"`
-	Summary      *BatchSummary          `json:"summary"`
+	BatchID     string         `json:"batch_id"`
+	CreatedAt   time.Time      `json:"created_at"`
+	CompletedAt time.Time      `json:"completed_at"`
+	Status      string         `json:"status"`
+	TotalTasks  int            `json:"total_tasks"`
+	Completed   int            `json:"completed"`
+	Failed      int            `json:"failed"`
+	DurationMs  int64          `json:"duration_ms"`
+	Results     []*BatchResult `json:"results"`
+	Summary     *BatchSummary  `json:"summary"`
 }
 
 type BatchSummary struct {
-	TotalTasks       int             `json:"total_tasks"`
-	SuccessCount     int             `json:"success_count"`
-	FailCount        int             `json:"fail_count"`
-	AvgSharpe        float64         `json:"avg_sharpe"`
-	AvgReturn        float64         `json:"avg_annual_return"`
-	AvgMaxDD         float64         `json:"avg_max_drawdown"`
-	AvgWinRate       float64         `json:"avg_win_rate"`
-	AvgOverfitScore  float64         `json:"avg_overfit_score"`
+	TotalTasks        int            `json:"total_tasks"`
+	SuccessCount      int            `json:"success_count"`
+	FailCount         int            `json:"fail_count"`
+	AvgSharpe         float64        `json:"avg_sharpe"`
+	AvgReturn         float64        `json:"avg_annual_return"`
+	AvgMaxDD          float64        `json:"avg_max_drawdown"`
+	AvgWinRate        float64        `json:"avg_win_rate"`
+	AvgOverfitScore   float64        `json:"avg_overfit_score"`
 	AvgStabilityScore float64        `json:"avg_stability_score"`
 	GradeDistribution map[string]int `json:"grade_distribution"`
-	BestTaskID       string          `json:"best_task_id"`
-	WorstTaskID      string          `json:"worst_task_id"`
+	BestTaskID        string         `json:"best_task_id"`
+	WorstTaskID       string         `json:"worst_task_id"`
 }
 
 type BatchConfig struct {
-	Concurrency int `json:"concurrency"`
+	Concurrency int  `json:"concurrency"`
 	RunWF       bool `json:"run_walk_forward"`
-	WFTrainDays int `json:"wf_train_days"`
-	WFTestDays  int `json:"wf_test_days"`
-	WFStepDays  int `json:"wf_step_days"`
+	WFTrainDays int  `json:"wf_train_days"`
+	WFTestDays  int  `json:"wf_test_days"`
+	WFStepDays  int  `json:"wf_step_days"`
 }
 
 func DefaultBatchConfig() BatchConfig {
@@ -113,11 +113,11 @@ func NewBatchEngine(engine *Engine, wfEng *WalkForwardEngine, config BatchConfig
 		config.Concurrency = 4
 	}
 	return &BatchEngine{
-		engine: engine,
-		wfEng:  wfEng,
-		config: config,
-		logger: logger.With().Str("component", "batch_engine").Logger(),
-		scorer: NewScorer(),
+		engine:  engine,
+		wfEng:   wfEng,
+		config:  config,
+		logger:  logger.With().Str("component", "batch_engine").Logger(),
+		scorer:  NewScorer(),
 		reports: make(map[string]*BatchReport),
 	}
 }
@@ -157,11 +157,11 @@ func (b *BatchEngine) Run(ctx context.Context, tasks []BatchTask) (*BatchReport,
 		Msg("Starting batch backtest")
 
 	report := &BatchReport{
-		BatchID:   batchID,
-		CreatedAt: startTime,
-		Status:    "running",
+		BatchID:    batchID,
+		CreatedAt:  startTime,
+		Status:     "running",
 		TotalTasks: len(tasks),
-		Results:   make([]*BatchResult, len(tasks)),
+		Results:    make([]*BatchResult, len(tasks)),
 	}
 
 	sem := make(chan struct{}, b.config.Concurrency)
@@ -418,7 +418,7 @@ func toBacktestResult(r *BacktestResponse) *domain.BacktestResult {
 		startedAt, _ = time.Parse(time.RFC3339, r.StartedAt)
 	}
 	return &domain.BacktestResult{
-		StartDate:        startedAt,
+		StartDate:       startedAt,
 		EndDate:         completedAt,
 		TotalReturn:     r.TotalReturn,
 		AnnualReturn:    r.AnnualReturn,
@@ -489,12 +489,12 @@ func ParseBatchCSV(path string) ([]BatchTask, error) {
 		riskFree := parseFloat(get("risk_free_rate"), 0.03)
 
 		task := BatchTask{
-			ID:          fmt.Sprintf("task_%d_%s", rowIdx+1, strategy),
-			Strategy:    strategy,
-			StockPool:   stockPool,
-			StartDate:   startDate,
-			EndDate:     endDate,
-			Capital:     capital,
+			ID:           fmt.Sprintf("task_%d_%s", rowIdx+1, strategy),
+			Strategy:     strategy,
+			StockPool:    stockPool,
+			StartDate:    startDate,
+			EndDate:      endDate,
+			Capital:      capital,
 			RiskFreeRate: riskFree,
 		}
 
@@ -603,12 +603,12 @@ func GenerateTaskMatrix(strategies []string, stockPools [][]string, dateRanges [
 			for _, dr := range dateRanges {
 				taskIdx++
 				tasks = append(tasks, BatchTask{
-					ID:         fmt.Sprintf("matrix_%d_%s", taskIdx, strat),
-					Strategy:   strat,
-					StockPool:  pool,
-					StartDate:  dr[0],
-					EndDate:    dr[1],
-					Capital:    1000000.0,
+					ID:           fmt.Sprintf("matrix_%d_%s", taskIdx, strat),
+					Strategy:     strat,
+					StockPool:    pool,
+					StartDate:    dr[0],
+					EndDate:      dr[1],
+					Capital:      1000000.0,
 					RiskFreeRate: 0.03,
 				})
 			}

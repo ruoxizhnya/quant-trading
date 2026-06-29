@@ -12,11 +12,11 @@ import (
 
 // MeanReversionConfig holds configuration for the Bollinger + RSI mean reversion strategy.
 type MeanReversionConfig struct {
-	BollingerPeriod  int     // Bollinger Bands SMA period (default 20)
-	BollingerStdDev  float64 // Number of standard deviations (default 2.0)
-	RSIPeriod         int     // RSI calculation period (default 14)
-	RSIOversold       float64 // RSI oversold threshold (default 30)
-	RSIOverbought     float64 // RSI overbought threshold (default 70)
+	BollingerPeriod int     // Bollinger Bands SMA period (default 20)
+	BollingerStdDev float64 // Number of standard deviations (default 2.0)
+	RSIPeriod       int     // RSI calculation period (default 14)
+	RSIOversold     float64 // RSI oversold threshold (default 30)
+	RSIOverbought   float64 // RSI overbought threshold (default 70)
 }
 
 // meanReversionStrategy implements a mean reversion strategy using
@@ -41,43 +41,43 @@ func (s *meanReversionStrategy) Parameters() []strategy.Parameter {
 	return []strategy.Parameter{
 		{
 			Name:        "bollinger_period",
-			Type:       "int",
+			Type:        "int",
 			Default:     20,
 			Description: "Bollinger Bands SMA period in days",
-			Min:        5,
-			Max:        100,
+			Min:         5,
+			Max:         100,
 		},
 		{
 			Name:        "bollinger_stddev",
-			Type:       "float",
+			Type:        "float",
 			Default:     2.0,
 			Description: "Number of standard deviations for Bollinger Bands",
-			Min:        0.5,
-			Max:        4.0,
+			Min:         0.5,
+			Max:         4.0,
 		},
 		{
 			Name:        "rsi_period",
-			Type:       "int",
+			Type:        "int",
 			Default:     14,
 			Description: "RSI calculation period in days",
-			Min:        2,
-			Max:        50,
+			Min:         2,
+			Max:         50,
 		},
 		{
 			Name:        "rsi_oversold",
-			Type:       "float",
+			Type:        "float",
 			Default:     30,
 			Description: "RSI oversold threshold (buy when RSI below this)",
-			Min:        5,
-			Max:        50,
+			Min:         5,
+			Max:         50,
 		},
 		{
 			Name:        "rsi_overbought",
-			Type:       "float",
+			Type:        "float",
 			Default:     70,
 			Description: "RSI overbought threshold (sell when RSI above this)",
-			Min:        50,
-			Max:        95,
+			Min:         50,
+			Max:         95,
 		},
 	}
 }
@@ -328,11 +328,11 @@ func init() {
 	s := &meanReversionStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("mean_reversion", "Bollinger Bands + RSI mean reversion"),
 		params: MeanReversionConfig{
-			BollingerPeriod:  20,
-			BollingerStdDev:  2.0,
-			RSIPeriod:         14,
-			RSIOversold:       30,
-			RSIOverbought:     70,
+			BollingerPeriod: 20,
+			BollingerStdDev: 2.0,
+			RSIPeriod:       14,
+			RSIOversold:     30,
+			RSIOverbought:   70,
 		},
 	}
 	strategy.GlobalRegister(s)

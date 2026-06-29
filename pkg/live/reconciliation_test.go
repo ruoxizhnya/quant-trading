@@ -464,7 +464,7 @@ func TestReconcile_MultipleDiscrepancies(t *testing.T) {
 	broker := AccountSnapshot{
 		AccountID: "ACC-1",
 		AsOf:      now,
-		Cash:      CashSnap{TotalCNY: 999_900.00},   // 100 CNY off
+		Cash:      CashSnap{TotalCNY: 999_900.00}, // 100 CNY off
 		Positions: map[string]PositionSnap{
 			"000001.SZ": {Symbol: "000001.SZ", Quantity: 998, MarketValue: 9980}, // 2 off
 		},
@@ -733,12 +733,12 @@ func TestReconcileWorker_Disabled(t *testing.T) {
 func TestReconcileWorker_StartRunsPeriodically(t *testing.T) {
 	now := time.Date(2026, 6, 13, 10, 0, 0, 0, time.UTC)
 	cfg := ReconciliationConfig{
-		Interval:     20 * time.Millisecond,
+		Interval:      20 * time.Millisecond,
 		CashTolerance: 0.01,
-		ReportPath:   t.TempDir(),
-		HistoryLimit: 10,
-		Enabled:      true,
-		Now:          func() time.Time { return now },
+		ReportPath:    t.TempDir(),
+		HistoryLimit:  10,
+		Enabled:       true,
+		Now:           func() time.Time { return now },
 	}
 	broker := &reconStubBroker{
 		snap: AccountSnapshot{
@@ -839,11 +839,11 @@ func TestFSReportPersister_PersistAndRead(t *testing.T) {
 		t.Fatalf("NewFSReportPersister: %v", err)
 	}
 	rep := ReconciliationReport{
-		SchemaVersion:  "rec-1.0",
-		GeneratedAt:    time.Date(2026, 6, 13, 10, 15, 0, 0, time.UTC),
-		AccountID:      "ACC-1",
-		Discrepancies:  []Discrepancy{},
-		Healthy:        true,
+		SchemaVersion: "rec-1.0",
+		GeneratedAt:   time.Date(2026, 6, 13, 10, 15, 0, 0, time.UTC),
+		AccountID:     "ACC-1",
+		Discrepancies: []Discrepancy{},
+		Healthy:       true,
 	}
 	if err := p.PersistReport(context.Background(), rep); err != nil {
 		t.Fatalf("PersistReport: %v", err)
@@ -944,8 +944,8 @@ func TestSeverityForMV(t *testing.T) {
 		rel, tol float64
 		want     DiscrepancySeverity
 	}{
-		{0.003, 0.005, SeverityInfo},    // < tol
-		{0.015, 0.005, SeverityWarning}, // 3x tol
+		{0.003, 0.005, SeverityInfo},     // < tol
+		{0.015, 0.005, SeverityWarning},  // 3x tol
 		{0.030, 0.005, SeverityCritical}, // 6x tol
 	}
 	for _, c := range cases {

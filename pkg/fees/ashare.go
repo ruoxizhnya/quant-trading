@@ -7,31 +7,32 @@
 //
 // 设计
 // ----
-// 1. **单一来源** — `pkg/backtest/constants.go` 早就定义了
-//    DefaultCommissionRate / DefaultStampTaxRate /
-//    DefaultTransferFeeRate / DefaultMinCommission /
-//    DefaultSlippageRate，但定义位置（pkg/backtest）暗示
-//    "仅回测用"。`pkg/fees` 把这些常量提升到独立包，向
-//    `pkg/backtest/constants.go` 反向 re-export（同名 const
-//    链）以保 backward-compat。
 //
-// 2. **Config 结构体 + ApplyDefaults** — 实盘 / 回测 / 测试
-//    经常要局部覆盖某项费率。Config 把 5 个费率聚合，零值
-//    字段自动 fallback 到 Default*。这样：
+//  1. **单一来源** — `pkg/backtest/constants.go` 早就定义了
+//     DefaultCommissionRate / DefaultStampTaxRate /
+//     DefaultTransferFeeRate / DefaultMinCommission /
+//     DefaultSlippageRate，但定义位置（pkg/backtest）暗示
+//     "仅回测用"。`pkg/fees` 把这些常量提升到独立包，向
+//     `pkg/backtest/constants.go` 反向 re-export（同名 const
+//     链）以保 backward-compat。
 //
-//      cfg := fees.AShareFees{} // 全用默认值
-//      cfg.ApplyDefaults()
-//      cfg.CommissionRate = 0.0001 // 测试只覆盖这一项
+//  2. **Config 结构体 + ApplyDefaults** — 实盘 / 回测 / 测试
+//     经常要局部覆盖某项费率。Config 把 5 个费率聚合，零值
+//     字段自动 fallback 到 Default*。这样：
 //
-// 3. **Fail-closed 校验** — Rates 必须 > 0 且 < 1，否则费率
-//    解释不通（0 = 免佣；1 = 100%）。Validate() 用于实盘下单
-//    前的 sanity check。
+//     cfg := fees.AShareFees{} // 全用默认值
+//     cfg.ApplyDefaults()
+//     cfg.CommissionRate = 0.0001 // 测试只覆盖这一项
+//
+//  3. **Fail-closed 校验** — Rates 必须 > 0 且 < 1，否则费率
+//     解释不通（0 = 免佣；1 = 100%）。Validate() 用于实盘下单
+//     前的 sanity check。
 //
 // 4. **不变性** — 常量值按 2024-01 上交所/深交所公告：
-//    * 佣金：双边 0.03% 最低 5 元（券商可打折到 0.01%）
-//    * 印花税：仅卖出 0.1%（2023-08 起减半）
-//    * 过户费：双边 0.001%
-//    * 滑点：默认假设 0.01%，无监管上限
+//   - 佣金：双边 0.03% 最低 5 元（券商可打折到 0.01%）
+//   - 印花税：仅卖出 0.1%（2023-08 起减半）
+//   - 过户费：双边 0.001%
+//   - 滑点：默认假设 0.01%，无监管上限
 package fees
 
 import "fmt"

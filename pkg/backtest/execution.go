@@ -14,10 +14,10 @@ import (
 type ExecutionService interface {
 	// ExecuteOrder processes an order and returns the resulting trade
 	ExecuteOrder(order domain.Order, quote Quote) (domain.Trade, error)
-	
+
 	// GetSlippageModel returns the current slippage model name
 	GetSlippageModel() string
-	
+
 	// SetSlippageModel sets the slippage model
 	SetSlippageModel(model string)
 }
@@ -55,7 +55,7 @@ func (s *BacktestExecutionService) ExecuteOrder(order domain.Order, quote Quote)
 
 	// Determine execution price based on order type and direction
 	var executionPrice float64
-	
+
 	switch order.OrderType {
 	case domain.OrderTypeMarket:
 		executionPrice = s.applySlippage(quote.Close, order.Direction, quote)

@@ -25,7 +25,7 @@ func TestSplitMarketSymbol(t *testing.T) {
 	}{
 		{"600519.SH", 1, "600519", false},
 		{"000001.SZ", 0, "000001", false},
-		{"AAPL", 0, "AAPL", false},   // leading 'A' → SZ heuristic
+		{"AAPL", 0, "AAPL", false},     // leading 'A' → SZ heuristic
 		{"688017", 1, "688017", false}, // starts with 6 → SH
 		{"300476", 0, "300476", false}, // starts with 3 → SZ
 		{"", 0, "", true},
@@ -97,18 +97,18 @@ func TestMootdxAdapter_Realtime(t *testing.T) {
 	transport := &fakeMootdxTransport{
 		quotes: []MootdxQuote{
 			{
-				Symbol:    "600519",
-				Price:     1500.0,
-				Open:      1495.0,
-				High:      1510.0,
-				Low:       1490.0,
-				LastClose: 1490.0,
-				Volume:    10000,
-				Amount:    1.5e7,
-				Bid1:      1499.5,
-				Bid1Vol:   100,
-				Ask1:      1500.5,
-				Ask1Vol:   200,
+				Symbol:     "600519",
+				Price:      1500.0,
+				Open:       1495.0,
+				High:       1510.0,
+				Low:        1490.0,
+				LastClose:  1490.0,
+				Volume:     10000,
+				Amount:     1.5e7,
+				Bid1:       1499.5,
+				Bid1Vol:    100,
+				Ask1:       1500.5,
+				Ask1Vol:    200,
 				ServerTime: time.Now(),
 			},
 		},
@@ -332,8 +332,8 @@ func TestEastmoneyAdapter_CapitalFlow_LmtScalesWithWindow(t *testing.T) {
 		capturedLmt = r.URL.Query().Get("lmt")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"data":   map[string]interface{}{"code": "1.600519", "name": "贵州茅台"},
-			"rc":     0,
+			"data": map[string]interface{}{"code": "1.600519", "name": "贵州茅台"},
+			"rc":   0,
 		})
 	}))
 	defer server.Close()
@@ -582,7 +582,7 @@ func TestBuildStockSectorItems(t *testing.T) {
 
 	t.Run("non-string in both name and code drops the row", func(t *testing.T) {
 		industry := map[string]interface{}{
-			"f100": 999, // wrong type — no usable name
+			"f100": 999,   // wrong type — no usable name
 			"f102": 12345, // wrong type — no usable code
 		}
 		items := buildStockSectorItems("600519.SH", industry)
@@ -652,13 +652,13 @@ func (e *retryableErr) Error() string { return e.msg }
 func (e *retryableErr) Unwrap() error { return ErrUpstreamUnavailable }
 func wrapRetryable(s string) error    { return &retryableErr{msg: s} }
 
-func (a *testAdapter) Name() string                              { return a.name }
-func (a *testAdapter) Type() AdapterType                         { return AdapterTypeHTTP }
-func (a *testAdapter) Enabled() bool                             { return true }
-func (a *testAdapter) SupportedTypes() []string                  { return a.supported }
-func (a *testAdapter) Schema(_ string) (DataSchema, error)       { return DataSchema{}, nil }
-func (a *testAdapter) HealthCheck(_ context.Context) error       { return nil }
-func (a *testAdapter) RateLimit() RateLimitConfig                { return RateLimitConfig{} }
+func (a *testAdapter) Name() string                        { return a.name }
+func (a *testAdapter) Type() AdapterType                   { return AdapterTypeHTTP }
+func (a *testAdapter) Enabled() bool                       { return true }
+func (a *testAdapter) SupportedTypes() []string            { return a.supported }
+func (a *testAdapter) Schema(_ string) (DataSchema, error) { return DataSchema{}, nil }
+func (a *testAdapter) HealthCheck(_ context.Context) error { return nil }
+func (a *testAdapter) RateLimit() RateLimitConfig          { return RateLimitConfig{} }
 func (a *testAdapter) Fetch(_ context.Context, _ FetchRequest) (*FetchResponse, error) {
 	if a.fetchErr != nil {
 		return nil, a.fetchErr

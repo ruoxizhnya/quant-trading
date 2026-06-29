@@ -7,21 +7,21 @@
 // 与日涨跌幅 ±10% 并存, 是"申报"环节的前置校验, 而非撮合规则。
 //
 // 本模块实现"4 套" 规则:
-//   1. 沪深主板 (MainBoardSH/SZ): 日涨跌幅 ±10% + 申报价格笼子 ±2%
-//   2. 创业板 (ChiNext): 日涨跌幅 ±20%, 无 2% 笼子
-//   3. 科创板 (STAR): 日涨跌幅 ±20%, 无 2% 笼子
-//   4. 北交所 (BSE): 日涨跌幅 ±30%, 无 2% 笼子
+//  1. 沪深主板 (MainBoardSH/SZ): 日涨跌幅 ±10% + 申报价格笼子 ±2%
+//  2. 创业板 (ChiNext): 日涨跌幅 ±20%, 无 2% 笼子
+//  3. 科创板 (STAR): 日涨跌幅 ±20%, 无 2% 笼子
+//  4. 北交所 (BSE): 日涨跌幅 ±30%, 无 2% 笼子
 //
 // CageRule 算法 (以沪/深主板 买入为例):
-//   1. limit_up = prev_close × (1 + daily_limit)        // 涨停价
-//   2. limit_down = prev_close × (1 - daily_limit)      // 跌停价
-//   3. 若 order_price == limit_up 或 order_price == limit_down,
-//      允许 (笼子规则不适用)
-//   4. 否则:
-//      a. ref = best_ask (有最优卖价时) 或 best_bid (有最优买价时) 或
-//         last_price (无对价时)
-//      b. order_price 必须满足: ref × (1 - 2%) ≤ order_price ≤ ref × (1 + 2%)
-//   5. 同时任何方向都必须满足: limit_down ≤ order_price ≤ limit_up
+//  1. limit_up = prev_close × (1 + daily_limit)        // 涨停价
+//  2. limit_down = prev_close × (1 - daily_limit)      // 跌停价
+//  3. 若 order_price == limit_up 或 order_price == limit_down,
+//     允许 (笼子规则不适用)
+//  4. 否则:
+//     a. ref = best_ask (有最优卖价时) 或 best_bid (有最优买价时) 或
+//     last_price (无对价时)
+//     b. order_price 必须满足: ref × (1 - 2%) ≤ order_price ≤ ref × (1 + 2%)
+//  5. 同时任何方向都必须满足: limit_down ≤ order_price ≤ limit_up
 //
 // 卖出则对称: 卖单价必须 ≥ best_bid × (1 - 2%) 且 ≤ best_ask × (1 + 2%)。
 //
@@ -42,17 +42,17 @@ import (
 // carries the structured reason + computed bounds so callers can map
 // the rejection to a user-friendly explanation.
 type PriceCageError struct {
-	Symbol      string  `json:"symbol"`
-	Board       Board   `json:"board"`
-	Direction   string  `json:"direction"`
-	OrderPrice  float64 `json:"order_price"`
-	PrevClose   float64 `json:"prev_close"`
-	LimitUp     float64 `json:"limit_up"`
-	LimitDown   float64 `json:"limit_down"`
-	Reference   float64 `json:"reference"`
-	CageFloor   float64 `json:"cage_floor,omitempty"`
-	CageCeil    float64 `json:"cage_ceil,omitempty"`
-	Reason      string  `json:"reason"`
+	Symbol     string  `json:"symbol"`
+	Board      Board   `json:"board"`
+	Direction  string  `json:"direction"`
+	OrderPrice float64 `json:"order_price"`
+	PrevClose  float64 `json:"prev_close"`
+	LimitUp    float64 `json:"limit_up"`
+	LimitDown  float64 `json:"limit_down"`
+	Reference  float64 `json:"reference"`
+	CageFloor  float64 `json:"cage_floor,omitempty"`
+	CageCeil   float64 `json:"cage_ceil,omitempty"`
+	Reason     string  `json:"reason"`
 }
 
 // Error implements the error interface.
@@ -87,9 +87,9 @@ func (e *PriceCageError) Is(target error) bool {
 // cage bounds. At least one of BestBid / BestAsk / Last must be positive;
 // the validator picks the appropriate one based on the order direction.
 type ReferencePrice struct {
-	BestBid float64
-	BestAsk float64
-	Last    float64
+	BestBid   float64
+	BestAsk   float64
+	Last      float64
 	PrevClose float64
 }
 
@@ -162,9 +162,9 @@ func (v *CageValidator) Validate(order *domain.Order, ref ReferencePrice) error 
 	}
 	if !ref.HasMinimum() {
 		return &PriceCageError{
-			Symbol:    order.Symbol,
+			Symbol:     order.Symbol,
 			OrderPrice: order.LimitPrice,
-			Reason:    "missing_reference",
+			Reason:     "missing_reference",
 		}
 	}
 

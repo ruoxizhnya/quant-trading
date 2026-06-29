@@ -58,7 +58,7 @@ func (s *stockStateStubTrader) GetPositions(_ context.Context) ([]PositionInfo, 
 func (s *stockStateStubTrader) GetAccount(_ context.Context) (*AccountInfo, error) {
 	return &AccountInfo{Cash: 1_000_000}, nil
 }
-func (s *stockStateStubTrader) Name() string { return "stub_trader" }
+func (s *stockStateStubTrader) Name() string                        { return "stub_trader" }
 func (s *stockStateStubTrader) HealthCheck(_ context.Context) error { return nil }
 func (s *stockStateStubTrader) EmergencyFlatten(_ context.Context, reason string) (*EmergencyFlattenResult, error) {
 	s.mu.Lock()
@@ -70,10 +70,10 @@ func (s *stockStateStubTrader) EmergencyFlatten(_ context.Context, reason string
 		return nil, err
 	}
 	return &EmergencyFlattenResult{
-		Sold:         sold,
-		Reason:       reason,
-		StartedAt:    time.Now(),
-		CompletedAt:  time.Now(),
+		Sold:        sold,
+		Reason:      reason,
+		StartedAt:   time.Now(),
+		CompletedAt: time.Now(),
 	}, nil
 }
 
@@ -128,7 +128,7 @@ func TestIsLegalTransition(t *testing.T) {
 		{StockStateListed, StockStateDelisted, true}, // 重大违法 jump-to-delisted
 		{StockStateListed, StockStateListed, false},
 		// Suspended → *
-		{StockStateSuspended, StockStateListed, true},  // 复牌
+		{StockStateSuspended, StockStateListed, true}, // 复牌
 		{StockStateSuspended, StockStateDelisting, true},
 		{StockStateSuspended, StockStateSuspended, false},
 		// Delisting → *
@@ -315,10 +315,10 @@ func TestDelete(t *testing.T) {
 func TestIsInDelistingWindow(t *testing.T) {
 	now := time.Date(2026, 7, 18, 9, 30, 0, 0, time.UTC)
 	cases := []struct {
-		name  string
-		rec   *StockStateRecord
-		win   time.Duration
-		want  bool
+		name string
+		rec  *StockStateRecord
+		win  time.Duration
+		want bool
 	}{
 		{
 			name: "inside window (2 days before delisted_date, window=5d)",

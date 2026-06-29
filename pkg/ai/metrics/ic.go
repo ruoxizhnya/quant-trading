@@ -16,12 +16,12 @@ func NewICCalculator() *ICCalculator {
 
 // ICResult holds the result of IC calculation.
 type ICResult struct {
-	IC          float64   `json:"ic"`
-	RankIC      float64   `json:"rank_ic"`
-	ICMean      float64   `json:"ic_mean"`
-	ICStd       float64   `json:"ic_std"`
-	IR          float64   `json:"ir"`
-	ICWinRate   float64   `json:"ic_win_rate"`
+	IC           float64   `json:"ic"`
+	RankIC       float64   `json:"rank_ic"`
+	ICMean       float64   `json:"ic_mean"`
+	ICStd        float64   `json:"ic_std"`
+	IR           float64   `json:"ir"`
+	ICWinRate    float64   `json:"ic_win_rate"`
 	ICTimeseries []float64 `json:"ic_timeseries"`
 }
 

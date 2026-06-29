@@ -239,11 +239,11 @@ func TestMaskSensitiveValue_LongAlphanumericToken(t *testing.T) {
 
 func TestMaskMap_MasksSensitiveKeys(t *testing.T) {
 	m := map[string]any{
-		"api_key":   "sk-abcdefghijklmnopqrstuvwxyz1234567890",
-		"password":  "secret123",
-		"token":     "tok-abcdefghijklmnopqrstuvwxyz1234567890",
-		"user":      "alice",
-		"count":     42,
+		"api_key":  "sk-abcdefghijklmnopqrstuvwxyz1234567890",
+		"password": "secret123",
+		"token":    "tok-abcdefghijklmnopqrstuvwxyz1234567890",
+		"user":     "alice",
+		"count":    42,
 	}
 	got := MaskMap(m)
 	if got["api_key"].(string) == "sk-abcdefghijklmnopqrstuvwxyz1234567890" {
@@ -262,9 +262,9 @@ func TestMaskMap_MasksSensitiveKeys(t *testing.T) {
 
 func TestMaskMap_CaseInsensitiveKeys(t *testing.T) {
 	m := map[string]any{
-		"API_KEY":   "sk-abcdefghijklmnopqrstuvwxyz1234567890",
-		"ApiKey":    "sk-abcdefghijklmnopqrstuvwxyz1234567890",
-		"api_key":   "sk-abcdefghijklmnopqrstuvwxyz1234567890",
+		"API_KEY": "sk-abcdefghijklmnopqrstuvwxyz1234567890",
+		"ApiKey":  "sk-abcdefghijklmnopqrstuvwxyz1234567890",
+		"api_key": "sk-abcdefghijklmnopqrstuvwxyz1234567890",
 	}
 	got := MaskMap(m)
 	for _, k := range []string{"API_KEY", "ApiKey", "api_key"} {

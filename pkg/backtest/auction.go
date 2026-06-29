@@ -17,19 +17,19 @@
 //     竞价阶段的成交"。
 //   - 本模块提供两套 API:
 //     ① Session + SessionAt: 给定一个 time.Time, 判定它属于哪个交易
-//        时段, 决定信号的撮合窗口 (open / continuous / close).
+//     时段, 决定信号的撮合窗口 (open / continuous / close).
 //     ② CallAuctionMatcher.Match: 给定一组买卖单, 按"最大成交量 +
-//        最小成交价"原则计算理论成交价和成交量, 用于回放假设场景
-//        (e.g. T-1 收盘后模型预测的 open price vs 实际 open).
+//     最小成交价"原则计算理论成交价和成交量, 用于回放假设场景
+//     (e.g. T-1 收盘后模型预测的 open price vs 实际 open).
 //
 // 算法 (上交所/深交所通用):
-//   1. 按价格档位 (price tick) 排序, 维护:
-//      - cumBuy(p)  = Σ buy.qty for buy with limit_price >= p
-//      - cumSell(p) = Σ sell.qty for sell with limit_price <= p
-//      - matched(p) = min(cumBuy(p), cumSell(p))
-//   2. clearing_price = argmax_p matched(p)
-//   3. 若多个价格匹配量相同, 取最接近 prev_close 的 (主板规则: 中间价).
-//   4. 在 clearing_price 上的剩余单边按"时间优先 + 等量按比例"分配。
+//  1. 按价格档位 (price tick) 排序, 维护:
+//     - cumBuy(p)  = Σ buy.qty for buy with limit_price >= p
+//     - cumSell(p) = Σ sell.qty for sell with limit_price <= p
+//     - matched(p) = min(cumBuy(p), cumSell(p))
+//  2. clearing_price = argmax_p matched(p)
+//  3. 若多个价格匹配量相同, 取最接近 prev_close 的 (主板规则: 中间价).
+//  4. 在 clearing_price 上的剩余单边按"时间优先 + 等量按比例"分配。
 //
 // 注意: 这是"理论撮合器"而非实盘撮合 — 实盘没有逐档 LOB 数据可用。
 // Backtest 假设的盘口快照是: prev_close (anchor) + 当日 open/close 区间。
@@ -122,11 +122,11 @@ func SessionWindow(s TradingSession) (startMin, endMin int) {
 	case SessionMorningContinuous:
 		return 9*60 + 30, 11*60 + 30
 	case SessionLunch:
-		return 11*60 + 30, 13*60
+		return 11*60 + 30, 13 * 60
 	case SessionAfternoonContinuous:
-		return 13*60, 14*60 + 57
+		return 13 * 60, 14*60 + 57
 	case SessionClosingCall:
-		return 14*60 + 57, 15*60
+		return 14*60 + 57, 15 * 60
 	case SessionClosed:
 		return 0, 0
 	}
@@ -248,7 +248,7 @@ func (m *CallAuctionMatcher) Match(buys, sells []CallAuctionOrder) ClearingResul
 
 	// For each candidate, compute matchable volume.
 	type pv struct {
-		price    float64
+		price     float64
 		matchable float64
 	}
 	scored := make([]pv, 0, len(candidates))

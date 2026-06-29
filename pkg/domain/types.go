@@ -218,17 +218,17 @@ type RiskMetrics struct {
 //   - Trailing Buy:  HWM 上升且 (HWM - TrailOffset) 触发后转市价单
 //   - Trailing Sell: HWM 上升且 (HWM - TrailOffset) 触发后转市价单 (回撤到位止损)
 type Order struct {
-	ID            string    `json:"id"`
-	Symbol        string    `json:"symbol"`
-	Direction     Direction `json:"direction"` // long or short
-	OrderType     OrderType `json:"order_type"`
-	Quantity      float64   `json:"quantity"`
-	LimitPrice    float64   `json:"limit_price"` // 0 for market orders
+	ID         string    `json:"id"`
+	Symbol     string    `json:"symbol"`
+	Direction  Direction `json:"direction"` // long or short
+	OrderType  OrderType `json:"order_type"`
+	Quantity   float64   `json:"quantity"`
+	LimitPrice float64   `json:"limit_price"` // 0 for market orders
 	// P1-3 扩展字段
-	StopPrice     float64 `json:"stop_price,omitempty"`      // 触发价
-	TrailAmount   float64 `json:"trail_amount,omitempty"`    // 跟踪绝对偏移
-	TrailPercent  float64 `json:"trail_percent,omitempty"`   // 跟踪百分比偏移
-	HighWaterMark float64 `json:"high_water_mark,omitempty"` // 跟踪止损 HWM (内部维护)
+	StopPrice     float64   `json:"stop_price,omitempty"`      // 触发价
+	TrailAmount   float64   `json:"trail_amount,omitempty"`    // 跟踪绝对偏移
+	TrailPercent  float64   `json:"trail_percent,omitempty"`   // 跟踪百分比偏移
+	HighWaterMark float64   `json:"high_water_mark,omitempty"` // 跟踪止损 HWM (内部维护)
 	Timestamp     time.Time `json:"timestamp"`
 	FilledQty     float64   `json:"filled_qty"`
 	FillPrice     float64   `json:"fill_price"`

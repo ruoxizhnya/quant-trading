@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 )
 
 type mockJobStore struct {
@@ -359,11 +359,11 @@ func TestJobService_SaveSyncResult(t *testing.T) {
 	svc, store := newTestJobService(t)
 
 	resp := &BacktestResponse{
-		ID:         "sync-1",
-		Strategy:   "momentum",
-		StockPool:  []string{"600000.SH", "600001.SH"},
-		StartDate:  "2020-01-01",
-		EndDate:    "2023-12-31",
+		ID:          "sync-1",
+		Strategy:    "momentum",
+		StockPool:   []string{"600000.SH", "600001.SH"},
+		StartDate:   "2020-01-01",
+		EndDate:     "2023-12-31",
 		TotalReturn: 0.15,
 	}
 

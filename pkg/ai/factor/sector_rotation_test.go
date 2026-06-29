@@ -77,8 +77,8 @@ func TestIsSectorRowValid(t *testing.T) {
 	}{
 		{SectorRow{SectorCode: "BK", TradeTime: now, ChangePct: 0.01}, true},
 		{SectorRow{SectorName: "NameOnly", TradeTime: now, ChangePct: 0.01}, true},
-		{SectorRow{TradeTime: now, ChangePct: 0.01}, false},                  // no code or name
-		{SectorRow{SectorCode: "BK", ChangePct: 0.01}, false},                // no time
+		{SectorRow{TradeTime: now, ChangePct: 0.01}, false},   // no code or name
+		{SectorRow{SectorCode: "BK", ChangePct: 0.01}, false}, // no time
 		{SectorRow{SectorCode: "BK", TradeTime: now, ChangePct: math.NaN()}, false},
 	}
 	for i, c := range cases {
@@ -114,8 +114,8 @@ func TestSectorRowsFromPoints_FilterByDataType(t *testing.T) {
 func TestSectorRotationFactor_NaNInfTolerance(t *testing.T) {
 	tradeDate := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
 	rows := []SectorRow{
-		{SectorCode: "BK0001", TradeTime: tradeDate, ChangePct: 0.05},   // valid
-		{SectorCode: "BK0002", TradeTime: tradeDate, ChangePct: math.NaN()}, // must not poison output
+		{SectorCode: "BK0001", TradeTime: tradeDate, ChangePct: 0.05},        // valid
+		{SectorCode: "BK0002", TradeTime: tradeDate, ChangePct: math.NaN()},  // must not poison output
 		{SectorCode: "BK0003", TradeTime: tradeDate, ChangePct: math.Inf(1)}, // must not poison output
 		{SectorCode: "BK0004", TradeTime: tradeDate, ChangePct: math.Inf(-1)},
 	}

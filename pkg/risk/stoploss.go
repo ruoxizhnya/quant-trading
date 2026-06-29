@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/errors"
-	"github.com/rs/zerolog"
 )
 
 // StopLossChecker handles dynamic stop loss calculations using ATR.
@@ -222,7 +222,7 @@ func (slc *StopLossChecker) CheckStopLoss(ctx context.Context, positions []domai
 				Reason:   "price dropped below stop loss level",
 			}
 			events = append(events, event)
-			
+
 			slc.logger.Info().
 				Str("symbol", pos.Symbol).
 				Float64("trigger_price", stopLossPrice).
@@ -240,7 +240,7 @@ func (slc *StopLossChecker) CheckStopLoss(ctx context.Context, positions []domai
 				Reason:   "price reached take profit level",
 			}
 			events = append(events, event)
-			
+
 			slc.logger.Info().
 				Str("symbol", pos.Symbol).
 				Float64("trigger_price", takeProfitPrice).
@@ -308,7 +308,7 @@ func (slc *StopLossChecker) inferTrend(pos domain.Position, currentPrice float64
 	// If current price is significantly above entry, likely bull
 	// If below, likely bear
 	pnlPercent := (currentPrice - pos.AvgCost) / pos.AvgCost
-	
+
 	if pnlPercent > 0.05 {
 		return "bull"
 	} else if pnlPercent < -0.05 {
@@ -322,9 +322,9 @@ func (slc *StopLossChecker) inferVolatility(pos domain.Position, atr float64) st
 	if pos.AvgCost <= 0 || atr <= 0 {
 		return "medium"
 	}
-	
+
 	atrPercent := atr / pos.AvgCost
-	
+
 	if atrPercent > 0.03 {
 		return "high"
 	} else if atrPercent < 0.015 {
@@ -336,7 +336,7 @@ func (slc *StopLossChecker) inferVolatility(pos domain.Position, atr float64) st
 // ATRFromOHLCV calculates ATR values for multiple symbols from OHLCV data.
 func (slc *StopLossChecker) ATRFromOHLCV(ohlcvData map[string][]domain.OHLCV) (map[string]float64, error) {
 	atrData := make(map[string]float64)
-	
+
 	for symbol, ohlcv := range ohlcvData {
 		atr, err := slc.CalculateATR(ohlcv)
 		if err != nil {
@@ -345,7 +345,7 @@ func (slc *StopLossChecker) ATRFromOHLCV(ohlcvData map[string][]domain.OHLCV) (m
 		}
 		atrData[symbol] = atr
 	}
-	
+
 	return atrData, nil
 }
 

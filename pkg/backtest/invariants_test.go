@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 // ------------------------------------------------------------------------------
@@ -31,37 +31,37 @@ func loadGoldenFixture(t *testing.T, filename string) *GoldenFixture {
 
 // GoldenFixture mirrors the on-disk fixture structure.
 type GoldenFixture struct {
-	Metadata      FixtureMetadata             `json:"metadata"`
-	Expected     *ExpectedOutput             `json:"expected_output,omitempty"`
-	Signals      []FixtureSignal             `json:"signals,omitempty"`
-	OHLCV        []FixtureOHLCV             `json:"ohlcv"`
+	Metadata FixtureMetadata `json:"metadata"`
+	Expected *ExpectedOutput `json:"expected_output,omitempty"`
+	Signals  []FixtureSignal `json:"signals,omitempty"`
+	OHLCV    []FixtureOHLCV  `json:"ohlcv"`
 }
 
 type FixtureMetadata struct {
-	Name              string            `json:"name"`
-	InitialCapital    float64           `json:"initial_capital"`
-	CommissionRate    float64           `json:"commission_rate"`
-	SlippageRate      float64           `json:"slippage_rate"`
-	Symbols           []string          `json:"symbols"`
-	TradingDays       int               `json:"trading_days"`
-	StartDate         string            `json:"start_date"`
-	EndDate           string            `json:"end_date"`
-	LimitUpEvents     map[string]string `json:"limit_up_events"`
-	LimitDownEvents   map[string]string `json:"limit_down_events"`
-	T1EdgeCaseNote    string            `json:"t1_edge_case_note"`
+	Name            string            `json:"name"`
+	InitialCapital  float64           `json:"initial_capital"`
+	CommissionRate  float64           `json:"commission_rate"`
+	SlippageRate    float64           `json:"slippage_rate"`
+	Symbols         []string          `json:"symbols"`
+	TradingDays     int               `json:"trading_days"`
+	StartDate       string            `json:"start_date"`
+	EndDate         string            `json:"end_date"`
+	LimitUpEvents   map[string]string `json:"limit_up_events"`
+	LimitDownEvents map[string]string `json:"limit_down_events"`
+	T1EdgeCaseNote  string            `json:"t1_edge_case_note"`
 }
 
 type ExpectedOutput struct {
-	TotalReturn   float64 `json:"total_return"`
-	Sharpe        float64 `json:"sharpe"`
-	MaxDrawdown   float64 `json:"max_drawdown"`
-	WinRate       float64 `json:"win_rate"`
-	AnnualReturn  float64 `json:"annual_return"`
-	SortinoRatio  float64 `json:"sortino_ratio"`
-	CalmarRatio   float64 `json:"calmar_ratio"`
-	TotalTrades   int     `json:"total_trades"`
-	WinTrades     int     `json:"win_trades"`
-	LoseTrades    int     `json:"lose_trades"`
+	TotalReturn  float64 `json:"total_return"`
+	Sharpe       float64 `json:"sharpe"`
+	MaxDrawdown  float64 `json:"max_drawdown"`
+	WinRate      float64 `json:"win_rate"`
+	AnnualReturn float64 `json:"annual_return"`
+	SortinoRatio float64 `json:"sortino_ratio"`
+	CalmarRatio  float64 `json:"calmar_ratio"`
+	TotalTrades  int     `json:"total_trades"`
+	WinTrades    int     `json:"win_trades"`
+	LoseTrades   int     `json:"lose_trades"`
 }
 
 type FixtureSignal struct {

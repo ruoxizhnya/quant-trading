@@ -5,19 +5,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
-	"github.com/rs/zerolog"
 )
 
 func TestRiskManager_NewRiskManager(t *testing.T) {
 	logger := zerolog.Nop()
 	cfg := RiskManagerConfig{
-		TargetVolatility:    0.15,
-		MaxPositionWeight:   0.10,
-		MinPositionWeight:   0.01,
-		ATRPeriod:           14,
+		TargetVolatility:   0.15,
+		MaxPositionWeight:  0.10,
+		MinPositionWeight:  0.01,
+		ATRPeriod:          14,
 		BaseMultiplier:     2.0,
 		BullMultiplier:     2.5,
 		BearMultiplier:     1.5,
@@ -38,9 +38,9 @@ func TestRiskManager_CalculatePosition_Basic(t *testing.T) {
 		TargetVolatility:  0.15,
 		MaxPositionWeight: 0.10,
 		ATRPeriod:         14,
-		BaseMultiplier:   2.0,
-		TakeProfitMult:   3.0,
-		VolLookbackDays:  60,
+		BaseMultiplier:    2.0,
+		TakeProfitMult:    3.0,
+		VolLookbackDays:   60,
 	}
 	rm, _ := NewRiskManager(cfg, logger)
 
@@ -75,8 +75,8 @@ func TestRiskManager_CalculatePosition_InsufficientData(t *testing.T) {
 		TargetVolatility:  0.15,
 		MaxPositionWeight: 0.10,
 		MinPositionWeight: 0.01,
-		ATRPeriod:        14,
-		VolLookbackDays:  60,
+		ATRPeriod:         14,
+		VolLookbackDays:   60,
 	}
 	rm, _ := NewRiskManager(cfg, logger)
 
@@ -214,9 +214,9 @@ func TestRiskManager_CalculatePositionsBatch_Basic(t *testing.T) {
 		TargetVolatility:  0.15,
 		MaxPositionWeight: 0.10,
 		ATRPeriod:         14,
-		BaseMultiplier:   2.0,
-		TakeProfitMult:   3.0,
-		VolLookbackDays:  60,
+		BaseMultiplier:    2.0,
+		TakeProfitMult:    3.0,
+		VolLookbackDays:   60,
 	}
 	rm, _ := NewRiskManager(cfg, logger)
 
@@ -228,7 +228,7 @@ func TestRiskManager_CalculatePositionsBatch_Basic(t *testing.T) {
 
 	prices := map[string]float64{
 		"600000.SH": 12.5,
-		"000001.SZ":  15.0,
+		"000001.SZ": 15.0,
 		"600519.SH": 1800.0,
 	}
 
@@ -279,9 +279,9 @@ func TestRiskManager_CalculatePositionsBatch_ConsistencyWithSingle(t *testing.T)
 		TargetVolatility:  0.15,
 		MaxPositionWeight: 0.10,
 		ATRPeriod:         14,
-		BaseMultiplier:   2.0,
-		TakeProfitMult:   3.0,
-		VolLookbackDays:  60,
+		BaseMultiplier:    2.0,
+		TakeProfitMult:    3.0,
+		VolLookbackDays:   60,
 	}
 	rm, _ := NewRiskManager(cfg, logger)
 
@@ -440,8 +440,8 @@ func TestRiskManager_PositionSize_RiskAdjustment(t *testing.T) {
 	regime := &domain.MarketRegime{Trend: "bull"}
 
 	tests := []struct {
-		name         string
-		volatility   float64
+		name          string
+		volatility    float64
 		expectSmaller bool
 	}{
 		{"low volatility", 0.01, false},

@@ -8,22 +8,22 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 // mockProvider implements Provider for testing
 type mockProvider struct {
-	name           string
+	name            string
 	connectivityErr error
-	ohlcvData      map[string][]domain.OHLCV
-	fundamentals   map[string]map[time.Time]*domain.Fundamental
-	stocks         []domain.Stock
-	prices         map[string]float64
-	indexConst     map[string][]string
-	tradingDays    []time.Time
-	stockMap       map[string]domain.Stock
+	ohlcvData       map[string][]domain.OHLCV
+	fundamentals    map[string]map[time.Time]*domain.Fundamental
+	stocks          []domain.Stock
+	prices          map[string]float64
+	indexConst      map[string][]string
+	tradingDays     []time.Time
+	stockMap        map[string]domain.Stock
 }
 
 func newMockProvider(name string) *mockProvider {

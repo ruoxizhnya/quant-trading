@@ -140,20 +140,20 @@ func main() {
 	// stop-loss checks happen in-process (zero HTTP latency). The
 	// same instance is also exposed over HTTP via RiskHandler.
 	riskCfg := risk.RiskManagerConfig{
-		TargetVolatility:     v.GetFloat64("risk_manager.target_volatility"),
-		MaxPositionWeight:    v.GetFloat64("risk_manager.max_position_weight"),
-		MinPositionWeight:    v.GetFloat64("risk_manager.min_position_weight"),
-		ATRPeriod:            v.GetInt("risk_manager.stoploss.atr_period"),
-		BaseMultiplier:       v.GetFloat64("risk_manager.stoploss.base_multiplier"),
-		BullMultiplier:       v.GetFloat64("risk_manager.stoploss.bull_multiplier"),
-		BearMultiplier:       v.GetFloat64("risk_manager.stoploss.bear_multiplier"),
-		SidewaysMultiplier:   v.GetFloat64("risk_manager.stoploss.sideways_multiplier"),
-		TakeProfitMult:       v.GetFloat64("risk_manager.take_profit.atr_multiplier"),
-		VolLookbackDays:      v.GetInt("risk_manager.volatility.lookback_days"),
-		AnnualizationFactor:  v.GetFloat64("risk_manager.volatility.annualization_factor"),
-		FastMAPeriod:         v.GetInt("risk_manager.regime.fast_ma_period"),
-		SlowMAPeriod:         v.GetInt("risk_manager.regime.slow_ma_period"),
-		RegimeVolLookback:    v.GetInt("risk_manager.regime.vol_lookback"),
+		TargetVolatility:    v.GetFloat64("risk_manager.target_volatility"),
+		MaxPositionWeight:   v.GetFloat64("risk_manager.max_position_weight"),
+		MinPositionWeight:   v.GetFloat64("risk_manager.min_position_weight"),
+		ATRPeriod:           v.GetInt("risk_manager.stoploss.atr_period"),
+		BaseMultiplier:      v.GetFloat64("risk_manager.stoploss.base_multiplier"),
+		BullMultiplier:      v.GetFloat64("risk_manager.stoploss.bull_multiplier"),
+		BearMultiplier:      v.GetFloat64("risk_manager.stoploss.bear_multiplier"),
+		SidewaysMultiplier:  v.GetFloat64("risk_manager.stoploss.sideways_multiplier"),
+		TakeProfitMult:      v.GetFloat64("risk_manager.take_profit.atr_multiplier"),
+		VolLookbackDays:     v.GetInt("risk_manager.volatility.lookback_days"),
+		AnnualizationFactor: v.GetFloat64("risk_manager.volatility.annualization_factor"),
+		FastMAPeriod:        v.GetInt("risk_manager.regime.fast_ma_period"),
+		SlowMAPeriod:        v.GetInt("risk_manager.regime.slow_ma_period"),
+		RegimeVolLookback:   v.GetInt("risk_manager.regime.vol_lookback"),
 	}
 	riskManager, err := risk.NewRiskManager(riskCfg, logger)
 	if err != nil {

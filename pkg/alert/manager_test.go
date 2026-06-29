@@ -166,15 +166,15 @@ func TestDetector_OrderFailureRate_OnlyCountsWindow(t *testing.T) {
 func TestDetector_RiskMetricBreaches_Fires(t *testing.T) {
 	snap := makeSnapshot(100_000)
 	snap.RiskMetrics = map[string]float64{
-		"sharpe":     0.5,
-		"var_99":     0.12,
-		"max_dd":     0.08,
-		"leverage":   2.5,
-		"untracked":  99.0, // not in thresholds
+		"sharpe":    0.5,
+		"var_99":    0.12,
+		"max_dd":    0.08,
+		"leverage":  2.5,
+		"untracked": 99.0, // not in thresholds
 	}
 	cfg := AlertManagerConfig{
 		RiskMetricThresholds: map[string]float64{
-			"sharpe":   0.3, // current > limit (sharpe higher is good, but rule is generic)
+			"sharpe":   0.3,  // current > limit (sharpe higher is good, but rule is generic)
 			"var_99":   0.05, // breach
 			"max_dd":   0.20, // no breach
 			"leverage": 2.0,  // breach

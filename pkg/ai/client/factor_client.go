@@ -27,10 +27,10 @@ func NewFactorClient(baseURL string) *FactorClient {
 
 // ComputeFactorRequest represents a factor computation request
 type ComputeFactorRequest struct {
-	Formula string   `json:"formula"`
-	Symbols []string `json:"symbols"`
-	StartDate string `json:"start_date"`
-	EndDate   string `json:"end_date"`
+	Formula   string   `json:"formula"`
+	Symbols   []string `json:"symbols"`
+	StartDate string   `json:"start_date"`
+	EndDate   string   `json:"end_date"`
 }
 
 // ComputeFactorResponse represents a factor computation response

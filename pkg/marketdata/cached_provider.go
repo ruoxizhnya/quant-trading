@@ -9,9 +9,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 type CacheConfig struct {

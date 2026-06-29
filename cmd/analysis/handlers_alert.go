@@ -24,14 +24,14 @@ type alertHistoryResponse struct {
 // the loop is alive (recorder.Len > 0 over time) and to watch
 // per-rule rates via webhook delivery logs.
 type alertStatsResponse struct {
-	Enabled         bool            `json:"enabled"`
-	ChannelCount    int             `json:"channel_count"`
-	RecorderLen     int             `json:"recorder_len"`
-	RecorderEvicted uint64          `json:"recorder_evicted"`
-	HistoryLen      int             `json:"history_len"`
-	HistoryLimit    int             `json:"history_limit"`
-	ByRule          map[string]int  `json:"by_rule"`
-	BySeverity      map[string]int  `json:"by_severity"`
+	Enabled         bool           `json:"enabled"`
+	ChannelCount    int            `json:"channel_count"`
+	RecorderLen     int            `json:"recorder_len"`
+	RecorderEvicted uint64         `json:"recorder_evicted"`
+	HistoryLen      int            `json:"history_len"`
+	HistoryLimit    int            `json:"history_limit"`
+	ByRule          map[string]int `json:"by_rule"`
+	BySeverity      map[string]int `json:"by_severity"`
 }
 
 // alertsRecentHandler returns the most recent N alerts from the

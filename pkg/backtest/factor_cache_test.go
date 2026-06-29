@@ -28,9 +28,9 @@ import (
 
 // fakeFactorStore — 测试用 FactorStore stub。
 type fakeFactorStore struct {
-	mu       sync.Mutex
-	entries  map[domain.FactorType][]*domain.FactorCacheEntry
-	failOn   domain.FactorType
+	mu      sync.Mutex
+	entries map[domain.FactorType][]*domain.FactorCacheEntry
+	failOn  domain.FactorType
 }
 
 func newFakeFactorStore() *fakeFactorStore {

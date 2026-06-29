@@ -255,19 +255,19 @@ func (e *LiveEngine) handleQuote(quote Quote) {
 //
 //   - Market:   fill at Ask (buy) / Bid (sell) immediately.
 //   - Limit:    fill only when the market crosses the limit price.
-//                  Buy  → Ask <= LimitPrice
-//                  Sell → Bid >= LimitPrice
-//               (crossing the spread, conservative for the taker side.)
+//     Buy  → Ask <= LimitPrice
+//     Sell → Bid >= LimitPrice
+//     (crossing the spread, conservative for the taker side.)
 //   - Stop:     a stop order. Once the market touches the stop price, it
-//               becomes a market order and fills at the next available
-//               price. StopBuy triggers on Ask >= StopPrice, StopSell on
-//               Bid <= StopPrice.
+//     becomes a market order and fills at the next available
+//     price. StopBuy triggers on Ask >= StopPrice, StopSell on
+//     Bid <= StopPrice.
 //   - Trailing: a trailing stop. We track a high water mark (HWM) per
-//               pending order. The trigger price is HWM - TrailOffset.
-//                  Buy  triggers when Ask <= trigger
-//                  Sell triggers when Bid <= trigger
-//               Only meaningful for Sell/Close direction in practice but
-//               the engine supports both for symmetry.
+//     pending order. The trigger price is HWM - TrailOffset.
+//     Buy  triggers when Ask <= trigger
+//     Sell triggers when Bid <= trigger
+//     Only meaningful for Sell/Close direction in practice but
+//     the engine supports both for symmetry.
 //
 // The function updates the in-memory order (HWM for trailing orders,
 // status transition) via the OrderManager and emits the onTrade callback

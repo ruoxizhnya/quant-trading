@@ -7,17 +7,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 type DataAdapter struct {
-	bus       *EventBus
-	primary   Provider
-	fallback  Provider
-	logger    zerolog.Logger
+	bus      *EventBus
+	primary  Provider
+	fallback Provider
+	logger   zerolog.Logger
 
-	switchMu   sync.RWMutex
+	switchMu    sync.RWMutex
 	currentName string
 
 	stopCh   chan struct{}
@@ -61,8 +61,8 @@ func (a *DataAdapter) SetPrimary(name string, p Provider) error {
 	a.switchMu.Unlock()
 
 	a.bus.Publish(DataEvent{
-		Type:   EventTypeSourceSwitch,
-		Source: name,
+		Type:    EventTypeSourceSwitch,
+		Source:  name,
 		Payload: map[string]string{"old": oldPrimary.Name(), "new": name},
 	})
 

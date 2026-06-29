@@ -43,13 +43,13 @@ import (
 // Top10Stocks is the list of the day's top-10 traded names; it may be
 // empty when the upstream endpoint does not return a breakdown.
 type NorthboundFlow struct {
-	Date          time.Time   `json:"date"`
-	TotalNetBuy   float64    `json:"total_net_buy"`
-	SHConnectNetBuy float64  `json:"sh_connect_net_buy"`
-	SZConnectNetBuy float64  `json:"sz_connect_net_buy"`
-	TotalBuy      float64    `json:"total_buy"`
-	TotalSell     float64    `json:"total_sell"`
-	Top10Stocks   []StockFlow `json:"top10_stocks"`
+	Date            time.Time   `json:"date"`
+	TotalNetBuy     float64     `json:"total_net_buy"`
+	SHConnectNetBuy float64     `json:"sh_connect_net_buy"`
+	SZConnectNetBuy float64     `json:"sz_connect_net_buy"`
+	TotalBuy        float64     `json:"total_buy"`
+	TotalSell       float64     `json:"total_sell"`
+	Top10Stocks     []StockFlow `json:"top10_stocks"`
 }
 
 // StockFlow captures the northbound flow for a single stock on a single
@@ -96,7 +96,7 @@ type NorthboundFetcher interface {
 // single stock on a single day.
 //
 //   - +1 (StrongInflow):  net buy > +2σ AND holding ratio increasing.
-//   -  0 (Neutral):        neither inflow nor outflow threshold met.
+//   - 0 (Neutral):        neither inflow nor outflow threshold met.
 //   - -1 (StrongOutflow): net buy < -2σ AND holding ratio decreasing.
 //
 // The 2σ band is the conventional "smart money" filter used by retail
@@ -105,7 +105,7 @@ type NorthboundFetcher interface {
 type FlowSignal int
 
 const (
-	FlowSignalNeutral     FlowSignal = 0
+	FlowSignalNeutral       FlowSignal = 0
 	FlowSignalStrongInflow  FlowSignal = 1
 	FlowSignalStrongOutflow FlowSignal = -1
 )

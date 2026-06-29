@@ -93,12 +93,12 @@ func TestClassifySymbol_ETF(t *testing.T) {
 
 func TestClassifySymbol_UnknownOrMalformed(t *testing.T) {
 	cases := []string{
-		"",                  // empty
-		"600000",            // no exchange
-		"600000.XX",         // bad exchange
-		"abcdef.SZ",         // non-digit code
-		"60.SH",             // too short
-		"0000300.SZ",        // 7 digits but still valid format → expect ChiNext
+		"",           // empty
+		"600000",     // no exchange
+		"600000.XX",  // bad exchange
+		"abcdef.SZ",  // non-digit code
+		"60.SH",      // too short
+		"0000300.SZ", // 7 digits but still valid format → expect ChiNext
 	}
 	expected := []Board{
 		BoardUnknown,

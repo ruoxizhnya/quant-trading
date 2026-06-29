@@ -73,13 +73,13 @@ func TestNewDivestmentChecker_Defaults(t *testing.T) {
 func TestSetRule_Override(t *testing.T) {
 	c := NewDivestmentChecker(nil)
 	custom := &DivestmentRule{
-		HolderType:           HolderTypeMajor5Pct,
-		AuctionWindowDays:    60,
-		AuctionWindowCapPct:  0.5,
-		BlockWindowDays:      60,
-		BlockWindowCapPct:    1.0,
-		AgreementMinPct:      3.0,
-		Source:               "test-override",
+		HolderType:          HolderTypeMajor5Pct,
+		AuctionWindowDays:   60,
+		AuctionWindowCapPct: 0.5,
+		BlockWindowDays:     60,
+		BlockWindowCapPct:   1.0,
+		AgreementMinPct:     3.0,
+		Source:              "test-override",
 	}
 	if err := c.SetRule(HolderTypeMajor5Pct, custom); err != nil {
 		t.Fatalf("set: %v", err)
@@ -169,7 +169,7 @@ func TestLockupPeriod_Overlaps(t *testing.T) {
 		EndAt:   time.Date(2024, 6, 30, 0, 0, 0, 0, time.UTC),
 	}
 	cases := []struct {
-		name string
+		name  string
 		other LockupPeriod
 		want  bool
 	}{
@@ -479,8 +479,8 @@ func TestCheck_WindowCap_OutOfRangeNoAccumulates(t *testing.T) {
 	p := defaultProfile(HolderTypeControlling, 10, 10_000_000)
 	recent := []Reduction{{
 		Symbol: "000001.SZ", Method: MethodAuction, Quantity: 5_000_000, // 5% (远超 1% cap)
-		At:     now.AddDate(0, 0, -100),                                  // 100 天前
-		Price:  10,
+		At:    now.AddDate(0, 0, -100), // 100 天前
+		Price: 10,
 	}}
 	plan := ReductionPlan{Symbol: "000001.SZ", Method: MethodAuction, Quantity: 500_000, At: now}
 	res := c.Check(p, plan, recent)
@@ -595,7 +595,7 @@ func TestSetRule_ConcurrentWithCheck(t *testing.T) {
 				_ = c.SetRule(HolderTypeMajor5Pct, &DivestmentRule{
 					HolderType:          HolderTypeMajor5Pct,
 					AuctionWindowDays:   90,
-					AuctionWindowCapPct: float64(i%5 + 1) * 0.1,
+					AuctionWindowCapPct: float64(i%5+1) * 0.1,
 					BlockWindowDays:     90,
 					BlockWindowCapPct:   2.0,
 					Source:              fmt.Sprintf("test-%d-%d", i, j),

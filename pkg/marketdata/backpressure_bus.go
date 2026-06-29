@@ -49,11 +49,11 @@ type BackpressureBus struct {
 
 // bpSubscriber is a single subscription with its own buffer and goroutine.
 type bpSubscriber struct {
-	id      uint64
-	topic   string
-	buffer  chan any
-	handler func(any)
-	stopCh  chan struct{}
+	id       uint64
+	topic    string
+	buffer   chan any
+	handler  func(any)
+	stopCh   chan struct{}
 	stopOnce sync.Once
 
 	// Per-subscriber dropped count (atomic).

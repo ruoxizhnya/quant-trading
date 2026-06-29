@@ -7,7 +7,8 @@ import "syscall"
 // RLIMIT_NPROC is hardcoded because the constant is not exposed by
 // Go's syscall package on Linux (it varies by kernel version but has
 // been 6 since 2.6.x). From <sys/resource.h>:
-//   #define RLIMIT_NPROC 6
+//
+//	#define RLIMIT_NPROC 6
 const rlimitNProc = 6
 
 // setNProc sets RLIMIT_NPROC on Linux. The constant isn't in the Go

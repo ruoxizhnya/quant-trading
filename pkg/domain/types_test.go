@@ -220,9 +220,9 @@ func TestPosition_ZeroValues(t *testing.T) {
 
 func TestPosition_JSONRoundTrip(t *testing.T) {
 	original := Position{
-		Symbol:           "000001.SZ",
+		Symbol:            "000001.SZ",
 		Quantity:          1000,
-		AvgCost:          10.5,
+		AvgCost:           10.5,
 		CurrentPrice:      11.0,
 		MarketValue:       11000,
 		UnrealizedPnL:     500,
@@ -288,9 +288,9 @@ func TestPortfolio_ZeroValues(t *testing.T) {
 
 func TestPortfolio_JSONRoundTrip(t *testing.T) {
 	original := Portfolio{
-		Cash:       100000,
-		Positions:  map[string]Position{"000001.SZ": {Symbol: "000001.SZ", Quantity: 100}},
-		TotalValue: 101000,
+		Cash:        100000,
+		Positions:   map[string]Position{"000001.SZ": {Symbol: "000001.SZ", Quantity: 100}},
+		TotalValue:  101000,
 		DailyReturn: 0.01,
 		UpdatedAt:   time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC),
 	}

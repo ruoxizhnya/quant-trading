@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 func TestStrategy_InterfaceCompliance(t *testing.T) {
@@ -38,7 +38,7 @@ func TestStrategy_Configure_NoError(t *testing.T) {
 
 func TestStrategy_GenerateSignals_EmptyBars(t *testing.T) {
 	s := &mockStrategy{
-		name:   "empty_test",
+		name:    "empty_test",
 		signals: []Signal{},
 	}
 

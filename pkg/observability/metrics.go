@@ -4,10 +4,10 @@
 // Sprint 6 P0-3 (ADR-017 §1): the four core metrics exposed at
 // /metrics are:
 //
-//	1. backtest_duration_seconds{strategy,universe}     — Histogram
-//	2. http_client_requests_total{service,status}       — Counter
-//	3. llm_tokens_total{provider,model}                 — Counter
-//	4. cache_hit_ratio{kind}                            — Gauge
+//  1. backtest_duration_seconds{strategy,universe}     — Histogram
+//  2. http_client_requests_total{service,status}       — Counter
+//  3. llm_tokens_total{provider,model}                 — Counter
+//  4. cache_hit_ratio{kind}                            — Gauge
 //
 // Plus a request_id (X-Request-ID header) that is generated for
 // inbound requests and propagated to outbound HTTP calls so log

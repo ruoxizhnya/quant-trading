@@ -93,11 +93,11 @@ func TestMeanReversionStrategy_Interface(t *testing.T) {
 	s := &meanReversionStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("mean_reversion", "test mean reversion strategy"),
 		params: MeanReversionConfig{
-			BollingerPeriod:  20,
-			BollingerStdDev:  2.0,
-			RSIPeriod:         14,
-			RSIOversold:       30,
-			RSIOverbought:     70,
+			BollingerPeriod: 20,
+			BollingerStdDev: 2.0,
+			RSIPeriod:       14,
+			RSIOversold:     30,
+			RSIOverbought:   70,
 		},
 	}
 

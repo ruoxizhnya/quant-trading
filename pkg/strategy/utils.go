@@ -45,10 +45,10 @@ func IsRebalanceDay(date time.Time, frequency string) bool {
 }
 
 type ScreenCache struct {
-	mu      sync.Mutex
-	store   map[string][]domain.ScreenResult
-	order   []string // insertion order (oldest first); used for deterministic eviction
-	limit   int
+	mu    sync.Mutex
+	store map[string][]domain.ScreenResult
+	order []string // insertion order (oldest first); used for deterministic eviction
+	limit int
 }
 
 func NewScreenCache(limit int) *ScreenCache {

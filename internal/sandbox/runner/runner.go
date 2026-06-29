@@ -24,14 +24,14 @@
 //
 // Threat model — what this sandbox does and does NOT do:
 //
-//   ✅  Wall-clock CPU bound (timeout)
-//   ✅  Memory bound (RLIMIT_AS on POSIX)
-//   ✅  File size / open file count bound
-//   ✅  Subprocess count bound (RLIMIT_NPROC)
-//   ✅  Process-group isolation (child in its own pgid, killable as group)
-//   ❌  Network egress isolation (would need network namespaces / cgroups)
-//   ❌  Filesystem chroot / bind-mount isolation (would need CAP_SYS_ADMIN)
-//   ❌  Syscall filtering (would need seccomp-bpf / eBPF)
+//	✅  Wall-clock CPU bound (timeout)
+//	✅  Memory bound (RLIMIT_AS on POSIX)
+//	✅  File size / open file count bound
+//	✅  Subprocess count bound (RLIMIT_NPROC)
+//	✅  Process-group isolation (child in its own pgid, killable as group)
+//	❌  Network egress isolation (would need network namespaces / cgroups)
+//	❌  Filesystem chroot / bind-mount isolation (would need CAP_SYS_ADMIN)
+//	❌  Syscall filtering (would need seccomp-bpf / eBPF)
 //
 // The ❌ items are out of scope for Sprint 6 P1-11 — the regex
 // staticcheck gate (P0-4) is the cheap first filter that catches
@@ -204,8 +204,8 @@ func (r *Runner) Run(ctx context.Context, name string, args []string, opts Optio
 		// OOM: setrlimit SIGKILL on Linux, signal=9 exit code.
 		if isOOM(runErr) {
 			r.mu.Lock()
-				fn := r.onOOM
-				r.mu.Unlock()
+			fn := r.onOOM
+			r.mu.Unlock()
 			if fn != nil {
 				fn(append([]string{name}, args...))
 			}

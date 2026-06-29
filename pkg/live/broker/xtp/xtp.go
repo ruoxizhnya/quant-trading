@@ -8,9 +8,9 @@
 //
 // This package defines the Go-side interface and configuration.
 // The actual XTP SDK binding (via CGo) requires:
-//   1. libxtptraderapi.so / .dylib (provided by 中泰证券)
-//   2. XTP account credentials (simulation or production)
-//   3. CGo wrapper in internal/cgo/xtp/
+//  1. libxtptraderapi.so / .dylib (provided by 中泰证券)
+//  2. XTP account credentials (simulation or production)
+//  3. CGo wrapper in internal/cgo/xtp/
 //
 // Until the SDK is linked, XTPTrader operates in "offline" mode:
 // all trading methods return ErrOffline. This allows the system
@@ -210,23 +210,23 @@ func (s ConnectionState) String() string {
 
 // OrderReq is the XTP order request structure.
 type OrderReq struct {
-	Symbol       string          `json:"symbol"`
+	Symbol       string           `json:"symbol"`
 	Direction    domain.Direction `json:"direction"`
 	OrderType    domain.OrderType `json:"order_type"`
-	Quantity     float64         `json:"quantity"`
-	Price        float64         `json:"price"`
-	BusinessType BusinessType    `json:"business_type"`
+	Quantity     float64          `json:"quantity"`
+	Price        float64          `json:"price"`
+	BusinessType BusinessType     `json:"business_type"`
 }
 
 // BusinessType specifies the XTP business type.
 type BusinessType int
 
 const (
-	BizCash      BusinessType = 0 // 普通股票
-	BizMargin    BusinessType = 1 // 融资融券
-	BizFuture    BusinessType = 2 // 期货
-	BizOption    BusinessType = 3 // 期权
-	BizHKStock   BusinessType = 4 // 港股通
+	BizCash    BusinessType = 0 // 普通股票
+	BizMargin  BusinessType = 1 // 融资融券
+	BizFuture  BusinessType = 2 // 期货
+	BizOption  BusinessType = 3 // 期权
+	BizHKStock BusinessType = 4 // 港股通
 )
 
 // ─── XTPTrader ─────────────────────────────────────────────
@@ -264,13 +264,13 @@ func NewXTPTrader(cfg Config, logger zerolog.Logger) (*XTPTrader, error) {
 	}
 
 	t := &XTPTrader{
-		cfg:      cfg,
-		logger:   logger.With().Str("broker", "xtp").Str("account", cfg.AccountID).Logger(),
-		orders:   make(map[string]*live.OrderResult),
+		cfg:       cfg,
+		logger:    logger.With().Str("broker", "xtp").Str("account", cfg.AccountID).Logger(),
+		orders:    make(map[string]*live.OrderResult),
 		positions: make(map[string]*live.PositionInfo),
-		account: &live.AccountInfo{},
-		stopCh:  make(chan struct{}),
-		doneCh: make(chan struct{}),
+		account:   &live.AccountInfo{},
+		stopCh:    make(chan struct{}),
+		doneCh:    make(chan struct{}),
 	}
 
 	if cfg.OfflineMode {
@@ -483,10 +483,10 @@ func (t *XTPTrader) EmergencyFlatten(ctx context.Context, reason string) (*live.
 	// 4. Return aggregated result
 
 	result := &live.EmergencyFlattenResult{
-		Sold:       make([]live.EmergencyFlattenOrder, 0),
-		Skipped:    make([]live.EmergencyFlattenSkip, 0),
-		StartedAt:  time.Now(),
-		Reason:     reason,
+		Sold:      make([]live.EmergencyFlattenOrder, 0),
+		Skipped:   make([]live.EmergencyFlattenSkip, 0),
+		StartedAt: time.Now(),
+		Reason:    reason,
 	}
 
 	t.mu.RLock()

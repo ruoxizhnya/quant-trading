@@ -192,13 +192,13 @@ func (p *Population) sortByFitness() {
 
 // PopulationStats holds statistics about the population.
 type PopulationStats struct {
-	Size          int     `json:"size"`
-	Generation    int     `json:"generation"`
-	BestFitness   float64 `json:"best_fitness"`
-	AvgFitness    float64 `json:"avg_fitness"`
-	WorstFitness  float64 `json:"worst_fitness"`
-	Diversity     float64 `json:"diversity"`
-	MaxSize       int     `json:"max_size"`
+	Size         int     `json:"size"`
+	Generation   int     `json:"generation"`
+	BestFitness  float64 `json:"best_fitness"`
+	AvgFitness   float64 `json:"avg_fitness"`
+	WorstFitness float64 `json:"worst_fitness"`
+	Diversity    float64 `json:"diversity"`
+	MaxSize      int     `json:"max_size"`
 }
 
 // GetStats returns population statistics.

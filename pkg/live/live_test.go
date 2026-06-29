@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/fees"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---- helpers -------------------------------------------------------------
@@ -38,11 +38,11 @@ func defaultExecConfig() domain.ExecutionConfig {
 // failingBroker returns errors for every Broker call (used in error-path tests).
 type failingBroker struct{}
 
-func (failingBroker) Connect() error                  { return fmt.Errorf("connect boom") }
-func (failingBroker) Disconnect() error               { return fmt.Errorf("disconnect boom") }
+func (failingBroker) Connect() error                           { return fmt.Errorf("connect boom") }
+func (failingBroker) Disconnect() error                        { return fmt.Errorf("disconnect boom") }
 func (failingBroker) SubmitOrder(domain.Order) (string, error) { return "", fmt.Errorf("submit boom") }
-func (failingBroker) CancelOrder(string) error        { return fmt.Errorf("cancel boom") }
-func (failingBroker) GetOrderStatus(string) (string, error) { return "", fmt.Errorf("status boom") }
+func (failingBroker) CancelOrder(string) error                 { return fmt.Errorf("cancel boom") }
+func (failingBroker) GetOrderStatus(string) (string, error)    { return "", fmt.Errorf("status boom") }
 func (failingBroker) GetPositions() ([]domain.Position, error) {
 	return nil, fmt.Errorf("positions boom")
 }
@@ -525,7 +525,7 @@ type positionErrBroker struct {
 	err   error
 }
 
-func (p *positionErrBroker) Connect() error { return p.inner.Connect() }
+func (p *positionErrBroker) Connect() error    { return p.inner.Connect() }
 func (p *positionErrBroker) Disconnect() error { return p.inner.Disconnect() }
 func (p *positionErrBroker) SubmitOrder(o domain.Order) (string, error) {
 	return p.inner.SubmitOrder(o)
@@ -556,7 +556,7 @@ type slowBroker struct {
 func newSlowBroker(delay time.Duration) *slowBroker {
 	return &slowBroker{
 		instrumentedBroker: newInstrumentedBroker(),
-		disconnectDelay:     delay,
+		disconnectDelay:    delay,
 	}
 }
 
@@ -698,16 +698,16 @@ type errDataFeed struct {
 	unsubscribeErr error
 }
 
-func (e *errDataFeed) Subscribe(symbols []string) error         { return e.subscribeErr }
-func (e *errDataFeed) Unsubscribe(symbols []string) error       { return e.unsubscribeErr }
-func (e *errDataFeed) GetQuote(string) (Quote, error)           { return Quote{}, nil }
-func (e *errDataFeed) SetCallback(func(Quote))                  {}
+func (e *errDataFeed) Subscribe(symbols []string) error   { return e.subscribeErr }
+func (e *errDataFeed) Unsubscribe(symbols []string) error { return e.unsubscribeErr }
+func (e *errDataFeed) GetQuote(string) (Quote, error)     { return Quote{}, nil }
+func (e *errDataFeed) SetCallback(func(Quote))            {}
 
 // discErrBroker is a broker whose Disconnect returns a hard error.
 type discErrBroker struct{ inner *instrumentedBroker }
 
-func (d *discErrBroker) Connect() error                  { return d.inner.Connect() }
-func (d *discErrBroker) Disconnect() error               { return fmt.Errorf("disconnect boom") }
+func (d *discErrBroker) Connect() error    { return d.inner.Connect() }
+func (d *discErrBroker) Disconnect() error { return fmt.Errorf("disconnect boom") }
 func (d *discErrBroker) SubmitOrder(o domain.Order) (string, error) {
 	return d.inner.SubmitOrder(o)
 }

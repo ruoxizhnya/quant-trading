@@ -80,9 +80,9 @@ type JobResult struct {
 // GenerateParams are the input parameters for strategy generation.
 type GenerateParams struct {
 	Description string `json:"description"`
-	Universe   string `json:"universe"`   // csi300, csi500, csi800, all
-	StartDate  string `json:"start_date"` // YYYY-MM-DD
-	EndDate    string `json:"end_date"`   // YYYY-MM-DD
+	Universe    string `json:"universe"`   // csi300, csi500, csi800, all
+	StartDate   string `json:"start_date"` // YYYY-MM-DD
+	EndDate     string `json:"end_date"`   // YYYY-MM-DD
 }
 
 // NewCopilotService creates a new CopilotService that reads AI credentials
@@ -269,39 +269,39 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 		}
 
 		// Sprint 6 P1-11 (ODR-020): process-isolation sandbox. The `go build`
-	// command is now executed via sandboxrunner.Runner which enforces a 30s
-	// wall-clock timeout, a 1GB virtual memory cap, and runs the child
-	// in its own session / process group. If the LLM produces a
-	// runaway-loop / fork-bomb / mem-leak build, the runner kills it
-	// before it can DoS the analysis service.
-	buildRunner := sandboxrunner.New(
-		sandboxrunner.WithTimeout(30*time.Second),
-		sandboxrunner.WithLimits(sandboxrunner.Limits{
-			MemoryBytes: 1 << 30, // 1 GiB
-			CPUSeconds:  25,
-			OpenFiles:   256,
-		}),
-	)
-	var stderr bytes.Buffer
-	buildOut := filepath.Join(tmpDir, fmt.Sprintf("strategy_v%d", attempt))
-	_, buildStderr, err := buildRunner.Run(ctx, "go", []string{"build", "-o", buildOut, outFile}, sandboxrunner.Options{
-		Dir: s.workingDir, // Sprint 6 P0-4: was a hard-coded path
-	})
-	// Copy the runner's stderr capture into our local buffer so the
-	// rest of the loop (LLM retry logic) keeps working unchanged.
-	if buildStderr != nil {
-		stderr.Write(buildStderr.Bytes())
-	}
-	if err != nil {
-		buildErr := stderr.String()
-		if errors.Is(err, sandboxrunner.ErrTimeout) {
-			s.logger.Warn().
-				Err(err).
-				Str("job_id", jobID).
-				Int("attempt", attempt).
-				Msg("Sandbox runner killed `go build` after timeout (P1-11)")
+		// command is now executed via sandboxrunner.Runner which enforces a 30s
+		// wall-clock timeout, a 1GB virtual memory cap, and runs the child
+		// in its own session / process group. If the LLM produces a
+		// runaway-loop / fork-bomb / mem-leak build, the runner kills it
+		// before it can DoS the analysis service.
+		buildRunner := sandboxrunner.New(
+			sandboxrunner.WithTimeout(30*time.Second),
+			sandboxrunner.WithLimits(sandboxrunner.Limits{
+				MemoryBytes: 1 << 30, // 1 GiB
+				CPUSeconds:  25,
+				OpenFiles:   256,
+			}),
+		)
+		var stderr bytes.Buffer
+		buildOut := filepath.Join(tmpDir, fmt.Sprintf("strategy_v%d", attempt))
+		_, buildStderr, err := buildRunner.Run(ctx, "go", []string{"build", "-o", buildOut, outFile}, sandboxrunner.Options{
+			Dir: s.workingDir, // Sprint 6 P0-4: was a hard-coded path
+		})
+		// Copy the runner's stderr capture into our local buffer so the
+		// rest of the loop (LLM retry logic) keeps working unchanged.
+		if buildStderr != nil {
+			stderr.Write(buildStderr.Bytes())
 		}
-		if attempt < maxRetries && s.aiClient.IsConfigured() {
+		if err != nil {
+			buildErr := stderr.String()
+			if errors.Is(err, sandboxrunner.ErrTimeout) {
+				s.logger.Warn().
+					Err(err).
+					Str("job_id", jobID).
+					Int("attempt", attempt).
+					Msg("Sandbox runner killed `go build` after timeout (P1-11)")
+			}
+			if attempt < maxRetries && s.aiClient.IsConfigured() {
 				fixedCode, fixErr := s.aiClient.FixStrategyCode(ctx, code, buildErr)
 				if fixErr == nil && fixedCode != "" {
 					// Re-run the sandbox gate on the LLM's fix. A

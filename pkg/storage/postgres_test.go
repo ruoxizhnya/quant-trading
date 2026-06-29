@@ -69,9 +69,15 @@ func TestSaveOHLCVBatch_and_GetOHLCV(t *testing.T) {
 	// Verify data integrity: check any bar has expected values
 	var hasClose10_2, hasClose10_6, hasClose10_9 bool
 	for _, b := range bars {
-		if abs(b.Close-10.2) < 0.01 { hasClose10_2 = true }
-		if abs(b.Close-10.6) < 0.01 { hasClose10_6 = true }
-		if abs(b.Close-10.9) < 0.01 { hasClose10_9 = true }
+		if abs(b.Close-10.2) < 0.01 {
+			hasClose10_2 = true
+		}
+		if abs(b.Close-10.6) < 0.01 {
+			hasClose10_6 = true
+		}
+		if abs(b.Close-10.9) < 0.01 {
+			hasClose10_9 = true
+		}
 	}
 	assert.True(t, hasClose10_2, "should have bar with close 10.2")
 	assert.True(t, hasClose10_6, "should have bar with close 10.6")
@@ -193,7 +199,7 @@ func TestSaveTradingCalendarEntry_and_GetTradingCalendar(t *testing.T) {
 
 	entry := &TradingCalendarEntry{
 		Exchange:     "TESTEX",
-		TradeDate:   parseDate("2024-12-31"),
+		TradeDate:    parseDate("2024-12-31"),
 		IsTradingDay: false, // holiday
 	}
 

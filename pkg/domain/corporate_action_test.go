@@ -223,7 +223,7 @@ func TestActionEngine_ApplyAll_BonusThenDividend(t *testing.T) {
 	e := NewActionEngine()
 	positions := []Position{makePos("X", 1000, 10.00)}
 	actions := []CorporateAction{
-		NewBonusShare("X", d(2026, 7, 1), d(2026, 6, 30), d(2026, 7, 2), 5),  // 先送
+		NewBonusShare("X", d(2026, 7, 1), d(2026, 6, 30), d(2026, 7, 2), 5),      // 先送
 		NewCashDividend("X", d(2026, 7, 1), d(2026, 6, 30), d(2026, 7, 5), 0.10), // 后分 (同日)
 	}
 	asOf := d(2026, 7, 2)

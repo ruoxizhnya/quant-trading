@@ -6,18 +6,18 @@ import (
 	"math"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
-	"github.com/rs/zerolog"
 )
 
 // RegimeDetector detects market regime from price data.
 type RegimeDetector struct {
-	fastMAPeriod  int // Fast MA period (e.g., 50-day)
-	slowMAPeriod  int // Slow MA period (e.g., 200-day)
-	volLookback   int // Lookback for volatility comparison
-	logger        zerolog.Logger
+	fastMAPeriod int // Fast MA period (e.g., 50-day)
+	slowMAPeriod int // Slow MA period (e.g., 200-day)
+	volLookback  int // Lookback for volatility comparison
+	logger       zerolog.Logger
 }
 
 // RegimeConfig holds configuration for the regime detector.
@@ -30,10 +30,10 @@ type RegimeConfig struct {
 // NewRegimeDetector creates a new RegimeDetector with the given configuration.
 func NewRegimeDetector(cfg RegimeConfig, logger zerolog.Logger) *RegimeDetector {
 	return &RegimeDetector{
-		fastMAPeriod:  cfg.FastMAPeriod,
-		slowMAPeriod:  cfg.SlowMAPeriod,
-		volLookback:   cfg.VolLookback,
-		logger:        logger.With().Str("component", "regime_detector").Logger(),
+		fastMAPeriod: cfg.FastMAPeriod,
+		slowMAPeriod: cfg.SlowMAPeriod,
+		volLookback:  cfg.VolLookback,
+		logger:       logger.With().Str("component", "regime_detector").Logger(),
 	}
 }
 
@@ -55,7 +55,7 @@ func (rd *RegimeDetector) DetectRegime(ctx context.Context, ohlcv []domain.OHLCV
 	if len(ohlcv) >= rd.volLookback {
 		longTermVol := rd.calculateHistoricalVolatility(ohlcv, rd.volLookback)
 		currentVol := rd.calculateHistoricalVolatility(ohlcv, 20)
-		
+
 		if currentVol > longTermVol*1.5 {
 			finalVolRegime = "high"
 		} else if currentVol < longTermVol*0.7 {
@@ -124,7 +124,7 @@ func (rd *RegimeDetector) detectVolatility(ohlcv []domain.OHLCV) string {
 
 	// Calculate 20-day volatility
 	recentVol := rd.calculateHistoricalVolatility(ohlcv, 20)
-	
+
 	// Calculate long-term (252-day or available) volatility
 	longTermVol := rd.calculateHistoricalVolatility(ohlcv, rd.volLookback)
 
@@ -197,7 +197,7 @@ func (rd *RegimeDetector) calculateMA(ohlcv []domain.OHLCV, period int) float64 
 	if len(ohlcv) < period {
 		period = len(ohlcv)
 	}
-	
+
 	sum := 0.0
 	startIdx := len(ohlcv) - period
 	for i := startIdx; i < len(ohlcv); i++ {
@@ -239,7 +239,7 @@ func (rd *RegimeDetector) calculateHistoricalVolatility(ohlcv []domain.OHLCV, lo
 	returns := make([]float64, lookback)
 	endIdx := len(ohlcv)
 	startIdx := endIdx - lookback - 1
-	
+
 	for i := startIdx + 1; i < endIdx; i++ {
 		idx := i - startIdx - 1
 		if ohlcv[i-1].Close > 0 {

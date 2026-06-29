@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 )
 
 // PostgresStore handles PostgreSQL/TimescaleDB operations.

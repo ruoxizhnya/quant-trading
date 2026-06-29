@@ -133,9 +133,9 @@ func TestOrderID_ContainsTimestamp(t *testing.T) {
 // version byte on a fresh ID.
 func TestHelpers_UseTheSamePrimitive(t *testing.T) {
 	for name, fn := range map[string]func() string{
-		"OrderID":         OrderID,
-		"JobID":           JobID,
-		"SubscriptionID":  SubscriptionID,
+		"OrderID":        OrderID,
+		"JobID":          JobID,
+		"SubscriptionID": SubscriptionID,
 	} {
 		id := fn()
 		u, err := uuid.Parse(id)

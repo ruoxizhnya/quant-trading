@@ -44,15 +44,15 @@ func synthOHLCV(symbols []string, days int, start time.Time) map[string][]domain
 			}
 
 			bars = append(bars, domain.OHLCV{
-				Symbol: sym,
-				Date:   date,
-				Open:   open,
-				High:   high,
-				Low:    low,
-				Close:  close,
-				Volume: vol,
+				Symbol:   sym,
+				Date:     date,
+				Open:     open,
+				High:     high,
+				Low:      low,
+				Close:    close,
+				Volume:   vol,
 				Turnover: turnover,
-				LimitUp: limitUp,
+				LimitUp:  limitUp,
 			})
 			price = close
 		}
@@ -186,7 +186,7 @@ func runSynthetic(b *testing.B, numSymbols, numDays int, workers int) {
 //   100 stocks × 480 days = 48,000 bars (2y daily) ← walk-forward window
 //   200 stocks × 240 days = 48,000 bars (large universe)
 
-func BenchmarkEngineSynthetic_50x240(b *testing.B)   { runSynthetic(b, 50, 240, 1) }
+func BenchmarkEngineSynthetic_50x240(b *testing.B)    { runSynthetic(b, 50, 240, 1) }
 func BenchmarkEngineSynthetic_50x240_W8(b *testing.B) { runSynthetic(b, 50, 240, 8) }
 
 func BenchmarkEngineSynthetic_100x480(b *testing.B)    { runSynthetic(b, 100, 480, 1) }

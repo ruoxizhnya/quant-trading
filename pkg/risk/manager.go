@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/errors"
-	"github.com/rs/zerolog"
 )
 
 // RiskManagerConfig holds all configuration for the risk manager.
@@ -16,12 +16,12 @@ type RiskManagerConfig struct {
 	MaxPositionWeight   float64
 	MinPositionWeight   float64
 	ATRPeriod           int
-	BaseMultiplier     float64
-	BullMultiplier     float64
-	BearMultiplier     float64
-	SidewaysMultiplier float64
-	TakeProfitMult     float64
-	VolLookbackDays    int
+	BaseMultiplier      float64
+	BullMultiplier      float64
+	BearMultiplier      float64
+	SidewaysMultiplier  float64
+	TakeProfitMult      float64
+	VolLookbackDays     int
 	AnnualizationFactor float64
 	FastMAPeriod        int
 	SlowMAPeriod        int
@@ -370,7 +370,7 @@ func (rm *RiskManager) CheckStopLoss(ctx context.Context, positions []domain.Pos
 func InferRegimeFromMarket(positions []domain.Position, prices map[string]float64) *domain.MarketRegime {
 	totalPnL := 0.0
 	count := 0
-	
+
 	for _, pos := range positions {
 		currentPrice, exists := prices[pos.Symbol]
 		if !exists {
@@ -390,10 +390,10 @@ func InferRegimeFromMarket(positions []domain.Position, prices map[string]float6
 	}
 
 	avgPnL := totalPnL / float64(count)
-	
+
 	var trend string
 	var sentiment float64
-	
+
 	if avgPnL > 0.02 {
 		trend = "bull"
 		sentiment = 0.5

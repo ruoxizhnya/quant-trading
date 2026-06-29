@@ -16,9 +16,9 @@ type Tracker struct {
 	mu sync.RWMutex
 
 	// Portfolio state
-	cash         float64
-	positions    map[string]*domain.Position
-	initialCash  float64
+	cash        float64
+	positions   map[string]*domain.Position
+	initialCash float64
 
 	// History
 	portfolioValues []domain.PortfolioValue
@@ -129,9 +129,9 @@ func (t *Tracker) GetPortfolioValue(prices map[string]float64) float64 {
 
 // OrderExecutionOpts holds options for trade execution.
 type OrderExecutionOpts struct {
-	OrderType   domain.OrderType
-	LimitPrice  float64
-	DayBar      *domain.OHLCV // today's OHLCV bar (needed for limit order fill check)
+	OrderType  domain.OrderType
+	LimitPrice float64
+	DayBar     *domain.OHLCV // today's OHLCV bar (needed for limit order fill check)
 }
 
 // ExecuteTrade executes a trade and returns the trade record.
@@ -172,13 +172,13 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 		if !limitFilled {
 			// Expired — record order and return
 			order := domain.Order{
-				ID:          uuid.New().String(),
-				Symbol:      symbol,
-				Direction:   direction,
-				OrderType:   orderType,
-				Quantity:    quantity,
-				LimitPrice:  limitPrice,
-				Timestamp:   timestamp,
+				ID:         uuid.New().String(),
+				Symbol:     symbol,
+				Direction:  direction,
+				OrderType:  orderType,
+				Quantity:   quantity,
+				LimitPrice: limitPrice,
+				Timestamp:  timestamp,
 				FilledQty:  0,
 				FillPrice:  0,
 				Status:     "expired",
@@ -234,17 +234,17 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 	}
 
 	trade := &domain.Trade{
-		ID:           uuid.New().String(),
-		Symbol:       symbol,
+		ID:          uuid.New().String(),
+		Symbol:      symbol,
 		Direction:   direction,
-		Quantity:     filledQty,
-		FilledQty:    filledQty,
-		Price:        executionPrice,
-		Commission:   commission,
-		TransferFee:  transferFee,
-		StampTax:     stampTax,
-		Timestamp:    timestamp,
-		PendingQty:   quantity - filledQty, // track unfilled portion
+		Quantity:    filledQty,
+		FilledQty:   filledQty,
+		Price:       executionPrice,
+		Commission:  commission,
+		TransferFee: transferFee,
+		StampTax:    stampTax,
+		Timestamp:   timestamp,
+		PendingQty:  quantity - filledQty, // track unfilled portion
 	}
 
 	switch direction {
@@ -407,16 +407,16 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 
 	// Record order in order log
 	order := domain.Order{
-		ID:          uuid.New().String(),
-		Symbol:      symbol,
-		Direction:   direction,
-		OrderType:   orderType,
-		Quantity:    quantity,
-		LimitPrice:  limitPrice,
-		Timestamp:   timestamp,
+		ID:         uuid.New().String(),
+		Symbol:     symbol,
+		Direction:  direction,
+		OrderType:  orderType,
+		Quantity:   quantity,
+		LimitPrice: limitPrice,
+		Timestamp:  timestamp,
 		FilledQty:  filledQty,
-		FillPrice:   executionPrice,
-		Status:      orderStatus,
+		FillPrice:  executionPrice,
+		Status:     orderStatus,
 	}
 	t.orderLog.Record(order)
 
@@ -850,10 +850,10 @@ func (t *Tracker) GetPortfolio(prices map[string]float64) *domain.Portfolio {
 	}
 
 	return &domain.Portfolio{
-		Cash:      t.cash,
-		Positions: positions,
+		Cash:       t.cash,
+		Positions:  positions,
 		TotalValue: totalValue,
-		UpdatedAt: time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 }
 

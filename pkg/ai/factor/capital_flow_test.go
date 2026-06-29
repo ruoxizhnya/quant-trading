@@ -16,9 +16,9 @@ func TestCapitalFlowFromPoints(t *testing.T) {
 			TradeTime: now,
 			DataType:  source.DataTypeCapitalFlow,
 			Data: map[string]interface{}{
-				"period":   "5d",
-				"main_net": 1.5e8,
-				"super_net": 8e7,
+				"period":      "5d",
+				"main_net":    1.5e8,
+				"super_net":   8e7,
 				"close_price": 1700.0,
 			},
 		},
@@ -85,12 +85,12 @@ func TestCapitalFlowFactor_DefaultsLookback(t *testing.T) {
 func TestCapitalFlowFactor_RespectsLookback(t *testing.T) {
 	now := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
 	rows := []CapitalFlowRow{
-		{Symbol: "A", TradeTime: now, MainNet: 1e8, ClosePrice: 100},                      // day 0
-		{Symbol: "A", TradeTime: now.AddDate(0, 0, -1), MainNet: 1e8, ClosePrice: 100},    // day -1
-		{Symbol: "A", TradeTime: now.AddDate(0, 0, -2), MainNet: 1e8, ClosePrice: 100},    // day -2
-		{Symbol: "A", TradeTime: now.AddDate(0, 0, -3), MainNet: 1e8, ClosePrice: 100},    // day -3
-		{Symbol: "A", TradeTime: now.AddDate(0, 0, -4), MainNet: 1e8, ClosePrice: 100},    // day -4
-		{Symbol: "A", TradeTime: now.AddDate(0, 0, -5), MainNet: 1e8, ClosePrice: 100},    // day -5 (excluded for lookback=5)
+		{Symbol: "A", TradeTime: now, MainNet: 1e8, ClosePrice: 100},                   // day 0
+		{Symbol: "A", TradeTime: now.AddDate(0, 0, -1), MainNet: 1e8, ClosePrice: 100}, // day -1
+		{Symbol: "A", TradeTime: now.AddDate(0, 0, -2), MainNet: 1e8, ClosePrice: 100}, // day -2
+		{Symbol: "A", TradeTime: now.AddDate(0, 0, -3), MainNet: 1e8, ClosePrice: 100}, // day -3
+		{Symbol: "A", TradeTime: now.AddDate(0, 0, -4), MainNet: 1e8, ClosePrice: 100}, // day -4
+		{Symbol: "A", TradeTime: now.AddDate(0, 0, -5), MainNet: 1e8, ClosePrice: 100}, // day -5 (excluded for lookback=5)
 	}
 	factor := CapitalFlowFactor(rows, 5)
 	want := 5 * 1e8 / 100
@@ -120,7 +120,7 @@ func TestCapitalFlowFactor_SuspendedDaySemantics(t *testing.T) {
 
 	t.Run("suspended as most recent day → symbol dropped", func(t *testing.T) {
 		rows := []CapitalFlowRow{
-			{Symbol: "A", TradeTime: now, MainNet: 0, ClosePrice: 0},                    // 停牌 (most recent)
+			{Symbol: "A", TradeTime: now, MainNet: 0, ClosePrice: 0}, // 停牌 (most recent)
 			{Symbol: "A", TradeTime: now.AddDate(0, 0, -1), MainNet: 2e6, ClosePrice: 100},
 			{Symbol: "A", TradeTime: now.AddDate(0, 0, -2), MainNet: 3e6, ClosePrice: 100},
 		}
@@ -188,9 +188,9 @@ func TestIsCapitalFlowRowValid(t *testing.T) {
 		want bool
 	}{
 		{CapitalFlowRow{Symbol: "A", TradeTime: now, MainNet: 1}, true},
-		{CapitalFlowRow{TradeTime: now, MainNet: 1}, false},                    // no symbol
-		{CapitalFlowRow{Symbol: "A", MainNet: 1}, false},                       // no time
-		{CapitalFlowRow{Symbol: "A", TradeTime: now, MainNet: math.NaN()}, false}, // NaN
+		{CapitalFlowRow{TradeTime: now, MainNet: 1}, false},                        // no symbol
+		{CapitalFlowRow{Symbol: "A", MainNet: 1}, false},                           // no time
+		{CapitalFlowRow{Symbol: "A", TradeTime: now, MainNet: math.NaN()}, false},  // NaN
 		{CapitalFlowRow{Symbol: "A", TradeTime: now, MainNet: math.Inf(1)}, false}, // +Inf
 	}
 	for i, c := range cases {

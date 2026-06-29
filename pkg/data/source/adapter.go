@@ -43,19 +43,19 @@ const (
 // Keep these in sync with the `data_fallback_chain.data_type` table
 // seeded in migration 015.
 const (
-	DataTypeOHLCDaily    = "ohlcv_daily"
-	DataTypeOHLCMinute   = "ohlcv_minute"
-	DataTypeRealtime     = "realtime_quote"
-	DataTypeCapitalFlow  = "capital_flow"
-	DataTypeFundamental  = "fundamentals"
-	DataTypeSectors      = "sectors"
-	DataTypeStockSector  = "stock_sector"
-	DataTypeTopList      = "top_list"
-	DataTypeLimitUpPool  = "limit_up_pool"
-	DataTypeAnnounce     = "announcements"
-	DataTypeNews         = "news"
-	DataTypeHotSearch    = "hot_search"
-	DataTypeGlobalOHLCV  = "global_ohlcv"
+	DataTypeOHLCDaily   = "ohlcv_daily"
+	DataTypeOHLCMinute  = "ohlcv_minute"
+	DataTypeRealtime    = "realtime_quote"
+	DataTypeCapitalFlow = "capital_flow"
+	DataTypeFundamental = "fundamentals"
+	DataTypeSectors     = "sectors"
+	DataTypeStockSector = "stock_sector"
+	DataTypeTopList     = "top_list"
+	DataTypeLimitUpPool = "limit_up_pool"
+	DataTypeAnnounce    = "announcements"
+	DataTypeNews        = "news"
+	DataTypeHotSearch   = "hot_search"
+	DataTypeGlobalOHLCV = "global_ohlcv"
 )
 
 // ErrUnsupported indicates the adapter cannot serve the requested data type.

@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 func TestEngine_NewEngine_DefaultConfig(t *testing.T) {
@@ -219,8 +219,8 @@ func TestEngine_Tracker_DividendProcessing(t *testing.T) {
 
 	// Process dividend (0.5 CNY per share)
 	dividend := domain.Dividend{
-		Symbol: symbol,
-		DivAmt: 0.5,
+		Symbol:  symbol,
+		DivAmt:  0.5,
 		PayDate: day.Add(24 * time.Hour),
 	}
 	err := tracker.ProcessDividend(symbol, dividend)

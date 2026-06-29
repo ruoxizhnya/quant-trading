@@ -380,7 +380,7 @@ func (wf *WalkForwardEngine) detectOverfitting(report *domain.WalkForwardReport)
 // wfWindow represents a single walk-forward window.
 type wfWindow struct {
 	trainStart, trainEnd time.Time
-	testStart, testEnd    time.Time
+	testStart, testEnd   time.Time
 }
 
 // buildWindows generates walk-forward windows from trading days.
@@ -455,7 +455,7 @@ func (wf *WalkForwardEngine) toBacktestResult(r *BacktestResponse) *domain.Backt
 	}
 
 	return &domain.BacktestResult{
-		StartDate:        startedAt,
+		StartDate:       startedAt,
 		EndDate:         completedAt,
 		TotalReturn:     r.TotalReturn,
 		AnnualReturn:    r.AnnualReturn,

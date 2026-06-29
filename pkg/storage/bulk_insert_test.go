@@ -129,10 +129,10 @@ func TestBuildInsertArgs_StandardColumns(t *testing.T) {
 	numeric := []string{"open", "close"}
 	tt := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
 	p := UnifiedDataPoint{
-		Symbol:    "000001.SZ",
-		TradeTime: tt,
-		Source:    "tushare",
-		Data:      map[string]interface{}{"open": 10.5, "close": int64(11)},
+		Symbol:     "000001.SZ",
+		TradeTime:  tt,
+		Source:     "tushare",
+		Data:       map[string]interface{}{"open": 10.5, "close": int64(11)},
 		IngestTime: tt,
 	}
 	args, err := buildInsertArgs(p, cols, pk, numeric)

@@ -85,7 +85,7 @@ func (p RetryPolicy) Do(ctx context.Context, f RetryableFunc) (string, int, erro
 	}
 
 	var (
-		lastErr error
+		lastErr    error
 		lastStatus int
 	)
 	for attempt := 1; attempt <= p.MaxAttempts; attempt++ {

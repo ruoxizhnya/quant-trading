@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
-	"github.com/rs/zerolog"
 )
 
 // FactorStore defines the interface for factor data operations.

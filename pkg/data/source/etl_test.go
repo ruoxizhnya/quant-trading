@@ -101,9 +101,9 @@ func TestETL_DropsInvalidPoints(t *testing.T) {
 		supported: []string{DataTypeRealtime},
 		items: []DataItem{
 			{Symbol: "A", TradeTime: time.Now(), Data: map[string]interface{}{"price": 100.0}},
-			{Symbol: "", TradeTime: time.Now(), Data: map[string]interface{}{"price": 200.0}},    // empty symbol → skip
+			{Symbol: "", TradeTime: time.Now(), Data: map[string]interface{}{"price": 200.0}},   // empty symbol → skip
 			{Symbol: "C", TradeTime: time.Time{}, Data: map[string]interface{}{"price": 300.0}}, // zero time → skip
-			{Symbol: "D", TradeTime: time.Now(), Data: nil},                                       // nil data → skip
+			{Symbol: "D", TradeTime: time.Now(), Data: nil},                                     // nil data → skip
 		},
 	}
 	require.NoError(t, reg.Register(a))

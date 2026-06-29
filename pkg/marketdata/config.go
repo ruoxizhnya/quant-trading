@@ -11,21 +11,21 @@ import (
 )
 
 type DataSourceConfig struct {
-	Primary  string            `mapstructure:"primary" json:"primary"`
-	Fallback string            `mapstructure:"fallback" json:"fallback"`
-	Cache    *CacheConfig      `mapstructure:"cache" json:"cache,omitempty"`
+	Primary  string                  `mapstructure:"primary" json:"primary"`
+	Fallback string                  `mapstructure:"fallback" json:"fallback"`
+	Cache    *CacheConfig            `mapstructure:"cache" json:"cache,omitempty"`
 	Sources  map[string]SourceConfig `mapstructure:"sources" json:"sources"`
 }
 
 type SourceConfig struct {
-	Type     string            `mapstructure:"type" json:"type"`
-	URL      string            `mapstructure:"url" json:"url,omitempty"`
-	Token    string            `mapstructure:"token" json:"token,omitempty"`
-	DBURL    string            `mapstructure:"db_url" json:"db_url,omitempty"`
-	RedisURL string            `mapstructure:"redis_url" json:"redis_url,omitempty"`
-	PythonPath string          `mapstructure:"python_path" json:"python_path,omitempty"`
-	ScriptDir  string          `mapstructure:"script_dir" json:"script_dir,omitempty"`
-	Options  map[string]string `mapstructure:"options" json:"options,omitempty"`
+	Type       string            `mapstructure:"type" json:"type"`
+	URL        string            `mapstructure:"url" json:"url,omitempty"`
+	Token      string            `mapstructure:"token" json:"token,omitempty"`
+	DBURL      string            `mapstructure:"db_url" json:"db_url,omitempty"`
+	RedisURL   string            `mapstructure:"redis_url" json:"redis_url,omitempty"`
+	PythonPath string            `mapstructure:"python_path" json:"python_path,omitempty"`
+	ScriptDir  string            `mapstructure:"script_dir" json:"script_dir,omitempty"`
+	Options    map[string]string `mapstructure:"options" json:"options,omitempty"`
 }
 
 type FactoryDeps struct {

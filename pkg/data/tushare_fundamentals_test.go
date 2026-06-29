@@ -78,13 +78,13 @@ func TestNormalizeFundamentalsData_NilFields(t *testing.T) {
 	client := &TushareClient{}
 
 	tests := []struct {
-		name            string
-		resp            *TushareResponse
-		wantCount       int
-		wantPENil       bool
-		wantPBNil       bool
-		wantROENil      bool
-		wantRevNil      bool
+		name       string
+		resp       *TushareResponse
+		wantCount  int
+		wantPENil  bool
+		wantPBNil  bool
+		wantROENil bool
+		wantRevNil bool
 	}{
 		{
 			name: "all numeric fields nil",
@@ -190,7 +190,7 @@ func TestNormalizeFundamentalsData_EmptyResponse(t *testing.T) {
 				Msg:  "ok",
 				Data: TushareData{
 					Fields: []string{"ts_code", "ann_date", "end_date", "pe", "pb", "ps", "roe", "roa", "debt_to_equity", "gross_margin", "net_margin", "revenue", "net_profit", "total_assets", "total_liab"},
-					Items: [][]any{},
+					Items:  [][]any{},
 				},
 			},
 			wantCount: 0,
@@ -230,7 +230,7 @@ func TestNormalizeFundamentalsData_EmptyResponse(t *testing.T) {
 				Msg:  "ok",
 				Data: TushareData{
 					Fields: []string{"ts_code", "ann_date", "end_date", "pe", "pb", "ps", "roe", "roa", "debt_to_equity", "gross_margin", "net_margin", "revenue", "net_profit", "total_assets", "total_liab"},
-					Items: nil,
+					Items:  nil,
 				},
 			},
 			wantCount: 0,
@@ -250,10 +250,10 @@ func TestFieldFloatPtr_NilValue(t *testing.T) {
 	client := &TushareClient{}
 
 	tests := []struct {
-		name  string
-		item  []any
-		idx   int
-		desc  string
+		name string
+		item []any
+		idx  int
+		desc string
 	}{
 		{"nil at index 0", []any{nil}, 0, "nil value at index 0"},
 		{"nil at index 3", []any{1.0, 2.0, 3.0, nil}, 3, "nil value at index 3"},

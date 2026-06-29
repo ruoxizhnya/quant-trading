@@ -223,10 +223,10 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 			}
 
 			opts := backtest.HTMLReportOptions{
-				Theme:           c.DefaultQuery("theme", "light"),
-				FooterNote:      c.Query("footer"),
-				IncludeEquityChart: c.Query("equity") != "0",  // default true
-				IncludeTrades:      c.Query("trades") != "0",  // default true
+				Theme:              c.DefaultQuery("theme", "light"),
+				FooterNote:         c.Query("footer"),
+				IncludeEquityChart: c.Query("equity") != "0", // default true
+				IncludeTrades:      c.Query("trades") != "0", // default true
 			}
 			body, contentType, err := backtest.RenderHTML(resp, opts)
 			if err != nil {

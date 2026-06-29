@@ -54,14 +54,14 @@ const (
 // All monetary values are in the same currency unit; rates are in
 // decimal form (e.g. 0.025 means 2.5%).
 type OptionSpec struct {
-	Spot           float64        `json:"spot"`            // 标的现价 S
-	Strike         float64        `json:"strike"`          // 行权价 K
-	TimeToExpiry   float64        `json:"time_to_expiry"`  // 剩余期限 T (years)
-	RiskFreeRate   float64        `json:"risk_free_rate"`  // 无风险利率 r (decimal, e.g. 0.025)
-	Volatility     float64        `json:"volatility"`      // 隐含波动率 σ (decimal, e.g. 0.20)
-	DividendYield  float64        `json:"dividend_yield"`  // 股息率 q (decimal, e.g. 0.01)
-	Type           OptionType     `json:"type"`            // Call or Put
-	Style          ExerciseStyle  `json:"style"`           // European or American
+	Spot          float64       `json:"spot"`           // 标的现价 S
+	Strike        float64       `json:"strike"`         // 行权价 K
+	TimeToExpiry  float64       `json:"time_to_expiry"` // 剩余期限 T (years)
+	RiskFreeRate  float64       `json:"risk_free_rate"` // 无风险利率 r (decimal, e.g. 0.025)
+	Volatility    float64       `json:"volatility"`     // 隐含波动率 σ (decimal, e.g. 0.20)
+	DividendYield float64       `json:"dividend_yield"` // 股息率 q (decimal, e.g. 0.01)
+	Type          OptionType    `json:"type"`           // Call or Put
+	Style         ExerciseStyle `json:"style"`          // European or American
 }
 
 // Greeks holds the five standard option sensitivity measures.
@@ -74,7 +74,7 @@ type Greeks struct {
 	Gamma float64 `json:"gamma"` // ∂²V/∂S²
 	Vega  float64 `json:"vega"`  // ∂V/∂σ per 1% vol
 	Theta float64 `json:"theta"` // ∂V/∂t per day
-	Rho   float64 `json:"rho"`    // ∂V/∂r per 1% rate
+	Rho   float64 `json:"rho"`   // ∂V/∂r per 1% rate
 }
 
 // Validate checks the OptionSpec for obvious input errors.

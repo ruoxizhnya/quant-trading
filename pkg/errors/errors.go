@@ -62,8 +62,8 @@ func (e *AppError) Is(target error) bool {
 // New creates a new AppError with the given code and message.
 func New(code ErrorCode, message string) *AppError {
 	return &AppError{
-		Code:      code,
-		Message:   message,
+		Code:       code,
+		Message:    message,
 		StackTrace: captureStack(),
 	}
 }

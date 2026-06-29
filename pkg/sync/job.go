@@ -8,39 +8,39 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 )
 
 // JobStatus represents the current state of a sync job.
 type JobStatus string
 
 const (
-	JobStatusPending    JobStatus = "pending"
-	JobStatusRunning    JobStatus = "running"
-	JobStatusCompleted  JobStatus = "completed"
-	JobStatusFailed     JobStatus = "failed"
-	JobStatusCancelled  JobStatus = "cancelled"
-	JobStatusRetrying   JobStatus = "retrying"
+	JobStatusPending   JobStatus = "pending"
+	JobStatusRunning   JobStatus = "running"
+	JobStatusCompleted JobStatus = "completed"
+	JobStatusFailed    JobStatus = "failed"
+	JobStatusCancelled JobStatus = "cancelled"
+	JobStatusRetrying  JobStatus = "retrying"
 )
 
 // JobType represents the type of data synchronization job.
 type JobType string
 
 const (
-	JobTypeStocks        JobType = "stocks"
-	JobTypeOHLCV         JobType = "ohlcv"
-	JobTypeOHLCVAll      JobType = "ohlcv_all"
-	JobTypeFundamentals  JobType = "fundamentals"
-	JobTypeFundamental   JobType = "fundamental"
-	JobTypeDividends     JobType = "dividends"
-	JobTypeSplits        JobType = "splits"
-	JobTypeCalendar      JobType = "calendar"
-	JobTypeFactors       JobType = "factors"
-	JobTypeFactor        JobType = "factor"
-	JobTypeFactorAttr    JobType = "factor_attribution"
-	JobTypeFactorIC      JobType = "factor_ic"
-	JobTypeIndexConst    JobType = "index_constituents"
+	JobTypeStocks       JobType = "stocks"
+	JobTypeOHLCV        JobType = "ohlcv"
+	JobTypeOHLCVAll     JobType = "ohlcv_all"
+	JobTypeFundamentals JobType = "fundamentals"
+	JobTypeFundamental  JobType = "fundamental"
+	JobTypeDividends    JobType = "dividends"
+	JobTypeSplits       JobType = "splits"
+	JobTypeCalendar     JobType = "calendar"
+	JobTypeFactors      JobType = "factors"
+	JobTypeFactor       JobType = "factor"
+	JobTypeFactorAttr   JobType = "factor_attribution"
+	JobTypeFactorIC     JobType = "factor_ic"
+	JobTypeIndexConst   JobType = "index_constituents"
 )
 
 // Job represents a single data synchronization task.

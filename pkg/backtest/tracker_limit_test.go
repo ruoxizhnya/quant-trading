@@ -90,8 +90,8 @@ func TestTracker_STStockLimit_5Percent(t *testing.T) {
 	tracker := newTestTracker(1000000.0)
 	symbol := "ST康美" // ST stock name
 	prevClose := 5.0
-	stLimitUp := prevClose * 1.05  // 5.25 (ST 涨停)
-	_ = prevClose * 0.95 // 4.75 (ST 跌停)
+	stLimitUp := prevClose * 1.05 // 5.25 (ST 涨停)
+	_ = prevClose * 0.95          // 4.75 (ST 跌停)
 	day := time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC)
 
 	// Buy at ST limit-up price
@@ -110,7 +110,7 @@ func TestTracker_STStockLimit_5Percent(t *testing.T) {
 
 func TestTracker_NewStockLimit_20Percent(t *testing.T) {
 	tracker := newTestTracker(1000000.0)
-	symbol := "600005.SH" // Newly listed stock
+	symbol := "600005.SH"                            // Newly listed stock
 	_ = time.Date(2022, 11, 1, 0, 0, 0, 0, time.UTC) // Listed ~60 days ago
 	tradeDay := time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC)
 	prevClose := 20.0

@@ -7,10 +7,10 @@ import (
 
 // WalkForwardValidator performs walk-forward analysis for strategy validation.
 type WalkForwardValidator struct {
-	trainRatio    float64 // Ratio of data for training
-	testRatio     float64 // Ratio of data for testing
-	minTrainSize  int     // Minimum training window size
-	minTestSize   int     // Minimum test window size
+	trainRatio   float64 // Ratio of data for training
+	testRatio    float64 // Ratio of data for testing
+	minTrainSize int     // Minimum training window size
+	minTestSize  int     // Minimum test window size
 }
 
 // NewWalkForwardValidator creates a new walk-forward validator.
@@ -18,8 +18,8 @@ func NewWalkForwardValidator() *WalkForwardValidator {
 	return &WalkForwardValidator{
 		trainRatio:   0.7,
 		testRatio:    0.3,
-		minTrainSize: 252,  // ~1 year of trading days
-		minTestSize:  63,   // ~3 months of trading days
+		minTrainSize: 252, // ~1 year of trading days
+		minTestSize:  63,  // ~3 months of trading days
 	}
 }
 
@@ -45,33 +45,33 @@ func (w *WalkForwardValidator) WithSizes(minTrain, minTest int) *WalkForwardVali
 
 // WalkForwardResult holds the result of walk-forward analysis.
 type WalkForwardResult struct {
-	Windows      []WindowResult `json:"windows"`
-	ISMetrics    Metrics        `json:"is_metrics"`  // In-sample
-	OOSMetrics   Metrics        `json:"oos_metrics"` // Out-of-sample
-	Robustness   float64        `json:"robustness"`  // OOS/IS ratio
-	OverfitRisk  string         `json:"overfit_risk"`
+	Windows     []WindowResult `json:"windows"`
+	ISMetrics   Metrics        `json:"is_metrics"`  // In-sample
+	OOSMetrics  Metrics        `json:"oos_metrics"` // Out-of-sample
+	Robustness  float64        `json:"robustness"`  // OOS/IS ratio
+	OverfitRisk string         `json:"overfit_risk"`
 }
 
 // WindowResult holds results for a single walk-forward window.
 type WindowResult struct {
-	WindowNum    int     `json:"window_num"`
-	TrainStart   int     `json:"train_start"`
-	TrainEnd     int     `json:"train_end"`
-	TestStart    int     `json:"test_start"`
-	TestEnd      int     `json:"test_end"`
-	TrainReturn  float64 `json:"train_return"`
-	TestReturn   float64 `json:"test_return"`
-	TrainSharpe  float64 `json:"train_sharpe"`
-	TestSharpe   float64 `json:"test_sharpe"`
+	WindowNum   int     `json:"window_num"`
+	TrainStart  int     `json:"train_start"`
+	TrainEnd    int     `json:"train_end"`
+	TestStart   int     `json:"test_start"`
+	TestEnd     int     `json:"test_end"`
+	TrainReturn float64 `json:"train_return"`
+	TestReturn  float64 `json:"test_return"`
+	TrainSharpe float64 `json:"train_sharpe"`
+	TestSharpe  float64 `json:"test_sharpe"`
 }
 
 // Metrics holds performance metrics.
 type Metrics struct {
-	TotalReturn  float64 `json:"total_return"`
-	SharpeRatio  float64 `json:"sharpe_ratio"`
-	MaxDrawdown  float64 `json:"max_drawdown"`
-	WinRate      float64 `json:"win_rate"`
-	Volatility   float64 `json:"volatility"`
+	TotalReturn float64 `json:"total_return"`
+	SharpeRatio float64 `json:"sharpe_ratio"`
+	MaxDrawdown float64 `json:"max_drawdown"`
+	WinRate     float64 `json:"win_rate"`
+	Volatility  float64 `json:"volatility"`
 }
 
 // Validate runs walk-forward validation on a strategy.

@@ -45,8 +45,8 @@ const swaggerUIHTML = `<!DOCTYPE html>
 //
 //   - GET /api/openapi.yaml — serves the embedded OpenAPI 3.0 YAML spec.
 //   - GET /api/docs        — serves the Swagger UI HTML page (loads the
-//                             spec from /api/openapi.yaml via CDN-hosted
-//                             swagger-ui-dist).
+//     spec from /api/openapi.yaml via CDN-hosted
+//     swagger-ui-dist).
 func registerOpenAPIRoutes(router *gin.Engine) {
 	router.GET("/api/openapi.yaml", serveOpenAPISpec)
 	router.GET("/api/docs", serveSwaggerUI)

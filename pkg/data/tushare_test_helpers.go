@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/httpclient"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
-	"github.com/rs/zerolog"
 )
 
 // mockStoreForTushare wraps mockStoreForTushareImpl to implement *storage.PostgresStore interface
@@ -46,31 +46,59 @@ func (m *mockStoreForTushareImpl) SaveFundamentalBatch(_ context.Context, record
 	return nil
 }
 
-func (m *mockStoreForTushareImpl) GetOHLCV(_ context.Context, symbol string, start, end interface{}) ([]domain.OHLCV, error) { return m.ohlcv, nil }
-func (m *mockStoreForTushareImpl) GetOHLCVForDateRange(_ context.Context, start, end interface{}) ([]domain.OHLCV, error) { return m.ohlcv, nil }
-func (m *mockStoreForTushareImpl) GetFundamentals(_ context.Context, symbol string, date interface{}) ([]domain.Fundamental, error) { return m.fundamentals, nil }
-func (m *mockStoreForTushareImpl) GetFundamentalsSnapshot(_ context.Context, date interface{}) ([]interface{}, error) { return nil, nil }
-func (m *mockStoreForTushareImpl) SaveFundamentalDataBatch(_ context.Context, records []interface{}) error { return nil }
-func (m *mockStoreForTushareImpl) SaveIndexConstituentBatch(_ context.Context, records []interface{}) error { return nil }
-func (m *mockStoreForTushareImpl) SaveDividendBatch(_ context.Context, records []interface{}) error { return nil }
-func (m *mockStoreForTushareImpl) SaveSplitBatch(_ context.Context, records []interface{}) error { return nil }
-func (m *mockStoreForTushareImpl) SaveTradingCalendar(_ context.Context, records []interface{}) error { return nil }
+func (m *mockStoreForTushareImpl) GetOHLCV(_ context.Context, symbol string, start, end interface{}) ([]domain.OHLCV, error) {
+	return m.ohlcv, nil
+}
+func (m *mockStoreForTushareImpl) GetOHLCVForDateRange(_ context.Context, start, end interface{}) ([]domain.OHLCV, error) {
+	return m.ohlcv, nil
+}
+func (m *mockStoreForTushareImpl) GetFundamentals(_ context.Context, symbol string, date interface{}) ([]domain.Fundamental, error) {
+	return m.fundamentals, nil
+}
+func (m *mockStoreForTushareImpl) GetFundamentalsSnapshot(_ context.Context, date interface{}) ([]interface{}, error) {
+	return nil, nil
+}
+func (m *mockStoreForTushareImpl) SaveFundamentalDataBatch(_ context.Context, records []interface{}) error {
+	return nil
+}
+func (m *mockStoreForTushareImpl) SaveIndexConstituentBatch(_ context.Context, records []interface{}) error {
+	return nil
+}
+func (m *mockStoreForTushareImpl) SaveDividendBatch(_ context.Context, records []interface{}) error {
+	return nil
+}
+func (m *mockStoreForTushareImpl) SaveSplitBatch(_ context.Context, records []interface{}) error {
+	return nil
+}
+func (m *mockStoreForTushareImpl) SaveTradingCalendar(_ context.Context, records []interface{}) error {
+	return nil
+}
 
 // mockCacheForTushare implements storage.Cache for testing
 type mockCacheForTushare struct{}
 
-func (m *mockCacheForTushare) Get(_ context.Context, key string) ([]byte, error)              { return nil, nil }
-func (m *mockCacheForTushare) Set(_ context.Context, key string, value interface{}, ttl int) error { return nil }
-func (m *mockCacheForTushare) SetEX(_ context.Context, key string, value interface{}, ttl time.Duration) error { return nil }
-func (m *mockCacheForTushare) Del(_ context.Context, keys ...string) error                        { return nil }
-func (m *mockCacheForTushare) Exists(_ context.Context, keys ...string) (int64, error)          { return 0, nil }
-func (m *mockCacheForTushare) InvalidateStocks(_ context.Context, exchange string) error        { return nil }
-func (m *mockCacheForTushare) Ping(_ context.Context) error                                     { return nil }
-func (m *mockCacheForTushare) Close() error                                                    { return nil }
-func (m *mockCacheForTushare) GetCachedStocks(_ context.Context, exchange string) (interface{}, error) { return nil, nil }
-func (m *mockCacheForTushare) CacheStocks(_ context.Context, exchange string, stocks interface{}) error { return nil }
-func (m *mockCacheForTushare) GetCachedStock(_ context.Context, symbol string) (interface{}, error)  { return nil, nil }
-func (m *mockCacheForTushare) CacheStock(_ context.Context, stock interface{}) error               { return nil }
+func (m *mockCacheForTushare) Get(_ context.Context, key string) ([]byte, error) { return nil, nil }
+func (m *mockCacheForTushare) Set(_ context.Context, key string, value interface{}, ttl int) error {
+	return nil
+}
+func (m *mockCacheForTushare) SetEX(_ context.Context, key string, value interface{}, ttl time.Duration) error {
+	return nil
+}
+func (m *mockCacheForTushare) Del(_ context.Context, keys ...string) error               { return nil }
+func (m *mockCacheForTushare) Exists(_ context.Context, keys ...string) (int64, error)   { return 0, nil }
+func (m *mockCacheForTushare) InvalidateStocks(_ context.Context, exchange string) error { return nil }
+func (m *mockCacheForTushare) Ping(_ context.Context) error                              { return nil }
+func (m *mockCacheForTushare) Close() error                                              { return nil }
+func (m *mockCacheForTushare) GetCachedStocks(_ context.Context, exchange string) (interface{}, error) {
+	return nil, nil
+}
+func (m *mockCacheForTushare) CacheStocks(_ context.Context, exchange string, stocks interface{}) error {
+	return nil
+}
+func (m *mockCacheForTushare) GetCachedStock(_ context.Context, symbol string) (interface{}, error) {
+	return nil, nil
+}
+func (m *mockCacheForTushare) CacheStock(_ context.Context, stock interface{}) error { return nil }
 
 // createTestTushareClient creates a TushareClient for testing with mock dependencies
 func createTestTushareClient(baseURL string, storeImpl *mockStoreForTushareImpl, cache *mockCacheForTushare) *TushareClient {

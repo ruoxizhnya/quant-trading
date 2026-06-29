@@ -41,8 +41,8 @@ const MaxScale = 18
 // scale is always in [0, MaxScale]; negative scales are normalised
 // to scale 0 by multiplying the value.
 type Decimal struct {
-	value int64  // unscaled value
-	scale int8   // number of decimal places (>= 0)
+	value int64 // unscaled value
+	scale int8  // number of decimal places (>= 0)
 }
 
 // Zero is the decimal representation of 0.

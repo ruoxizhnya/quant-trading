@@ -17,16 +17,16 @@ import (
 type ValueMomentumConfig struct {
 	Factors struct {
 		PE struct {
-			Weight               float64 `mapstructure:"weight"`
-			PercentileThreshold  float64 `mapstructure:"percentile_threshold"`
+			Weight              float64 `mapstructure:"weight"`
+			PercentileThreshold float64 `mapstructure:"percentile_threshold"`
 		} `mapstructure:"pe"`
 		PB struct {
-			Weight               float64 `mapstructure:"weight"`
-			PercentileThreshold  float64 `mapstructure:"percentile_threshold"`
+			Weight              float64 `mapstructure:"weight"`
+			PercentileThreshold float64 `mapstructure:"percentile_threshold"`
 		} `mapstructure:"pb"`
 		Momentum struct {
-			Weight        float64 `mapstructure:"weight"`
-			LookbackDays  int     `mapstructure:"lookback_days"`
+			Weight       float64 `mapstructure:"weight"`
+			LookbackDays int     `mapstructure:"lookback_days"`
 		} `mapstructure:"momentum"`
 		Quality struct {
 			Weight       float64 `mapstructure:"weight"`
@@ -153,7 +153,7 @@ func (s *valueMomentumStrategy) configure(config map[string]any) error {
 // setDefaults sets default configuration values.
 func (s *valueMomentumStrategy) setDefaults() {
 	s.config = ValueMomentumConfig{}
-	
+
 	s.config.Factors.PE.Weight = 0.25
 	s.config.Factors.PE.PercentileThreshold = 0.3
 	s.config.Factors.PB.Weight = 0.25
@@ -162,11 +162,11 @@ func (s *valueMomentumStrategy) setDefaults() {
 	s.config.Factors.Momentum.LookbackDays = 20
 	s.config.Factors.Quality.Weight = 0.25
 	s.config.Factors.Quality.ROEThreshold = 0.15
-	
+
 	s.config.Filter.TopMcapPercentile = 0.8
 	s.config.Filter.RequirePositivePE = true
 	s.config.Filter.RequirePositiveROE = true
-	
+
 	s.config.Signal.LongThreshold = 0.3
 	s.config.Signal.ShortThreshold = -0.3
 	s.config.Signal.MaxPositions = 20
@@ -204,12 +204,12 @@ func (s *valueMomentumStrategy) GenerateSignals(
 
 // stockFactorData holds calculated factor data for a stock.
 type stockFactorData struct {
-	Symbol     string
-	MarketCap  float64
-	PE         float64
-	PB         float64
-	Momentum   float64
-	ROE        float64
+	Symbol    string
+	MarketCap float64
+	PE        float64
+	PB        float64
+	Momentum  float64
+	ROE       float64
 }
 
 // percentileData holds percentile thresholds.

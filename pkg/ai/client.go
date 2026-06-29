@@ -48,11 +48,11 @@ type Client struct {
 	httpClient *http.Client
 
 	// Resilience layer (Sprint 6 P1-14, AR-008).
-	limiter    *Limiter     // token-bucket rate limiter
-	retry      RetryPolicy  // exponential backoff with jitter
-	costTable  *CostTable   // per-model token cost
-	metrics    *Metrics     // per-call observability
-	tracer     Tracer       // pluggable tracer (default: NoopTracer)
+	limiter   *Limiter    // token-bucket rate limiter
+	retry     RetryPolicy // exponential backoff with jitter
+	costTable *CostTable  // per-model token cost
+	metrics   *Metrics    // per-call observability
+	tracer    Tracer      // pluggable tracer (default: NoopTracer)
 
 	// mu protects limiter/retry/costTable/metrics/tracer swaps.
 	// Field assignments during NewClientWithOptions are safe without

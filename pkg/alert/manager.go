@@ -65,8 +65,8 @@ type Alert struct {
 	Message    string                 `json:"message"`
 	Value      float64                `json:"value"`
 	Threshold  float64                `json:"threshold"`
-	Symbol     string                 `json:"symbol,omitempty"`   // for single-symbol rules
-	Sector     string                 `json:"sector,omitempty"`   // for sector rules
+	Symbol     string                 `json:"symbol,omitempty"` // for single-symbol rules
+	Sector     string                 `json:"sector,omitempty"` // for sector rules
 	Timestamp  time.Time              `json:"timestamp"`
 	Attributes map[string]interface{} `json:"attributes,omitempty"`
 }
@@ -97,12 +97,12 @@ type PortfolioSnapshot struct {
 
 // PositionSnapshot is a single position within PortfolioSnapshot.
 type PositionSnapshot struct {
-	Symbol   string
-	Sector   string  // sector classification (empty = uncategorized)
-	Quantity float64
-	AvgCost  float64
-	CurrentPrice float64
-	MarketValue  float64
+	Symbol        string
+	Sector        string // sector classification (empty = uncategorized)
+	Quantity      float64
+	AvgCost       float64
+	CurrentPrice  float64
+	MarketValue   float64
 	UnrealizedPnL float64
 }
 
@@ -153,10 +153,10 @@ type AlertManagerConfig struct {
 // AlertManagerConfig or call SetWebhookURL while holding no other
 // operations.
 type AlertManager struct {
-	cfg     AlertManagerConfig
-	logger  zerolog.Logger
-	mu      sync.RWMutex
-	closed  bool
+	cfg    AlertManagerConfig
+	logger zerolog.Logger
+	mu     sync.RWMutex
+	closed bool
 
 	// channels is the list of registered sinks. Iteration is read-only
 	// after construction; a copy is taken under mu in Evaluate.

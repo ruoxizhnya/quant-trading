@@ -13,10 +13,10 @@ import (
 
 func validConfig() Config {
 	return Config{
-		IP:         "tcp://210.14.63.51",
-		Port:       6100,
-		AccountID:  "test_account",
-		Password:   "test_password",
+		IP:          "tcp://210.14.63.51",
+		Port:        6100,
+		AccountID:   "test_account",
+		Password:    "test_password",
 		OfflineMode: true,
 		ClientID:    1,
 	}

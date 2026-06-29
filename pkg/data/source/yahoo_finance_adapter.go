@@ -15,8 +15,9 @@ import (
 //
 // The official Go SDK (yfinance) is not imported to keep dependencies
 // minimal; we hit the public chart endpoint directly:
-//   GET https://query1.finance.yahoo.com/v8/finance/chart/{symbol}
-//     ?range=1y&interval=1d&events=history
+//
+//	GET https://query1.finance.yahoo.com/v8/finance/chart/{symbol}
+//	  ?range=1y&interval=1d&events=history
 //
 // This is the same surface yfinance wraps internally.
 type YahooFinanceAdapter struct {
@@ -80,10 +81,10 @@ type yahooChartResponse struct {
 	Chart struct {
 		Result []struct {
 			Meta struct {
-				Symbol     string `json:"symbol"`
-				Range      string `json:"range"`
-				Currency   string `json:"currency"`
-				Exchange   string `json:"fullExchangeName"`
+				Symbol   string `json:"symbol"`
+				Range    string `json:"range"`
+				Currency string `json:"currency"`
+				Exchange string `json:"fullExchangeName"`
 			} `json:"meta"`
 			Timestamp  []int64 `json:"timestamp"`
 			Indicators struct {

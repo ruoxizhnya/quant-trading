@@ -25,9 +25,9 @@ const registryCacheTTL = 30 * time.Second
 
 // registryStatus is the cached response for /api/datasource/registry/status.
 type registryStatus struct {
-	Adapters []adapterStatusEntry `json:"adapters"`
-	Chains   map[string][]string  `json:"chains"`
-	GeneratedAt time.Time          `json:"generated_at"`
+	Adapters    []adapterStatusEntry `json:"adapters"`
+	Chains      map[string][]string  `json:"chains"`
+	GeneratedAt time.Time            `json:"generated_at"`
 }
 
 type adapterStatusEntry struct {

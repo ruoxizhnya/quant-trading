@@ -9,10 +9,10 @@ import (
 
 // TPEOptimizer implements Tree-structured Parzen Estimator for Bayesian optimization.
 type TPEOptimizer struct {
-	rng          *rand.Rand
-	gamma        float64 // Quantile for splitting observations
+	rng            *rand.Rand
+	gamma          float64 // Quantile for splitting observations
 	nStartupTrials int
-	mu           sync.Mutex
+	mu             sync.Mutex
 }
 
 // NewTPEOptimizer creates a new TPE optimizer.
@@ -31,27 +31,27 @@ type SearchSpace struct {
 
 // ParamDef defines a single parameter.
 type ParamDef struct {
-	Name    string  `json:"name"`
-	Type    string  `json:"type"`    // "int", "float", "categorical"
-	Min     float64 `json:"min"`
-	Max     float64 `json:"max"`
+	Name    string   `json:"name"`
+	Type    string   `json:"type"` // "int", "float", "categorical"
+	Min     float64  `json:"min"`
+	Max     float64  `json:"max"`
 	Choices []string `json:"choices,omitempty"`
 }
 
 // Trial represents a single optimization trial.
 type Trial struct {
-	ID       int                    `json:"id"`
-	Params   map[string]interface{} `json:"params"`
-	Value    float64                `json:"value"`
-	State    string                 `json:"state"` // "running", "completed", "failed"
+	ID     int                    `json:"id"`
+	Params map[string]interface{} `json:"params"`
+	Value  float64                `json:"value"`
+	State  string                 `json:"state"` // "running", "completed", "failed"
 }
 
 // OptimizeResult holds the optimization result.
 type OptimizeResult struct {
-	BestTrial  *Trial   `json:"best_trial"`
-	AllTrials  []*Trial `json:"all_trials"`
-	NTrials    int      `json:"n_trials"`
-	BestValue  float64  `json:"best_value"`
+	BestTrial *Trial   `json:"best_trial"`
+	AllTrials []*Trial `json:"all_trials"`
+	NTrials   int      `json:"n_trials"`
+	BestValue float64  `json:"best_value"`
 }
 
 // Optimize runs TPE optimization.

@@ -159,7 +159,8 @@ func (a *JuchaoAdapter) ensureOrgIDMap(ctx context.Context) error {
 }
 
 // resolveOrgID returns the orgId for a project-canonical symbol.
-//   "600519.SH" → "600519" → lookup in map → "gssh0600519" (example)
+//
+//	"600519.SH" → "600519" → lookup in map → "gssh0600519" (example)
 func (a *JuchaoAdapter) resolveOrgID(_ context.Context, sym string) (string, error) {
 	code := sym
 	if len(sym) > 3 && (sym[len(sym)-2:] == "SH" || sym[len(sym)-2:] == "SZ") {

@@ -8,19 +8,19 @@ import (
 	"sync"
 	"time"
 
+	"encoding/json"
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/ruoxizhnya/quant-trading/pkg/httpclient"
-	"encoding/json"
-	"github.com/rs/zerolog"
 )
 
 type tushareProvider struct {
-	token     string
-	baseURL   string
-	client    *httpclient.Client
-	logger    zerolog.Logger
-	store     OHLCVStore
+	token   string
+	baseURL string
+	client  *httpclient.Client
+	logger  zerolog.Logger
+	store   OHLCVStore
 
 	mu          sync.Mutex
 	lastRequest time.Time
@@ -209,14 +209,14 @@ func (p *tushareProvider) CheckCalendarExists(ctx context.Context, start, end ti
 }
 
 type tushareResponse struct {
-	Code int           `json:"code"`
-	Msg  string        `json:"msg"`
-	Data tushareData   `json:"data"`
+	Code int         `json:"code"`
+	Msg  string      `json:"msg"`
+	Data tushareData `json:"data"`
 }
 
 type tushareData struct {
 	Fields []string `json:"fields"`
-	Items  [][]any   `json:"items"`
+	Items  [][]any  `json:"items"`
 }
 
 func (p *tushareProvider) callAPI(ctx context.Context, apiName string, params map[string]interface{}, fields string) (*tushareResponse, error) {

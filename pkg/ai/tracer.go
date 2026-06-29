@@ -68,14 +68,14 @@ var (
 // are deliberately untyped (string / int / time.Duration) so they
 // can flow through any tracer implementation.
 const (
-	AttrAIModel       = "ai.model"
-	AttrAIPromptTok   = "ai.prompt_tokens"
+	AttrAIModel         = "ai.model"
+	AttrAIPromptTok     = "ai.prompt_tokens"
 	AttrAICompletionTok = "ai.completion_tokens"
-	AttrAITotalCost   = "ai.cost_usd"
-	AttrAIStatusCode  = "ai.http_status_code"
-	AttrAIDurationMS  = "ai.duration_ms"
-	AttrAIRetryCount  = "ai.retry_count"
-	AttrAIRateLimited = "ai.rate_limited"
+	AttrAITotalCost     = "ai.cost_usd"
+	AttrAIStatusCode    = "ai.http_status_code"
+	AttrAIDurationMS    = "ai.duration_ms"
+	AttrAIRetryCount    = "ai.retry_count"
+	AttrAIRateLimited   = "ai.rate_limited"
 )
 
 // SpanName is the conventional span name for AI client calls. The

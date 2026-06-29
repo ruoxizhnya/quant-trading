@@ -136,15 +136,15 @@ func (h *ReconciliationHandler) config(c *gin.Context) {
 	}
 	cfg := h.worker.Config()
 	c.JSON(http.StatusOK, gin.H{
-		"interval":            cfg.Interval.String(),
-		"interval_seconds":    cfg.Interval.Seconds(),
-		"cash_tolerance":      cfg.CashTolerance,
-		"quantity_tolerance":  cfg.QuantityTolerance,
-		"market_value_tol":    cfg.MarketValueTol,
-		"fee_tolerance":       cfg.FeeTolerance,
-		"report_path":         cfg.ReportPath,
-		"history_limit":       cfg.HistoryLimit,
-		"enabled":             cfg.Enabled,
+		"interval":           cfg.Interval.String(),
+		"interval_seconds":   cfg.Interval.Seconds(),
+		"cash_tolerance":     cfg.CashTolerance,
+		"quantity_tolerance": cfg.QuantityTolerance,
+		"market_value_tol":   cfg.MarketValueTol,
+		"fee_tolerance":      cfg.FeeTolerance,
+		"report_path":        cfg.ReportPath,
+		"history_limit":      cfg.HistoryLimit,
+		"enabled":            cfg.Enabled,
 	})
 }
 

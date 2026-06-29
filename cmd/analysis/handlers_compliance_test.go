@@ -76,11 +76,11 @@ func TestHandler_Check_RejectsChiNext(t *testing.T) {
 	h := newTestComplianceHandler(t)
 	// 50k < 100k ChiNext threshold → reject
 	w := doRequest(h, "POST", "/api/compliance/check", map[string]any{
-		"symbol":               "300750.SZ",
-		"asset_daily_avg_cny":  50_000,
-		"first_trade_at":       time.Now().AddDate(0, -36, 0).Format(time.RFC3339),
-		"risk_level":           4,
-		"boards_enabled":       []string{"chinext"},
+		"symbol":              "300750.SZ",
+		"asset_daily_avg_cny": 50_000,
+		"first_trade_at":      time.Now().AddDate(0, -36, 0).Format(time.RFC3339),
+		"risk_level":          4,
+		"boards_enabled":      []string{"chinext"},
 	})
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422 (compliance rejected), got %d: %s", w.Code, w.Body.String())

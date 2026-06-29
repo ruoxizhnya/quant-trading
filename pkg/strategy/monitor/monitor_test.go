@@ -37,9 +37,10 @@ func TestStrategyMonitor_Register(t *testing.T) {
 // rolling Sharpe computation against a hand-computed expected value.
 //
 // Returns = [0.01, 0.02, -0.01, 0.005, 0.015]
-//   mean      = 0.008
-//   sample std = sqrt(0.0001325) ≈ 0.0115111
-//   Sharpe    = 0.008 * sqrt(252) / 0.0115111 ≈ 11.03
+//
+//	mean      = 0.008
+//	sample std = sqrt(0.0001325) ≈ 0.0115111
+//	Sharpe    = 0.008 * sqrt(252) / 0.0115111 ≈ 11.03
 func TestStrategyMonitor_Update_RollingSharpe(t *testing.T) {
 	m := NewStrategyMonitor(DefaultAlertThresholds(), nopLogger())
 	m.Register("alpha")

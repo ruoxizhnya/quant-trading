@@ -52,16 +52,16 @@ type JobStore interface {
 // JobRecord holds the raw fields of a backtest job as stored in the DB.
 // The Params and Result fields are stored as JSON bytes.
 type JobRecord struct {
-	ID         string
-	StrategyID string
-	Params     []byte // JSONB
-	Universe   string
-	StartDate  string
-	EndDate    string
-	Status     string
-	Result     []byte // JSONB
-	ErrorMsg   string
-	CreatedAt  time.Time
+	ID          string
+	StrategyID  string
+	Params      []byte // JSONB
+	Universe    string
+	StartDate   string
+	EndDate     string
+	Status      string
+	Result      []byte // JSONB
+	ErrorMsg    string
+	CreatedAt   time.Time
 	StartedAt   *time.Time
 	CompletedAt *time.Time
 }
@@ -132,14 +132,14 @@ func NewJobService(store JobStore, engine *Engine) *JobService {
 
 // CreateJobRequest is the API request to create a backtest job.
 type CreateJobRequest struct {
-	StrategyID      string         `json:"strategy_id" binding:"required"`
-	Params          map[string]any `json:"params"`
-	Universe        string         `json:"universe" binding:"required"`
-	StartDate       string         `json:"start_date" binding:"required"`
-	EndDate         string         `json:"end_date" binding:"required"`
-	InitialCapital  float64        `json:"initial_capital"`
-	CommissionRate  float64        `json:"commission_rate"`
-	SlippageRate    float64        `json:"slippage_rate"`
+	StrategyID     string         `json:"strategy_id" binding:"required"`
+	Params         map[string]any `json:"params"`
+	Universe       string         `json:"universe" binding:"required"`
+	StartDate      string         `json:"start_date" binding:"required"`
+	EndDate        string         `json:"end_date" binding:"required"`
+	InitialCapital float64        `json:"initial_capital"`
+	CommissionRate float64        `json:"commission_rate"`
+	SlippageRate   float64        `json:"slippage_rate"`
 }
 
 // Job is the public API response for a job.
@@ -215,10 +215,10 @@ func (s *JobService) CreateJob(ctx context.Context, req CreateJobRequest) (*Job,
 // marks it "completed" with the result or "failed" with the error.
 //
 // Context handling strategy:
-// - Uses context.Background() as base to ensure the job continues running
-//   even after the HTTP request that started it has completed.
-// - Monitors the parent context for cancellation signals to allow graceful shutdown.
-// - For explicit cancellation, use CancelJob() method instead.
+//   - Uses context.Background() as base to ensure the job continues running
+//     even after the HTTP request that started it has completed.
+//   - Monitors the parent context for cancellation signals to allow graceful shutdown.
+//   - For explicit cancellation, use CancelJob() method instead.
 //
 // Sprint 6 P0-8 (ODR-013): if the JobService is currently draining
 // (Shutdown has been called), StartJob refuses to start a new goroutine
@@ -602,7 +602,7 @@ func recordToJob(r *JobRecord) *Job {
 		Params:      r.Params,
 		Universe:    r.Universe,
 		StartDate:   r.StartDate,
-		EndDate:    r.EndDate,
+		EndDate:     r.EndDate,
 		Status:      r.Status,
 		Result:      r.Result,
 		Error:       r.ErrorMsg,

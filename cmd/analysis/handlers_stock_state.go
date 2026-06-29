@@ -50,7 +50,7 @@ func (h *StockStateHandler) RegisterRoutes(router *gin.Engine) {
 	group := router.Group("/api/stock-state")
 	{
 		group.GET("/list", h.list)
-		group.GET("/scan", h.scanGET)  // for browser convenience
+		group.GET("/scan", h.scanGET) // for browser convenience
 		group.POST("/scan", h.scan)
 		group.GET("/:symbol", h.get)
 		group.POST("/:symbol/set", h.set)
@@ -76,8 +76,8 @@ func (h *StockStateHandler) list(c *gin.Context) {
 	}
 	recs := h.registry.ListByState(state)
 	c.JSON(http.StatusOK, gin.H{
-		"count":    len(recs),
-		"records":  recs,
+		"count":          len(recs),
+		"records":        recs,
 		"registry_count": h.registry.Count(),
 	})
 }

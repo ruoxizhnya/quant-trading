@@ -30,9 +30,9 @@ func TestSentimentFactor_HotSearchRank1(t *testing.T) {
 func TestSentimentFactor_NewsSentimentMapping(t *testing.T) {
 	ref := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
 	rows := []HotSearchRow{
-		{Symbol: "POS", TradeTime: ref, Title: "stock soars", Sentiment: 1.0},  // bullish → 1.0
+		{Symbol: "POS", TradeTime: ref, Title: "stock soars", Sentiment: 1.0},     // bullish → 1.0
 		{Symbol: "NEU", TradeTime: ref, Title: "earnings report", Sentiment: 0.0}, // neutral → 0.5
-		{Symbol: "NEG", TradeTime: ref, Title: "stock tumbles", Sentiment: -1.0}, // bearish → 0.0
+		{Symbol: "NEG", TradeTime: ref, Title: "stock tumbles", Sentiment: -1.0},  // bearish → 0.0
 	}
 	factor := SentimentFactor(rows, ref)
 	if math.Abs(factor["POS"]-1.0) > 1e-9 {
@@ -144,8 +144,8 @@ func TestIsHotSearchRowValid(t *testing.T) {
 		want bool
 	}{
 		{HotSearchRow{Symbol: "A", TradeTime: now, Heat: 1}, true},
-		{HotSearchRow{TradeTime: now, Heat: 1}, false},                    // no symbol
-		{HotSearchRow{Symbol: "A", Heat: 1}, false},                      // no time
+		{HotSearchRow{TradeTime: now, Heat: 1}, false}, // no symbol
+		{HotSearchRow{Symbol: "A", Heat: 1}, false},    // no time
 		{HotSearchRow{Symbol: "A", TradeTime: now, Heat: math.NaN()}, false},
 	}
 	for i, c := range cases {
@@ -162,10 +162,10 @@ func TestIsHotSearchRowValid(t *testing.T) {
 // must not propagate NaN/Inf downstream: the output is later used in
 // IC computation, where a single NaN entry would void the entire
 // cross-section. The fix has two layers:
-//   1. The function's arithmetic must not turn a NaN input into a
-//      NaN output (or if it does, the row must be skipped).
-//   2. The output range [0, 1] must hold; NaN is by definition
-//      neither, so emitting NaN is a contract violation.
+//  1. The function's arithmetic must not turn a NaN input into a
+//     NaN output (or if it does, the row must be skipped).
+//  2. The output range [0, 1] must hold; NaN is by definition
+//     neither, so emitting NaN is a contract violation.
 func TestSentimentFactor_NaNInfTolerance(t *testing.T) {
 	ref := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
 	rows := []HotSearchRow{

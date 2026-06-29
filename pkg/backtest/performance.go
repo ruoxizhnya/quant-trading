@@ -320,7 +320,7 @@ func calculateTradeMetrics(trades []domain.Trade, portfolioValues []domain.Portf
 						holdingDays := trade.Timestamp.Sub(entryTime).Hours() / 24
 						totalHoldingDays += holdingDays
 						holdingDaysCount++
-						if pnl - trade.Commission > 0 {
+						if pnl-trade.Commission > 0 {
 							winningTrades++
 						} else {
 							losingTrades++
@@ -352,7 +352,7 @@ func calculateTradeMetrics(trades []domain.Trade, portfolioValues []domain.Portf
 						holdingDays := trade.Timestamp.Sub(entryTime).Hours() / 24
 						totalHoldingDays += holdingDays
 						holdingDaysCount++
-						if pnl - trade.Commission > 0 {
+						if pnl-trade.Commission > 0 {
 							winningTrades++
 						} else {
 							losingTrades++
@@ -373,7 +373,7 @@ func calculateTradeMetrics(trades []domain.Trade, portfolioValues []domain.Portf
 					holdingDays := trade.Timestamp.Sub(entryTime).Hours() / 24
 					totalHoldingDays += holdingDays
 					holdingDaysCount++
-					if pnl - trade.Commission > 0 {
+					if pnl-trade.Commission > 0 {
 						winningTrades++
 					} else {
 						losingTrades++
@@ -385,7 +385,7 @@ func calculateTradeMetrics(trades []domain.Trade, portfolioValues []domain.Portf
 					holdingDays := trade.Timestamp.Sub(entryTime).Hours() / 24
 					totalHoldingDays += holdingDays
 					holdingDaysCount++
-					if pnl - trade.Commission > 0 {
+					if pnl-trade.Commission > 0 {
 						winningTrades++
 					} else {
 						losingTrades++
@@ -469,21 +469,21 @@ func GenerateBacktestResult(
 	winRate, totalTrades, winTrades, loseTrades, avgHoldingDays := calculateTradeMetrics(trades, portfolioValues)
 
 	return domain.BacktestResult{
-		StartDate:        startDate,
-		EndDate:          endDate,
-		TotalReturn:      totalReturn,
-		AnnualReturn:     annualReturn,
-		SharpeRatio:      sharpe,
-		SortinoRatio:     sortino,
-		MaxDrawdown:      maxDD,
-		MaxDrawdownDate:  maxDDDate,
-		WinRate:          winRate,
-		TotalTrades:      totalTrades,
-		WinTrades:        winTrades,
-		LoseTrades:       loseTrades,
-		AvgHoldingDays:   avgHoldingDays,
-		CalmarRatio:      calmar,
-		PortfolioValues:  portfolioValues,
-		Trades:           trades,
+		StartDate:       startDate,
+		EndDate:         endDate,
+		TotalReturn:     totalReturn,
+		AnnualReturn:    annualReturn,
+		SharpeRatio:     sharpe,
+		SortinoRatio:    sortino,
+		MaxDrawdown:     maxDD,
+		MaxDrawdownDate: maxDDDate,
+		WinRate:         winRate,
+		TotalTrades:     totalTrades,
+		WinTrades:       winTrades,
+		LoseTrades:      loseTrades,
+		AvgHoldingDays:  avgHoldingDays,
+		CalmarRatio:     calmar,
+		PortfolioValues: portfolioValues,
+		Trades:          trades,
 	}
 }

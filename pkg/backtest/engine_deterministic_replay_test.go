@@ -165,7 +165,7 @@ func TestEngine_RNG_NotGlobal(t *testing.T) {
 // sampling, Int63n for ID generation, Shuffle for tie-breaking).
 type streamSample struct {
 	Int63   [16]int64
-	Intn    [16]int  `json:",omitempty"`
+	Intn    [16]int `json:",omitempty"`
 	Float64 [16]float64
 	Shuffle []int
 }

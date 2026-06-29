@@ -20,9 +20,9 @@
 //  1. Token bucket (not fixed window). The analysis-service
 //     middleware uses a per-IP fixed-window counter; the AI service
 //     uses a per-user *token bucket* because:
-//       - the cost of an LLM call is bursty (a research session
-//         can fire 5–10 calls in quick succession), and
-//       - we want to allow short bursts but cap sustained rate.
+//     - the cost of an LLM call is bursty (a research session
+//     can fire 5–10 calls in quick succession), and
+//     - we want to allow short bursts but cap sustained rate.
 //     `rate.NewLimiter(rate.Every(6*time.Second), 10)` gives exactly
 //     10 req/min sustained with a burst of 10 tokens.
 //
@@ -200,8 +200,8 @@ func (rl *rateLimiter) middleware() gin.HandlerFunc {
 			delay := rl.reserveDelay(user)
 			c.Header("Retry-After", strconv.Itoa(int(delay.Seconds())))
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error":       "rate limit exceeded",
-				"limit_per_min": int(rl.rate * 60),
+				"error":               "rate limit exceeded",
+				"limit_per_min":       int(rl.rate * 60),
 				"retry_after_seconds": int(delay.Seconds()),
 			})
 			return

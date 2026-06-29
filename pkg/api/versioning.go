@@ -83,7 +83,7 @@ type VersionInfo struct {
 	CurrentVersion  string   `json:"current_version"`
 	Supported       []string `json:"supported_versions"`
 	DeprecatedSince string   `json:"deprecated_since,omitempty"` // RFC3339
-	SunsetAt        string   `json:"sunset_at,omitempty"`         // RFC3339
+	SunsetAt        string   `json:"sunset_at,omitempty"`        // RFC3339
 	LatestStable    string   `json:"latest_stable"`
 	Endpoints       []string `json:"endpoints,omitempty"`
 }

@@ -193,9 +193,12 @@ func (a *EastmoneyAdapter) Fetch(ctx context.Context, req FetchRequest) (*FetchR
 // fetchCapitalFlow calls the push2 capital flow endpoint.
 //
 // URL pattern (push2):
-//   /api/qt/stock/kline/get?secid=1.600519&fields1=...&fields2=...&klt=1&fqt=1&beg=...&end=...
+//
+//	/api/qt/stock/kline/get?secid=1.600519&fields1=...&fields2=...&klt=1&fqt=1&beg=...&end=...
+//
 // For "individual stock capital flow" we use:
-//   /api/qt/stock/fflow/daykline/get?secid=1.600519&fields1=...&fields2=...&klt=1&fqt=1&beg=...&end=...
+//
+//	/api/qt/stock/fflow/daykline/get?secid=1.600519&fields1=...&fields2=...&klt=1&fqt=1&beg=...&end=...
 //
 // Period mapping:
 //   - "1d" / "daily"  →  period column = "daily"
@@ -229,11 +232,11 @@ func (a *EastmoneyAdapter) fetchCapitalFlow(ctx context.Context, req FetchReques
 // data is in Data.KLines (a slice of strings) or Data.Diff.
 type eastmoneyPush2Response struct {
 	Data struct {
-		Code    string        `json:"code"`
-		Name    string        `json:"name"`
-		KLines  []string      `json:"klines"`
-		Total   int           `json:"total"`
-		Diff    []interface{} `json:"diff"`
+		Code   string        `json:"code"`
+		Name   string        `json:"name"`
+		KLines []string      `json:"klines"`
+		Total  int           `json:"total"`
+		Diff   []interface{} `json:"diff"`
 	} `json:"data"`
 	RC int `json:"rc"`
 }
@@ -293,17 +296,17 @@ func (a *EastmoneyAdapter) fetchCapitalFlowForSymbol(ctx context.Context, sym, p
 			Symbol:    sym,
 			TradeTime: r.Date,
 			Data: map[string]interface{}{
-				"period":            period,
-				"main_net":          r.MainNet,
-				"super_net":         r.SuperNet,
-				"large_net":         r.LargeNet,
-				"medium_net":        r.MediumNet,
-				"small_net":         r.SmallNet,
-				"main_net_ratio":    r.MainNetRatio,
-				"retail_net":        r.RetailNet,
-				"retail_net_ratio":  r.RetailRatio,
-				"close_price":       r.ClosePrice,
-				"change_pct":        r.ChangePct,
+				"period":           period,
+				"main_net":         r.MainNet,
+				"super_net":        r.SuperNet,
+				"large_net":        r.LargeNet,
+				"medium_net":       r.MediumNet,
+				"small_net":        r.SmallNet,
+				"main_net_ratio":   r.MainNetRatio,
+				"retail_net":       r.RetailNet,
+				"retail_net_ratio": r.RetailRatio,
+				"close_price":      r.ClosePrice,
+				"change_pct":       r.ChangePct,
 			},
 		})
 	}
@@ -379,11 +382,12 @@ func kltToDays(klt int) int {
 
 // parseEastmoneyCapitalFlowKLines parses the comma-separated rows from
 // the push2 capital-flow endpoint. Field order (per the api docs):
-//   date, close, change_pct, main_net, main_buy, main_sell, main_net_ratio,
-//   super_buy, super_sell, super_net,
-//   large_buy, large_sell, large_net,
-//   medium_buy, medium_sell, medium_net,
-//   small_buy, small_sell, small_net
+//
+//	date, close, change_pct, main_net, main_buy, main_sell, main_net_ratio,
+//	super_buy, super_sell, super_net,
+//	large_buy, large_sell, large_net,
+//	medium_buy, medium_sell, medium_net,
+//	small_buy, small_sell, small_net
 func parseEastmoneyCapitalFlowKLines(lines []string) ([]eastmoneyCapitalFlowRow, error) {
 	rows := make([]eastmoneyCapitalFlowRow, 0, len(lines))
 	for _, line := range lines {

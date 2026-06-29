@@ -67,11 +67,11 @@ func (h *RiskHandler) RegisterRoutes(router *gin.Engine) {
 // shape. Signal / Portfolio / Regime / OHLCV are passed through
 // to risk.RiskManager.CalculatePosition unchanged.
 type calculatePositionRequest struct {
-	Signal       domain.Signal       `json:"signal"`
-	Portfolio    domain.Portfolio    `json:"portfolio"`
+	Signal       domain.Signal        `json:"signal"`
+	Portfolio    domain.Portfolio     `json:"portfolio"`
 	Regime       *domain.MarketRegime `json:"regime"`
-	CurrentPrice float64             `json:"current_price"`
-	OHLCV        []domain.OHLCV      `json:"ohlcv,omitempty"`
+	CurrentPrice float64              `json:"current_price"`
+	OHLCV        []domain.OHLCV       `json:"ohlcv,omitempty"`
 }
 
 type calculatePositionResponse struct {

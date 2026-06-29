@@ -77,7 +77,7 @@ func (s *stubLiveTrader) CancelOrder(context.Context, string) error {
 func (s *stubLiveTrader) GetOrder(context.Context, string) (*live.OrderResult, error) {
 	panic("stubLiveTrader.GetOrder should not be called from alert loop tests")
 }
-func (s *stubLiveTrader) Name() string                    { return "stub" }
+func (s *stubLiveTrader) Name() string                      { return "stub" }
 func (s *stubLiveTrader) HealthCheck(context.Context) error { return nil }
 func (s *stubLiveTrader) EmergencyFlatten(_ context.Context, reason string) (*live.EmergencyFlattenResult, error) {
 	// Alert loop does not exercise emergency flatten; return an
@@ -93,7 +93,7 @@ type stubRiskManager struct {
 }
 
 func (s *stubRiskManager) GetConfig() risk.RiskManagerConfig { return s.cfg }
-func (s *stubRiskManager) CurrentRegime() interface{}         { return nil }
+func (s *stubRiskManager) CurrentRegime() interface{}        { return nil }
 
 // newTestLoop builds a PeriodicAlertLoop wired to a stub trader
 // and stub risk manager. Returns the loop, history, and the

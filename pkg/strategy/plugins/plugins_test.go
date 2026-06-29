@@ -231,14 +231,14 @@ func TestMultiFactorStrategy_WithMockData(t *testing.T) {
 func TestStrategyRegistration(t *testing.T) {
 	// Ensure all init() functions have run by accessing packages directly
 	strategies := map[string]strategy.Strategy{
-		"momentum":             &momentumStrategy{params: MomentumConfig{LookbackDays: 20, TopN: 5}},
-		"mean_reversion":       &meanReversionStrategy{params: MeanReversionConfig{BollingerPeriod: 20, BollingerStdDev: 2.0, RSIPeriod: 14, RSIOversold: 30, RSIOverbought: 70}},
-		"value_screening":      &valueScreeningStrategy{params: ValueScreeningConfig{PEMax: 30, PBMax: 3, ROEMin: 0.1, MomentumDays: 60, TopN: 10}},
-		"multi_factor":         &multiFactorStrategy{params: MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3, LookbackDays: 60, TopN: 10}},
-		"td_sequential":        &tdSequentialStrategy{params: TDSequentialConfig{SetupCount: 9, CancelDays: 4}},
-		"bollinger_mr":         &bollingerMRStrategy{params: BollingerMRConfig{Period: 20, StdDev: 2.0, BuyZScore: -2.0, SellZScore: 2.0}},
-		"volume_price_trend":   &vptStrategy{params: VPTConfig{SMALookback: 20, TopN: 5}},
-		"volatility_breakout":  &volBreakoutStrategy{params: VolBreakoutConfig{ATRPeriod: 14, ATRMultiplier: 2.0, Lookback: 20, TopN: 5}},
+		"momentum":            &momentumStrategy{params: MomentumConfig{LookbackDays: 20, TopN: 5}},
+		"mean_reversion":      &meanReversionStrategy{params: MeanReversionConfig{BollingerPeriod: 20, BollingerStdDev: 2.0, RSIPeriod: 14, RSIOversold: 30, RSIOverbought: 70}},
+		"value_screening":     &valueScreeningStrategy{params: ValueScreeningConfig{PEMax: 30, PBMax: 3, ROEMin: 0.1, MomentumDays: 60, TopN: 10}},
+		"multi_factor":        &multiFactorStrategy{params: MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3, LookbackDays: 60, TopN: 10}},
+		"td_sequential":       &tdSequentialStrategy{params: TDSequentialConfig{SetupCount: 9, CancelDays: 4}},
+		"bollinger_mr":        &bollingerMRStrategy{params: BollingerMRConfig{Period: 20, StdDev: 2.0, BuyZScore: -2.0, SellZScore: 2.0}},
+		"volume_price_trend":  &vptStrategy{params: VPTConfig{SMALookback: 20, TopN: 5}},
+		"volatility_breakout": &volBreakoutStrategy{params: VolBreakoutConfig{ATRPeriod: 14, ATRMultiplier: 2.0, Lookback: 20, TopN: 5}},
 	}
 
 	for name, s := range strategies {

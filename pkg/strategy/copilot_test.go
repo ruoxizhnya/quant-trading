@@ -31,7 +31,7 @@ func newCopilotWithMock(mock *ai.MockClient) *CopilotService {
 
 func TestCopilotService_Generate_RecordsJob(t *testing.T) {
 	svc := newCopilotWithMock(&ai.MockClient{
-		Configured:      true,
+		Configured:       true,
 		GenerateResponse: "package plugins",
 	})
 
@@ -101,7 +101,7 @@ func TestCopilotService_AcceptanceRate_ComputedFromCounters(t *testing.T) {
 
 func TestCopilotService_Stats_AtomicRead(t *testing.T) {
 	svc := newCopilotWithMock(&ai.MockClient{
-		Configured:      true,
+		Configured:       true,
 		GenerateResponse: "package plugins",
 	})
 
@@ -276,7 +276,7 @@ func TestCopilotService_WithWorkingDir(t *testing.T) {
 // (and the LLM on retry) can act on it.
 func TestCopilotService_Run_StaticcheckRejectsDangerousCode(t *testing.T) {
 	mock := &ai.MockClient{
-		Configured:      true,
+		Configured:       true,
 		GenerateResponse: "package x\nimport \"os\"\nfunc f() { os.RemoveAll(\"/\") }\n",
 	}
 	svc := newCopilotWithMock(mock).
@@ -314,7 +314,7 @@ func TestCopilotService_Run_StaticcheckRejectsDangerousCode(t *testing.T) {
 // themselves" by shelling out.
 func TestCopilotService_Run_StaticcheckRejectsExecCommand(t *testing.T) {
 	mock := &ai.MockClient{
-		Configured:      true,
+		Configured:       true,
 		GenerateResponse: "package x\nimport \"os/exec\"\nfunc f() { _ = exec.Command(\"ls\") }\n",
 	}
 	svc := newCopilotWithMock(mock).WithWorkingDir(t.TempDir())
@@ -342,7 +342,7 @@ func TestCopilotService_Run_StaticcheckRejectsExecCommand(t *testing.T) {
 // error.
 func TestCopilotService_Run_WorkingDirEmpty_RejectsWithConfigError(t *testing.T) {
 	mock := &ai.MockClient{
-		Configured:      true,
+		Configured:       true,
 		GenerateResponse: "package x\nfunc f() {}\n", // safe code — failure must be config, not staticcheck
 	}
 	svc := newCopilotWithMock(mock) // WorkingDir left empty
@@ -380,7 +380,7 @@ func TestCopilotService_WithLogger_NopIsSafe(t *testing.T) {
 // crash the backtest engine.
 func TestCopilotService_Run_StaticcheckRejectsPanic(t *testing.T) {
 	mock := &ai.MockClient{
-		Configured:      true,
+		Configured:       true,
 		GenerateResponse: "package x\nfunc f() { panic(\"boom\") }\n",
 	}
 	svc := newCopilotWithMock(mock).WithWorkingDir(t.TempDir())

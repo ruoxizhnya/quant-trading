@@ -21,13 +21,16 @@ type stubBroker struct {
 	submitCalls int
 }
 
-func (s *stubBroker) Connect() error                                       { return nil }
-func (s *stubBroker) Disconnect() error                                    { return nil }
-func (s *stubBroker) SubmitOrder(_ domain.Order) (string, error)           { s.submitCalls++; return "BROKER-ID", nil }
-func (s *stubBroker) CancelOrder(_ string) error                           { return nil }
-func (s *stubBroker) GetOrderStatus(_ string) (string, error)              { return "submitted", nil }
-func (s *stubBroker) GetPositions() ([]domain.Position, error)             { return nil, nil }
-func (s *stubBroker) GetAccountBalance() (float64, error)                  { return 1e6, nil }
+func (s *stubBroker) Connect() error    { return nil }
+func (s *stubBroker) Disconnect() error { return nil }
+func (s *stubBroker) SubmitOrder(_ domain.Order) (string, error) {
+	s.submitCalls++
+	return "BROKER-ID", nil
+}
+func (s *stubBroker) CancelOrder(_ string) error               { return nil }
+func (s *stubBroker) GetOrderStatus(_ string) (string, error)  { return "submitted", nil }
+func (s *stubBroker) GetPositions() ([]domain.Position, error) { return nil, nil }
+func (s *stubBroker) GetAccountBalance() (float64, error)      { return 1e6, nil }
 
 func newTestOrderManagerWithCage() (*OrderManager, *stubBroker) {
 	broker := &stubBroker{}

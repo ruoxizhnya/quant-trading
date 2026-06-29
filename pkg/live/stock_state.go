@@ -43,10 +43,11 @@ import (
 // StockState 表示一只股票当前的上市状态。
 //
 // 状态转换 (单向, 不允许逆向):
-//   Listed  → Suspended    (临时停牌, 复牌后回 Listed)
-//   Listed  → Delisting    (触发退市, 进入整理期)
-//   Suspended → Delisting  (停牌期间触发退市, 复牌即整理期首日)
-//   Delisting → Delisted   (整理期满, 摘牌)
+//
+//	Listed  → Suspended    (临时停牌, 复牌后回 Listed)
+//	Listed  → Delisting    (触发退市, 进入整理期)
+//	Suspended → Delisting  (停牌期间触发退市, 复牌即整理期首日)
+//	Delisting → Delisted   (整理期满, 摘牌)
 type StockState string
 
 const (
@@ -200,10 +201,10 @@ func (r *StockStateRegistry) SetState(symbol string, state StockState, reason st
 	}
 
 	rec := StockStateRecord{
-		Symbol:     symbol,
-		State:      state,
-		Reason:     reason,
-		UpdatedAt:  now,
+		Symbol:    symbol,
+		State:     state,
+		Reason:    reason,
+		UpdatedAt: now,
 	}
 
 	// Auto-populate delisting timeline when entering Delisting / Delisted.
@@ -304,21 +305,21 @@ func (r *StockStateRegistry) Delete(symbol string) {
 // Sold: 成功卖出 (由 EmergencyFlatten 内部走 BypassedT1 通道).
 // Skipped: 跳过原因 (e.g. 持仓为 0 / 不在强制清仓窗口 / 券商拒绝).
 type LiquidationAction struct {
-	Symbol   string    `json:"symbol"`
-	State    StockState `json:"state"`
-	DelistedDate time.Time `json:"delisted_date"`
-	Quantity  float64   `json:"quantity"`     // 强制清仓的股数
-	Sold      bool      `json:"sold"`
-	Reason    string    `json:"reason"`       // 卖出失败 / 跳过的原因
-	Timestamp time.Time `json:"timestamp"`
+	Symbol       string     `json:"symbol"`
+	State        StockState `json:"state"`
+	DelistedDate time.Time  `json:"delisted_date"`
+	Quantity     float64    `json:"quantity"` // 强制清仓的股数
+	Sold         bool       `json:"sold"`
+	Reason       string     `json:"reason"` // 卖出失败 / 跳过的原因
+	Timestamp    time.Time  `json:"timestamp"`
 }
 
 // LiquidationResult is the aggregated result of one Scan() call.
 type LiquidationResult struct {
-	ScannedAt   time.Time             `json:"scanned_at"`
-	Actions     []LiquidationAction   `json:"actions"`
-	TotalSold   int                   `json:"total_sold"`
-	TotalSkipped int                  `json:"total_skipped"`
+	ScannedAt    time.Time           `json:"scanned_at"`
+	Actions      []LiquidationAction `json:"actions"`
+	TotalSold    int                 `json:"total_sold"`
+	TotalSkipped int                 `json:"total_skipped"`
 }
 
 // ForcedLiquidator 在退市整理期末期强制卖出所有持仓.

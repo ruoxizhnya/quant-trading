@@ -89,8 +89,8 @@ func (b *LiveBridge) Get() live.LiveTrader {
 //     保持完全一致——这是 engine → bridge 迁移的兼容点
 //   - currentPrice <= 0 时返回 error，避免向 broker 提交无意义订单
 //   - 根据 signal.OrderType 自动选择市价/限价逻辑：
-//       * market:  price = 0
-//       * limit:   price = signal.LimitPrice (fallback: currentPrice)
+//   - market:  price = 0
+//   - limit:   price = signal.LimitPrice (fallback: currentPrice)
 //   - quantity 由 signal.Strength 推导，旧实现使用 `100.0 * max(1, strength*10)`
 //     公式（封顶 10000）——保留以保持行为完全一致
 //

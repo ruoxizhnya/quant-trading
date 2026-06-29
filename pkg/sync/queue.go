@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 )
 
 // Queue manages the lifecycle of sync jobs using a PostgreSQL-backed queue.

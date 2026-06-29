@@ -52,9 +52,9 @@ func TestIsVersioned(t *testing.T) {
 		{"/api/backtest", false},
 		{"/api/v1", true},
 		{"/api/v1/", true},
-		{"/api/v1abc", false},  // not pure number
-		{"/api/v", false},      // no number
-		{"/health", false},     // not /api/
+		{"/api/v1abc", false},   // not pure number
+		{"/api/v", false},       // no number
+		{"/health", false},      // not /api/
 		{"/api/version", false}, // "version" is not v<NUM>
 		{"/api/versioning", false},
 	}

@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 var nopLogger = zerolog.Nop()
@@ -29,7 +29,7 @@ func makeOHLCV(n int, basePrice float64) []domain.OHLCV {
 		p := basePrice + float64(i)*0.5
 		out[i] = domain.OHLCV{
 			Symbol: "TEST",
-			Date:    time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, i),
+			Date:   time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, i),
 			Open:   p,
 			High:   p + 1.0,
 			Low:    p - 0.5,
@@ -620,9 +620,9 @@ func TestBoundary_VolatilitySizer_CalculateVolatility_Empty(t *testing.T) {
 
 func TestBoundary_VolatilitySizer_CalculatePositionWeight_ZeroVol(t *testing.T) {
 	cfg := VolatilityConfig{
-		TargetVolatility:    0.15,
-		MaxPositionWeight:   0.10,
-		MinPositionWeight:   0.01,
+		TargetVolatility:  0.15,
+		MaxPositionWeight: 0.10,
+		MinPositionWeight: 0.01,
 	}
 	vs := NewVolatilitySizer(cfg, nopLogger)
 
@@ -636,9 +636,9 @@ func TestBoundary_VolatilitySizer_CalculatePositionWeight_ZeroVol(t *testing.T) 
 
 func TestBoundary_VolatilitySizer_CalculatePositionWeight_NegativeVol(t *testing.T) {
 	cfg := VolatilityConfig{
-		TargetVolatility:    0.15,
-		MaxPositionWeight:   0.10,
-		MinPositionWeight:   0.01,
+		TargetVolatility:  0.15,
+		MaxPositionWeight: 0.10,
+		MinPositionWeight: 0.01,
 	}
 	vs := NewVolatilitySizer(cfg, nopLogger)
 
@@ -652,9 +652,9 @@ func TestBoundary_VolatilitySizer_CalculatePositionWeight_NegativeVol(t *testing
 
 func TestBoundary_VolatilitySizer_CalculatePositionWeight_CapsAtMax(t *testing.T) {
 	cfg := VolatilityConfig{
-		TargetVolatility:    0.15,
-		MaxPositionWeight:   0.10,
-		MinPositionWeight:   0.01,
+		TargetVolatility:  0.15,
+		MaxPositionWeight: 0.10,
+		MinPositionWeight: 0.01,
 	}
 	vs := NewVolatilitySizer(cfg, nopLogger)
 
@@ -669,9 +669,9 @@ func TestBoundary_VolatilitySizer_CalculatePositionWeight_CapsAtMax(t *testing.T
 
 func TestBoundary_VolatilitySizer_CalculatePositionWeight_HighVolRegime(t *testing.T) {
 	cfg := VolatilityConfig{
-		TargetVolatility:    0.15,
-		MaxPositionWeight:   0.10,
-		MinPositionWeight:   0.01,
+		TargetVolatility:  0.15,
+		MaxPositionWeight: 0.10,
+		MinPositionWeight: 0.01,
 	}
 	vs := NewVolatilitySizer(cfg, nopLogger)
 
@@ -687,9 +687,9 @@ func TestBoundary_VolatilitySizer_CalculatePositionWeight_HighVolRegime(t *testi
 
 func TestBoundary_VolatilitySizer_CalculatePositionWeight_LowVolRegime(t *testing.T) {
 	cfg := VolatilityConfig{
-		TargetVolatility:    0.15,
-		MaxPositionWeight:   0.10,
-		MinPositionWeight:   0.01,
+		TargetVolatility:  0.15,
+		MaxPositionWeight: 0.10,
+		MinPositionWeight: 0.01,
 	}
 	vs := NewVolatilitySizer(cfg, nopLogger)
 
@@ -704,9 +704,9 @@ func TestBoundary_VolatilitySizer_CalculatePositionWeight_LowVolRegime(t *testin
 
 func TestBoundary_VolatilitySizer_CalculatePositionWeight_BearRegime(t *testing.T) {
 	cfg := VolatilityConfig{
-		TargetVolatility:    0.15,
-		MaxPositionWeight:   0.10,
-		MinPositionWeight:   0.01,
+		TargetVolatility:  0.15,
+		MaxPositionWeight: 0.10,
+		MinPositionWeight: 0.01,
 	}
 	vs := NewVolatilitySizer(cfg, nopLogger)
 
@@ -722,8 +722,8 @@ func TestBoundary_VolatilitySizer_CalculatePositionWeight_BearRegime(t *testing.
 
 func TestBoundary_VolatilitySizer_CalculateBaseWeight(t *testing.T) {
 	cfg := VolatilityConfig{
-		TargetVolatility:    0.15,
-		MinPositionWeight:   0.01,
+		TargetVolatility:  0.15,
+		MinPositionWeight: 0.01,
 	}
 	vs := NewVolatilitySizer(cfg, nopLogger)
 
@@ -836,8 +836,8 @@ func TestBoundary_StopLossChecker_InferTrend(t *testing.T) {
 		avgCost      float64
 		want         string
 	}{
-		{110.0, 100.0, "bull"},   // +10% → bull
-		{90.0, 100.0, "bear"},    // -10% → bear
+		{110.0, 100.0, "bull"},     // +10% → bull
+		{90.0, 100.0, "bear"},      // -10% → bear
 		{101.0, 100.0, "sideways"}, // +1% → sideways
 		{99.0, 100.0, "sideways"},  // -1% → sideways
 	}
@@ -861,11 +861,11 @@ func TestBoundary_StopLossChecker_InferVolatility(t *testing.T) {
 		atr     float64
 		want    string
 	}{
-		{100.0, 5.0, "high"},    // 5% ATR → high
-		{100.0, 1.0, "low"},     // 1% ATR → low
-		{100.0, 2.0, "medium"},  // 2% ATR → medium
-		{0.0, 5.0, "medium"},     // zero cost → medium (guard)
-		{100.0, 0.0, "medium"},  // zero ATR → medium (guard)
+		{100.0, 5.0, "high"},   // 5% ATR → high
+		{100.0, 1.0, "low"},    // 1% ATR → low
+		{100.0, 2.0, "medium"}, // 2% ATR → medium
+		{0.0, 5.0, "medium"},   // zero cost → medium (guard)
+		{100.0, 0.0, "medium"}, // zero ATR → medium (guard)
 	}
 	for _, c := range cases {
 		pos := domain.Position{AvgCost: c.avgCost}
@@ -988,9 +988,9 @@ func TestBoundary_StopLossChecker_ExtremeATRPeriod(t *testing.T) {
 
 func TestBoundary_VolatilitySizer_CalculatePositionWeight_NilRegime(t *testing.T) {
 	cfg := VolatilityConfig{
-		TargetVolatility:    0.15,
-		MaxPositionWeight:   0.10,
-		MinPositionWeight:   0.01,
+		TargetVolatility:  0.15,
+		MaxPositionWeight: 0.10,
+		MinPositionWeight: 0.01,
 	}
 	vs := NewVolatilitySizer(cfg, nopLogger)
 

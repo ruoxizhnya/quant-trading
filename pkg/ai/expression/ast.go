@@ -9,11 +9,11 @@ import (
 type NodeType string
 
 const (
-	NodeTypeLiteral    NodeType = "literal"
-	NodeTypeIdentifier NodeType = "identifier"
-	NodeTypeBinaryOp   NodeType = "binary_op"
-	NodeTypeUnaryOp    NodeType = "unary_op"
-	NodeTypeFunction   NodeType = "function"
+	NodeTypeLiteral        NodeType = "literal"
+	NodeTypeIdentifier     NodeType = "identifier"
+	NodeTypeBinaryOp       NodeType = "binary_op"
+	NodeTypeUnaryOp        NodeType = "unary_op"
+	NodeTypeFunction       NodeType = "function"
 	NodeTypeCrossSectional NodeType = "cross_sectional"
 )
 
@@ -87,7 +87,7 @@ func (n *FunctionNode) Children() []Node {
 
 // CrossSectionalNode represents a cross-sectional operation (e.g., cs_rank, cs_zscore)
 type CrossSectionalNode struct {
-	Op  string
+	Op   string
 	Expr Node
 }
 

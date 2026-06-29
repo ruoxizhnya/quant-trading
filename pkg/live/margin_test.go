@@ -17,11 +17,11 @@ import (
 func newTestMarginConfig() MarginConfig {
 	return MarginConfig{
 		InitialMarginRate:     0.5,
-		MaintenanceRatioFloor:  1.3,
-		WarningRatio:           1.5,
-		FinancingRate:          0.06,
+		MaintenanceRatioFloor: 1.3,
+		WarningRatio:          1.5,
+		FinancingRate:         0.06,
 		SecuritiesLendingRate: 0.08,
-		DaysPerYear:            365,
+		DaysPerYear:           365,
 		Now: func() time.Time {
 			return time.Date(2026, 6, 24, 15, 0, 0, 0, time.UTC)
 		},
@@ -874,16 +874,16 @@ func TestMarginAccount_RiskStatus_Warning(t *testing.T) {
 	// assets = 1000000 + 600000 = 1600000, debt = 600000
 	// ratio = 1600000 / 600000 = 2.67 (still safe)
 	// Need to push it lower. Buy more.
-	acc.MarginBuy(ctx, "600000.SH", 60000, 10.0)  // financing = 600000
-	acc.MarginBuy(ctx, "600000.SH", 60000, 10.0)  // financing = 1200000
+	acc.MarginBuy(ctx, "600000.SH", 60000, 10.0) // financing = 600000
+	acc.MarginBuy(ctx, "600000.SH", 60000, 10.0) // financing = 1200000
 	// assets = 1000000 + 1200000 = 2200000, debt = 1200000
 	// ratio = 2200000 / 1200000 = 1.833 (safe)
 	// Buy more.
-	acc.MarginBuy(ctx, "600000.SH", 60000, 10.0)  // financing = 1800000
+	acc.MarginBuy(ctx, "600000.SH", 60000, 10.0) // financing = 1800000
 	// assets = 1000000 + 1800000 = 2800000, debt = 1800000
 	// ratio = 2800000 / 1800000 = 1.556 (safe, just above 1.5)
 	// Buy more to get below 1.5.
-	acc.MarginBuy(ctx, "600000.SH", 60000, 10.0)  // financing = 2400000
+	acc.MarginBuy(ctx, "600000.SH", 60000, 10.0) // financing = 2400000
 	// assets = 1000000 + 2400000 = 3400000, debt = 2400000
 	// ratio = 3400000 / 2400000 = 1.417 (warning)
 
@@ -929,8 +929,8 @@ func TestMarginAccount_ForceLiquidate(t *testing.T) {
 	ctx := context.Background()
 
 	// Build positions.
-	acc.MarginBuy(ctx, "600000.SH", 1000, 10.0)   // financing = 10000
-	acc.ShortSell(ctx, "000001.SZ", 1000, 10.0)   // lending = 10000
+	acc.MarginBuy(ctx, "600000.SH", 1000, 10.0) // financing = 10000
+	acc.ShortSell(ctx, "000001.SZ", 1000, 10.0) // lending = 10000
 
 	prices := map[string]float64{
 		"600000.SH": 10.0,

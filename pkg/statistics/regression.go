@@ -110,7 +110,8 @@ func ZScore(values []float64) []float64 {
 }
 
 // LogReturns converts a price series into log-returns:
-//   r[i] = ln(prices[i+1] / prices[i])
+//
+//	r[i] = ln(prices[i+1] / prices[i])
 //
 // The result has len(prices) - 1 elements. NaN is returned for any
 // transition where EITHER price is non-finite (NaN, Inf) or

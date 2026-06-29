@@ -49,13 +49,13 @@ import (
 //	DaysPerYear:               计息天数基准, 默认 365 (自然日)。
 //	Now:                       时钟注入 (测试用)。nil → time.Now。
 type MarginConfig struct {
-	InitialMarginRate      float64
-	MaintenanceRatioFloor  float64
-	WarningRatio           float64
-	FinancingRate          float64
-	SecuritiesLendingRate  float64
-	DaysPerYear            int
-	Now                    func() time.Time
+	InitialMarginRate     float64
+	MaintenanceRatioFloor float64
+	WarningRatio          float64
+	FinancingRate         float64
+	SecuritiesLendingRate float64
+	DaysPerYear           int
+	Now                   func() time.Time
 }
 
 // DefaultMarginConfig returns regulatory-recommended defaults.
@@ -65,11 +65,11 @@ type MarginConfig struct {
 func DefaultMarginConfig() MarginConfig {
 	return MarginConfig{
 		InitialMarginRate:     0.5,
-		MaintenanceRatioFloor:  1.3,
-		WarningRatio:           1.5,
-		FinancingRate:          0.06,
-		SecuritiesLendingRate:  0.106,
-		DaysPerYear:            365,
+		MaintenanceRatioFloor: 1.3,
+		WarningRatio:          1.5,
+		FinancingRate:         0.06,
+		SecuritiesLendingRate: 0.106,
+		DaysPerYear:           365,
 	}
 }
 
@@ -135,10 +135,10 @@ type MarginShortPosition struct {
 type MarginOperation string
 
 const (
-	OpMarginBuy    MarginOperation = "margin_buy"    // 融资买入
-	OpShortSell    MarginOperation = "short_sell"    // 融券卖出
-	OpBuyToCover   MarginOperation = "buy_to_cover"  // 买券还券
-	OpMarginSell   MarginOperation = "margin_sell"   // 卖券还款
+	OpMarginBuy  MarginOperation = "margin_buy"   // 融资买入
+	OpShortSell  MarginOperation = "short_sell"   // 融券卖出
+	OpBuyToCover MarginOperation = "buy_to_cover" // 买券还券
+	OpMarginSell MarginOperation = "margin_sell"  // 卖券还款
 )
 
 // MarginTradeResult 记录一次融资融券操作的结果。
@@ -155,28 +155,28 @@ type MarginTradeResult struct {
 	MarginRequired   float64         `json:"margin_required"`
 	MaintenanceRatio float64         `json:"maintenance_ratio"` // 交易后担保比例
 	Warning          bool            `json:"warning"`           // 交易后是否触发预警
-	Timestamp       time.Time        `json:"timestamp"`
+	Timestamp        time.Time       `json:"timestamp"`
 }
 
 // MarginRiskStatus 描述账户当前的风险状态。
 type MarginRiskStatus struct {
 	TotalAssets       float64 `json:"total_assets"`
 	TotalDebt         float64 `json:"total_debt"`
-	NetAssets         float64 `json:"net_assets"`          // equity = total_assets - total_debt
+	NetAssets         float64 `json:"net_assets"` // equity = total_assets - total_debt
 	MaintenanceRatio  float64 `json:"maintenance_ratio"`
 	AvailableMargin   float64 `json:"available_margin"`
 	FinancingBalance  float64 `json:"financing_balance"`
-	LendingBalance    float64 `json:"lending_balance"`     // 融券余额 (按当前市值)
+	LendingBalance    float64 `json:"lending_balance"` // 融券余额 (按当前市值)
 	AccruedInterest   float64 `json:"accrued_interest"`
-	Status            string  `json:"status"`               // "safe" / "warning" / "danger" / "forced_liquidation"
+	Status            string  `json:"status"` // "safe" / "warning" / "danger" / "forced_liquidation"
 	ForcedLiquidation bool    `json:"forced_liquidation"`
 }
 
 // Risk status levels.
 const (
-	MarginStatusSafe             = "safe"               // ratio >= warning
-	MarginStatusWarning          = "warning"            // floor <= ratio < warning
-	MarginStatusDanger           = "danger"             // ratio < floor but not yet liquidated
+	MarginStatusSafe              = "safe"               // ratio >= warning
+	MarginStatusWarning           = "warning"            // floor <= ratio < warning
+	MarginStatusDanger            = "danger"             // ratio < floor but not yet liquidated
 	MarginStatusForcedLiquidation = "forced_liquidation" // ratio < floor, liquidation triggered
 )
 
@@ -187,7 +187,7 @@ const (
 // ShortableEntry 描述一只可融券标的的限制。
 type ShortableEntry struct {
 	Symbol  string    `json:"symbol"`
-	MaxQty  float64   `json:"max_qty"`   // 单券最大可融数量 (股); 0 = 无限制
+	MaxQty  float64   `json:"max_qty"` // 单券最大可融数量 (股); 0 = 无限制
 	AddedAt time.Time `json:"added_at"`
 }
 
@@ -396,12 +396,14 @@ func (c *MarginCalculator) IsSafe(ratio float64) bool {
 // AvailableMargin computes the margin available for new positions.
 //
 // Formula (per requirement):
-//   available = total_margin - used_margin - maintenance_margin
+//
+//	available = total_margin - used_margin - maintenance_margin
 //
 // Where:
-//   total_margin      = total_assets (cash + position values + short proceeds)
-//   used_margin       = sum(position_value * InitialMarginRate) for all open positions
-//   maintenance_margin = total_debt * (1 - 1/MaintenanceRatioFloor)
+//
+//	total_margin      = total_assets (cash + position values + short proceeds)
+//	used_margin       = sum(position_value * InitialMarginRate) for all open positions
+//	maintenance_margin = total_debt * (1 - 1/MaintenanceRatioFloor)
 //
 // The maintenance_margin term represents the minimum equity buffer
 // required to stay above the 130% floor. When available_margin <= 0,
@@ -724,13 +726,13 @@ func (a *MarginAccount) RiskStatus(prices map[string]float64) MarginRiskStatus {
 	return MarginRiskStatus{
 		TotalAssets:       assets,
 		TotalDebt:         debt,
-		NetAssets:        assets - debt,
-		MaintenanceRatio: ratio,
-		AvailableMargin:  available,
-		FinancingBalance: a.financingBalance,
-		LendingBalance:   lendingBal,
-		AccruedInterest:  a.accruedFinancingInterest + a.accruedLendingInterest,
-		Status:           status,
+		NetAssets:         assets - debt,
+		MaintenanceRatio:  ratio,
+		AvailableMargin:   available,
+		FinancingBalance:  a.financingBalance,
+		LendingBalance:    lendingBal,
+		AccruedInterest:   a.accruedFinancingInterest + a.accruedLendingInterest,
+		Status:            status,
 		ForcedLiquidation: forced,
 	}
 }
@@ -1163,8 +1165,8 @@ func (a *MarginAccount) ForceLiquidate(ctx context.Context, prices map[string]fl
 
 	now := a.now()
 	result := &ForceLiquidateResult{
-		Reason:      reason,
-		StartedAt:   now,
+		Reason:    reason,
+		StartedAt: now,
 	}
 
 	// Sell all long positions.
@@ -1233,12 +1235,12 @@ type ForceLiquidateEntry struct {
 
 // ForceLiquidateResult reports the outcome of a ForceLiquidate call.
 type ForceLiquidateResult struct {
-	LongSold      []ForceLiquidateEntry `json:"long_sold"`
-	ShortCovered  []ForceLiquidateEntry `json:"short_covered"`
-	FinalCash     float64               `json:"final_cash"`
-	StartedAt     time.Time             `json:"started_at"`
-	CompletedAt   time.Time             `json:"completed_at"`
-	Reason        string                `json:"reason"`
+	LongSold     []ForceLiquidateEntry `json:"long_sold"`
+	ShortCovered []ForceLiquidateEntry `json:"short_covered"`
+	FinalCash    float64               `json:"final_cash"`
+	StartedAt    time.Time             `json:"started_at"`
+	CompletedAt  time.Time             `json:"completed_at"`
+	Reason       string                `json:"reason"`
 }
 
 // ============================================================

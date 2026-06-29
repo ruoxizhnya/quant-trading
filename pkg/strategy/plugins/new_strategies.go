@@ -152,8 +152,12 @@ func (s *tdSequentialStrategy) Configure(params map[string]any) error {
 
 func (s *tdSequentialStrategy) Weight(signal strategy.Signal, _ float64) float64 {
 	w := signal.Strength * 0.12
-	if w > 0.08 { w = 0.08 }
-	if w < 0.01 { w = 0.01 }
+	if w > 0.08 {
+		w = 0.08
+	}
+	if w < 0.01 {
+		w = 0.01
+	}
 	return w
 }
 
@@ -162,16 +166,16 @@ func (s *tdSequentialStrategy) Cleanup() {}
 func init() {
 	s := &tdSequentialStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("td_sequential", "TD Sequential: Tom DeMark's sequential indicator for trend exhaustion detection"),
-		params: TDSequentialConfig{SetupCount: 9, CancelDays: 4, CountdownFrom: 13},
+		params:       TDSequentialConfig{SetupCount: 9, CancelDays: 4, CountdownFrom: 13},
 	}
 	strategy.GlobalRegister(s)
 }
 
 type BollingerMRConfig struct {
-	Period      int
-	StdDev      float64
-	BuyZScore   float64
-	SellZScore  float64
+	Period     int
+	StdDev     float64
+	BuyZScore  float64
+	SellZScore float64
 }
 
 type bollingerMRStrategy struct {
@@ -199,10 +203,14 @@ func (s *bollingerMRStrategy) GenerateSignals(ctx context.Context, bars map[stri
 		return nil, nil
 	}
 	period := s.params.Period
-	if period <= 0 { period = 20 }
+	if period <= 0 {
+		period = 20
+	}
 	stdDev := s.params.StdDev
-	if stdDev <= 0 { stdDev = 2.0 }
-	
+	if stdDev <= 0 {
+		stdDev = 2.0
+	}
+
 	// For single/few stocks, use more relaxed thresholds to ensure signals
 	isSingleStock := len(bars) <= 3
 	buyZScore := s.params.BuyZScore
@@ -216,10 +224,12 @@ func (s *bollingerMRStrategy) GenerateSignals(ctx context.Context, bars map[stri
 			sellZScore = 1.0
 		}
 	}
-	
+
 	var signals []strategy.Signal
 	for symbol, data := range bars {
-		if len(data) < period { continue }
+		if len(data) < period {
+			continue
+		}
 		// Sort by date ascending using shared utility
 		sorted := sortOHLCV(data)
 
@@ -230,7 +240,9 @@ func (s *bollingerMRStrategy) GenerateSignals(ctx context.Context, bars map[stri
 		mean := statistics.Mean(prices)
 		sd := statistics.PopulationStdDev(prices)
 
-		if sd <= 0 || latestPrice <= 0 { continue }
+		if sd <= 0 || latestPrice <= 0 {
+			continue
+		}
 
 		zScore := (latestPrice - mean) / sd
 
@@ -238,13 +250,13 @@ func (s *bollingerMRStrategy) GenerateSignals(ctx context.Context, bars map[stri
 			strength := math.Min(math.Abs(zScore-buyZScore)/(math.Abs(buyZScore)+1), 1.0)
 			lowerBand := mean - stdDev*sd
 			signals = append(signals, strategy.Signal{
-				Symbol:    symbol,
-				Action:    "buy",
-				Strength:  strength,
-				Price:     latestPrice,
-				OrderType: domain.OrderTypeLimit,
+				Symbol:     symbol,
+				Action:     "buy",
+				Strength:   strength,
+				Price:      latestPrice,
+				OrderType:  domain.OrderTypeLimit,
 				LimitPrice: lowerBand,
-				Factors:   map[string]float64{"z_score": zScore, "lower_band": lowerBand, "upper_band": mean + stdDev*sd},
+				Factors:    map[string]float64{"z_score": zScore, "lower_band": lowerBand, "upper_band": mean + stdDev*sd},
 			})
 		} else if zScore >= sellZScore {
 			strength := math.Min((zScore-sellZScore)/(sellZScore+1), 1.0)
@@ -252,13 +264,13 @@ func (s *bollingerMRStrategy) GenerateSignals(ctx context.Context, bars map[stri
 				if pos, ok := portfolio.Positions[symbol]; ok && pos.Quantity > 0 {
 					upperBand := mean + stdDev*sd
 					signals = append(signals, strategy.Signal{
-						Symbol:    symbol,
-						Action:    "sell",
-						Strength:  strength,
-						Price:     latestPrice,
-						OrderType: domain.OrderTypeLimit,
+						Symbol:     symbol,
+						Action:     "sell",
+						Strength:   strength,
+						Price:      latestPrice,
+						OrderType:  domain.OrderTypeLimit,
 						LimitPrice: upperBand,
-						Factors:   map[string]float64{"z_score": zScore, "lower_band": mean - stdDev*sd, "upper_band": upperBand},
+						Factors:    map[string]float64{"z_score": zScore, "lower_band": mean - stdDev*sd, "upper_band": upperBand},
 					})
 				}
 			}
@@ -295,8 +307,12 @@ func (s *bollingerMRStrategy) Configure(params map[string]any) error {
 
 func (s *bollingerMRStrategy) Weight(signal strategy.Signal, _ float64) float64 {
 	w := signal.Strength * 0.10
-	if w > 0.06 { w = 0.06 }
-	if w < 0.01 { w = 0.01 }
+	if w > 0.06 {
+		w = 0.06
+	}
+	if w < 0.01 {
+		w = 0.01
+	}
 	return w
 }
 
@@ -305,7 +321,7 @@ func (s *bollingerMRStrategy) Cleanup() {}
 func init() {
 	s := &bollingerMRStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("bollinger_mr", "Bollinger Mean Reversion: trade band bounces with z-score thresholds"),
-		params: BollingerMRConfig{Period: 20, StdDev: 2.0, BuyZScore: -1.5, SellZScore: 1.5},
+		params:       BollingerMRConfig{Period: 20, StdDev: 2.0, BuyZScore: -1.5, SellZScore: 1.5},
 	}
 	strategy.GlobalRegister(s)
 }
@@ -338,20 +354,26 @@ func (s *vptStrategy) GenerateSignals(ctx context.Context, bars map[string][]dom
 		return nil, nil
 	}
 	lookback := s.params.SMALookback
-	if lookback <= 0 { lookback = 20 }
+	if lookback <= 0 {
+		lookback = 20
+	}
 	topN := s.params.TopN
-	if topN <= 0 { topN = 5 }
+	if topN <= 0 {
+		topN = 5
+	}
 
 	type vptResult struct {
-		symbol    string
-		vpt       float64
-		vptSlope  float64
-		price     float64
+		symbol   string
+		vpt      float64
+		vptSlope float64
+		price    float64
 	}
 	var results []vptResult
 
 	for symbol, data := range bars {
-		if len(data) < lookback+1 { continue }
+		if len(data) < lookback+1 {
+			continue
+		}
 		// Sort by date ascending using shared utility
 		sorted := sortOHLCV(data)
 
@@ -372,7 +394,9 @@ func (s *vptStrategy) GenerateSignals(ctx context.Context, bars map[string][]dom
 			pC := recentWindow[0].Close
 			for i := 1; i < len(recentWindow); i++ {
 				cp := 0.0
-				if pC != 0 { cp = (recentWindow[i].Close - pC) / pC }
+				if pC != 0 {
+					cp = (recentWindow[i].Close - pC) / pC
+				}
 				vptRecent += cp * recentWindow[i].Volume
 				pC = recentWindow[i].Close
 			}
@@ -381,7 +405,9 @@ func (s *vptStrategy) GenerateSignals(ctx context.Context, bars map[string][]dom
 			oC := oldWindow[0].Close
 			for i := 1; i < len(oldWindow); i++ {
 				cp := 0.0
-				if oC != 0 { cp = (oldWindow[i].Close - oC) / oC }
+				if oC != 0 {
+					cp = (oldWindow[i].Close - oC) / oC
+				}
 				oldVPT += cp * oldWindow[i].Volume
 				oC = oldWindow[i].Close
 			}
@@ -395,8 +421,12 @@ func (s *vptStrategy) GenerateSignals(ctx context.Context, bars map[string][]dom
 
 	var signals []strategy.Signal
 	for i, r := range results {
-		if i >= topN { break }
-		if r.price <= 0 { continue }
+		if i >= topN {
+			break
+		}
+		if r.price <= 0 {
+			continue
+		}
 		maxSlope := results[0].vptSlope
 		minSlope := results[len(results)-1].vptSlope
 		strength := 0.5
@@ -422,8 +452,14 @@ func (s *vptStrategy) GenerateSignals(ctx context.Context, bars map[string][]dom
 				if pos, ok := portfolio.Positions[r.symbol]; ok && pos.Quantity > 0 {
 					strength := math.Abs(r.vptSlope)
 					maxAbs := 0.0
-					for _, x := range results { if math.Abs(x.vptSlope) > maxAbs { maxAbs = math.Abs(x.vptSlope) } }
-					if maxAbs > 0 { strength /= maxAbs }
+					for _, x := range results {
+						if math.Abs(x.vptSlope) > maxAbs {
+							maxAbs = math.Abs(x.vptSlope)
+						}
+					}
+					if maxAbs > 0 {
+						strength /= maxAbs
+					}
 					signals = append(signals, strategy.Signal{
 						Symbol:   r.symbol,
 						Action:   "sell",
@@ -456,8 +492,12 @@ func (s *vptStrategy) Configure(params map[string]any) error {
 
 func (s *vptStrategy) Weight(signal strategy.Signal, _ float64) float64 {
 	w := signal.Strength * 0.10
-	if w > 0.06 { w = 0.06 }
-	if w < 0.01 { w = 0.01 }
+	if w > 0.06 {
+		w = 0.06
+	}
+	if w < 0.01 {
+		w = 0.01
+	}
 	return w
 }
 
@@ -466,16 +506,16 @@ func (s *vptStrategy) Cleanup() {}
 func init() {
 	s := &vptStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("volume_price_trend", "Volume-Price Trend: volume-weighted price momentum indicator"),
-		params: VPTConfig{SMALookback: 20, TopN: 5},
+		params:       VPTConfig{SMALookback: 20, TopN: 5},
 	}
 	strategy.GlobalRegister(s)
 }
 
 type VolBreakoutConfig struct {
-	ATRPeriod    int
+	ATRPeriod     int
 	ATRMultiplier float64
-	Lookback     int
-	TopN         int
+	Lookback      int
+	TopN          int
 }
 
 type volBreakoutStrategy struct {
@@ -503,13 +543,21 @@ func (s *volBreakoutStrategy) GenerateSignals(ctx context.Context, bars map[stri
 		return nil, nil
 	}
 	atrPeriod := s.params.ATRPeriod
-	if atrPeriod <= 0 { atrPeriod = 14 }
+	if atrPeriod <= 0 {
+		atrPeriod = 14
+	}
 	atrMult := s.params.ATRMultiplier
-	if atrMult <= 0 { atrMult = 2.0 }
+	if atrMult <= 0 {
+		atrMult = 2.0
+	}
 	lookback := s.params.Lookback
-	if lookback <= 0 { lookback = 20 }
+	if lookback <= 0 {
+		lookback = 20
+	}
 	topN := s.params.TopN
-	if topN <= 0 { topN = 5 }
+	if topN <= 0 {
+		topN = 5
+	}
 
 	type breakoutResult struct {
 		symbol    string
@@ -522,7 +570,9 @@ func (s *volBreakoutStrategy) GenerateSignals(ctx context.Context, bars map[stri
 
 	for symbol, data := range bars {
 		n := atrPeriod + lookback + 1
-		if len(data) < n { continue }
+		if len(data) < n {
+			continue
+		}
 		// Sort by date ascending using shared utility
 		sorted := sortOHLCV(data)
 
@@ -539,8 +589,12 @@ func (s *volBreakoutStrategy) GenerateSignals(ctx context.Context, bars map[stri
 		highMax := sorted[len(sorted)-1].High
 		lowMin := sorted[len(sorted)-1].Low
 		for i := len(sorted) - lookback; i < len(sorted); i++ {
-			if sorted[i].High > highMax { highMax = sorted[i].High }
-			if sorted[i].Low < lowMin { lowMin = sorted[i].Low }
+			if sorted[i].High > highMax {
+				highMax = sorted[i].High
+			}
+			if sorted[i].Low < lowMin {
+				lowMin = sorted[i].Low
+			}
 		}
 
 		latestClose := sorted[len(sorted)-1].Close
@@ -548,7 +602,9 @@ func (s *volBreakoutStrategy) GenerateSignals(ctx context.Context, bars map[stri
 		upperBand := highMax + atr*atrMult
 		lowerBand := lowMin - atr*atrMult
 
-		if latestClose <= 0 || atr <= 0 || prevClose <= 0 { continue }
+		if latestClose <= 0 || atr <= 0 || prevClose <= 0 {
+			continue
+		}
 
 		// Breakout detection: price crossing above/below Donchian channels
 		// Buy: price breaks above recent high channel (momentum breakout)
@@ -563,7 +619,9 @@ func (s *volBreakoutStrategy) GenerateSignals(ctx context.Context, bars map[stri
 			if upperBand > lowerBand {
 				strength = math.Min((latestClose-lowerBand)/(upperBand-lowerBand), 1.0)
 			}
-			if strength < 0.3 { strength = 0.3 }
+			if strength < 0.3 {
+				strength = 0.3
+			}
 			results = append(results, breakoutResult{symbol: symbol, breakType: "buy", strength: strength, price: latestClose, atr: atr})
 		} else if latestClose < sellThreshold && latestClose < prevClose {
 			// Price near or below lower channel and falling
@@ -571,7 +629,9 @@ func (s *volBreakoutStrategy) GenerateSignals(ctx context.Context, bars map[stri
 			if upperBand > lowerBand {
 				strength = math.Min((upperBand-latestClose)/(upperBand-lowerBand), 1.0)
 			}
-			if strength < 0.3 { strength = 0.3 }
+			if strength < 0.3 {
+				strength = 0.3
+			}
 			results = append(results, breakoutResult{symbol: symbol, breakType: "sell", strength: strength, price: latestClose, atr: atr})
 		}
 	}
@@ -635,8 +695,12 @@ func (s *volBreakoutStrategy) Configure(params map[string]any) error {
 
 func (s *volBreakoutStrategy) Weight(signal strategy.Signal, _ float64) float64 {
 	w := signal.Strength * 0.10
-	if w > 0.08 { w = 0.08 }
-	if w < 0.01 { w = 0.01 }
+	if w > 0.08 {
+		w = 0.08
+	}
+	if w < 0.01 {
+		w = 0.01
+	}
 	return w
 }
 
@@ -645,7 +709,7 @@ func (s *volBreakoutStrategy) Cleanup() {}
 func init() {
 	s := &volBreakoutStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("volatility_breakout", "Volatility Breakout: ATR Donchian channel breakout system"),
-		params: VolBreakoutConfig{ATRPeriod: 14, ATRMultiplier: 2.0, Lookback: 20, TopN: 5},
+		params:       VolBreakoutConfig{ATRPeriod: 14, ATRMultiplier: 2.0, Lookback: 20, TopN: 5},
 	}
 	strategy.GlobalRegister(s)
 }

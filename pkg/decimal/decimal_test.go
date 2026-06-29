@@ -183,17 +183,17 @@ func TestSub_NegativeResult(t *testing.T) {
 // KEY TEST: 1000000 * 0.0001 = 100 (large × small precision).
 func TestMul_LargeTimesSmall(t *testing.T) {
 	t.Parallel()
-	a := FromInt(1000000)       // 1,000,000
-	b := New(1, 4)              // 0.0001
-	product := Mul(a, b)        // scale 0+4=4 → 1000000/10^4 = 100
+	a := FromInt(1000000) // 1,000,000
+	b := New(1, 4)        // 0.0001
+	product := Mul(a, b)  // scale 0+4=4 → 1000000/10^4 = 100
 	assert.True(t, Equal(product, FromInt(100)),
 		"1000000 * 0.0001 = %s, want 100", product)
 }
 
 func TestMul_Simple(t *testing.T) {
 	t.Parallel()
-	a := New(3, 0)  // 3
-	b := New(4, 0)  // 4
+	a := New(3, 0) // 3
+	b := New(4, 0) // 4
 	p := Mul(a, b) // 12
 	assert.Equal(t, int64(12), p.Value())
 	assert.Equal(t, 0, p.Scale())
@@ -271,8 +271,8 @@ func TestAbs(t *testing.T) {
 
 func TestEqual(t *testing.T) {
 	t.Parallel()
-	assert.True(t, Equal(New(1, 0), New(100, 2)))  // 1 == 1.00
-	assert.True(t, Equal(New(0, 0), New(0, 5)))     // 0 == 0.00000
+	assert.True(t, Equal(New(1, 0), New(100, 2))) // 1 == 1.00
+	assert.True(t, Equal(New(0, 0), New(0, 5)))   // 0 == 0.00000
 	assert.False(t, Equal(New(1, 0), New(2, 0)))
 }
 
@@ -357,22 +357,22 @@ func TestRound(t *testing.T) {
 
 func TestCeiling(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "4", New(314, 2).Ceiling().ToString())  // 3.14 → 4
+	assert.Equal(t, "4", New(314, 2).Ceiling().ToString())   // 3.14 → 4
 	assert.Equal(t, "3", New(300, 2).Ceiling().ToString())   // 3.00 → 3
 	assert.Equal(t, "-3", New(-314, 2).Ceiling().ToString()) // -3.14 → -3
 }
 
 func TestFloor(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "3", New(314, 2).Floor().ToString())  // 3.14 → 3
+	assert.Equal(t, "3", New(314, 2).Floor().ToString())   // 3.14 → 3
 	assert.Equal(t, "3", New(300, 2).Floor().ToString())   // 3.00 → 3
-	assert.Equal(t, "-4", New(-314, 2).Floor().ToString())  // -3.14 → -4
+	assert.Equal(t, "-4", New(-314, 2).Floor().ToString()) // -3.14 → -4
 }
 
 func TestTruncate(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "3.14", New(3141, 3).Truncate(2).ToString()) // 3.141 → 3.14
-	assert.Equal(t, "3.14", New(3149, 3).Truncate(2).ToString())  // 3.149 → 3.14 (no rounding)
+	assert.Equal(t, "3.14", New(3149, 3).Truncate(2).ToString()) // 3.149 → 3.14 (no rounding)
 }
 
 // ─── JSON marshalling ───────────────────────────────────────────

@@ -114,8 +114,8 @@ func TestMockClient_Chat_FuncOverridesError(t *testing.T) {
 
 func TestMockClient_GenerateStrategyCode_CannedResponse(t *testing.T) {
 	m := &MockClient{
-		Configured:        true,
-		GenerateResponse:  "package plugins\n// generated code",
+		Configured:       true,
+		GenerateResponse: "package plugins\n// generated code",
 	}
 	code, err := m.GenerateStrategyCode(context.Background(), "momentum strategy")
 	if err != nil {
@@ -139,8 +139,8 @@ func TestMockClient_GenerateStrategyCode_NoResponse(t *testing.T) {
 
 func TestMockClient_GenerateStrategyCode_CannedError(t *testing.T) {
 	m := &MockClient{
-		Configured:   true,
-		GenerateErr:  errors.New("generation failed"),
+		Configured:  true,
+		GenerateErr: errors.New("generation failed"),
 	}
 	_, err := m.GenerateStrategyCode(context.Background(), "test")
 	if err == nil {
@@ -168,8 +168,8 @@ func TestMockClient_GenerateStrategyCode_CustomFunc(t *testing.T) {
 
 func TestMockClient_FixStrategyCode_CannedResponse(t *testing.T) {
 	m := &MockClient{
-		Configured:   true,
-		FixResponse:  "package plugins\n// fixed code",
+		Configured:  true,
+		FixResponse: "package plugins\n// fixed code",
 	}
 	code, err := m.FixStrategyCode(context.Background(), "broken code", "syntax error")
 	if err != nil {
@@ -492,10 +492,10 @@ func TestUsage_Struct(t *testing.T) {
 
 func TestMockClient_MultipleMethodsCalled(t *testing.T) {
 	m := &MockClient{
-		Configured:        true,
-		ChatResponse:       "chat response",
-		GenerateResponse:  "generate response",
-		FixResponse:       "fix response",
+		Configured:       true,
+		ChatResponse:     "chat response",
+		GenerateResponse: "generate response",
+		FixResponse:      "fix response",
 	}
 
 	_, _ = m.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}})

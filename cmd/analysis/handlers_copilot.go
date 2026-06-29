@@ -259,9 +259,9 @@ func registerCopilotRoutes(router *gin.Engine, copilotService *strategy.CopilotS
 			generated, buildable, backtested := copilotService.Stats()
 			rate := copilotService.AcceptanceRate()
 			c.JSON(http.StatusOK, gin.H{
-				"generated":      generated,
-				"buildable":      buildable,
-				"backtest_valid": backtested,
+				"generated":       generated,
+				"buildable":       buildable,
+				"backtest_valid":  backtested,
 				"acceptance_rate": rate,
 			})
 		})

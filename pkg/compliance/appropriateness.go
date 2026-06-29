@@ -181,15 +181,15 @@ func (p *SuitabilityProfile) IsBoardEnabled(board live.Board) bool {
 // up the chain (e.g. risk manager) and render the same payload to
 // both logs and the UI.
 type CheckResult struct {
-	Allowed     bool       // true = 用户有交易该板权限
-	Board       live.Board // 板块
-	Reasons     []string   // 不通过原因 (Allowed=true 时为空)
-	UserID      string     // 用户 ID (审计用)
-	ProfileAge  int        // 用户经验月数 (审计用)
-	AssetDaily  float64    // 用户 20 日日均资产 (审计用)
-	RiskLevel   RiskLevel  // 用户风险等级
-	Required    *BoardRequirement // 板级要求 (审计 + UI 文案)
-	CheckedAt   time.Time  // 判定时间
+	Allowed    bool              // true = 用户有交易该板权限
+	Board      live.Board        // 板块
+	Reasons    []string          // 不通过原因 (Allowed=true 时为空)
+	UserID     string            // 用户 ID (审计用)
+	ProfileAge int               // 用户经验月数 (审计用)
+	AssetDaily float64           // 用户 20 日日均资产 (审计用)
+	RiskLevel  RiskLevel         // 用户风险等级
+	Required   *BoardRequirement // 板级要求 (审计 + UI 文案)
+	CheckedAt  time.Time         // 判定时间
 }
 
 // IsAllowed returns true if the user may trade `symbol` on the given
@@ -203,11 +203,11 @@ func (p *SuitabilityProfile) IsAllowed(board live.Board, now time.Time) CheckRes
 // Check runs the three-gate eligibility test for `board` against
 // the user's profile. All three gates must pass:
 //
-//	1. RiskTestExpiredAt must be in the future (测评分未过期)
-//	2. RiskLevel >= BoardRequirement.RiskLevel
-//	3. AssetDailyAvgCNY >= BoardRequirement.AssetThresholdCNY
-//	4. ExperienceMonths >= BoardRequirement.ExperienceMonths
-//	5. BoardsEnabled includes the board (when whitelist is non-empty)
+//  1. RiskTestExpiredAt must be in the future (测评分未过期)
+//  2. RiskLevel >= BoardRequirement.RiskLevel
+//  3. AssetDailyAvgCNY >= BoardRequirement.AssetThresholdCNY
+//  4. ExperienceMonths >= BoardRequirement.ExperienceMonths
+//  5. BoardsEnabled includes the board (when whitelist is non-empty)
 //
 // The check is order-stable: reasons appear in regulatory order
 // (risk first, then asset, then experience) so the audit log is

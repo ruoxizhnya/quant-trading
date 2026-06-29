@@ -12,14 +12,14 @@ import (
 )
 
 type inmemoryProvider struct {
-	mu           sync.RWMutex
-	ohlcv        map[string][]domain.OHLCV
-	fund         map[string]map[time.Time]*domain.Fundamental
-	stocks       []domain.Stock
-	stockMap     map[string]domain.Stock
-	prices       map[string]float64
-	indexes      map[string][]string
-	tradingDays  []time.Time
+	mu          sync.RWMutex
+	ohlcv       map[string][]domain.OHLCV
+	fund        map[string]map[time.Time]*domain.Fundamental
+	stocks      []domain.Stock
+	stockMap    map[string]domain.Stock
+	prices      map[string]float64
+	indexes     map[string][]string
+	tradingDays []time.Time
 }
 
 func NewInMemoryProvider() *inmemoryProvider {

@@ -86,8 +86,8 @@ func (a *AlphaVantageAdapter) Fetch(ctx context.Context, req FetchRequest) (*Fet
 // alphaVantageTimeSeriesResponse is the JSON response shape for
 // TIME_SERIES_DAILY_ADJUSTED.
 type alphaVantageTimeSeriesResponse struct {
-	MetaData map[string]string             `json:"Meta Data"`
-	Series    map[string]map[string]string `json:"Time Series (Daily)"`
+	MetaData map[string]string            `json:"Meta Data"`
+	Series   map[string]map[string]string `json:"Time Series (Daily)"`
 }
 
 func (a *AlphaVantageAdapter) fetchDaily(ctx context.Context, req FetchRequest) (*FetchResponse, error) {

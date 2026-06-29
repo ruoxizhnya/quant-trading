@@ -70,10 +70,10 @@ func TestSessionAt_Weekend(t *testing.T) {
 
 func TestSessionWindow(t *testing.T) {
 	cases := []struct {
-		s        TradingSession
-		wantStr  string
-		wantMin  int
-		wantEnd  int
+		s       TradingSession
+		wantStr string
+		wantMin int
+		wantEnd int
 	}{
 		{SessionPreOpen, "09:15-09:20", 555, 560},
 		{SessionPreOpenFreeze, "09:20-09:25", 560, 565},
@@ -211,7 +211,7 @@ func TestCallAuction_TieBreakByLowerWhenEquidistant(t *testing.T) {
 func TestCallAuction_MarketOrdersFilledFirst(t *testing.T) {
 	// 买市价单 (LimitPrice=0) 应在 limit 单之前全额撮合.
 	buys := []CallAuctionOrder{
-		{ID: "b1", Direction: "buy", Quantity: 50, LimitPrice: 0},   // market
+		{ID: "b1", Direction: "buy", Quantity: 50, LimitPrice: 0}, // market
 		{ID: "b2", Direction: "buy", Quantity: 100, LimitPrice: 10.10},
 	}
 	sells := []CallAuctionOrder{

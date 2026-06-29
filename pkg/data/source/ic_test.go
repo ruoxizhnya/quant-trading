@@ -77,7 +77,7 @@ func TestIC_CapitalFlow_PeriodAggregation(t *testing.T) {
 			daily = append(daily, capitalFlowICRow{
 				Symbol:        symbolForTest(s),
 				MainNet:       float64(d%5) + float64(s)*0.1,
-				ForwardReturn: float64(d%5) * 0.01 + float64(s)*0.001,
+				ForwardReturn: float64(d%5)*0.01 + float64(s)*0.001,
 				Date:          time.Date(2026, 5, d+1, 0, 0, 0, 0, time.UTC),
 			})
 		}
@@ -133,8 +133,8 @@ type sectorICRow struct {
 }
 
 type hotSearchICRow struct {
-	StockSymbol  string
-	HotRank      int
+	StockSymbol   string
+	HotRank       int
 	NextDayReturn float64
 }
 

@@ -150,11 +150,11 @@ func TestLogChannel_Send(t *testing.T) {
 
 func TestWebhookChannel_Send(t *testing.T) {
 	var (
-		mu       sync.Mutex
-		gotBody  []byte
-		gotType  string
-		gotSev   string
-		called   int
+		mu      sync.Mutex
+		gotBody []byte
+		gotType string
+		gotSev  string
+		called  int
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()

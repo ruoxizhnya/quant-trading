@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 func TestWalkForwardEngine_buildWindows(t *testing.T) {

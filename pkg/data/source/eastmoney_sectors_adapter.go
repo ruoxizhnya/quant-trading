@@ -15,11 +15,12 @@ import (
 // (stock → sector mapping), and the daily sector snapshot.
 //
 // API reference (per cn_market_data.yaml):
-//   GET https://push2.eastmoney.com/api/qt/clist/get
-//     ?pn=1&pz=200&po=1&np=1&fltt=2&invt=2&fid=f3
-//     &fs=m:90+t:2        # industry sectors
-//     &fs=m:90+t:3        # concept sectors
-//     &fields=f1,f2,f3,f4,f5,f6,f12,f14,f20
+//
+//	GET https://push2.eastmoney.com/api/qt/clist/get
+//	  ?pn=1&pz=200&po=1&np=1&fltt=2&invt=2&fid=f3
+//	  &fs=m:90+t:2        # industry sectors
+//	  &fs=m:90+t:3        # concept sectors
+//	  &fields=f1,f2,f3,f4,f5,f6,f12,f14,f20
 type EastmoneySectorsAdapter struct {
 	AdapterBase
 	client *EastmoneyClient
@@ -93,8 +94,8 @@ func (a *EastmoneySectorsAdapter) Fetch(ctx context.Context, req FetchRequest) (
 // sectorListResponse mirrors the push2 clist response shape.
 type sectorListResponse struct {
 	Data struct {
-		Total int                       `json:"total"`
-		Diff  []map[string]interface{}  `json:"diff"`
+		Total int                      `json:"total"`
+		Diff  []map[string]interface{} `json:"diff"`
 	} `json:"data"`
 	RC int `json:"rc"`
 }
@@ -149,12 +150,12 @@ func (a *EastmoneySectorsAdapter) fetchSectorList(ctx context.Context, req Fetch
 			Symbol:    code, // sector code in Symbol slot
 			TradeTime: tradeDate,
 			Data: map[string]interface{}{
-				"sector_code":     code,
-				"sector_name":     name,
-				"category":        category,
-				"change_pct":      changePct,
-				"leading_symbol":  leading,
-				"leading_change":  toFloat64Safe(row["f4"]),
+				"sector_code":    code,
+				"sector_name":    name,
+				"category":       category,
+				"change_pct":     changePct,
+				"leading_symbol": leading,
+				"leading_change": toFloat64Safe(row["f4"]),
 			},
 		})
 	}
@@ -167,11 +168,12 @@ func (a *EastmoneySectorsAdapter) fetchSectorList(ctx context.Context, req Fetch
 
 // fetchStockSectors fetches sector membership for a list of symbols.
 // Eastmoney returns sector codes per stock via
-//   GET /api/qt/stock/get?secid=1.600519&fields=f100,f101,f102,f103
-//   - f100: 行业名称 (industry name, e.g. "银行")
-//   - f101: 概念名称 (concept name, e.g. "区块链")
-//   - f102: 行业代码 (industry code)
-//   - f103: 概念代码 (concept code)
+//
+//	GET /api/qt/stock/get?secid=1.600519&fields=f100,f101,f102,f103
+//	- f100: 行业名称 (industry name, e.g. "银行")
+//	- f101: 概念名称 (concept name, e.g. "区块链")
+//	- f102: 行业代码 (industry code)
+//	- f103: 概念代码 (concept code)
 //
 // CR-38 (ODR-012): previously only f100/f102 were requested, so concept
 // membership was silently dropped. We now request all four fields and
@@ -202,9 +204,9 @@ func (a *EastmoneySectorsAdapter) fetchStockSectors(ctx context.Context, req Fet
 // be present in the requested `fields` query parameter to be populated.
 type stockSectorResponse struct {
 	Data struct {
-		Code     string                   `json:"code"`
-		Name     string                   `json:"name"`
-		Industry map[string]interface{}   `json:"industry"`
+		Code     string                 `json:"code"`
+		Name     string                 `json:"name"`
+		Industry map[string]interface{} `json:"industry"`
 	} `json:"data"`
 }
 
@@ -431,9 +433,10 @@ type topListResponse struct {
 
 // fetchTopList fetches the dragon-tiger list.
 // API: https://datacenter-web.eastmoney.com/api/data/v1/get
-//   ?reportName=RPT_DAILYBILLBOARD_DETAILS
-//   &columns=ALL&filter=&pageNumber=1&pageSize=50
-//   &sortColumns=TRADE_DATE&sortTypes=-1
+//
+//	?reportName=RPT_DAILYBILLBOARD_DETAILS
+//	&columns=ALL&filter=&pageNumber=1&pageSize=50
+//	&sortColumns=TRADE_DATE&sortTypes=-1
 func (a *EastmoneyTopListAdapter) fetchTopList(ctx context.Context, req FetchRequest) (*FetchResponse, error) {
 	// CR-19 (ODR-012): the four hardcoded pagination/filter knobs below
 	// (`pageNumber`, `pageSize`, the lower-bound `TRADE_DATE>='...'`, and
@@ -500,14 +503,14 @@ func (a *EastmoneyTopListAdapter) fetchTopList(ctx context.Context, req FetchReq
 			Symbol:    sym,
 			TradeTime: tradeDate,
 			Data: map[string]interface{}{
-				"name":         stringFromMap(row, "SECURITY_NAME_ABBR"),
-				"net_buy":      toFloat64Safe(row["BILLBOARD_NET_AMT"]),
-				"buy_amount":   toFloat64Safe(row["BILLBOARD_BUY_AMT"]),
-				"sell_amount":  toFloat64Safe(row["BILLBOARD_SELL_AMT"]),
-				"turnover":     toFloat64Safe(row["TURNOVER"]),
-				"reason":       stringFromMap(row, "EXPLAIN"),
-				"close_price":  toFloat64Safe(row["CLOSE_PRICE"]),
-				"change_pct":   toFloat64Safe(row["CHANGE_RATE"]),
+				"name":        stringFromMap(row, "SECURITY_NAME_ABBR"),
+				"net_buy":     toFloat64Safe(row["BILLBOARD_NET_AMT"]),
+				"buy_amount":  toFloat64Safe(row["BILLBOARD_BUY_AMT"]),
+				"sell_amount": toFloat64Safe(row["BILLBOARD_SELL_AMT"]),
+				"turnover":    toFloat64Safe(row["TURNOVER"]),
+				"reason":      stringFromMap(row, "EXPLAIN"),
+				"close_price": toFloat64Safe(row["CLOSE_PRICE"]),
+				"change_pct":  toFloat64Safe(row["CHANGE_RATE"]),
 			},
 		})
 	}
@@ -520,11 +523,14 @@ func (a *EastmoneyTopListAdapter) fetchTopList(ctx context.Context, req FetchReq
 
 // fetchLimitUpPool fetches the daily limit-up pool.
 // API: https://push2.eastmoney.com/api/qt/stock/get
-//   ?secid=1.000001&fields=...&mktnum=...
+//
+//	?secid=1.000001&fields=...&mktnum=...
+//
 // For the full pool we use:
-//   https://push2.eastmoney.com/api/qt/clist/get
-//     ?fs=m:1+t:2,m:0+t:6  (sh+sz main boards, limit-up)
-//     &fields=f1,f2,f3,f4,f5,f6,f12,f14,f20
+//
+//	https://push2.eastmoney.com/api/qt/clist/get
+//	  ?fs=m:1+t:2,m:0+t:6  (sh+sz main boards, limit-up)
+//	  &fields=f1,f2,f3,f4,f5,f6,f12,f14,f20
 func (a *EastmoneyTopListAdapter) fetchLimitUpPool(ctx context.Context, req FetchRequest) (*FetchResponse, error) {
 	q := url.Values{}
 	q.Set("pn", "1")

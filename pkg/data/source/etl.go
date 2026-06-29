@@ -143,6 +143,7 @@ type Normalizer func(item DataItem, source, dataType string) UnifiedDataPoint
 // ValidatePoints performs lightweight sanity checks:
 //   - Symbol must be non-empty
 //   - TradeTime must not be zero
+//
 // Returns the surviving points and the number dropped.
 func ValidatePoints(points []UnifiedDataPoint) ([]UnifiedDataPoint, int) {
 	skipped := 0

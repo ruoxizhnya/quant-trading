@@ -37,10 +37,10 @@ type BacktestRequest struct {
 
 // BacktestResponse represents a backtest response
 type BacktestResponse struct {
-	Result  *domain.BacktestResult `json:"result,omitempty"`
-	Error   string                 `json:"error,omitempty"`
-	JobID   string                 `json:"job_id,omitempty"`
-	Status  string                 `json:"status"`
+	Result *domain.BacktestResult `json:"result,omitempty"`
+	Error  string                 `json:"error,omitempty"`
+	JobID  string                 `json:"job_id,omitempty"`
+	Status string                 `json:"status"`
 }
 
 // RunBacktest executes a backtest via the API

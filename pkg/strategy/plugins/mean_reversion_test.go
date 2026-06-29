@@ -31,11 +31,11 @@ func TestMeanReversionStrategy_Parameters(t *testing.T) {
 	s := &meanReversionStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("mean_reversion", "test"),
 		params: MeanReversionConfig{
-			BollingerPeriod:  20,
-			BollingerStdDev:  2.0,
-			RSIPeriod:         14,
-			RSIOversold:       30,
-			RSIOverbought:     70,
+			BollingerPeriod: 20,
+			BollingerStdDev: 2.0,
+			RSIPeriod:       14,
+			RSIOversold:     30,
+			RSIOverbought:   70,
 		},
 	}
 	params := s.Parameters()
@@ -51,21 +51,21 @@ func TestMeanReversionStrategy_Configure(t *testing.T) {
 	s := &meanReversionStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("mean_reversion", "test"),
 		params: MeanReversionConfig{
-			BollingerPeriod:  20,
-			BollingerStdDev:  2.0,
-			RSIPeriod:         14,
-			RSIOversold:       30,
-			RSIOverbought:     70,
+			BollingerPeriod: 20,
+			BollingerStdDev: 2.0,
+			RSIPeriod:       14,
+			RSIOversold:     30,
+			RSIOverbought:   70,
 		},
 	}
 
 	t.Run("valid params", func(t *testing.T) {
 		err := s.Configure(map[string]any{
-			"bollinger_period":  10,
-			"bollinger_stddev":  1.5,
-			"rsi_period":         7,
-			"rsi_oversold":       25,
-			"rsi_overbought":     75,
+			"bollinger_period": 10,
+			"bollinger_stddev": 1.5,
+			"rsi_period":       7,
+			"rsi_oversold":     25,
+			"rsi_overbought":   75,
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 10, s.params.BollingerPeriod)
@@ -95,11 +95,11 @@ func TestMeanReversionStrategy_GenerateSignals(t *testing.T) {
 	s := &meanReversionStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("mean_reversion", "test"),
 		params: MeanReversionConfig{
-			BollingerPeriod:  5,
-			BollingerStdDev:  2.0,
-			RSIPeriod:         5,
-			RSIOversold:       40,
-			RSIOverbought:     60,
+			BollingerPeriod: 5,
+			BollingerStdDev: 2.0,
+			RSIPeriod:       5,
+			RSIOversold:     40,
+			RSIOverbought:   60,
 		},
 	}
 
@@ -264,11 +264,11 @@ func TestMeanReversionStrategy_Cleanup(t *testing.T) {
 	s := &meanReversionStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("mean_reversion", "test"),
 		params: MeanReversionConfig{
-			BollingerPeriod:  20,
-			BollingerStdDev:  2.0,
-			RSIPeriod:         14,
-			RSIOversold:       30,
-			RSIOverbought:     70,
+			BollingerPeriod: 20,
+			BollingerStdDev: 2.0,
+			RSIPeriod:       14,
+			RSIOversold:     30,
+			RSIOverbought:   70,
 		},
 	}
 	s.Cleanup()

@@ -134,7 +134,7 @@ func TestConfig_Defaults(t *testing.T) {
 func TestConfig_OverridesRespected(t *testing.T) {
 	t.Parallel()
 	c := Config{
-		MaxMemoryBytes:  128 << 20,
+		MaxMemoryBytes:   128 << 20,
 		MaxExecutionTime: 60 * time.Second,
 	}.withDefaults()
 	assert.Equal(t, 128<<20, c.MaxMemoryBytes)

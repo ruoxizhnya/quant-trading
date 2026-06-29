@@ -8,16 +8,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/httpclient"
 	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
-	"github.com/rs/zerolog"
 )
 
 const (
-	tushareRateLimit     = 200 // requests per minute on free tier
-	tushareRateLimitDur  = time.Minute
+	tushareRateLimit    = 200 // requests per minute on free tier
+	tushareRateLimitDur = time.Minute
 )
 
 // TushareStore defines the interface for tushare data operations.
@@ -35,10 +35,10 @@ type TushareStore interface {
 // TushareClient wraps the tushare.pro HTTP API.
 type TushareClient struct {
 	httpClient *httpclient.Client
-	token     string
-	logger    zerolog.Logger
-	store     TushareStore
-	cache     storage.Cache
+	token      string
+	logger     zerolog.Logger
+	store      TushareStore
+	cache      storage.Cache
 
 	mu           sync.Mutex
 	lastRequest  time.Time
@@ -54,42 +54,42 @@ func NewTushareClient(token, baseURL string, maxRetries int, store TushareStore,
 	}
 	return &TushareClient{
 		httpClient: httpclient.New(baseURL, 30*time.Second, maxRetries),
-		token:     token,
-		logger:    logger,
-		store:     store,
-		cache:     cache,
+		token:      token,
+		logger:     logger,
+		store:      store,
+		cache:      cache,
 	}
 }
 
 // TushareRequest represents a tushare API request payload.
 type TushareRequest struct {
-	APIName  string                 `json:"api_name"`
-	Token    string                 `json:"token"`
-	Params   map[string]interface{} `json:"params,omitempty"`
-	Fields   string                 `json:"fields,omitempty"`
+	APIName string                 `json:"api_name"`
+	Token   string                 `json:"token"`
+	Params  map[string]interface{} `json:"params,omitempty"`
+	Fields  string                 `json:"fields,omitempty"`
 }
 
 // TushareResponse represents a tushare API response.
 type TushareResponse struct {
-	Code    int             `json:"code"`
-	Msg     string          `json:"msg"`
+	Code    int                `json:"code"`
+	Msg     string             `json:"msg"`
 	Request TushareRequestMeta `json:"request"`
-	Data    TushareData     `json:"data"`
+	Data    TushareData        `json:"data"`
 }
 
 // TushareRequestMeta contains metadata about the request.
 type TushareRequestMeta struct {
-	API      string `json:"api"`
-	Token    string `json:"token"`
-	Params   any    `json:"params"`
-	Fields   string `json:"fields"`
-	TS       int64  `json:"ts"`
+	API    string `json:"api"`
+	Token  string `json:"token"`
+	Params any    `json:"params"`
+	Fields string `json:"fields"`
+	TS     int64  `json:"ts"`
 }
 
 // TushareData contains the response data.
 type TushareData struct {
-	Fields []string        `json:"fields"`
-	Items  [][]any         `json:"items"`
+	Fields []string `json:"fields"`
+	Items  [][]any  `json:"items"`
 }
 
 // fieldToFloat safely converts an interface{} to float64.
@@ -176,7 +176,7 @@ func (c *TushareClient) call(ctx context.Context, apiName string, params map[str
 // FetchStocks retrieves stock list from tushare and saves to database.
 func (c *TushareClient) FetchStocks(ctx context.Context, exchange string, listStatus string) ([]domain.Stock, error) {
 	params := map[string]interface{}{
-		"exchange":   exchange,
+		"exchange":    exchange,
 		"list_status": listStatus,
 	}
 
@@ -255,7 +255,7 @@ func formatDate(s string) string {
 // FetchDailyOHLCV retrieves daily OHLCV data from tushare using stk_factor_pro API with 前复权 (qfq) adjustment.
 func (c *TushareClient) FetchDailyOHLCV(ctx context.Context, symbol string, startDate, endDate string) ([]domain.OHLCV, error) {
 	params := map[string]interface{}{
-		"ts_code":   symbol,
+		"ts_code":    symbol,
 		"start_date": formatDate(startDate),
 		"end_date":   formatDate(endDate),
 	}
@@ -307,13 +307,13 @@ func (c *TushareClient) normalizeDailyOHLCV(resp *TushareResponse, symbol string
 		ohlcv := domain.OHLCV{
 			Symbol:    symbol,
 			Date:      t,
-			Open:      c.fieldFloat(item, 2),   // open_qfq
-			High:      c.fieldFloat(item, 3),   // high_qfq
-			Low:       c.fieldFloat(item, 4),   // low_qfq
-			Close:     c.fieldFloat(item, 5),   // close_qfq
-			Volume:    c.fieldFloat(item, 6),   // vol
-			Turnover:  c.fieldFloat(item, 7),   // amount
-			TradeDays: 0,                       // not available from stk_factor_pro
+			Open:      c.fieldFloat(item, 2), // open_qfq
+			High:      c.fieldFloat(item, 3), // high_qfq
+			Low:       c.fieldFloat(item, 4), // low_qfq
+			Close:     c.fieldFloat(item, 5), // close_qfq
+			Volume:    c.fieldFloat(item, 6), // vol
+			Turnover:  c.fieldFloat(item, 7), // amount
+			TradeDays: 0,                     // not available from stk_factor_pro
 		}
 		records = append(records, ohlcv)
 	}
@@ -323,7 +323,7 @@ func (c *TushareClient) normalizeDailyOHLCV(resp *TushareResponse, symbol string
 // FetchFundamentals retrieves financial data from tushare.
 func (c *TushareClient) FetchFundamentals(ctx context.Context, symbol string, date string) ([]domain.Fundamental, error) {
 	params := map[string]interface{}{
-		"ts_code": symbol,
+		"ts_code":  symbol,
 		"ann_date": date,
 	}
 
@@ -446,15 +446,15 @@ func (c *TushareClient) normalizeFundamentalsData(resp *TushareResponse) []domai
 
 		// Use end_date as trade_date for factor analysis
 		fund := domain.FundamentalData{
-			TsCode:    tsCode,
-			TradeDate: endDate,
-			AnnDate:   annDate,
-			EndDate:   endDate,
-			PE:        c.fieldFloatPtr(item, 3),
-			PB:        c.fieldFloatPtr(item, 4),
-			PS:        c.fieldFloatPtr(item, 5),
-			ROE:       c.fieldFloatPtr(item, 6),
-			ROA:       c.fieldFloatPtr(item, 7),
+			TsCode:       tsCode,
+			TradeDate:    endDate,
+			AnnDate:      annDate,
+			EndDate:      endDate,
+			PE:           c.fieldFloatPtr(item, 3),
+			PB:           c.fieldFloatPtr(item, 4),
+			PS:           c.fieldFloatPtr(item, 5),
+			ROE:          c.fieldFloatPtr(item, 6),
+			ROA:          c.fieldFloatPtr(item, 7),
 			DebtToEquity: c.fieldFloatPtr(item, 8),
 			GrossMargin:  c.fieldFloatPtr(item, 9),
 			NetMargin:    c.fieldFloatPtr(item, 10),
@@ -654,9 +654,9 @@ func (c *TushareClient) normalizeTradingCalendar(resp *TushareResponse, exchange
 		isTradingDay := isOpenStr == "1"
 
 		entries = append(entries, storage.TradingCalendarEntry{
-			TradeDate:      t,
-			Exchange:       exchange,
-			IsTradingDay:   isTradingDay,
+			TradeDate:    t,
+			Exchange:     exchange,
+			IsTradingDay: isTradingDay,
 		})
 	}
 
@@ -727,10 +727,10 @@ func (c *TushareClient) normalizeDividends(resp *TushareResponse) []domain.Divid
 			AnnDate:   annDate,
 			RecDate:   recDate,
 			PayDate:   payDate,
-			DivAmt:    c.fieldFloat(item, 4),  // div_amnt — cash dividend per share
-			StkDiv:    c.fieldFloat(item, 5),  // stk_div — stock dividend per share
-			StkRatio:  c.fieldFloat(item, 6),  // stk_ratio — stock split ratio
-			CashRatio: c.fieldFloat(item, 7),  // cash_ratio — cash dividend ratio
+			DivAmt:    c.fieldFloat(item, 4), // div_amnt — cash dividend per share
+			StkDiv:    c.fieldFloat(item, 5), // stk_div — stock dividend per share
+			StkRatio:  c.fieldFloat(item, 6), // stk_ratio — stock split ratio
+			CashRatio: c.fieldFloat(item, 7), // cash_ratio — cash dividend ratio
 		}
 		records = append(records, record)
 	}
@@ -793,9 +793,9 @@ func (c *TushareClient) normalizeSplits(resp *TushareResponse) []domain.Split {
 		record := domain.Split{
 			Symbol:       tsCode,
 			TradeDate:    tradeDate,
-			StkDivRatio:  c.fieldFloat(item, 2),  // stk_div_ratio — stock dividend/split ratio
-			CashDivRatio: c.fieldFloat(item, 3),    // cash_div_ratio — cash dividend ratio
-			Currency:     c.fieldStr(item, 4),      // currency
+			StkDivRatio:  c.fieldFloat(item, 2), // stk_div_ratio — stock dividend/split ratio
+			CashDivRatio: c.fieldFloat(item, 3), // cash_div_ratio — cash dividend ratio
+			Currency:     c.fieldStr(item, 4),   // currency
 		}
 		records = append(records, record)
 	}

@@ -5,11 +5,11 @@ import (
 	"sort"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rs/zerolog"
 )
 
 type postgresProvider struct {
@@ -21,7 +21,7 @@ type postgresProvider struct {
 func NewPostgresProvider(store *storage.PostgresStore, logger zerolog.Logger) Provider {
 	return &postgresProvider{
 		store:  store,
-		pool:  store.DB(),
+		pool:   store.DB(),
 		logger: logger.With().Str("component", "postgres_provider").Logger(),
 	}
 }

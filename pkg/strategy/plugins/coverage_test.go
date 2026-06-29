@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBollingerMR_Description(t *testing.T) {
@@ -35,7 +35,7 @@ func TestVolBreakout_Description(t *testing.T) {
 func TestMultiFactor_SetFactorCache(t *testing.T) {
 	s := &multiFactorStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("multi_factor", "Multi-factor strategy"),
-		params:      MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3},
+		params:       MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3},
 	}
 
 	reader := func(ft domain.FactorType, date time.Time, symbol string) (float64, bool) {
@@ -51,7 +51,7 @@ func TestMultiFactor_SetFactorCache(t *testing.T) {
 func TestMultiFactor_GenerateSignalsFromFactorCache(t *testing.T) {
 	s := &multiFactorStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("multi_factor", "Multi-factor strategy"),
-		params:      MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3, TopN: 3},
+		params:       MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3, TopN: 3},
 	}
 
 	screenDate := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
@@ -93,7 +93,7 @@ func TestMultiFactor_GenerateSignalsFromFactorCache(t *testing.T) {
 func TestMultiFactor_GenerateSignalsFromFactorCache_NoFactors(t *testing.T) {
 	s := &multiFactorStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("multi_factor", "Multi-factor strategy"),
-		params:      MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3},
+		params:       MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3},
 	}
 
 	s.SetFactorCache(func(ft domain.FactorType, date time.Time, symbol string) (float64, bool) {
@@ -111,7 +111,7 @@ func TestMultiFactor_GenerateSignalsFromFactorCache_NoFactors(t *testing.T) {
 func TestMultiFactor_GenerateSignalsFromFactorCache_PartialFactors(t *testing.T) {
 	s := &multiFactorStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("multi_factor", "Multi-factor strategy"),
-		params:      MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3},
+		params:       MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3},
 	}
 
 	screenDate := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
@@ -134,7 +134,7 @@ func TestMultiFactor_GenerateSignalsFromFactorCache_PartialFactors(t *testing.T)
 func TestMultiFactor_GenerateSellSignals(t *testing.T) {
 	s := &multiFactorStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("multi_factor", "Multi-factor strategy"),
-		params:      MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3},
+		params:       MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3},
 	}
 
 	bars := map[string][]domain.OHLCV{}
@@ -163,7 +163,7 @@ func TestMultiFactor_GenerateSellSignals(t *testing.T) {
 func TestMultiFactor_GenerateSellSignals_NegativeMomentum(t *testing.T) {
 	s := &multiFactorStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("multi_factor", "Multi-factor strategy"),
-		params:      MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3},
+		params:       MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3},
 	}
 
 	bars := map[string][]domain.OHLCV{}
@@ -194,7 +194,7 @@ func TestMultiFactor_GenerateSellSignals_NegativeMomentum(t *testing.T) {
 func TestMultiFactor_GenerateSellSignals_NilPortfolio(t *testing.T) {
 	s := &multiFactorStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("multi_factor", "Multi-factor strategy"),
-		params:      MultiFactorConfig{},
+		params:       MultiFactorConfig{},
 	}
 
 	signals, err := s.generateSellSignals(nil, nil, 5)
@@ -205,7 +205,7 @@ func TestMultiFactor_GenerateSellSignals_NilPortfolio(t *testing.T) {
 func TestValueScreen_GenerateSellSignals(t *testing.T) {
 	s := &valueScreeningStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("value_screen", "Value screening strategy"),
-		params:      ValueScreeningConfig{MomentumDays: 5},
+		params:       ValueScreeningConfig{MomentumDays: 5},
 	}
 
 	bars := map[string][]domain.OHLCV{}
@@ -235,7 +235,7 @@ func TestValueScreen_GenerateSellSignals(t *testing.T) {
 func TestValueScreen_GenerateSellSignals_NilPortfolio(t *testing.T) {
 	s := &valueScreeningStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("value_screen", "Value screening strategy"),
-		params:      ValueScreeningConfig{},
+		params:       ValueScreeningConfig{},
 	}
 
 	signals, err := s.generateSellSignals(nil, nil, 5)
@@ -246,7 +246,7 @@ func TestValueScreen_GenerateSellSignals_NilPortfolio(t *testing.T) {
 func TestMultiFactor_GenerateSignals_WithFactorCache(t *testing.T) {
 	s := &multiFactorStrategy{
 		BaseStrategy: strategy.NewBaseStrategy("multi_factor", "Multi-factor strategy"),
-		params:      MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3, TopN: 1, RebalanceFrequency: "daily"},
+		params:       MultiFactorConfig{ValueWeight: 0.4, QualityWeight: 0.3, MomentumWeight: 0.3, TopN: 1, RebalanceFrequency: "daily"},
 	}
 
 	screenDate := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)

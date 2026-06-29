@@ -59,7 +59,7 @@ func mkQuote(symbol string, bid, ask float64) Quote {
 		Timestamp: time.Now(),
 		Open:      ask,
 		High:      ask,
-		Low:      bid,
+		Low:       bid,
 		Close:     (bid + ask) / 2,
 		Bid:       bid,
 		Ask:       ask,
@@ -178,11 +178,11 @@ func TestTryFillOrder_Stop_BuyTriggersOnAskBreakout(t *testing.T) {
 	e.onTrade = func(domain.Trade) { trades++ }
 
 	order := seedPending(t, e, domain.Order{
-		Symbol:     "600000.SH",
-		Direction:  domain.DirectionLong,
-		OrderType:  domain.OrderTypeStop,
-		Quantity:   100,
-		StopPrice:  10.0,
+		Symbol:    "600000.SH",
+		Direction: domain.DirectionLong,
+		OrderType: domain.OrderTypeStop,
+		Quantity:  100,
+		StopPrice: 10.0,
 	})
 
 	e.tryFillOrder(&order, mkQuote("600000.SH", 9.7, 9.8)) // 不触发
@@ -198,11 +198,11 @@ func TestTryFillOrder_Stop_SellTriggersOnBidBreakdown(t *testing.T) {
 	e.onTrade = func(domain.Trade) { trades++ }
 
 	order := seedPending(t, e, domain.Order{
-		Symbol:     "600000.SH",
-		Direction:  domain.DirectionClose,
-		OrderType:  domain.OrderTypeStop,
-		Quantity:   100,
-		StopPrice:  10.0,
+		Symbol:    "600000.SH",
+		Direction: domain.DirectionClose,
+		OrderType: domain.OrderTypeStop,
+		Quantity:  100,
+		StopPrice: 10.0,
 	})
 
 	e.tryFillOrder(&order, mkQuote("600000.SH", 10.1, 10.3))
@@ -220,11 +220,11 @@ func TestTryFillOrder_Stop_FillPriceIsMarket(t *testing.T) {
 	e.onTrade = func(tr domain.Trade) { once.Do(func() { captured = tr }) }
 
 	order := seedPending(t, e, domain.Order{
-		Symbol:     "600000.SH",
-		Direction:  domain.DirectionClose,
-		OrderType:  domain.OrderTypeStop,
-		Quantity:   100,
-		StopPrice:  10.0,
+		Symbol:    "600000.SH",
+		Direction: domain.DirectionClose,
+		OrderType: domain.OrderTypeStop,
+		Quantity:  100,
+		StopPrice: 10.0,
 	})
 	e.tryFillOrder(&order, mkQuote("600000.SH", 9.8, 9.9))
 	assert.Equal(t, 9.8, captured.Price, "stop sell converts to market sell at bid")
@@ -238,12 +238,12 @@ func TestTryFillOrder_Trailing_HWMRisesMonotonically(t *testing.T) {
 	e := newTestEngine()
 
 	order := seedPending(t, e, domain.Order{
-		Symbol:         "600000.SH",
-		Direction:      domain.DirectionClose,
-		OrderType:      domain.OrderTypeTrailing,
-		Quantity:       100,
-		TrailAmount:    0.5,
-		HighWaterMark:  0,
+		Symbol:        "600000.SH",
+		Direction:     domain.DirectionClose,
+		OrderType:     domain.OrderTypeTrailing,
+		Quantity:      100,
+		TrailAmount:   0.5,
+		HighWaterMark: 0,
 	})
 
 	// 第一笔 quote: 推动 HWM 上升
@@ -332,8 +332,8 @@ func TestTryFillOrder_Trailing_AmountWinsOverPercent(t *testing.T) {
 		Direction:     domain.DirectionClose,
 		OrderType:     domain.OrderTypeTrailing,
 		Quantity:      100,
-		TrailAmount:   2.0,                // 期望触发价 100 - 2 = 98
-		TrailPercent:  0.5,                // 50% (应被忽略)
+		TrailAmount:   2.0, // 期望触发价 100 - 2 = 98
+		TrailPercent:  0.5, // 50% (应被忽略)
 		HighWaterMark: 100,
 	})
 	assert.InDelta(t, 98.0, e.trailingTriggerPrice(&order), 1e-9,
