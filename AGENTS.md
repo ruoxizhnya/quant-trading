@@ -330,6 +330,83 @@ Browser (Vue SPA :5173)
 | 文档 | 验证代码一致性、检查交叉引用、更新导航表（AGENTS.md Document Index） |
 | 其他 | 无特定要求 |
 
+### 执行规范（Implementation Discipline）
+
+> **来源**: 2026-06-29 ODR-043 综合审计后确立 — 适用于 `docs/TASKS.md` 中所有 S7-* 系列任务及后续新增任务
+
+每个任务在执行过程中**必须**遵循以下三条规范，缺一不可：
+
+#### 规范 1: 测试先行（Test-First）
+
+- **每个任务必须编写对应的测试用例**，包括但不限于：
+  - Bug 修复：先写一个能复现 bug 的失败测试，再修复代码使测试通过
+  - 新功能：先写测试定义预期行为，再实现功能
+  - 重构：确保现有测试覆盖重构范围，重构后测试全部通过
+- **测试质量要求**：
+  - 必须有行为断言（禁止 `assert.True(t, true)` placeholder）
+  - 必须覆盖边界条件（空输入、非法输入、并发场景）
+  - 禁止用 `time.Sleep` 同步并发测试，改用 channel/`require.Eventually`/`sync.WaitGroup`
+  - 测试名必须描述被测行为（如 `TestT1SellBlockedByQuantityYesterday`）
+- **验证标准**: `go test ./... -count=1 -race` 必须通过；前端 `npm test` 必须通过
+
+#### 规范 2: 代码审查（Code Review）
+
+- **每个任务完成后必须进行代码审查**，审查维度：
+  - **正确性**: 逻辑是否正确？边界条件是否处理？
+  - **可维护性**: 命名是否清晰？函数是否过长（>100 行警示）？参数是否过多（>5 个警示）？
+  - **规范遵循**: 是否符合 AGENTS.md §6 代码规范？gofmt 是否通过？
+  - **测试质量**: 测试是否有效？是否覆盖关键路径？
+  - **文档同步**: 是否需要更新 SPEC.md/ARCHITECTURE.md/AGENTS.md？
+- **审查方式**:
+  - 自审：提交前自己通读 diff
+  - 工具审：`go vet ./...` + `gofmt -l .` + `npm run typecheck`（若可用）
+  - 必要时使用 TRAE-code-review skill 执行结构化审查
+- **审查记录**: 审查发现的问题要么当场修复，要么记录为新任务到 `docs/TASKS.md`
+
+#### 规范 3: 原子提交（Atomic Commit）
+
+- **每个任务采用 atomic commit 方式提交代码变更**，含义：
+  - **一个任务 = 一个 commit**（或一组逻辑紧密关联的 commit）
+  - **每个 commit 必须是可独立构建、可独立测试通过的完整变更**
+  - 禁止"提交一半工作"（如修改了 A 但没改依赖的 B，导致编译失败）
+  - 禁止"混合多个任务到一个 commit"（如把 bug 修复和重构混在一起）
+- **Commit message 格式**:
+  ```
+  <type>(<scope>): <subject>
+
+  <body — 说明 what/why，不要说明 how>
+
+  Refs: S7-P0-1 (任务 ID from docs/TASKS.md)
+  Reviewed: self-review + go vet + gofmt + tests pass
+  ```
+  - `type`: feat / fix / refactor / test / docs / chore
+  - `scope`: 受影响的包或模块（如 `ai/pipeline` / `backtest` / `web`）
+  - `Refs`: 任务 ID，便于追溯
+- **提交前检查清单**:
+  - [ ] `go build ./...` 通过
+  - [ ] `go vet ./...` 无警告
+  - [ ] `gofmt -l .` 无输出（已格式化）
+  - [ ] `go test ./... -count=1 -race` 通过（或受影响包的测试通过）
+  - [ ] 前端变更：`npm test` + `npm run typecheck`（若可用）通过
+  - [ ] commit message 符合格式
+- **分支策略**: 不直接提交到 `main`，使用 feature branch（如 `fix/s7-p0-1-pipeline-nil-runner`）
+
+#### 规范适用范围
+
+| 任务类型 | 测试先行 | 代码审查 | 原子提交 |
+|---------|---------|---------|---------|
+| Bug 修复 (P0) | ✅ 必须复现测试 | ✅ | ✅ |
+| 重构 (P1/P2) | ✅ 现有测试不退化 | ✅ | ✅ |
+| 新功能 (P3) | ✅ TDD 优先 | ✅ | ✅ |
+| 文档同步 | N/A | ✅ 一致性审查 | ✅ 独立 commit |
+| 测试补强 | ✅ 被测代码已有 | ✅ 测试质量审查 | ✅ |
+
+#### 违规处理
+
+- 未编写测试的任务：**不算完成**，标记为 blocked
+- 未通过代码审查的提交：**不得合并**，返回修改
+- 非 atomic commit：**要求拆分**为多个原子 commit 后再合并
+
 ---
 
 ## 9. 行为边界
@@ -581,8 +658,9 @@ Please continue from where we left off.
 
 ### 项目健康度
 - **Phase**: 3 (Integration & Scale) → 4 (AI-Native Evolution) 进行中
-- **测试覆盖** (2026-05-17 实测): backtest 67.8% | strategy 40.1% (顶层) / plugins 80.3% (子包) | data 70.6% | storage 2.4% (无 DB 时 skip) | ai 0% (顶层) / 子包 16-95% (avg ~67%) | live 52.3% | marketdata 77.8% | risk 59.8%
+- **测试覆盖** (2026-06-29 实测, 总体 62.9% statement-weighted): backtest 76.0% | strategy 64.4% (顶层) / plugins 83.1% (子包) | data/source 60.9% | data/sentiment 76.8% | storage 13.2% (无 DB 时 skip) | ai 28.9% (顶层) / 子包 16-95% (avg ~67%) | live 75.8% | marketdata 79.0% | risk 85.3% | compliance 91.6% | fees 100% | expression 74.5%
 - **关键服务**: Analysis ✅ | Data ✅ | **Sync ✅** | **AI Research ✅ (running)** | Strategy ⏸️ (standby per ADR-012, awaiting Phase 3 D3 activation)
+- **审计状态** (2026-06-29 ODR-043): 4 维度审计完成, 12 Critical / 18 High / 10 Medium 问题点; 5 真实 bug 已识别待修复
 
 ### 任务追踪
 > **Phase 3 任务追踪**: [docs/TASKS.md](docs/TASKS.md)
@@ -606,6 +684,13 @@ Please continue from where we left off.
 | `ChatbubbleEllipsisOutline` icon name doesn't exist | Correct name is `ChatbubbleEllipsesOutline` (with 'e' before 's') |
 | Trade markers may not render if portfolio_values is empty | Ensure backtest returns valid data before calling renderChart() |
 | **ODR-011 Multi-Source Risks** (CR-48, ODR-012) | See sub-table below |
+| **ODR-043-1 AI Pipeline 端到端跑不通** | `cmd/analysis/handlers_pipeline.go:83` 传 nil runner; 修复前 `Pipeline.Execute` 回测阶段被静默跳过 |
+| **ODR-043-2 Pipeline 硬编码开发者本机路径** | `pkg/ai/pipeline/pipeline.go` 的 `buildCmd.Dir` 写死 `/Users/ruoxi/longshaosWorld/...`; 不可移植 |
+| **ODR-043-3 ValidateAgent 默认股票池为美股** | `pkg/ai/agents/validate.go` L3 默认 `["AAPL","GOOGL","MSFT"]`; A 股项目应改为 csi300/csi500 |
+| **ODR-043-4 LLM 输出用字符串扫描解析** | `pkg/ai/agents/research.go` 和 `generate.go` 用 `extractField` 而非 `json.Unmarshal`; 对转义/嵌套必失败 |
+| **ODR-043-5 前端 lint/typecheck 脚本不存在** | `web/package.json` 无 `lint`/`typecheck` 脚本, 未安装 ESLint; AGENTS.md §5/§9 的命令实际无法执行 — 临时用 `npx vue-tsc --noEmit` 替代 |
+| **ODR-043-6 e2e/tests 无 skip guard** | `e2e/tests/integration_test.go` 无 `TestMain`/env gate; 无 Docker 时 `go test ./...` 必 FAIL — 临时用 `go test $(go list ./... \| grep -v e2e)` 排除 |
+| **ODR-043-7 文档漂移: 服务拓扑/归档引用/ADR 状态** | ARCHITECTURE/VISION/SPEC 仍引用 risk-service(8083)/execution-service(8084) (ODR-021 已合并); NEXT_STEPS/IMPLEMENTATION_PLAN 已归档仍被引用; ADR-014 被 ADR-020 §6 取代未标记 — 详见 [ODR-043](docs/odr/odr-043-comprehensive-audit-2026-06-29.md) |
 
 ### ODR-011 Multi-Source Integration Risks (CR-48, ODR-012)
 

@@ -1567,6 +1567,65 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 ---
 
+## 🔴 Sprint 7 — ODR-043 综合审计改进任务 (2026-06-29 ⏳ Pending)
+
+> **来源**: [ODR-043](odr/odr-043-comprehensive-audit-2026-06-29.md) — 4 维度综合审计 (Go 静态质量 / Go 模块化 / Go 测试 / 前端质量)
+> **执行规范**: 每个任务必须 (1) 编写测试用例 (2) 通过代码审查 (3) 采用 atomic commit 提交 — 详见 [AGENTS.md §8.3 执行规范](../AGENTS.md#83-执行规范)
+> **总计**: 9 项任务 (P0×1 + P1×3 + P2×2 + P3×3)
+
+### 🔴 P0 — 立即修复（真实 bug，2-3 天）
+
+| ID | 任务 | 文件 | 状态 | 来源 |
+|----|------|------|------|------|
+| S7-P0-1 | 修复 AI Pipeline 端到端跑不通 — handlers_pipeline.go:83 传 nil runner | `cmd/analysis/handlers_pipeline.go:83` | ⬜ | ODR-043 |
+| S7-P0-2 | 修复 Pipeline 硬编码 buildCmd.Dir 为开发者本机路径 | `pkg/ai/pipeline/pipeline.go` | ⬜ | ODR-043 |
+| S7-P0-3 | 修复 ValidateAgent L3 默认股票池为美股（应改为 A 股） | `pkg/ai/agents/validate.go` | ⬜ | ODR-043 |
+| S7-P0-4 | 修复 research.go/generate.go 用 extractField 字符串扫描解析 JSON | `pkg/ai/agents/research.go`, `generate.go` | ⬜ | ODR-043 |
+| S7-P0-5 | 修复 simulated_broker.go:151 硬编码 0.00025 与 fees 包不一致 | `pkg/live/simulated_broker.go:151` | ⬜ | ODR-043 |
+| S7-P0-6 | 修复 9 处 _ = json.Unmarshal 静默吞错 | `pkg/ai/gene_pool/strategy_pool.go` ×6, `factor_pool.go` ×2, `pkg/strategy/db.go` ×1 | ⬜ | ODR-043 |
+| S7-P0-7 | 修复 pkg/risk/take_profit.go 构造器 3 处 panic（违反生产代码不 panic 约定） | `pkg/risk/take_profit.go:248,255,258` | ⬜ | ODR-043 |
+| S7-P0-8 | 修复 e2e/tests 无 skip guard 导致 go test ./... 永远 FAIL | `e2e/tests/integration_test.go` | ⬜ | ODR-043 |
+| S7-P0-9 | 修复 16 个 ReviewActions.spec.ts 测试失败（缺 MessageProvider） | `web/src/components/ai/__tests__/ReviewActions.spec.ts` | ⬜ | ODR-043 |
+| S7-P0-10 | 一次性 gofmt -w . 格式化 237 个未格式化文件 | 全代码库 | ⬜ | ODR-043 |
+
+### 🟠 P1 — 高优先级重构（1-2 sprint）
+
+| ID | 任务 | 文件 | 状态 | 来源 |
+|----|------|------|------|------|
+| S7-P1-1 | 抽取 pkg/settlement + pkg/portfolio 共享原语包（消除 tracker/mock_trader 重复） | `pkg/settlement/` 新建, `pkg/portfolio/` 新建 | ⬜ | ODR-043 |
+| S7-P1-2 | 修复 5 处跨层反向依赖（strategy→ai/internal/sandbox, storage→sync, marketdata→live, compliance→live） | 多处 | ⬜ | ODR-043 |
+| S7-P1-3 | 抽取 BacktestRunner 接口到 pkg/ai/contracts/（消除 3 处重复定义） | `pkg/ai/contracts/` 新建 | ⬜ | ODR-043 |
+| S7-P1-4 | 修复费率配置三重定义（让 backtest.TradingConfig 引用 fees.AShareFees） | `pkg/backtest/engine.go:39`, `pkg/live/mock_trader.go:26` | ⬜ | ODR-043 |
+| S7-P1-5 | 补 pkg/ai 顶层 5 子系统测试（client/cost/metrics/ratelimit/tracer 当前 0%） | `pkg/ai/*.go` | ⬜ | ODR-043 |
+| S7-P1-6 | 修复 6 个无断言弱测试 + 改 40 处 time.Sleep 并发测试为 channel | 多处 | ⬜ | ODR-043 |
+
+### 🟡 P2 — 中优先级改进（2-3 sprint）
+
+| ID | 任务 | 文件 | 状态 | 来源 |
+|----|------|------|------|------|
+| S7-P2-1 | 拆分 pkg/backtest 上帝包为子包（12 职责 → 12 子包） | `pkg/backtest/` | ⬜ | ODR-043 |
+| S7-P2-2 | 拆分 pkg/live 上帝包为子包（6 职责 → 子包，margin.go 1367 行拆 3 文件） | `pkg/live/` | ⬜ | ODR-043 |
+| S7-P2-3 | 拆分 cmd/analysis/main.go 372 行 main() 函数 | `cmd/analysis/main.go:86` | ⬜ | ODR-043 |
+| S7-P2-4 | 拆分 registerRoutes 16 参数函数为 ServerDeps 结构体 | `cmd/analysis/main.go:475` | ⬜ | ODR-043 |
+| S7-P2-5 | 拆分 cmd/data/main.go (1713 行 God File) | `cmd/data/main.go` | ⬜ | ODR-043 |
+| S7-P2-6 | 前端补 ESLint + @vitest/coverage-v8 依赖 + lint/typecheck 脚本 | `web/package.json` | ⬜ | ODR-043 |
+| S7-P2-7 | 产品决策：AI Research 模块 2500 行不可达代码 → 上线或删除 | `web/src/pages/AIResearch.vue` + 10 组件 | ⬜ | ODR-043 |
+| S7-P2-8 | 产品决策：EmergencyFlatten.vue 311 行死代码 → 接入或删除 | `web/src/components/paper/EmergencyFlatten.vue` | ⬜ | ODR-043 |
+| S7-P2-9 | 拆分 PaperTrading.vue 654 行 God 组件 | `web/src/pages/PaperTrading.vue` | ⬜ | ODR-043 |
+
+### 🟢 P3 — 长期改进（按需）
+
+| ID | 任务 | 文件 | 状态 | 来源 |
+|----|------|------|------|------|
+| S7-P3-1 | 扩展 pkg/ai/expression/ 到信号/仓位/风控层 + 实现 ExpressionStrategy 适配器 | `pkg/ai/expression/` | ⬜ | ODR-043 |
+| S7-P3-2 | 实现 YAML → ExpressionStrategy 加载器（让 AI 输出 YAML 即可执行） | `pkg/ai/yaml/` | ⬜ | ODR-043 |
+| S7-P3-3 | 建 pkg/tools/registry.go Tools Registry（AI 一等居民的最后一公里） | `pkg/tools/` 新建 | ⬜ | ODR-043 |
+| S7-P3-4 | 数据层"软分层" — 新增 pkg/domain/market/ 子包 + view 过渡 | `pkg/domain/market/` 新建 | ⬜ | ODR-043 |
+| S7-P3-5 | 修复全部文档漂移（ARCHITECTURE/VISION/SPEC 同步 ODR-021 服务合并） | `docs/ARCHITECTURE.md` 等 | ⬜ | ODR-043 |
+| S7-P3-6 | 标记 ADR-014 为 Superseded by ADR-020 §6 + 更新 ADR-015/019/020 状态 | `docs/adr/adr-014*.md` 等 | ⬜ | ODR-043 |
+
+---
+
 ## 🔗 相关文档
 
 | 文档                               | 用途             |
@@ -1576,10 +1635,11 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | [archive/NEXT\_STEPS.md](archive/NEXT_STEPS.md)  | 审查发现详情         |
 | [TEST.md](TEST.md)               | 测试策略和覆盖率目标     |
 | [ODR-013](odr/odr-013-comprehensive-audit-2026-06-11.md) | Sprint 6 综合审查记录 |
+| [ODR-043](odr/odr-043-comprehensive-audit-2026-06-29.md) | Sprint 7 综合审计 (4 维度 40 问题点) |
 | [ADR-017](adr/adr-017-observability-and-auth.md) ~ [ADR-020](adr/adr-020-engine-decomposition.md) | Sprint 6 架构决策 |
 
 ***
 
-_Last updated: 2026-06-11 (v3.10.0) — Sprint 6 (ODR-013) 73 项任务全量入库：P0×10 + P1×30 + P2×33；ADR-007/008 Accepted + ADR-017~020 Proposed；ODR-013 审计 + 6 跨维度系统性问题_
-_Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查 + Sprint 6 (ODR-013) 综合审查_
+_Last updated: 2026-06-29 (v4.0.0) — Sprint 7 (ODR-043) 综合审计 9 项改进任务入库：P0×10 + P1×6 + P2×9 + P3×6 = 31 子任务; 4 维度审计 (Go 静态质量/模块化/测试/前端); 推翻 brainstorming "ExecutionCore 合并"假设; AGENTS.md §8.3 执行规范确立_
+_Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查 + Sprint 6 (ODR-013) 综合审查 + Sprint 7 (ODR-043) 4 维度综合审计_
 
