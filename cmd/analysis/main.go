@@ -559,7 +559,11 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 	registerDatasourceRoutes(router, engine, logger)
 	registerFactorRoutes(router, factorAttributor, logger)
 	registerPluginRoutes(router, pluginLoader)
-	registerPipelineRoutes(router)
+	// S7-P0-1 (ODR-043-1): inject copilotRunner so the AI pipeline can
+	// execute the backtest stage end-to-end instead of silently skipping
+	// it. copilotRunner is the same *strategyEngineAdapter already wired
+	// into /api/copilot above.
+	registerPipelineRoutes(router, copilotRunner)
 	registerAuthRoutes(router, authSvc, logger)
 
 	// P1-15 (Sprint 6, ODR-021): risk + execution endpoints

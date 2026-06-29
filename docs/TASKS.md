@@ -1577,7 +1577,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
-| S7-P0-1 | 修复 AI Pipeline 端到端跑不通 — handlers_pipeline.go:83 传 nil runner | `cmd/analysis/handlers_pipeline.go:83` | ⬜ | ODR-043 |
+| S7-P0-1 | 修复 AI Pipeline 端到端跑不通 — handlers_pipeline.go:83 传 nil runner | `cmd/analysis/handlers_pipeline.go:83` | ✅ | ODR-043 |
 | S7-P0-2 | 修复 Pipeline 硬编码 buildCmd.Dir 为开发者本机路径 | `pkg/ai/pipeline/pipeline.go` | ⬜ | ODR-043 |
 | S7-P0-3 | 修复 ValidateAgent L3 默认股票池为美股（应改为 A 股） | `pkg/ai/agents/validate.go` | ⬜ | ODR-043 |
 | S7-P0-4 | 修复 research.go/generate.go 用 extractField 字符串扫描解析 JSON | `pkg/ai/agents/research.go`, `generate.go` | ⬜ | ODR-043 |

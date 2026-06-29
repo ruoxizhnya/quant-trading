@@ -10,18 +10,55 @@ import (
 // PipelineHandler handles pipeline-related HTTP requests
 type PipelineHandler struct {
 	pipeline *pipeline.Pipeline
+	// runner is the BacktestRunner used by RunPipeline to execute the
+	// backtest stage of the AI strategy generation pipeline. When nil,
+	// the pipeline silently skips Stage 5 (backtest) — preserving the
+	// pre-S7-P0-1 behaviour for callers that do not supply a runner.
+	//
+	// S7-P0-1 (ODR-043-1): previously RunPipeline hardcoded nil here,
+	// which meant the AI pipeline was never end-to-end runnable. The
+	// handler now accepts a runner via the WithBacktestRunner option
+	// so main.go can inject the same copilotRunner already wired into
+	// /api/copilot.
+	runner pipeline.BacktestRunner
 }
 
-// NewPipelineHandler creates a new pipeline handler
-func NewPipelineHandler() *PipelineHandler {
-	return &PipelineHandler{
-		pipeline: pipeline.NewPipeline(),
+// PipelineHandlerOption configures a PipelineHandler at construction
+// time using the functional-options pattern.
+type PipelineHandlerOption func(*PipelineHandler)
+
+// WithBacktestRunner injects a BacktestRunner into the handler. Passing
+// nil is allowed and equivalent to not calling the option — the pipeline
+// will simply skip the backtest stage. This keeps the handler safe to
+// construct without a runner (e.g. in tests or degraded deployments).
+func WithBacktestRunner(r pipeline.BacktestRunner) PipelineHandlerOption {
+	return func(h *PipelineHandler) {
+		h.runner = r
 	}
 }
 
-// registerPipelineRoutes registers pipeline routes with the router
-func registerPipelineRoutes(router *gin.Engine) {
-	handler := NewPipelineHandler()
+// NewPipelineHandler creates a new pipeline handler. Default behaviour
+// (no options) leaves the runner nil for backward compatibility —
+// callers that need end-to-end pipeline execution should pass
+// WithBacktestRunner.
+func NewPipelineHandler(opts ...PipelineHandlerOption) *PipelineHandler {
+	h := &PipelineHandler{
+		pipeline: pipeline.NewPipeline(),
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(h)
+		}
+	}
+	return h
+}
+
+// registerPipelineRoutes registers pipeline routes with the router.
+// The runner parameter is forwarded to the handler via WithBacktestRunner
+// so that the AI pipeline can execute the backtest stage end-to-end;
+// pass nil to keep the legacy "skip backtest" behaviour.
+func registerPipelineRoutes(router *gin.Engine, runner pipeline.BacktestRunner) {
+	handler := NewPipelineHandler(WithBacktestRunner(runner))
 	api := router.Group("/api")
 	handler.RegisterPipelineRoutes(api)
 }
@@ -80,7 +117,11 @@ func (h *PipelineHandler) RunPipeline(c *gin.Context) {
 		return
 	}
 
-	result, err := h.pipeline.Execute(c.Request.Context(), req.Description, nil)
+	// S7-P0-1 (ODR-043-1): pass the injected runner instead of nil so the
+	// pipeline can actually execute the backtest stage. When no runner was
+	// injected (legacy callers), h.runner is nil and Execute still skips
+	// Stage 5 gracefully — preserving backward compatibility.
+	result, err := h.pipeline.Execute(c.Request.Context(), req.Description, h.runner)
 	if err != nil {
 		// Return the result even if there was an error, so the client can see partial results
 		c.JSON(http.StatusOK, pipelineResultToResponse(result))

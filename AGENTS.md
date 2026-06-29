@@ -684,7 +684,6 @@ Please continue from where we left off.
 | `ChatbubbleEllipsisOutline` icon name doesn't exist | Correct name is `ChatbubbleEllipsesOutline` (with 'e' before 's') |
 | Trade markers may not render if portfolio_values is empty | Ensure backtest returns valid data before calling renderChart() |
 | **ODR-011 Multi-Source Risks** (CR-48, ODR-012) | See sub-table below |
-| **ODR-043-1 AI Pipeline 端到端跑不通** | `cmd/analysis/handlers_pipeline.go:83` 传 nil runner; 修复前 `Pipeline.Execute` 回测阶段被静默跳过 |
 | **ODR-043-2 Pipeline 硬编码开发者本机路径** | `pkg/ai/pipeline/pipeline.go` 的 `buildCmd.Dir` 写死 `/Users/ruoxi/longshaosWorld/...`; 不可移植 |
 | **ODR-043-3 ValidateAgent 默认股票池为美股** | `pkg/ai/agents/validate.go` L3 默认 `["AAPL","GOOGL","MSFT"]`; A 股项目应改为 csi300/csi500 |
 | **ODR-043-4 LLM 输出用字符串扫描解析** | `pkg/ai/agents/research.go` 和 `generate.go` 用 `extractField` 而非 `json.Unmarshal`; 对转义/嵌套必失败 |
