@@ -277,6 +277,15 @@ func TestGlobalPluginLoader(t *testing.T) {
 	logger := zerolog.New(os.Stdout)
 	registry := NewRegistry()
 
+	// S7-P0-15 (ODR-043): Save and restore the package-level global so the
+	// test is hermetic across -count>1 runs. GlobalPluginLoader is a
+	// package-level var that persists across test iterations within the same
+	// process; without this reset, the assert.Nil below fails on the second
+	// run because InitPluginLoader set it on the first run.
+	old := GlobalPluginLoader
+	GlobalPluginLoader = nil
+	defer func() { GlobalPluginLoader = old }()
+
 	// Should be nil before init
 	assert.Nil(t, GlobalPluginLoader)
 
