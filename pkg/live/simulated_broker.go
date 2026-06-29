@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/fees"
 )
 
 // SimulatedBroker implements a paper trading broker for testing
@@ -17,14 +18,23 @@ type SimulatedBroker struct {
 	positions  map[string]domain.Position
 	balance    float64
 	orderCount int
+	// fees is the A-share fee schedule used for commission calculation.
+	// S7-P0-5 (ODR-043): previously the commission rate (0.025%) and
+	// minimum (¥5) were hardcoded literals that diverged from pkg/fees
+	// (regulatory 0.03% / ¥5) and from MockTrader. Now sourced from
+	// the shared fees package so backtest / paper-trading / live stay
+	// in sync when rates change.
+	fees fees.AShareFees
 }
 
 // NewSimulatedBroker creates a new simulated broker
 func NewSimulatedBroker(initialBalance float64) *SimulatedBroker {
+	defaultFees := fees.DefaultAShareFees()
 	return &SimulatedBroker{
 		orders:    make(map[string]domain.Order),
 		positions: make(map[string]domain.Position),
 		balance:   initialBalance,
+		fees:      defaultFees,
 	}
 }
 
@@ -148,7 +158,10 @@ func (b *SimulatedBroker) fillOrder(orderID string) {
 	}
 
 	amount := fillPrice * order.Quantity
-	commission := math.Max(amount*0.00025, 5.0)
+	// S7-P0-5 (ODR-043): source commission rate and minimum from the
+	// shared fees package instead of hardcoded literals, keeping
+	// SimulatedBroker consistent with MockTrader and the backtest engine.
+	commission := math.Max(amount*b.fees.CommissionRate, b.fees.MinCommission)
 
 	if order.Direction == domain.DirectionLong {
 		position.Quantity += order.Quantity
