@@ -1,4 +1,4 @@
-package backtest
+package metrics
 
 import (
 	"math"
@@ -486,4 +486,15 @@ func GenerateBacktestResult(
 		PortfolioValues: portfolioValues,
 		Trades:          trades,
 	}
+}
+
+// abs returns the absolute value of x. S7-P2-1: this was previously
+// shared from pkg/backtest/tracker.go; it is duplicated here because
+// the metrics sub-package cannot access unexported helpers from the
+// parent package.
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

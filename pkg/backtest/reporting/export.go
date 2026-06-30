@@ -1,4 +1,4 @@
-package backtest
+package reporting
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
@@ -35,7 +36,7 @@ type HTMLReportOptions struct {
 // Returns the rendered bytes and the Content-Type the handler should set
 // ("text/html; charset=utf-8"). Errors only on programmer mistakes
 // (bad template name), not on user input.
-func RenderHTML(resp BacktestResponse, opts HTMLReportOptions) ([]byte, string, error) {
+func RenderHTML(resp backtest.BacktestResponse, opts HTMLReportOptions) ([]byte, string, error) {
 	if opts.Theme == "" {
 		opts.Theme = "light"
 	}
@@ -54,7 +55,7 @@ func RenderHTML(resp BacktestResponse, opts HTMLReportOptions) ([]byte, string, 
 }
 
 type reportData struct {
-	Report           BacktestResponse
+	Report           backtest.BacktestResponse
 	Theme            string
 	GeneratedAt      string
 	FooterNote       string
@@ -93,7 +94,7 @@ type tradeRow struct {
 	PnL      string
 }
 
-func buildReportData(resp BacktestResponse, opts HTMLReportOptions) reportData {
+func buildReportData(resp backtest.BacktestResponse, opts HTMLReportOptions) reportData {
 	data := reportData{
 		Report:        resp,
 		Theme:         opts.Theme,

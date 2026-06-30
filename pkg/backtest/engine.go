@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/metrics"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 	"github.com/ruoxizhnya/quant-trading/pkg/httpclient"
@@ -724,7 +725,7 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 	portfolioValues := state.Tracker.GetPortfolioValues()
 	trades := state.Tracker.GetTrades()
 
-	result := GenerateBacktestResult(
+	result := metrics.GenerateBacktestResult(
 		portfolioValues,
 		trades,
 		params.RiskFreeRate,

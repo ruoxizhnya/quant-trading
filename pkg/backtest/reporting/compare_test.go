@@ -1,4 +1,4 @@
-package backtest
+package reporting
 
 import (
 	"context"
@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
-func sampleResponse(id string, strategy string, totalReturn float64) BacktestResponse {
-	return BacktestResponse{
+func sampleResponse(id string, strategy string, totalReturn float64) backtest.BacktestResponse {
+	return backtest.BacktestResponse{
 		ID:              id,
 		Status:          "completed",
 		Strategy:        strategy,
@@ -43,7 +44,7 @@ func sampleResponse(id string, strategy string, totalReturn float64) BacktestRes
 }
 
 func TestCompareReports_HappyPath(t *testing.T) {
-	resolver := func(_ context.Context, id string) (BacktestResponse, error) {
+	resolver := func(_ context.Context, id string) (backtest.BacktestResponse, error) {
 		return sampleResponse(id, "momentum-"+id, 0.10+float64(len(id))*0.01), nil
 	}
 	ids := []string{"bt-1", "bt-2", "bt-3"}
@@ -81,7 +82,7 @@ func TestCompareReports_HappyPath(t *testing.T) {
 }
 
 func TestCompareReports_RejectsBelowMin(t *testing.T) {
-	_, err := CompareReports(context.Background(), []string{"only-one"}, func(_ context.Context, id string) (BacktestResponse, error) {
+	_, err := CompareReports(context.Background(), []string{"only-one"}, func(_ context.Context, id string) (backtest.BacktestResponse, error) {
 		return sampleResponse(id, "x", 0.1), nil
 	})
 	if err == nil || !strings.Contains(err.Error(), "at least 2") {
@@ -94,7 +95,7 @@ func TestCompareReports_RejectsAboveMax(t *testing.T) {
 	for i := range ids {
 		ids[i] = fmt.Sprintf("bt-%d", i)
 	}
-	_, err := CompareReports(context.Background(), ids, func(_ context.Context, id string) (BacktestResponse, error) {
+	_, err := CompareReports(context.Background(), ids, func(_ context.Context, id string) (backtest.BacktestResponse, error) {
 		return sampleResponse(id, "x", 0.1), nil
 	})
 	if err == nil || !strings.Contains(err.Error(), "at most 8") {
@@ -104,7 +105,7 @@ func TestCompareReports_RejectsAboveMax(t *testing.T) {
 
 func TestCompareReports_RejectsAfterDedup(t *testing.T) {
 	// 3 input ids, but all blank → dedupe drops them all → < 2 distinct
-	_, err := CompareReports(context.Background(), []string{"", " ", "\t"}, func(_ context.Context, id string) (BacktestResponse, error) {
+	_, err := CompareReports(context.Background(), []string{"", " ", "\t"}, func(_ context.Context, id string) (backtest.BacktestResponse, error) {
 		return sampleResponse(id, "x", 0.1), nil
 	})
 	if err == nil || !strings.Contains(err.Error(), "distinct") {
@@ -115,9 +116,9 @@ func TestCompareReports_RejectsAfterDedup(t *testing.T) {
 func TestCompareReports_PartialResolution(t *testing.T) {
 	// One ID succeeds, one fails. We expect the success to land in
 	// Reports/Entries and the failure to be captured in Missing.
-	resolver := func(_ context.Context, id string) (BacktestResponse, error) {
+	resolver := func(_ context.Context, id string) (backtest.BacktestResponse, error) {
 		if id == "bt-missing" {
-			return BacktestResponse{}, errors.New("not found in store")
+			return backtest.BacktestResponse{}, errors.New("not found in store")
 		}
 		return sampleResponse(id, "momentum", 0.10), nil
 	}
@@ -138,7 +139,7 @@ func TestCompareReports_PartialResolution(t *testing.T) {
 
 func TestCompareReports_DedupesIDs(t *testing.T) {
 	calls := map[string]int{}
-	resolver := func(_ context.Context, id string) (BacktestResponse, error) {
+	resolver := func(_ context.Context, id string) (backtest.BacktestResponse, error) {
 		calls[id]++
 		return sampleResponse(id, "x", 0.1), nil
 	}
@@ -159,7 +160,7 @@ func TestCompareReports_DedupesIDs(t *testing.T) {
 func TestCompareReports_BestPicksHighestMetric(t *testing.T) {
 	// Build three reports with strictly increasing TotalReturn
 	// but strictly decreasing Sharpe (so the two "bests" differ).
-	resolver := func(_ context.Context, id string) (BacktestResponse, error) {
+	resolver := func(_ context.Context, id string) (backtest.BacktestResponse, error) {
 		r := sampleResponse(id, "x", 0)
 		switch id {
 		case "low":
@@ -188,7 +189,7 @@ func TestCompareReports_BestPicksHighestMetric(t *testing.T) {
 
 func TestCompareReports_BestDrawdownPicksLeastNegative(t *testing.T) {
 	// MaxDrawdown is special: the "best" is the least negative.
-	resolver := func(_ context.Context, id string) (BacktestResponse, error) {
+	resolver := func(_ context.Context, id string) (backtest.BacktestResponse, error) {
 		r := sampleResponse(id, "x", 0.1)
 		switch id {
 		case "deep":
@@ -238,8 +239,8 @@ func TestFlattenEntry_NoEquityDataFlag(t *testing.T) {
 func TestCompareReports_EmptyEntriesYieldsEmptyBest(t *testing.T) {
 	// Two IDs, both fail to resolve — we still return a valid
 	// (but empty) report.
-	resolver := func(_ context.Context, id string) (BacktestResponse, error) {
-		return BacktestResponse{}, errors.New("nope")
+	resolver := func(_ context.Context, id string) (backtest.BacktestResponse, error) {
+		return backtest.BacktestResponse{}, errors.New("nope")
 	}
 	report, err := CompareReports(context.Background(), []string{"a", "b"}, resolver)
 	if err != nil {
