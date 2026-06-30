@@ -1,4 +1,5 @@
-// Package live — 券资金对账 (securities-fund reconciliation) Worker (P2-8).
+// Package reconciliation implements 券资金对账 (securities-fund
+// reconciliation) Worker (P2-8).
 //
 // 监管依据:
 //   - 《证券公司大额交易报告管理办法》(2024-04 修订) + 中国结算 《证券
@@ -15,7 +16,10 @@
 //   - 偏差超阈值 → 立即通过 alert.AlertManager 派发 critical / warning 告警
 //   - 落盘 on-disk JSON 报告, 文件名 rec-YYYYMMDD-HHMM.json
 //   - 完全无状态 (除 history buffer): 重启不丢失历史, 历史只由调用方持有
-package live
+//
+// S7-P2-2: extracted from pkg/live/reconciliation.go as a clean leaf
+// sub-package. Zero internal dependencies on parent pkg/live.
+package reconciliation
 
 import (
 	"context"

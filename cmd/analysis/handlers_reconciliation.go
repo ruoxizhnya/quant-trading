@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/quant-trading/pkg/live"
+	"github.com/ruoxizhnya/quant-trading/pkg/live/reconciliation"
 )
 
 // P2-8 (Sprint 6 ODR-030): Reconciliation handler.
@@ -26,14 +26,14 @@ import (
 // The handler is intentionally read-only except for /run; the
 // reconciliation worker is owned by main.go's wiring layer.
 type ReconciliationHandler struct {
-	worker *live.ReconciliationWorker
+	worker *reconciliation.ReconciliationWorker
 	logger zerolog.Logger
 }
 
 // NewReconciliationHandler wires the handler to a worker. The worker
 // may be nil when the feature is disabled; in that case, the handler
 // returns 503 Service Unavailable.
-func NewReconciliationHandler(worker *live.ReconciliationWorker, logger zerolog.Logger) *ReconciliationHandler {
+func NewReconciliationHandler(worker *reconciliation.ReconciliationWorker, logger zerolog.Logger) *ReconciliationHandler {
 	return &ReconciliationHandler{
 		worker: worker,
 		logger: logger.With().Str("component", "reconciliation_handler").Logger(),

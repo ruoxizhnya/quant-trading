@@ -1,4 +1,4 @@
-package live
+package stockstate
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/live"
 )
 
 // ============================================================
@@ -25,7 +26,7 @@ type stockStateStubTrader struct {
 	// flattenErr 让测试模拟券商拒绝.
 	flattenErr error
 	// soldPerFlatten 控制每次 EmergencyFlatten 返回的 Sold 列表.
-	soldPerFlatten []EmergencyFlattenOrder
+	soldPerFlatten []live.EmergencyFlattenOrder
 	// positionsErr 让测试模拟 trader.GetPositions 失败.
 	positionsErr error
 }
@@ -34,33 +35,33 @@ type flattenCall struct {
 	reason string
 }
 
-func (s *stockStateStubTrader) SubmitOrder(_ context.Context, _ string, _ domain.Direction, _ domain.OrderType, _ float64, _ float64) (*OrderResult, error) {
+func (s *stockStateStubTrader) SubmitOrder(_ context.Context, _ string, _ domain.Direction, _ domain.OrderType, _ float64, _ float64) (*live.OrderResult, error) {
 	return nil, errors.New("not implemented")
 }
 func (s *stockStateStubTrader) CancelOrder(_ context.Context, _ string) error {
 	return nil
 }
-func (s *stockStateStubTrader) GetOrder(_ context.Context, _ string) (*OrderResult, error) {
+func (s *stockStateStubTrader) GetOrder(_ context.Context, _ string) (*live.OrderResult, error) {
 	return nil, errors.New("not implemented")
 }
-func (s *stockStateStubTrader) GetPositions(_ context.Context) ([]PositionInfo, error) {
+func (s *stockStateStubTrader) GetPositions(_ context.Context) ([]live.PositionInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.positionsErr != nil {
 		return nil, s.positionsErr
 	}
-	out := make([]PositionInfo, 0, len(s.positions))
+	out := make([]live.PositionInfo, 0, len(s.positions))
 	for sym, qty := range s.positions {
-		out = append(out, PositionInfo{Symbol: sym, Quantity: qty})
+		out = append(out, live.PositionInfo{Symbol: sym, Quantity: qty})
 	}
 	return out, nil
 }
-func (s *stockStateStubTrader) GetAccount(_ context.Context) (*AccountInfo, error) {
-	return &AccountInfo{Cash: 1_000_000}, nil
+func (s *stockStateStubTrader) GetAccount(_ context.Context) (*live.AccountInfo, error) {
+	return &live.AccountInfo{Cash: 1_000_000}, nil
 }
 func (s *stockStateStubTrader) Name() string                        { return "stub_trader" }
 func (s *stockStateStubTrader) HealthCheck(_ context.Context) error { return nil }
-func (s *stockStateStubTrader) EmergencyFlatten(_ context.Context, reason string) (*EmergencyFlattenResult, error) {
+func (s *stockStateStubTrader) EmergencyFlatten(_ context.Context, reason string) (*live.EmergencyFlattenResult, error) {
 	s.mu.Lock()
 	s.flattenCalls = append(s.flattenCalls, flattenCall{reason: reason})
 	sold := s.soldPerFlatten
@@ -69,7 +70,7 @@ func (s *stockStateStubTrader) EmergencyFlatten(_ context.Context, reason string
 	if err != nil {
 		return nil, err
 	}
-	return &EmergencyFlattenResult{
+	return &live.EmergencyFlattenResult{
 		Sold:        sold,
 		Reason:      reason,
 		StartedAt:   time.Now(),
@@ -404,7 +405,7 @@ func TestForcedLiquidator_Scan_TriggersFlattenForHeldSymbol(t *testing.T) {
 
 	trader := &stockStateStubTrader{
 		positions:      map[string]float64{"600000.SH": 1000},
-		soldPerFlatten: []EmergencyFlattenOrder{{Symbol: "600000.SH", OrderID: "O1", Quantity: 1000}},
+		soldPerFlatten: []live.EmergencyFlattenOrder{{Symbol: "600000.SH", OrderID: "O1", Quantity: 1000}},
 	}
 
 	res, err := liq.Scan(context.Background(), trader)
@@ -553,7 +554,7 @@ func TestForcedLiquidator_Scan_MultipleSymbols(t *testing.T) {
 			"BBB.SH": 200,
 			"CCC.SH": 300,
 		},
-		soldPerFlatten: []EmergencyFlattenOrder{
+		soldPerFlatten: []live.EmergencyFlattenOrder{
 			{Symbol: "AAA.SH", Quantity: 100},
 			{Symbol: "BBB.SH", Quantity: 200},
 		},
