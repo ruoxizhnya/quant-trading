@@ -1,7 +1,9 @@
 package yaml
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -10,6 +12,15 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy/expression"
 )
+
+// uniqueName builds a strategy name unique per test invocation (including
+// -count=2 re-runs) so GlobalRegister never collides across tests or
+// re-runs. The global strategy registry is package-level state with no
+// Unregister, so fixed names flake under -count=2.
+func uniqueName(t *testing.T) string {
+	t.Helper()
+	return fmt.Sprintf("test_%s_%d", t.Name(), time.Now().UnixNano())
+}
 
 // TestParseConfig_ValidFullYAML verifies that a complete YAML document
 // with all sections (including the new expression section) parses
@@ -346,22 +357,24 @@ backtest:
 
 // TestLoadAndRegister_HappyPath verifies the convenience wrapper
 // registers the strategy so GlobalGet can find it. We use a unique name
-// to avoid collisions with other tests in the suite.
+// (per invocation) to avoid collisions across tests and -count=2 re-runs
+// — the global registry has no Unregister.
 func TestLoadAndRegister_HappyPath(t *testing.T) {
-	yamlStr := `strategy:
-  name: load_and_register_test_strat
+	name := uniqueName(t)
+	yamlStr := fmt.Sprintf(`strategy:
+  name: %s
   type: expression
 expression:
   signal:
     expression: "close > 50"
-`
+`, name)
 	s, err := LoadAndRegister(yamlStr)
 	require.NoError(t, err)
 	require.NotNil(t, s)
-	assert.Equal(t, "load_and_register_test_strat", s.Name())
+	assert.Equal(t, name, s.Name())
 
 	// Verify it's retrievable via the global registry.
-	retrieved, err := strategy.GlobalGet("load_and_register_test_strat")
+	retrieved, err := strategy.GlobalGet(name)
 	require.NoError(t, err)
 	assert.Equal(t, s.Name(), retrieved.Name())
 }
@@ -369,13 +382,14 @@ expression:
 // TestLoadAndRegister_DuplicateName verifies that registering a strategy
 // with an already-registered name returns an error from GlobalRegister.
 func TestLoadAndRegister_DuplicateName(t *testing.T) {
-	yamlStr := `strategy:
-  name: dup_name_strat
+	name := uniqueName(t)
+	yamlStr := fmt.Sprintf(`strategy:
+  name: %s
   type: expression
 expression:
   signal:
     expression: "close > 50"
-`
+`, name)
 	// First registration succeeds.
 	_, err := LoadAndRegister(yamlStr)
 	require.NoError(t, err)
@@ -383,7 +397,7 @@ expression:
 	// Second registration of the same name should fail.
 	_, err = LoadAndRegister(yamlStr)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "dup_name_strat")
+	assert.Contains(t, err.Error(), name)
 }
 
 // verifyDirectionConstants ensures our test assumptions about
@@ -395,4 +409,104 @@ func TestDirectionConstants(t *testing.T) {
 	assert.Equal(t, "short", string(domain.DirectionShort))
 	assert.Equal(t, "close", string(domain.DirectionClose))
 	assert.Equal(t, "hold", string(domain.DirectionHold))
+}
+
+// ─── S7-P3-2 Phase 4: ExpressionParamsFromConfig tests ──────────────
+
+// TestExpressionParamsFromConfig verifies that a Config with a fully
+// populated Expression section yields a params map containing every
+// ExpressionStrategy.Configure parameter with the correct value.
+func TestExpressionParamsFromConfig(t *testing.T) {
+	config := &Config{
+		Expression: ExpressionYAML{
+			Signal: SignalYAML{
+				Expression:  "cs_rank(close) > 0.8",
+				Action:      "buy",
+				Direction:   "long",
+				MinStrength: 0.5,
+				Lookback:    60,
+			},
+			Sizing: SizingYAML{
+				Method:      "equal",
+				FixedWeight: 0.05,
+				MaxPerStock: 0.10,
+				MaxTotal:    1.0,
+			},
+			Risk: RiskYAML{
+				MaxPositionPct:   0.10,
+				MaxDrawdown:      0.20,
+				MaxOpenPositions: 20,
+				MinCashBuffer:    0.05,
+			},
+		},
+	}
+
+	params := ExpressionParamsFromConfig(config)
+
+	assert.Equal(t, "cs_rank(close) > 0.8", params["signal_expr"])
+	assert.Equal(t, "buy", params["action"])
+	assert.Equal(t, "long", params["direction"])
+	assert.Equal(t, 0.5, params["min_strength"])
+	assert.Equal(t, 60, params["lookback"])
+	assert.Equal(t, "equal", params["sizing_method"])
+	assert.Equal(t, 0.05, params["fixed_weight"])
+	assert.Equal(t, 0.10, params["max_per_stock"])
+	assert.Equal(t, 1.0, params["max_total"])
+	assert.Equal(t, 0.10, params["max_position_pct"])
+	assert.Equal(t, 20, params["max_open_positions"])
+	assert.Equal(t, 0.05, params["min_cash_buffer"])
+
+	// max_drawdown is NOT a Configure param (it's only in RiskConfig for
+	// future use), so it must not appear in the params map.
+	_, present := params["max_drawdown"]
+	assert.False(t, present, "max_drawdown is not a Configure parameter")
+}
+
+// TestExpressionParamsFromConfig_PartialFields verifies that zero-valued
+// fields are omitted from the params map so Configure preserves the
+// existing strategy's values for those fields (partial-update semantics).
+func TestExpressionParamsFromConfig_PartialFields(t *testing.T) {
+	config := &Config{
+		Expression: ExpressionYAML{
+			Signal: SignalYAML{
+				Expression: "close > 50",
+				// Action, Direction, MinStrength, Lookback all zero → omitted
+			},
+			// Sizing and Risk fully zero → omitted
+		},
+	}
+
+	params := ExpressionParamsFromConfig(config)
+
+	// signal_expr is always present (even if empty, for the "keep current"
+	// Configure semantics on the type: expression path).
+	assert.Equal(t, "close > 50", params["signal_expr"])
+
+	// Zero-valued optional fields must be absent.
+	for _, key := range []string{
+		"action", "direction", "min_strength", "lookback",
+		"sizing_method", "fixed_weight", "max_per_stock", "max_total",
+		"max_position_pct", "max_open_positions", "min_cash_buffer",
+	} {
+		_, present := params[key]
+		assert.False(t, present, "zero-valued field %q should be omitted", key)
+	}
+}
+
+// TestExpressionParamsFromConfig_EmptySection verifies the type:expression
+// path (no explicit expression: block) yields a map with only
+// signal_expr="" — Configure treats this as "keep current value".
+func TestExpressionParamsFromConfig_EmptySection(t *testing.T) {
+	config := &Config{} // zero-valued Expression
+
+	params := ExpressionParamsFromConfig(config)
+
+	require.Len(t, params, 1)
+	assert.Equal(t, "", params["signal_expr"])
+}
+
+// TestExpressionParamsFromConfig_NilConfig verifies a nil config returns
+// nil rather than panicking — defensive guard for caller bugs.
+func TestExpressionParamsFromConfig_NilConfig(t *testing.T) {
+	assert.Nil(t, ExpressionParamsFromConfig(nil))
 }

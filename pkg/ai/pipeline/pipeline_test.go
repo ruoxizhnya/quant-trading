@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -661,4 +662,139 @@ func (m *mockDataProvider) GetField(symbol, field string, lookback int) ([]float
 
 func (m *mockDataProvider) GetSymbols() []string {
 	return []string{"AAPL", "GOOGL"}
+}
+
+// ─── S7-P3-2 Phase 4: ExecuteFromYAML tests ──────────────────────────
+
+// uniqueYAMLName builds a strategy name unique per test invocation
+// (including -count=2 re-runs) so that GlobalRegister never collides
+// across tests or re-runs. The global strategy registry is package-level
+// state with no Unregister, so fixed names would flake under -count=2.
+func uniqueYAMLName(t *testing.T) string {
+	t.Helper()
+	return fmt.Sprintf("test_yaml_%s_%d", t.Name(), time.Now().UnixNano())
+}
+
+// expressionYAMLForTest returns a valid expression-strategy YAML with
+// the given name. The expression and sizing are minimal but valid so
+// LoadStrategy can build an ExpressionStrategy from it.
+func expressionYAMLForTest(name string) string {
+	return fmt.Sprintf(`strategy:
+  name: %s
+  type: expression
+  description: test expression strategy for ExecuteFromYAML
+expression:
+  signal:
+    expression: "cs_rank(close) > 0.8"
+    action: buy
+    direction: long
+    lookback: 60
+  sizing:
+    method: equal
+    max_per_stock: 0.10
+    max_total: 1.0
+  risk:
+    max_open_positions: 20
+    min_cash_buffer: 0.05
+`, name)
+}
+
+// TestPipeline_ExecuteFromYAML_HappyPath verifies the full happy path:
+// valid YAML → strategy loaded + registered → mock runner returns a
+// result → Result is populated correctly. GeneratedCode/BuildError must
+// be empty because no LLM codegen occurred.
+func TestPipeline_ExecuteFromYAML_HappyPath(t *testing.T) {
+	p := NewPipeline()
+	name := uniqueYAMLName(t)
+	yamlStr := expressionYAMLForTest(name)
+
+	runner := &mockBacktestRunner{
+		result: &domain.BacktestResult{
+			TotalTrades: 7,
+			TotalReturn: 0.12,
+			SharpeRatio: 1.5,
+		},
+	}
+
+	result, err := p.ExecuteFromYAML(context.Background(), yamlStr, runner)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, StageComplete, result.Status)
+	assert.Equal(t, yamlStr, result.YAMLConfig)
+	require.NotNil(t, result.BacktestResult)
+	assert.Equal(t, 7, result.BacktestResult.TotalTrades)
+	assert.Equal(t, 0.12, result.BacktestResult.TotalReturn)
+	// No codegen occurred → these must be empty.
+	assert.Empty(t, result.GeneratedCode)
+	assert.Empty(t, result.BuildError)
+}
+
+// TestPipeline_ExecuteFromYAML_RegistrationCollision verifies that
+// calling ExecuteFromYAML twice with the same YAML (same strategy name)
+// reconfigures the already-registered strategy in place rather than
+// erroring. This is the common AI iterative-tuning workflow: the same
+// strategy name is re-run with tweaked expression params.
+func TestPipeline_ExecuteFromYAML_RegistrationCollision(t *testing.T) {
+	p := NewPipeline()
+	name := uniqueYAMLName(t)
+	yamlStr := expressionYAMLForTest(name)
+
+	runner := &mockBacktestRunner{}
+
+	// First call — registers the strategy.
+	result1, err := p.ExecuteFromYAML(context.Background(), yamlStr, runner)
+	require.NoError(t, err)
+	assert.Equal(t, StageComplete, result1.Status)
+
+	// Second call — same name, should Configure in place (not error).
+	result2, err := p.ExecuteFromYAML(context.Background(), yamlStr, runner)
+	require.NoError(t, err)
+	assert.Equal(t, StageComplete, result2.Status)
+	require.NotNil(t, result2.BacktestResult)
+}
+
+// TestPipeline_ExecuteFromYAML_InvalidYAML verifies that malformed YAML
+// (missing required strategy section) fails at StageParse with a clear
+// error message, and the Result is marked StageFailed.
+func TestPipeline_ExecuteFromYAML_InvalidYAML(t *testing.T) {
+	p := NewPipeline()
+	runner := &mockBacktestRunner{}
+
+	// YAML missing the required strategy: section.
+	invalidYAML := `backtest:
+  start_date: 2020-01-01
+data:
+  universe: csi300
+`
+
+	result, err := p.ExecuteFromYAML(context.Background(), invalidYAML, runner)
+
+	require.Error(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, StageFailed, result.Status)
+	// The returned err is the original ParseConfig error; the wrapped
+	// "YAML parse failed: ..." message is stored in result.BuildError
+	// by p.fail (same pattern as Execute/ExecuteAsync).
+	assert.Contains(t, err.Error(), "missing required section: strategy:")
+	assert.Contains(t, result.BuildError, "YAML parse failed")
+}
+
+// TestPipeline_ExecuteFromYAML_NilRunner verifies that a nil runner
+// causes the backtest stage to be skipped (not error). The strategy is
+// still loaded and registered, and the Result reaches StageComplete.
+// This supports "load and register without running" callers.
+func TestPipeline_ExecuteFromYAML_NilRunner(t *testing.T) {
+	p := NewPipeline()
+	name := uniqueYAMLName(t)
+	yamlStr := expressionYAMLForTest(name)
+
+	result, err := p.ExecuteFromYAML(context.Background(), yamlStr, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, StageComplete, result.Status)
+	assert.Equal(t, yamlStr, result.YAMLConfig)
+	assert.Nil(t, result.BacktestResult)
+	assert.Empty(t, result.BacktestError)
 }

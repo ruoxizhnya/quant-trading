@@ -153,6 +153,66 @@ func LoadAndRegister(yamlStr string) (strategy.Strategy, error) {
 	return s, nil
 }
 
+// ExpressionParamsFromConfig builds the flat params map that
+// expression.ExpressionStrategy.Configure expects, from a parsed
+// Config's Expression section. Only non-zero values are included so
+// partial updates preserve the existing config (Configure semantics:
+// missing keys keep current values).
+//
+// Used by Pipeline.ExecuteFromYAML to reconfigure an already-registered
+// strategy in place when the same name is loaded again. The param-name
+// strings here mirror ExpressionStrategy.Parameters() in
+// pkg/strategy/expression/strategy.go and intentToExpressionConfig in
+// generator.go — keeping the mapping in one package avoids divergent
+// copies.
+//
+// When the Expression section is empty (the strategy.type == "expression"
+// path with no explicit expression: block), the returned map contains
+// only signal_expr="" — Configure treats this as "keep current value".
+func ExpressionParamsFromConfig(config *Config) map[string]interface{} {
+	if config == nil {
+		return nil
+	}
+	expr := config.Expression
+	params := map[string]interface{}{
+		"signal_expr": expr.Signal.Expression,
+	}
+	if expr.Signal.Action != "" {
+		params["action"] = expr.Signal.Action
+	}
+	if expr.Signal.Direction != "" {
+		params["direction"] = expr.Signal.Direction
+	}
+	if expr.Signal.MinStrength != 0 {
+		params["min_strength"] = expr.Signal.MinStrength
+	}
+	if expr.Signal.Lookback != 0 {
+		params["lookback"] = expr.Signal.Lookback
+	}
+	if expr.Sizing.Method != "" {
+		params["sizing_method"] = expr.Sizing.Method
+	}
+	if expr.Sizing.FixedWeight != 0 {
+		params["fixed_weight"] = expr.Sizing.FixedWeight
+	}
+	if expr.Sizing.MaxPerStock != 0 {
+		params["max_per_stock"] = expr.Sizing.MaxPerStock
+	}
+	if expr.Sizing.MaxTotal != 0 {
+		params["max_total"] = expr.Sizing.MaxTotal
+	}
+	if expr.Risk.MaxPositionPct != 0 {
+		params["max_position_pct"] = expr.Risk.MaxPositionPct
+	}
+	if expr.Risk.MaxOpenPositions != 0 {
+		params["max_open_positions"] = expr.Risk.MaxOpenPositions
+	}
+	if expr.Risk.MinCashBuffer != 0 {
+		params["min_cash_buffer"] = expr.Risk.MinCashBuffer
+	}
+	return params
+}
+
 // buildExpressionConfig maps the YAML representation to the
 // expression.ExpressionStrategyConfig struct, validating the direction
 // string along the way.

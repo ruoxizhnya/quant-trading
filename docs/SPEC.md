@@ -363,6 +363,41 @@ either (a) the `expression:` section is present with a non-empty
 **Reserved name**: `expression_template` is rejected by `LoadStrategy`
 to avoid collision with the self-registered default.
 
+#### Direct Execution via ExecuteFromYAML
+
+`Pipeline.ExecuteFromYAML` runs a backtest directly from a YAML strategy
+config, **bypassing the LLM Go-codegen + compile path entirely**. This is
+the execution path for expression-type strategies once the AI has
+emitted the YAML:
+
+```
+YAML → ParseConfig + LoadStrategy → registerOrConfigure → RunBacktest
+```
+
+| Method | Signature |
+|--------|-----------|
+| `Pipeline.ExecuteFromYAML` | `(ctx, yamlStr string, runner BacktestRunner) (*Result, error)` |
+
+**Behavior**:
+
+- **No codegen**: `Result.GeneratedCode` and `Result.BuildError` are left
+  empty; `Result.YAMLConfig` is set to the input YAML.
+- **Registration collision**: if a strategy with the same name is already
+  registered and is also an `*expression.ExpressionStrategy`, the existing
+  one is reconfigured in place via `Configure` (partial-update semantics).
+  If the existing strategy is a different concrete type, an error is
+  returned. If the name is not registered, `GlobalRegister` is called.
+- **Universe / dates**: taken from the YAML `data.universe` and
+  `backtest.start_date` / `backtest.end_date` fields. When absent, they
+  fall back to `nil` (all stocks) and `2022-01-01` → `2024-01-01`
+  (matching `Pipeline.runBacktest` defaults).
+- **Nil runner**: when `runner` is nil, backtest is skipped and the
+  result reaches `StageComplete` after registration — supports
+  "load and register without running" callers.
+
+This method is synchronous (like `Execute`). An async variant
+`ExecuteFromYAMLAsync` may be added in a follow-up if needed.
+
 ### cs_neutralize Fix (S7-P3-1 Phase 1)
 
 The `cs_neutralize(x, group)` cross-sectional operator was declared in

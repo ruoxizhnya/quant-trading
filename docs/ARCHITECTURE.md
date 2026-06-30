@@ -918,6 +918,13 @@ type Config struct {
 返回: {intent, yaml, code, backtest_result}
 ```
 
+> **YAML 直执行路径 (S7-P3-2)**: 当策略为 expression 类型时，
+> `Pipeline.ExecuteFromYAML` 绕过 LLM codegen + 编译，直接
+> `LoadStrategy → registerOrConfigure → RunBacktest`。适用于 AI 迭代
+> 调参场景（同 YAML 多次执行 / 微调 expression 后重跑）。同名策略
+> 重复执行时走 `Configure` in-place 重配，异类型冲突报错。详见
+> [SPEC.md](SPEC.md#direct-execution-via-executefromyaml)。
+
 ### 表达式引擎 (Factor Expression DSL)
 
 ```go
