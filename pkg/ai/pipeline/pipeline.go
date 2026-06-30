@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/intent"
 	yamlgen "github.com/ruoxizhnya/quant-trading/pkg/ai/yaml"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -58,10 +59,13 @@ type Result struct {
 	done chan struct{} `json:"-"`
 }
 
-// BacktestRunner is the interface for running backtests
-type BacktestRunner interface {
-	RunBacktest(ctx context.Context, strategyName string, stockPool []string, startDate, endDate string) (*domain.BacktestResult, error)
-}
+// BacktestRunner is the canonical contract for running backtests.
+// S7-P1-3 (ODR-043): previously a local duplicate of the same
+// interface in pkg/strategy/copilot.go. Now a zero-cost type alias to
+// the single source of truth in pkg/ai/contracts. All existing code
+// (adapters, mocks, compile-time assertions) continues to work
+// unchanged because Go type aliases are transparent.
+type BacktestRunner = contracts.BacktestRunner
 
 // Pipeline orchestrates the full strategy generation and validation flow
 type Pipeline struct {
