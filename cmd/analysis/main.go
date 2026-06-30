@@ -12,15 +12,10 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/internal/sandbox/runner"
 	"github.com/ruoxizhnya/quant-trading/internal/sandbox/staticcheck"
-	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/compliance"
-	"github.com/ruoxizhnya/quant-trading/pkg/data"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
-	"github.com/ruoxizhnya/quant-trading/pkg/live"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
-	"github.com/ruoxizhnya/quant-trading/pkg/risk"
-	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	_ "github.com/ruoxizhnya/quant-trading/pkg/strategy/plugins"
 	"github.com/spf13/viper"
 )
@@ -36,12 +31,6 @@ var httpClient = &http.Client{
 		Service: "data",
 	},
 }
-
-// metrics holds the four ADR-017 §1 core metrics. Constructed in
-// main() and shared into the httpClient transport (records
-// http_client_requests_total), the /metrics handler, and any
-// backtest/LLM observation call sites.
-var metrics *observability.Metrics
 
 type strategyEngineAdapter struct {
 	engine *backtest.Engine
@@ -128,7 +117,7 @@ func (a *strategyEngineAdapter) RunBacktest(
 // now a thin orchestrator (~35 lines).
 func main() {
 	logger := initLogger()
-	metrics = initMetrics(logger)
+	m := initMetrics(logger)
 	v := loadConfig(logger)
 
 	engine, httpProvider := buildBacktestEngine(v, logger)
@@ -149,8 +138,27 @@ func main() {
 	copilotService, copilotRunner := buildCopilot(v, engine, logger)
 	strategyDB, pluginLoader := initStrategyAndPlugins(v, store, logger)
 
+	deps := &ServerDeps{
+		Engine:           engine,
+		JobService:       ds.JobService,
+		WFEngine:         ds.WFEngine,
+		BatchEngine:      ds.BatchEngine,
+		StrategyDB:       strategyDB,
+		CopilotService:   copilotService,
+		CopilotRunner:    copilotRunner,
+		FactorAttributor: ds.FactorAttributor,
+		PluginLoader:     pluginLoader,
+		AuthSvc:          authSvc,
+		RiskManager:      riskManager,
+		ExecutionTrader:  executionTrader,
+		EmergencyToken:   v.GetString("trading.emergency_token"),
+		Metrics:          m,
+		Logger:           logger,
+		Viper:            v,
+	}
+
 	router := buildRouter(authSvc, v, logger)
-	registerRoutes(router, engine, ds.JobService, ds.WFEngine, ds.BatchEngine, strategyDB, copilotService, copilotRunner, ds.FactorAttributor, pluginLoader, authSvc, riskManager, executionTrader, v.GetString("trading.emergency_token"), logger, v)
+	registerRoutes(router, deps)
 	registerAlertRoutes(router, alertLoop)
 	go alertLoop.Start(context.Background())
 
@@ -178,7 +186,7 @@ func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 	}
 }
 
-func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, wfEngine *backtest.WalkForwardEngine, batchEngine *backtest.BatchEngine, strategyDB *strategy.StrategyDB, copilotService *strategy.CopilotService, copilotRunner strategy.BacktestRunner, factorAttributor *data.FactorAttributor, pluginLoader *strategy.PluginLoader, authSvc *auth.Service, riskManager *risk.RiskManager, executionTrader live.LiveTrader, emergencyToken string, logger zerolog.Logger, v *viper.Viper) {
+func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 
 	router.Static("/static", "./cmd/analysis/static")
 
@@ -235,7 +243,7 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 	// core metrics + Go runtime collectors. Unauthenticated by
 	// design — the metrics scraper runs on the same network and
 	// ADR-017 §2 (P1-2) will add an authn boundary separately.
-	router.GET("/metrics", observability.Handler(metrics))
+	router.GET("/metrics", observability.Handler(deps.Metrics))
 
 	router.GET("/api/v1", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -256,32 +264,32 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 	// /api/openapi.yaml; the Swagger UI is served at /api/docs.
 	registerOpenAPIRoutes(router)
 
-	registerProxyRoutes(router, httpClient, logger)
-	registerBacktestRoutes(router, engine, jobService, logger)
-	registerWalkForwardRoutes(router, wfEngine, logger)
-	registerBatchRoutes(router, batchEngine, logger)
-	registerStrategyRoutes(router, strategyDB)
-	registerCopilotRoutes(router, copilotService, copilotRunner)
-	registerDatasourceRoutes(router, engine, logger)
-	registerFactorRoutes(router, factorAttributor, logger)
-	registerPluginRoutes(router, pluginLoader)
+	registerProxyRoutes(router, httpClient, deps.Logger)
+	registerBacktestRoutes(router, deps.Engine, deps.JobService, deps.Logger)
+	registerWalkForwardRoutes(router, deps.WFEngine, deps.Logger)
+	registerBatchRoutes(router, deps.BatchEngine, deps.Logger)
+	registerStrategyRoutes(router, deps.StrategyDB)
+	registerCopilotRoutes(router, deps.CopilotService, deps.CopilotRunner)
+	registerDatasourceRoutes(router, deps.Engine, deps.Logger)
+	registerFactorRoutes(router, deps.FactorAttributor, deps.Logger)
+	registerPluginRoutes(router, deps.PluginLoader)
 	// S7-P0-1 (ODR-043-1): inject copilotRunner so the AI pipeline can
 	// execute the backtest stage end-to-end instead of silently skipping
 	// it. copilotRunner is the same *strategyEngineAdapter already wired
 	// into /api/copilot above.
-	registerPipelineRoutes(router, copilotRunner)
-	registerAuthRoutes(router, authSvc, logger)
+	registerPipelineRoutes(router, deps.CopilotRunner)
+	registerAuthRoutes(router, deps.AuthSvc, deps.Logger)
 
 	// P1-15 (Sprint 6, ODR-021): risk + execution endpoints
 	// absorbed from cmd/risk/main.go + cmd/execution/main.go.
 	// Both backends are in-process (risk.RiskManager and
 	// live.MockTrader) so the HTTP layer is a thin shim — no
 	// service-to-service hop.
-	NewRiskHandler(riskManager, logger).RegisterRoutes(router)
+	NewRiskHandler(deps.RiskManager, deps.Logger).RegisterRoutes(router)
 	// P2-3 (ODR-026): pass the emergency-flatten bearer token
 	// through to the execution handler. Empty token disables the
 	// kill-switch endpoint (returns 503 instead of 404).
-	NewExecutionHandler(executionTrader, logger, emergencyToken).RegisterRoutes(router)
+	NewExecutionHandler(deps.ExecutionTrader, deps.Logger, deps.EmergencyToken).RegisterRoutes(router)
 
 	// P2-4 (ODR-028): investor suitability (compliance) endpoints.
 	// The handler is read-only — it does not block order submission
@@ -290,17 +298,17 @@ func registerRoutes(router *gin.Engine, engine *backtest.Engine, jobService *bac
 	// loaded from `trading.default_user_profile.*` in the analysis
 	// config; in production this is replaced by a JWT-driven DB
 	// lookup (P1-2 + a future `users` table column set).
-	defaultProfile := loadDefaultSuitabilityProfile(v)
+	defaultProfile := loadDefaultSuitabilityProfile(deps.Viper)
 	// P2-6 (ODR-028): large-transaction reporter config from
 	// `compliance.reporter.*` viper keys. Defaults are regulatory
 	// (2M / 5M) but the operator can override per environment.
 	reporterCfg := compliance.LargeTradeConfig{
-		SingleThresholdCNY:     v.GetFloat64("compliance.reporter.single_threshold_cny"),
-		CumulativeThresholdCNY: v.GetFloat64("compliance.reporter.cumulative_threshold_cny"),
-		OutputPath:             v.GetString("compliance.reporter.output_path"),
+		SingleThresholdCNY:     deps.Viper.GetFloat64("compliance.reporter.single_threshold_cny"),
+		CumulativeThresholdCNY: deps.Viper.GetFloat64("compliance.reporter.cumulative_threshold_cny"),
+		OutputPath:             deps.Viper.GetString("compliance.reporter.output_path"),
 		AccountWhitelist:       map[string]bool{},
 	}
-	NewComplianceHandler(logger, defaultProfile, reporterCfg).RegisterRoutes(router)
+	NewComplianceHandler(deps.Logger, defaultProfile, reporterCfg).RegisterRoutes(router)
 }
 
 // loadDefaultSuitabilityProfile reads the suitability profile from
