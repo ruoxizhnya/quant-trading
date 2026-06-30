@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -234,32 +235,57 @@ func TestStrategyMonitor_ListStrategies(t *testing.T) {
 // CheckStatus / GetState / ListStrategies access to validate
 // thread-safety under `go test -race`. Required by the P1-E
 // constraint that the monitor be safe for concurrent use.
+//
+// Beyond race-safety, the test also verifies the behavioral contract:
+//   - Update on a registered strategy must never error
+//   - GetState on a registered strategy must succeed and return the correct name
+//   - ListStrategies must always return both registered names in order
 func TestStrategyMonitor_Concurrent(t *testing.T) {
 	m := NewStrategyMonitor(DefaultAlertThresholds(), nopLogger())
 	m.Register("alpha")
 	m.Register("beta")
 
 	var wg sync.WaitGroup
+	var updateErrs int64
+	var stateOK int64
+	var listOK int64
 	const iterations = 20
 	for i := 0; i < iterations; i++ {
 		wg.Add(4)
 		go func(i int) {
 			defer wg.Done()
-			_ = m.Update("alpha", 0.001*float64(i%5-2), 100+float64(i))
+			if err := m.Update("alpha", 0.001*float64(i%5-2), 100+float64(i)); err != nil {
+				atomic.AddInt64(&updateErrs, 1)
+			}
 		}(i)
 		go func(i int) {
 			defer wg.Done()
-			_ = m.Update("beta", 0.001*float64(i%5-2), 100+float64(i))
+			if err := m.Update("beta", 0.001*float64(i%5-2), 100+float64(i)); err != nil {
+				atomic.AddInt64(&updateErrs, 1)
+			}
 		}(i)
 		go func() {
 			defer wg.Done()
+			// CheckStatus returns []Alert; length is data-dependent (may be 0+).
+			// The call itself exercises the read path under concurrency.
 			_ = m.CheckStatus()
 		}()
 		go func() {
 			defer wg.Done()
-			_, _ = m.GetState("alpha")
-			_ = m.ListStrategies()
+			if st, err := m.GetState("alpha"); err == nil && st != nil && st.Name == "alpha" {
+				atomic.AddInt64(&stateOK, 1)
+			}
+			if names := m.ListStrategies(); len(names) == 2 && names[0] == "alpha" && names[1] == "beta" {
+				atomic.AddInt64(&listOK, 1)
+			}
 		}()
 	}
 	wg.Wait()
+
+	assert.Equal(t, int64(0), atomic.LoadInt64(&updateErrs),
+		"Update must not error on registered strategies")
+	assert.Equal(t, int64(iterations), atomic.LoadInt64(&stateOK),
+		"GetState must succeed for registered 'alpha'")
+	assert.Equal(t, int64(iterations), atomic.LoadInt64(&listOK),
+		"ListStrategies must always return both registered names in order")
 }

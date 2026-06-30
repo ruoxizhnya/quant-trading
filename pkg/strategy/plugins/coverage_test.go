@@ -269,7 +269,16 @@ func TestMultiFactor_GenerateSignals_WithFactorCache(t *testing.T) {
 
 	signals, err := s.GenerateSignals(context.Background(), bars, portfolio)
 	require.NoError(t, err)
-	_ = signals
+	// factorReader returns 1.0 for all three factors of 600000.SH, so the
+	// composite score is 1.0 (normalized weighted sum). With TopN=1 and an
+	// empty portfolio (no sells), exactly one buy signal should be produced.
+	require.Len(t, signals, 1, "exactly one buy signal expected for top-1 stock")
+	sig := signals[0]
+	assert.Equal(t, "600000.SH", sig.Symbol)
+	assert.Equal(t, "buy", sig.Action)
+	assert.InDelta(t, 1.0, sig.Strength, 1e-9, "composite score should be 1.0 when all factors are 1.0")
+	assert.Equal(t, 10.0, sig.Price)
+	assert.Equal(t, screenDate, sig.Date)
 }
 
 func TestIsRebalanceDay_MultiFactor(t *testing.T) {
