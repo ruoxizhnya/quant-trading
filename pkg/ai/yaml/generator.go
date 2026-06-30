@@ -32,6 +32,49 @@ type Config struct {
 	Risk         RiskConfig         `yaml:"risk,omitempty"`
 	Execution    ExecutionConfig    `yaml:"execution,omitempty"`
 	Optimization OptimizationConfig `yaml:"optimization,omitempty"`
+	// Expression carries the ExpressionStrategy-specific config. When
+	// present (non-zero), pkg/ai/yaml.LoadStrategy builds an
+	// ExpressionStrategy from it. This is distinct from the top-level
+	// Risk field: top-level Risk is engine-level stop-loss/take-profit;
+	// Expression.Risk is post-signal weight risk control.
+	// Added in S7-P3-2.
+	Expression ExpressionYAML `yaml:"expression,omitempty"`
+}
+
+// ExpressionYAML maps 1:1 to expression.ExpressionStrategyConfig. It is
+// the YAML representation of an ExpressionStrategy's signal/sizing/risk
+// configuration. See pkg/strategy/expression/strategy.go.
+type ExpressionYAML struct {
+	Signal SignalYAML `yaml:"signal,omitempty"`
+	Sizing SizingYAML `yaml:"sizing,omitempty"`
+	Risk   RiskYAML   `yaml:"risk,omitempty"`
+}
+
+// SignalYAML maps to expression.SignalConfig.
+type SignalYAML struct {
+	Expression  string  `yaml:"expression"`
+	Action      string  `yaml:"action,omitempty"`
+	Direction   string  `yaml:"direction,omitempty"`
+	MinStrength float64 `yaml:"min_strength,omitempty"`
+	Lookback    int     `yaml:"lookback,omitempty"`
+}
+
+// SizingYAML maps to expression.SizingConfig.
+type SizingYAML struct {
+	Method      string  `yaml:"method,omitempty"`
+	FixedWeight float64 `yaml:"fixed_weight,omitempty"`
+	MaxPerStock float64 `yaml:"max_per_stock,omitempty"`
+	MaxTotal    float64 `yaml:"max_total,omitempty"`
+}
+
+// RiskYAML maps to expression.RiskConfig. NOTE: this is NOT the same as
+// the top-level RiskConfig (engine-level stop-loss). This controls the
+// ExpressionStrategy's post-signal weight checks.
+type RiskYAML struct {
+	MaxPositionPct   float64 `yaml:"max_position_pct,omitempty"`
+	MaxDrawdown      float64 `yaml:"max_drawdown,omitempty"`
+	MaxOpenPositions int     `yaml:"max_open_positions,omitempty"`
+	MinCashBuffer    float64 `yaml:"min_cash_buffer,omitempty"`
 }
 
 // StrategyConfig holds strategy-specific configuration
@@ -188,7 +231,117 @@ func (g *Generator) intentToConfig(i *intent.Intent) Config {
 		}
 	}
 
+	// S7-P3-2: If the intent carries expression-strategy parameters
+	// (signal_expr, sizing_method, etc.), populate the Expression
+	// section so the generated YAML can be loaded directly by
+	// LoadStrategy without LLM codegen.
+	if expr, ok := intentToExpressionConfig(i); ok {
+		config.Expression = expr
+	}
+
 	return config
+}
+
+// intentToExpressionConfig extracts ExpressionStrategy-related parameters
+// from an intent. Returns (expr, true) if the intent has a signal_expr
+// parameter (the trigger for emitting an expression: section); returns
+// (zero, false) otherwise.
+//
+// The mapping mirrors ExpressionStrategy.Parameters() in
+// pkg/strategy/expression/strategy.go. Only signal_expr is required to
+// trigger emission; other fields fall back to their zero values and
+// LoadStrategy/NewExpressionStrategy apply defaults downstream.
+func intentToExpressionConfig(i *intent.Intent) (ExpressionYAML, bool) {
+	params := make(map[string]interface{}, len(i.Parameters))
+	for _, p := range i.Parameters {
+		params[p.Name] = p.Value
+	}
+
+	signalExpr, ok := params["signal_expr"]
+	if !ok {
+		return ExpressionYAML{}, false
+	}
+	exprStr, _ := signalExpr.(string)
+	if exprStr == "" {
+		return ExpressionYAML{}, false
+	}
+
+	expr := ExpressionYAML{
+		Signal: SignalYAML{
+			Expression: exprStr,
+		},
+	}
+	if v, ok := params["action"].(string); ok {
+		expr.Signal.Action = v
+	}
+	if v, ok := params["direction"].(string); ok {
+		expr.Signal.Direction = v
+	}
+	if v, ok := toFloat64(params["min_strength"]); ok {
+		expr.Signal.MinStrength = v
+	}
+	if v, ok := toInt(params["lookback"]); ok {
+		expr.Signal.Lookback = v
+	}
+	if v, ok := params["sizing_method"].(string); ok {
+		expr.Sizing.Method = v
+	}
+	if v, ok := toFloat64(params["fixed_weight"]); ok {
+		expr.Sizing.FixedWeight = v
+	}
+	if v, ok := toFloat64(params["max_per_stock"]); ok {
+		expr.Sizing.MaxPerStock = v
+	}
+	if v, ok := toFloat64(params["max_total"]); ok {
+		expr.Sizing.MaxTotal = v
+	}
+	if v, ok := toFloat64(params["max_position_pct"]); ok {
+		expr.Risk.MaxPositionPct = v
+	}
+	if v, ok := toInt(params["max_open_positions"]); ok {
+		expr.Risk.MaxOpenPositions = v
+	}
+	if v, ok := toFloat64(params["min_cash_buffer"]); ok {
+		expr.Risk.MinCashBuffer = v
+	}
+	return expr, true
+}
+
+// toFloat64 extracts a float64 from an interface{} that may be float64
+// or int (JSON numbers decode to float64; intent literals may be int).
+func toFloat64(v interface{}) (float64, bool) {
+	switch val := v.(type) {
+	case float64:
+		return val, true
+	case int:
+		return float64(val), true
+	}
+	return 0, false
+}
+
+// toInt extracts an int from an interface{} that may be int or float64.
+func toInt(v interface{}) (int, bool) {
+	switch val := v.(type) {
+	case int:
+		return val, true
+	case float64:
+		return int(val), true
+	}
+	return 0, false
+}
+
+// quoteYAMLString wraps a string in double quotes and escapes inner
+// double-quotes and backslashes so the result is a valid YAML
+// double-quoted scalar. This is used for the expression string, which
+// may contain characters (>, :, #) that would otherwise be
+// misinterpreted by YAML parsers.
+//
+// Example: cs_rank(close) > 0.8 → "cs_rank(close) > 0.8"
+// Example: ratio(a, "b") → "ratio(a, \"b\")"
+func quoteYAMLString(s string) string {
+	escaped := strings.ReplaceAll(s, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	return `"` + escaped + `"`
 }
 
 // configToYAML converts a Config to YAML string
@@ -235,6 +388,60 @@ func (g *Generator) configToYAML(config Config) string {
 		}
 	}
 	b.WriteString(fmt.Sprintf("%sadjust_price: %t\n", indent, config.Data.AdjustPrice))
+
+	// Expression section (S7-P3-2): emitted only when the Expression
+	// field is populated (i.e. the intent carried expression params).
+	// String values are double-quoted to handle special characters
+	// (colons, >, etc.) that would otherwise break YAML parsing.
+	if config.Expression.Signal.Expression != "" {
+		b.WriteString("\nexpression:\n")
+		// signal:
+		b.WriteString(fmt.Sprintf("%ssignal:\n", indent))
+		b.WriteString(fmt.Sprintf("%s%sexpression: %s\n", indent, indent, quoteYAMLString(config.Expression.Signal.Expression)))
+		if config.Expression.Signal.Action != "" {
+			b.WriteString(fmt.Sprintf("%s%saction: %s\n", indent, indent, config.Expression.Signal.Action))
+		}
+		if config.Expression.Signal.Direction != "" {
+			b.WriteString(fmt.Sprintf("%s%sdirection: %s\n", indent, indent, config.Expression.Signal.Direction))
+		}
+		if config.Expression.Signal.MinStrength != 0 {
+			b.WriteString(fmt.Sprintf("%s%smin_strength: %g\n", indent, indent, config.Expression.Signal.MinStrength))
+		}
+		if config.Expression.Signal.Lookback > 0 {
+			b.WriteString(fmt.Sprintf("%s%slookback: %d\n", indent, indent, config.Expression.Signal.Lookback))
+		}
+		// sizing:
+		if config.Expression.Sizing.Method != "" || config.Expression.Sizing.FixedWeight > 0 ||
+			config.Expression.Sizing.MaxPerStock > 0 || config.Expression.Sizing.MaxTotal > 0 {
+			b.WriteString(fmt.Sprintf("%ssizing:\n", indent))
+			if config.Expression.Sizing.Method != "" {
+				b.WriteString(fmt.Sprintf("%s%smethod: %s\n", indent, indent, config.Expression.Sizing.Method))
+			}
+			if config.Expression.Sizing.FixedWeight > 0 {
+				b.WriteString(fmt.Sprintf("%s%sfixed_weight: %g\n", indent, indent, config.Expression.Sizing.FixedWeight))
+			}
+			if config.Expression.Sizing.MaxPerStock > 0 {
+				b.WriteString(fmt.Sprintf("%s%smax_per_stock: %g\n", indent, indent, config.Expression.Sizing.MaxPerStock))
+			}
+			if config.Expression.Sizing.MaxTotal > 0 {
+				b.WriteString(fmt.Sprintf("%s%smax_total: %g\n", indent, indent, config.Expression.Sizing.MaxTotal))
+			}
+		}
+		// risk:
+		if config.Expression.Risk.MaxPositionPct > 0 || config.Expression.Risk.MaxOpenPositions > 0 ||
+			config.Expression.Risk.MinCashBuffer > 0 {
+			b.WriteString(fmt.Sprintf("%srisk:\n", indent))
+			if config.Expression.Risk.MaxPositionPct > 0 {
+				b.WriteString(fmt.Sprintf("%s%smax_position_pct: %g\n", indent, indent, config.Expression.Risk.MaxPositionPct))
+			}
+			if config.Expression.Risk.MaxOpenPositions > 0 {
+				b.WriteString(fmt.Sprintf("%s%smax_open_positions: %d\n", indent, indent, config.Expression.Risk.MaxOpenPositions))
+			}
+			if config.Expression.Risk.MinCashBuffer > 0 {
+				b.WriteString(fmt.Sprintf("%s%smin_cash_buffer: %g\n", indent, indent, config.Expression.Risk.MinCashBuffer))
+			}
+		}
+	}
 
 	// Risk section
 	hasRisk := config.Risk.MaxPositions > 0 || config.Risk.MaxDrawdown > 0 ||

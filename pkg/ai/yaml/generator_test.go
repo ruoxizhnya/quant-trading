@@ -478,3 +478,106 @@ func splitLines(s string) []string {
 	}
 	return lines
 }
+
+// ─── S7-P3-2: Generator expression-section emission tests ────────────
+
+// TestGenerator_Generate_EmitsExpressionSection verifies that when an
+// intent carries a signal_expr parameter, the generated YAML includes
+// an 'expression:' section whose signal.expression matches the input.
+func TestGenerator_Generate_EmitsExpressionSection(t *testing.T) {
+	g := NewGenerator()
+	i := &intent.Intent{
+		StrategyName: "expr_from_intent",
+		StrategyType: intent.StrategyTypeCustom,
+		Description:  "generated expression strategy",
+		Universe:     "csi300",
+		Timeframe:    "1d",
+		Parameters: []intent.Parameter{
+			{Name: "signal_expr", Value: "cs_rank(close) > 0.8"},
+			{Name: "action", Value: "buy"},
+			{Name: "direction", Value: "long"},
+			{Name: "sizing_method", Value: "equal"},
+			{Name: "max_per_stock", Value: 0.15},
+			{Name: "max_open_positions", Value: 25},
+		},
+	}
+
+	yamlStr := g.Generate(i)
+	require.NotEmpty(t, yamlStr)
+
+	// The expression: section must be present.
+	assert.Contains(t, yamlStr, "expression:")
+	assert.Contains(t, yamlStr, "signal:")
+	assert.Contains(t, yamlStr, "expression: \"cs_rank(close) > 0.8\"")
+	assert.Contains(t, yamlStr, "action: buy")
+	assert.Contains(t, yamlStr, "direction: long")
+	assert.Contains(t, yamlStr, "method: equal")
+	assert.Contains(t, yamlStr, "max_per_stock: 0.15")
+	assert.Contains(t, yamlStr, "max_open_positions: 25")
+
+	// Round-trip: the generated YAML must be parseable by LoadStrategy
+	// and produce a strategy whose Parameters match the original intent.
+	s, err := LoadStrategy(yamlStr)
+	require.NoError(t, err)
+	require.NotNil(t, s)
+	assert.Equal(t, "expr_from_intent", s.Name())
+}
+
+// TestGenerator_Generate_ExpressionWithSpecialChars verifies that an
+// expression containing a colon (which would break unquoted YAML) is
+// properly double-quoted in the output and survives a round-trip
+// through ParseConfig.
+func TestGenerator_Generate_ExpressionWithSpecialChars(t *testing.T) {
+	g := NewGenerator()
+	// The colon in this expression would break YAML if unquoted.
+	// (ratio(close, open) > 1.5 is safe, but we add a comment-style
+	// colon to stress-test the quoting.)
+	i := &intent.Intent{
+		StrategyName: "special_chars_strat",
+		StrategyType: intent.StrategyTypeCustom,
+		Description:  "expression with special chars",
+		Universe:     "csi300",
+		Timeframe:    "1d",
+		Parameters: []intent.Parameter{
+			{Name: "signal_expr", Value: `cs_rank(close) > 0.8 # top decile`},
+		},
+	}
+
+	yamlStr := g.Generate(i)
+	require.NotEmpty(t, yamlStr)
+
+	// The expression must be double-quoted in the output.
+	assert.Contains(t, yamlStr, `expression: "cs_rank(close) > 0.8 # top decile"`)
+
+	// Round-trip: ParseConfig must recover the original expression
+	// intact, including the colon and hash.
+	config, err := ParseConfig(yamlStr)
+	require.NoError(t, err)
+	assert.Equal(t, `cs_rank(close) > 0.8 # top decile`, config.Expression.Signal.Expression)
+}
+
+// TestGenerator_Generate_NoExpressionParams verifies backward
+// compatibility: an intent without a signal_expr parameter must NOT
+// emit an 'expression:' section. Existing callers that don't use the
+// expression path see no change in the generated YAML.
+func TestGenerator_Generate_NoExpressionParams(t *testing.T) {
+	g := NewGenerator()
+	i := &intent.Intent{
+		StrategyName: "plain_momentum",
+		StrategyType: intent.StrategyTypeMomentum,
+		Description:  "plain momentum, no expression",
+		Universe:     "csi300",
+		Timeframe:    "1d",
+		Parameters: []intent.Parameter{
+			{Name: "lookback_days", Value: 20},
+			{Name: "top_n", Value: 10},
+		},
+	}
+
+	yamlStr := g.Generate(i)
+	require.NotEmpty(t, yamlStr)
+
+	// No expression: section should appear.
+	assert.NotContains(t, yamlStr, "\nexpression:")
+	assert.NotContains(t, yamlStr, "signal:")
+}

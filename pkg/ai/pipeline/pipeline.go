@@ -17,6 +17,8 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/intent"
 	yamlgen "github.com/ruoxizhnya/quant-trading/pkg/ai/yaml"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy/expression"
 )
 
 // Stage represents a pipeline stage
@@ -317,6 +319,76 @@ func (p *Pipeline) ExecuteAsync(ctx context.Context, description string, runner 
 	return result.ID
 }
 
+// ExecuteFromYAML runs a backtest directly from a YAML strategy config,
+// bypassing the LLM code-generation + compile path. The YAML must
+// describe an expression-type strategy (either via an 'expression:'
+// section or 'strategy.type: expression').
+//
+// S7-P3-2 (ODR-043): This closes the loop from natural-language intent
+// to executable backtest without generating Go code (per ADR-015 §3
+// "AI as quant researcher"). The flow is:
+//
+//  1. Parse YAML → Config (for universe/dates) + LoadStrategy → Strategy
+//  2. Registration: GlobalGet(name) → if same concrete type, Configure
+//     in place; if different type, error; if not found, GlobalRegister
+//  3. runner.RunBacktest(ctx, name, universe, startDate, endDate)
+//
+// Result.YAMLConfig is populated; GeneratedCode/BuildError are left
+// empty (no codegen occurred). If runner is nil, backtest is skipped
+// and the result is marked complete after registration — useful for
+// "load and register without running" callers.
+func (p *Pipeline) ExecuteFromYAML(ctx context.Context, yamlStr string, runner BacktestRunner) (*Result, error) {
+	result := p.StartJob("yaml-direct-execution")
+
+	// Stage 1: Parse YAML + build strategy.
+	p.log(result, "Stage 1/3: Parsing YAML and loading strategy...")
+	config, err := yamlgen.ParseConfig(yamlStr)
+	if err != nil {
+		p.fail(result, StageParse, fmt.Sprintf("YAML parse failed: %v", err))
+		return result, err
+	}
+	result.YAMLConfig = yamlStr
+
+	s, err := yamlgen.LoadStrategy(yamlStr)
+	if err != nil {
+		p.fail(result, StageGenerate, fmt.Sprintf("Strategy load failed: %v", err))
+		return result, err
+	}
+
+	// Stage 2: Register or reconfigure (collision-safe).
+	p.log(result, "Stage 2/3: Registering strategy...")
+	if err := p.registerOrConfigure(s, config); err != nil {
+		p.fail(result, StageGenerate, fmt.Sprintf("Registration failed: %v", err))
+		return result, err
+	}
+
+	// Stage 3: Backtest (if runner provided).
+	if runner != nil {
+		p.log(result, "Stage 3/3: Running backtest...")
+		universe := parseUniverse(config.Data.Universe)
+		startDate := config.Backtest.StartDate
+		endDate := config.Backtest.EndDate
+		if startDate == "" {
+			startDate = "2022-01-01"
+		}
+		if endDate == "" {
+			endDate = "2024-01-01"
+		}
+		btResult, err := runner.RunBacktest(ctx, s.Name(), universe, startDate, endDate)
+		if err != nil {
+			p.fail(result, StageBacktest, fmt.Sprintf("Backtest failed: %v", err))
+			return result, err
+		}
+		result.BacktestResult = btResult
+		p.log(result, "Backtest completed successfully")
+	} else {
+		p.log(result, "Stage 3/3: Skipping backtest (no runner provided)")
+	}
+
+	p.complete(result)
+	return result, nil
+}
+
 // StartJob creates a new pipeline job
 func (p *Pipeline) StartJob(description string) *Result {
 	jobID := uuid.New().String()
@@ -444,6 +516,43 @@ func (p *Pipeline) runBacktest(ctx context.Context, i *intent.Intent, runner Bac
 	}
 
 	return btResult, nil
+}
+
+// registerOrConfigure handles strategy registration with collision
+// resolution for ExecuteFromYAML. If the name is not registered, it
+// registers s. If a strategy with the same name exists and is also an
+// *expression.ExpressionStrategy, it reconfigures the existing one in
+// place (so any engine holding the existing reference sees the update).
+// If the existing strategy is a different concrete type, it returns an
+// error — silently calling Configure on a non-expression strategy would
+// be a hidden bug (it might ignore the expression params).
+//
+// S7-P3-2 (ODR-043): the type assertion on *expression.ExpressionStrategy
+// is safe because yamlgen.LoadStrategy only returns that concrete type.
+// The pipeline → expression dependency is consistent with the existing
+// pipeline → yaml → expression transitive dependency.
+func (p *Pipeline) registerOrConfigure(s strategy.Strategy, config *yamlgen.Config) error {
+	name := s.Name()
+	existing, err := strategy.GlobalGet(name)
+	if err != nil {
+		// Not registered — register new.
+		return strategy.GlobalRegister(s)
+	}
+	// Collision — require same concrete type.
+	existingExpr, ok1 := existing.(*expression.ExpressionStrategy)
+	_, ok2 := s.(*expression.ExpressionStrategy)
+	if !ok1 || !ok2 {
+		return fmt.Errorf(
+			"pipeline: strategy name %q already registered with a different (non-expression) type",
+			name)
+	}
+	// Same type — reconfigure existing in place.
+	params := yamlgen.ExpressionParamsFromConfig(config)
+	c := strategy.AsConfigurable(existingExpr)
+	if c == nil {
+		return fmt.Errorf("pipeline: existing strategy %q is not Configurable", name)
+	}
+	return c.Configure(params)
 }
 
 // fail marks a pipeline job as failed
