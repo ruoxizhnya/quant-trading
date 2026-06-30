@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/fees"
 )
 
 // ---------------------------------------------------------------------------
@@ -29,7 +30,7 @@ import (
 func newTestEngine() *LiveEngine {
 	return NewLiveEngine(nil, nil, domain.ExecutionConfig{
 		OrderType:      domain.OrderTypeMarket,
-		CommissionRate: 0.00025,
+		CommissionRate: fees.DefaultCommissionRate,
 		MinCommission:  5.0,
 		InitialCapital: 1000000,
 	})

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/intent"
+	"github.com/ruoxizhnya/quant-trading/pkg/fees"
 )
 
 // Generator generates YAML configuration from strategy intents
@@ -146,8 +147,8 @@ func (g *Generator) intentToConfig(i *intent.Intent) Config {
 			StartDate:      "2020-01-01",
 			EndDate:        "2024-01-01",
 			InitialCapital: 1000000,
-			CommissionRate: 0.00025,
-			SlippageRate:   0.001,
+			CommissionRate: fees.DefaultCommissionRate, // S7-P1-4: was 0.00025 (stale, diverged from fees.DefaultCommissionRate=0.0003)
+			SlippageRate:   fees.DefaultSlippageRate,   // S7-P1-4: was 0.001 (FixedSlippageRate); YAML slippage_rate is the backtest assumption, must use DefaultSlippageRate (0.0001)
 			RebalanceFreq:  "daily",
 		},
 		Data: DataConfig{
@@ -219,7 +220,8 @@ func (g *Generator) configToYAML(config Config) string {
 	b.WriteString(fmt.Sprintf("%send_date: %s\n", indent, config.Backtest.EndDate))
 	b.WriteString(fmt.Sprintf("%sinitial_capital: %.0f\n", indent, config.Backtest.InitialCapital))
 	b.WriteString(fmt.Sprintf("%scommission_rate: %.5f\n", indent, config.Backtest.CommissionRate))
-	b.WriteString(fmt.Sprintf("%sslippage_rate: %.3f\n", indent, config.Backtest.SlippageRate))
+	// S7-P1-4 (D5): %.5f, not %.3f — %.3f truncates 0.0001 to "0.000".
+	b.WriteString(fmt.Sprintf("%sslippage_rate: %.5f\n", indent, config.Backtest.SlippageRate))
 	b.WriteString(fmt.Sprintf("%srebalance_frequency: %s\n", indent, config.Backtest.RebalanceFreq))
 
 	// Data section
