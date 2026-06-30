@@ -195,48 +195,60 @@
 </template>
 
 <script setup lang="ts">
-import { h, ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
+import { h, ref, reactive } from 'vue'
 import { NTag, useMessage } from 'naive-ui'
 import type { DataTableColumns, FormRules, FormInst } from 'naive-ui'
 import {
-  getPaperTradingStatus,
   startPaperTrading,
   stopPaperTrading,
   submitOrder,
-  getOrders,
-  getPositions,
-  getPortfolio,
 } from '@/api/paper-trading'
-import type { Position, Order, PaperTradingStatus, Portfolio } from '@/api/paper-trading'
-import { checkSuitability } from '@/api/compliance'
-import type { CheckResponse } from '@/api/compliance'
+import type { Position, Order } from '@/api/paper-trading'
 import { fmtNumber } from '@/utils/format'
 import EmergencyFlatten from '@/components/paper/EmergencyFlatten.vue'
+// S7-P2-9: data lifecycle + suitability state machine extracted into
+// composables so PaperTrading.vue focuses on template composition and
+// table column definitions. The composables are unit-tested in isolation.
+import {
+  usePaperTradingData,
+  pnlColorUp,
+  pnlColorDown,
+} from '@/composables/usePaperTradingData'
+import {
+  useSuitability,
+  extractErrorMessage,
+} from '@/composables/useSuitability'
 
 const message = useMessage()
 
-// A-share convention: red = up/profit, green = down/loss. We expose
-// them as constants so the NStatistic value-style + table cell class
-// stay in sync. The existing BacktestCompare page uses the inverse
-// (Western) convention via --q-success/--q-danger; here we follow the
-// domestic market colour norm since this is a trading dashboard.
-const pnlColorUp = '#e03131'   // 红
-const pnlColorDown = '#2f9e44' // 绿
+// ── Data lifecycle (fetch / poll / computed metrics) ────────────────
+// All read-side state (status/portfolio/positions/orders, the 5s poll,
+// and the derived account metrics) is owned by usePaperTradingData so
+// this component no longer has to manage setInterval teardown.
+const {
+  status,
+  loading,
+  portfolio,
+  positions,
+  orders,
+  autoRefresh,
+  fetchData,
+  positionsValue,
+  dailyPnl,
+  cumulativePnl,
+  todayOrders,
+} = usePaperTradingData()
 
-// Status
-const status = ref<PaperTradingStatus | null>(null)
-const loading = ref(false)
-const submitting = ref(false)
-const starting = ref(false)
-
-// Data
-const portfolio = ref<Portfolio | null>(null)
-const positions = ref<Position[]>([])
-const orders = ref<Order[]>([])
-
-// Auto-refresh toggle (default on, 5s interval per spec)
-const autoRefresh = ref(true)
-let pollInterval: ReturnType<typeof setInterval> | null = null
+// ── Suitability precheck (P2-4 / ODR-028) ──────────────────────────
+// Tracks the verdict of POST /api/compliance/check for the current
+// symbol. refreshSuitability is called on input blur; ensureSuitability
+// is the defensive recheck on submit.
+const {
+  suitabilityState,
+  resetSuitability,
+  refreshSuitability,
+  ensureSuitability,
+} = useSuitability(message)
 
 // Local stock-name lookup. The Position/Order types may carry an
 // optional `name` from the backend; when absent we fall back to this
@@ -256,59 +268,116 @@ function stockName(symbol: string): string {
   return STOCK_NAMES[symbol] || symbol
 }
 
-// Methods
-async function fetchData() {
-  loading.value = true
+// ── Form / submit state ─────────────────────────────────────────────
+// Kept here because it owns the form UI and calls submitOrder() (a
+// write op), which is distinct from the read-only data lifecycle.
+const submitting = ref(false)
+const starting = ref(false)
+const showStartModal = ref(false)
+const orderFormRef = ref<FormInst | null>(null)
+const startFormRef = ref<FormInst | null>(null)
+
+const orderForm = reactive({
+  symbol: '',
+  direction: 'long',
+  quantity: 100,
+  limit_price: undefined as number | undefined,
+})
+
+const startForm = reactive({
+  symbols: [] as string[],
+  initial_capital: 1000000,
+})
+
+const directionOptions = [
+  { label: '买入', value: 'long' },
+  { label: '卖出', value: 'short' },
+]
+
+const stockOptions = [
+  { label: '平安银行 (000001.SZ)', value: '000001.SZ' },
+  { label: '浦发银行 (600000.SH)', value: '600000.SH' },
+  { label: '贵州茅台 (600519.SH)', value: '600519.SH' },
+  { label: '宁德时代 (300750.SZ)', value: '300750.SZ' },
+  { label: '比亚迪 (002594.SZ)', value: '002594.SZ' },
+]
+
+const orderRules: FormRules = {
+  symbol: [{ required: true, message: '请输入股票代码', trigger: 'blur' }],
+  direction: [{ required: true, message: '请选择方向', trigger: 'change' }],
+  quantity: [{ required: true, type: 'number', min: 1, message: '数量必须大于0', trigger: 'blur' }],
+}
+
+function resetOrderForm() {
+  orderForm.symbol = ''
+  orderForm.direction = 'long'
+  orderForm.quantity = 100
+  orderForm.limit_price = undefined
+  resetSuitability()
+}
+
+async function handleStart() {
+  starting.value = true
   try {
-    const [statusRes, portfolioRes, positionsRes, ordersRes] = await Promise.all([
-      getPaperTradingStatus(),
-      getPortfolio(),
-      getPositions(),
-      getOrders(),
-    ])
-    status.value = statusRes
-    portfolio.value = portfolioRes
-    positions.value = positionsRes
-    orders.value = ordersRes
+    await startPaperTrading(startForm.symbols, startForm.initial_capital)
+    message.success('模拟交易已启动')
+    showStartModal.value = false
+    await fetchData()
   } catch (error) {
-    console.error('Failed to fetch paper trading data:', error)
+    message.error(extractErrorMessage(error, '启动失败'))
   } finally {
-    loading.value = false
+    starting.value = false
   }
 }
 
-// ── Computed account metrics ──────────────────────────────────────
-// 累计盈亏 = 总资产 - 初始资金 (the realised+unrealised P&L since start).
-// 当日盈亏 is approximated by the sum of floating P&L across positions;
-// the backend has no "yesterday's close" snapshot, so unrealised P&L
-// is the closest available proxy for an intraday dashboard.
-const positionsValue = computed(() =>
-  positions.value.reduce((sum, pos) => sum + pos.market_value, 0),
-)
-const dailyPnl = computed(() =>
-  positions.value.reduce((sum, pos) => sum + pos.unrealized_pnl, 0),
-)
-const cumulativePnl = computed(() =>
-  (portfolio.value?.total_value || 0) - (status.value?.initial_capital || 0),
-)
+async function handleStop() {
+  try {
+    await stopPaperTrading()
+    message.success('模拟交易已停止')
+    await fetchData()
+  } catch (error) {
+    message.error(extractErrorMessage(error, '停止失败'))
+  }
+}
 
-// Today's orders, newest first. The API returns all orders; we filter
-// to the current calendar day so the right-hand panel matches the
-// "当日订单" spec. Sorting is enforced in the column sorter too, but
-// pre-sorting keeps the default view correct before the user clicks.
-const todayOrders = computed(() => {
-  const today = new Date()
-  const yyyy = today.getFullYear()
-  const mm = String(today.getMonth() + 1).padStart(2, '0')
-  const dd = String(today.getDate()).padStart(2, '0')
-  const todayPrefix = `${yyyy}-${mm}-${dd}`
-  return orders.value
-    .filter(o => (o.timestamp || '').startsWith(todayPrefix))
-    .slice()
-    .sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0))
-})
+async function handleSubmitOrder() {
+  try {
+    await orderFormRef.value?.validate()
+  } catch {
+    return
+  }
 
-// ── Position table ────────────────────────────────────────────────
+  // P2-4 (ODR-028): defensive precheck on submit so a rejected symbol
+  // can never reach /api/execution/orders through the UI even if the
+  // operator skipped the blur handler.
+  if (orderForm.symbol) {
+    const ok = await ensureSuitability(orderForm.symbol)
+    if (!ok) {
+      message.warning('当前账户不符合该板块适当性要求，下单已拦截')
+      return
+    }
+  }
+
+  submitting.value = true
+  try {
+    await submitOrder({
+      symbol: orderForm.symbol,
+      direction: orderForm.direction,
+      quantity: orderForm.quantity,
+      order_type: orderForm.limit_price != null ? 'limit' : 'market',
+      limit_price: orderForm.limit_price,
+    })
+    message.success('订单已提交')
+    resetOrderForm()
+    await fetchData()
+  } catch (error) {
+    message.error(extractErrorMessage(error, '提交失败'))
+  } finally {
+    submitting.value = false
+  }
+}
+
+// ── Position table ──────────────────────────────────────────────────
 // 可卖量: A-share T+1 means shares bought today cannot be sold today.
 // The Position type has no per-lot lot-date, so we approximate by
 // showing the full quantity — paper trading in this codebase does not
@@ -425,217 +494,6 @@ const orderColumns: DataTableColumns<Order> = [
   },
 ]
 
-// ── Quick trade form ──────────────────────────────────────────────
-const showStartModal = ref(false)
-const orderFormRef = ref<FormInst | null>(null)
-const startFormRef = ref<FormInst | null>(null)
-
-const orderForm = reactive({
-  symbol: '',
-  direction: 'long',
-  quantity: 100,
-  limit_price: undefined as number | undefined,
-})
-
-const startForm = reactive({
-  symbols: [] as string[],
-  initial_capital: 1000000,
-})
-
-const directionOptions = [
-  { label: '买入', value: 'long' },
-  { label: '卖出', value: 'short' },
-]
-
-const stockOptions = [
-  { label: '平安银行 (000001.SZ)', value: '000001.SZ' },
-  { label: '浦发银行 (600000.SH)', value: '600000.SH' },
-  { label: '贵州茅台 (600519.SH)', value: '600519.SH' },
-  { label: '宁德时代 (300750.SZ)', value: '300750.SZ' },
-  { label: '比亚迪 (002594.SZ)', value: '002594.SZ' },
-]
-
-const orderRules: FormRules = {
-  symbol: [{ required: true, message: '请输入股票代码', trigger: 'blur' }],
-  direction: [{ required: true, message: '请选择方向', trigger: 'change' }],
-  quantity: [{ required: true, type: 'number', min: 1, message: '数量必须大于0', trigger: 'blur' }],
-}
-
-function resetOrderForm() {
-  orderForm.symbol = ''
-  orderForm.direction = 'long'
-  orderForm.quantity = 100
-  orderForm.limit_price = undefined
-  resetSuitability()
-}
-
-async function handleStart() {
-  starting.value = true
-  try {
-    await startPaperTrading(startForm.symbols, startForm.initial_capital)
-    message.success('模拟交易已启动')
-    showStartModal.value = false
-    await fetchData()
-  } catch (error) {
-    message.error(extractErrorMessage(error, '启动失败'))
-  } finally {
-    starting.value = false
-  }
-}
-
-async function handleStop() {
-  try {
-    await stopPaperTrading()
-    message.success('模拟交易已停止')
-    await fetchData()
-  } catch (error) {
-    message.error(extractErrorMessage(error, '停止失败'))
-  }
-}
-
-async function handleSubmitOrder() {
-  try {
-    await orderFormRef.value?.validate()
-  } catch {
-    return
-  }
-
-  // P2-4 (ODR-028): defensive precheck on submit so a rejected symbol
-  // can never reach /api/execution/orders through the UI even if the
-  // operator skipped the blur handler.
-  if (orderForm.symbol) {
-    const ok = await ensureSuitability(orderForm.symbol)
-    if (!ok) {
-      message.warning('当前账户不符合该板块适当性要求，下单已拦截')
-      return
-    }
-  }
-
-  submitting.value = true
-  try {
-    await submitOrder({
-      symbol: orderForm.symbol,
-      direction: orderForm.direction,
-      quantity: orderForm.quantity,
-      order_type: orderForm.limit_price != null ? 'limit' : 'market',
-      limit_price: orderForm.limit_price,
-    })
-    message.success('订单已提交')
-    resetOrderForm()
-    await fetchData()
-  } catch (error) {
-    message.error(extractErrorMessage(error, '提交失败'))
-  } finally {
-    submitting.value = false
-  }
-}
-
-// ============================================================
-// P2-4 (ODR-028): investor-suitability precheck logic.
-// ============================================================
-
-interface SuitabilityState {
-  visible: boolean
-  checked: boolean
-  allowed: boolean
-  title: string
-  boardName: string
-  reasons: string[]
-}
-
-const initialSuitability = (): SuitabilityState => ({
-  visible: false,
-  checked: false,
-  allowed: false,
-  title: '',
-  boardName: '',
-  reasons: [],
-})
-
-const suitabilityState = reactive<SuitabilityState>(initialSuitability())
-
-function resetSuitability() {
-  Object.assign(suitabilityState, initialSuitability())
-}
-
-function applySuitabilityResult(result: CheckResponse) {
-  if (result.allowed) {
-    suitabilityState.allowed = true
-    suitabilityState.title = `适当性检查通过 (${result.board_name || result.board})`
-    suitabilityState.boardName = result.board_name || result.board
-    suitabilityState.reasons = []
-  } else {
-    suitabilityState.allowed = false
-    suitabilityState.title = `适当性检查未通过 (${result.board_name || result.board})`
-    suitabilityState.boardName = result.board_name || result.board
-    suitabilityState.reasons = result.reasons || []
-  }
-  suitabilityState.checked = true
-  suitabilityState.visible = true
-}
-
-async function refreshSuitability() {
-  const symbol = orderForm.symbol.trim()
-  if (!symbol) {
-    resetSuitability()
-    return
-  }
-  try {
-    const result = await checkSuitability({ symbol })
-    applySuitabilityResult(result)
-  } catch {
-    resetSuitability()
-  }
-}
-
-async function ensureSuitability(symbol: string): Promise<boolean> {
-  try {
-    const result = await checkSuitability({ symbol })
-    applySuitabilityResult(result)
-    return result.allowed
-  } catch (error) {
-    message.error(extractErrorMessage(error, '适当性预检失败'))
-    return false
-  }
-}
-
-function extractErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object') {
-    const e = error as { response?: { data?: { error?: string } }; message?: string }
-    return e.response?.data?.error || e.message || fallback
-  }
-  return fallback
-}
-
-// ── Polling ───────────────────────────────────────────────────────
-// autoRefresh toggles the 5s poll on/off. We tear the interval down
-// when the switch is flipped off (and on unmount) so the dashboard
-// doesn't keep hammering the API in the background.
-function startPolling() {
-  if (pollInterval) return
-  pollInterval = setInterval(fetchData, 5000)
-}
-
-function stopPolling() {
-  if (pollInterval) {
-    clearInterval(pollInterval)
-    pollInterval = null
-  }
-}
-
-watch(autoRefresh, (on) => {
-  if (on) startPolling()
-  else stopPolling()
-})
-
-onMounted(() => {
-  fetchData()
-  if (autoRefresh.value) startPolling()
-})
-
-onUnmounted(() => {
-  stopPolling()
-})
 </script>
 
 <style scoped>
