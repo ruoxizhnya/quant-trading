@@ -32,6 +32,49 @@ type Config struct {
 	Risk         RiskConfig         `yaml:"risk,omitempty"`
 	Execution    ExecutionConfig    `yaml:"execution,omitempty"`
 	Optimization OptimizationConfig `yaml:"optimization,omitempty"`
+	// Expression carries the ExpressionStrategy-specific config. When
+	// present (non-zero), pkg/ai/yaml.LoadStrategy builds an
+	// ExpressionStrategy from it. This is distinct from the top-level
+	// Risk field: top-level Risk is engine-level stop-loss/take-profit;
+	// Expression.Risk is post-signal weight risk control.
+	// Added in S7-P3-2.
+	Expression ExpressionYAML `yaml:"expression,omitempty"`
+}
+
+// ExpressionYAML maps 1:1 to expression.ExpressionStrategyConfig. It is
+// the YAML representation of an ExpressionStrategy's signal/sizing/risk
+// configuration. See pkg/strategy/expression/strategy.go.
+type ExpressionYAML struct {
+	Signal SignalYAML `yaml:"signal,omitempty"`
+	Sizing SizingYAML `yaml:"sizing,omitempty"`
+	Risk   RiskYAML   `yaml:"risk,omitempty"`
+}
+
+// SignalYAML maps to expression.SignalConfig.
+type SignalYAML struct {
+	Expression  string  `yaml:"expression"`
+	Action      string  `yaml:"action,omitempty"`
+	Direction   string  `yaml:"direction,omitempty"`
+	MinStrength float64 `yaml:"min_strength,omitempty"`
+	Lookback    int     `yaml:"lookback,omitempty"`
+}
+
+// SizingYAML maps to expression.SizingConfig.
+type SizingYAML struct {
+	Method      string  `yaml:"method,omitempty"`
+	FixedWeight float64 `yaml:"fixed_weight,omitempty"`
+	MaxPerStock float64 `yaml:"max_per_stock,omitempty"`
+	MaxTotal    float64 `yaml:"max_total,omitempty"`
+}
+
+// RiskYAML maps to expression.RiskConfig. NOTE: this is NOT the same as
+// the top-level RiskConfig (engine-level stop-loss). This controls the
+// ExpressionStrategy's post-signal weight checks.
+type RiskYAML struct {
+	MaxPositionPct   float64 `yaml:"max_position_pct,omitempty"`
+	MaxDrawdown      float64 `yaml:"max_drawdown,omitempty"`
+	MaxOpenPositions int     `yaml:"max_open_positions,omitempty"`
+	MinCashBuffer    float64 `yaml:"min_cash_buffer,omitempty"`
 }
 
 // StrategyConfig holds strategy-specific configuration
