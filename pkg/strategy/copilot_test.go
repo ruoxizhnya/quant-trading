@@ -16,17 +16,32 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/internal/sandbox/staticcheck"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// testStaticCheckAdapter wraps internal/sandbox/staticcheck so the
+// CopilotService can exercise the real regex-based sandbox gate
+// without pkg/strategy's production code importing
+// internal/sandbox/staticcheck (S7-P1-2). This is a TEST-ONLY adapter
+// — production wiring lives in cmd/analysis/main.go.
+type testStaticCheckAdapter struct{}
+
+func (testStaticCheckAdapter) CheckOrError(code string) error {
+	return staticcheck.CheckOrError(code)
+}
+
 // newCopilotWithMock constructs a CopilotService whose AI client is
-// a deterministic mock. Tests that don't await the spawned goroutine
-// (Generate is fire-and-forget) don't need to drain the goroutine
-// because the mock is concurrency-safe.
+// a deterministic mock AND whose code checker is the real staticcheck
+// (S7-P1-2: was implicit via direct staticcheck.CheckOrError call in
+// run(); now wired via WithCodeChecker to preserve test fidelity).
+// Tests that don't await the spawned goroutine (Generate is
+// fire-and-forget) don't need to drain the goroutine because the mock
+// is concurrency-safe.
 func newCopilotWithMock(mock *ai.MockClient) *CopilotService {
-	return NewCopilotServiceWithLLM(mock)
+	return NewCopilotServiceWithLLM(mock).WithCodeChecker(testStaticCheckAdapter{})
 }
 
 func TestCopilotService_Generate_RecordsJob(t *testing.T) {
@@ -83,12 +98,15 @@ func TestCopilotService_IsConfigured_False(t *testing.T) {
 	assert.False(t, svc.IsConfigured())
 }
 
-func TestCopilotService_NewCopilotServiceWithLLM_NilFallsBackToReal(t *testing.T) {
-	// Nil client → fallback to a real *ai.Client (env-driven).
-	// Just verify it doesn't panic and produces a non-nil service.
+func TestCopilotService_NewCopilotServiceWithLLM_NilLeavesClientNil(t *testing.T) {
+	// S7-P1-2: Nil client NO LONGER falls back to ai.NewClient() — that
+	// would re-introduce the strategy → ai reverse dependency. Instead,
+	// aiClient stays nil and IsConfigured() returns false. The caller
+	// MUST inject a real client via WithLLMClient at the composition root.
 	svc := NewCopilotServiceWithLLM(nil)
 	require.NotNil(t, svc)
-	// IsConfigured depends on env; we don't assert on its value.
+	assert.False(t, svc.IsConfigured(),
+		"NewCopilotServiceWithLLM(nil) must leave aiClient nil (no fallback)")
 }
 
 func TestCopilotService_AcceptanceRate_ZeroGenerated(t *testing.T) {

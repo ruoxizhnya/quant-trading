@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/live"
+	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 )
 
 // ============================================================
@@ -39,7 +39,7 @@ import (
 // 计算。RiskLevel 字段映射到投资者风险测评等级 (C1-C5); 用户的
 // RiskLevel 必须 ≥ 板级要求才能准入。
 type BoardRequirement struct {
-	Board             live.Board
+	Board             marketdata.Board
 	AssetThresholdCNY float64   // 20日日均资产下限 (CNY)
 	ExperienceMonths  int       // 交易经验下限 (月)
 	RiskLevel         RiskLevel // 投资者风险测评等级下限
@@ -88,7 +88,7 @@ func (r RiskLevel) String() string {
 // 默认门槛 (P2-4 任务规格书中给出, 实际生产可通过 config 覆盖).
 var DefaultBoardRequirements = []BoardRequirement{
 	{
-		Board:             live.BoardChiNext,
+		Board:             marketdata.BoardChiNext,
 		AssetThresholdCNY: 100_000, // 10 万
 		ExperienceMonths:  24,
 		RiskLevel:         RiskLevelSteady, // C3 稳健
@@ -96,7 +96,7 @@ var DefaultBoardRequirements = []BoardRequirement{
 		Description:       "申请开通前 20 个交易日证券账户及资金账户内的资产日均不低于人民币 10 万元；参与证券交易 24 个月以上；风险等级 C3 稳健及以上。",
 	},
 	{
-		Board:             live.BoardSTAR,
+		Board:             marketdata.BoardSTAR,
 		AssetThresholdCNY: 500_000, // 50 万
 		ExperienceMonths:  24,
 		RiskLevel:         RiskLevelAggressive, // C4 积极
@@ -104,7 +104,7 @@ var DefaultBoardRequirements = []BoardRequirement{
 		Description:       "申请开通前 20 个交易日证券账户及资金账户内的资产日均不低于人民币 50 万元；参与证券交易 24 个月以上；风险等级 C4 积极及以上。",
 	},
 	{
-		Board:             live.BoardBSE,
+		Board:             marketdata.BoardBSE,
 		AssetThresholdCNY: 1_000_000, // 100 万
 		ExperienceMonths:  24,
 		RiskLevel:         RiskLevelAggressive, // C4 积极
@@ -118,8 +118,8 @@ var DefaultBoardRequirements = []BoardRequirement{
 //
 // 主板 / 中小板 / ETF / 债券 / 基金 / 指数 / B 股 / 优先股 都不在
 // 适当性管理范围内 (门槛为 0).
-func BoardsRequiringSuitability() []live.Board {
-	return []live.Board{live.BoardChiNext, live.BoardSTAR, live.BoardBSE}
+func BoardsRequiringSuitability() []marketdata.Board {
+	return []marketdata.Board{marketdata.BoardChiNext, marketdata.BoardSTAR, marketdata.BoardBSE}
 }
 
 // SuitabilityProfile is the user-side state checked against the
@@ -161,7 +161,7 @@ func (p *SuitabilityProfile) ExperienceMonths(now time.Time) int {
 // to a particular board. When BoardsEnabled is non-empty, the
 // eligibility gate accepts the board ONLY if it is in this list —
 // even if the user meets all numeric thresholds.
-func (p *SuitabilityProfile) IsBoardEnabled(board live.Board) bool {
+func (p *SuitabilityProfile) IsBoardEnabled(board marketdata.Board) bool {
 	if len(p.BoardsEnabled) == 0 {
 		// Empty whitelist means "all of them" — but only for users
 		// that have not yet had their board permissions recorded
@@ -182,7 +182,7 @@ func (p *SuitabilityProfile) IsBoardEnabled(board live.Board) bool {
 // both logs and the UI.
 type CheckResult struct {
 	Allowed    bool              // true = 用户有交易该板权限
-	Board      live.Board        // 板块
+	Board      marketdata.Board        // 板块
 	Reasons    []string          // 不通过原因 (Allowed=true 时为空)
 	UserID     string            // 用户 ID (审计用)
 	ProfileAge int               // 用户经验月数 (审计用)
@@ -196,7 +196,7 @@ type CheckResult struct {
 // board. This is a thin alias for Check(...) with a single-symbol
 // board pre-classification — production callers usually use
 // CheckSymbol(...) instead, which is more ergonomic.
-func (p *SuitabilityProfile) IsAllowed(board live.Board, now time.Time) CheckResult {
+func (p *SuitabilityProfile) IsAllowed(board marketdata.Board, now time.Time) CheckResult {
 	return p.Check(board, now)
 }
 
@@ -212,7 +212,7 @@ func (p *SuitabilityProfile) IsAllowed(board live.Board, now time.Time) CheckRes
 // The check is order-stable: reasons appear in regulatory order
 // (risk first, then asset, then experience) so the audit log is
 // reproducible.
-func (p *SuitabilityProfile) Check(board live.Board, now time.Time) CheckResult {
+func (p *SuitabilityProfile) Check(board marketdata.Board, now time.Time) CheckResult {
 	req := LookupRequirement(board)
 	result := CheckResult{
 		Board:      board,
@@ -273,9 +273,9 @@ func (p *SuitabilityProfile) Check(board live.Board, now time.Time) CheckResult 
 // CheckSymbol resolves a ts_code to a board and runs the check. This
 // is the entry point used by the order-precheck handler — it does
 // the board classification for the caller so the caller doesn't
-// have to import pkg/live.
+// have to import pkg/marketdata.
 func (p *SuitabilityProfile) CheckSymbol(symbol string, now time.Time) CheckResult {
-	board := live.ClassifySymbol(symbol)
+	board := marketdata.ClassifySymbol(symbol)
 	result := p.Check(board, now)
 	return result
 }
@@ -289,8 +289,8 @@ var (
 	registry   = buildDefaultRegistry()
 )
 
-func buildDefaultRegistry() map[live.Board]*BoardRequirement {
-	out := make(map[live.Board]*BoardRequirement, len(DefaultBoardRequirements))
+func buildDefaultRegistry() map[marketdata.Board]*BoardRequirement {
+	out := make(map[marketdata.Board]*BoardRequirement, len(DefaultBoardRequirements))
 	for i := range DefaultBoardRequirements {
 		req := DefaultBoardRequirements[i]
 		// Copy by value so taking &req is safe (no loop-variable alias).
@@ -303,7 +303,7 @@ func buildDefaultRegistry() map[live.Board]*BoardRequirement {
 // LookupRequirement returns the registered BoardRequirement for the
 // given board, or nil if the board is not in the suitability scope
 // (e.g. main board — no check required).
-func LookupRequirement(board live.Board) *BoardRequirement {
+func LookupRequirement(board marketdata.Board) *BoardRequirement {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	return registry[board]
@@ -317,7 +317,7 @@ func LookupRequirement(board live.Board) *BoardRequirement {
 // Returns an error if the input is invalid (negative threshold, etc.).
 // This is the only mutating function in the package — all others are
 // pure reads, which is why the registry is RWMutex-guarded.
-func SetRequirement(board live.Board, req *BoardRequirement) error {
+func SetRequirement(board marketdata.Board, req *BoardRequirement) error {
 	if board == "" {
 		return fmt.Errorf("board must be non-empty")
 	}

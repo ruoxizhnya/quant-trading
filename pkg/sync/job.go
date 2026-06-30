@@ -10,115 +10,51 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/logging"
+	"github.com/ruoxizhnya/quant-trading/pkg/sync/types"
 )
 
-// JobStatus represents the current state of a sync job.
-type JobStatus string
+// S7-P1-2 (ODR-043): Job, JobStatus, JobType, and Schedule now live in
+// pkg/sync/types (a leaf package with no heavy deps). These aliases
+// preserve backward compatibility for all existing `sync.Job`,
+// `sync.JobStatus`, etc. references. The canonical definitions and
+// methods (IsTerminal, CanRetry, UpdateProgress, Clone) are in
+// pkg/sync/types. This breaks the storage → sync reverse dependency:
+// pkg/storage now imports pkg/sync/types directly.
+
+// JobStatus is an alias for types.JobStatus.
+type JobStatus = types.JobStatus
 
 const (
-	JobStatusPending   JobStatus = "pending"
-	JobStatusRunning   JobStatus = "running"
-	JobStatusCompleted JobStatus = "completed"
-	JobStatusFailed    JobStatus = "failed"
-	JobStatusCancelled JobStatus = "cancelled"
-	JobStatusRetrying  JobStatus = "retrying"
+	JobStatusPending   = types.JobStatusPending
+	JobStatusRunning   = types.JobStatusRunning
+	JobStatusCompleted = types.JobStatusCompleted
+	JobStatusFailed    = types.JobStatusFailed
+	JobStatusCancelled = types.JobStatusCancelled
+	JobStatusRetrying  = types.JobStatusRetrying
 )
 
-// JobType represents the type of data synchronization job.
-type JobType string
+// JobType is an alias for types.JobType.
+type JobType = types.JobType
 
 const (
-	JobTypeStocks       JobType = "stocks"
-	JobTypeOHLCV        JobType = "ohlcv"
-	JobTypeOHLCVAll     JobType = "ohlcv_all"
-	JobTypeFundamentals JobType = "fundamentals"
-	JobTypeFundamental  JobType = "fundamental"
-	JobTypeDividends    JobType = "dividends"
-	JobTypeSplits       JobType = "splits"
-	JobTypeCalendar     JobType = "calendar"
-	JobTypeFactors      JobType = "factors"
-	JobTypeFactor       JobType = "factor"
-	JobTypeFactorAttr   JobType = "factor_attribution"
-	JobTypeFactorIC     JobType = "factor_ic"
-	JobTypeIndexConst   JobType = "index_constituents"
+	JobTypeStocks       = types.JobTypeStocks
+	JobTypeOHLCV        = types.JobTypeOHLCV
+	JobTypeOHLCVAll     = types.JobTypeOHLCVAll
+	JobTypeFundamentals = types.JobTypeFundamentals
+	JobTypeFundamental  = types.JobTypeFundamental
+	JobTypeDividends    = types.JobTypeDividends
+	JobTypeSplits       = types.JobTypeSplits
+	JobTypeCalendar     = types.JobTypeCalendar
+	JobTypeFactors      = types.JobTypeFactors
+	JobTypeFactor       = types.JobTypeFactor
+	JobTypeFactorAttr   = types.JobTypeFactorAttr
+	JobTypeFactorIC     = types.JobTypeFactorIC
+	JobTypeIndexConst   = types.JobTypeIndexConst
 )
 
-// Job represents a single data synchronization task.
-type Job struct {
-	ID              string          `json:"id"`
-	JobType         JobType         `json:"job_type"`
-	Status          JobStatus       `json:"status"`
-	Params          json.RawMessage `json:"params"`
-	ProgressPercent int             `json:"progress_percent"`
-	TotalItems      int             `json:"total_items"`
-	ProcessedItems  int             `json:"processed_items"`
-	FailedItems     int             `json:"failed_items"`
-	ErrorMessage    string          `json:"error_message,omitempty"`
-	Result          json.RawMessage `json:"result,omitempty"`
-	CreatedAt       time.Time       `json:"created_at"`
-	StartedAt       *time.Time      `json:"started_at,omitempty"`
-	CompletedAt     *time.Time      `json:"completed_at,omitempty"`
-	RetryCount      int             `json:"retry_count"`
-	MaxRetries      int             `json:"max_retries"`
-	ScheduledAt     *time.Time      `json:"scheduled_at,omitempty"`
-	WorkerID        string          `json:"worker_id,omitempty"`
-}
-
-// IsTerminal returns true if the job status is a terminal state.
-func (j *Job) IsTerminal() bool {
-	return j.Status == JobStatusCompleted || j.Status == JobStatusFailed || j.Status == JobStatusCancelled
-}
-
-// CanRetry returns true if the job can be retried.
-func (j *Job) CanRetry() bool {
-	return j.RetryCount < j.MaxRetries && (j.Status == JobStatusFailed || j.Status == JobStatusPending)
-}
-
-// UpdateProgress updates the job progress.
-func (j *Job) UpdateProgress(processed, total, failed int) {
-	j.ProcessedItems = processed
-	j.TotalItems = total
-	j.FailedItems = failed
-	if total > 0 {
-		j.ProgressPercent = (processed * 100) / total
-	}
-}
-
-// Clone returns a deep copy of the Job.
-func (j *Job) Clone() *Job {
-	if j == nil {
-		return nil
-	}
-	clone := &Job{
-		ID:              j.ID,
-		JobType:         j.JobType,
-		Status:          j.Status,
-		Params:          append(json.RawMessage(nil), j.Params...),
-		ProgressPercent: j.ProgressPercent,
-		TotalItems:      j.TotalItems,
-		ProcessedItems:  j.ProcessedItems,
-		FailedItems:     j.FailedItems,
-		ErrorMessage:    j.ErrorMessage,
-		Result:          append(json.RawMessage(nil), j.Result...),
-		CreatedAt:       j.CreatedAt,
-		RetryCount:      j.RetryCount,
-		MaxRetries:      j.MaxRetries,
-		WorkerID:        j.WorkerID,
-	}
-	if j.StartedAt != nil {
-		t := *j.StartedAt
-		clone.StartedAt = &t
-	}
-	if j.CompletedAt != nil {
-		t := *j.CompletedAt
-		clone.CompletedAt = &t
-	}
-	if j.ScheduledAt != nil {
-		t := *j.ScheduledAt
-		clone.ScheduledAt = &t
-	}
-	return clone
-}
+// Job is an alias for types.Job. Methods (IsTerminal, CanRetry,
+// UpdateProgress, Clone) are defined on types.Job.
+type Job = types.Job
 
 // JobStore defines the interface for job persistence.
 type JobStore interface {

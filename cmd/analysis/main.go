@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -14,6 +16,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/internal/sandbox/runner"
+	"github.com/ruoxizhnya/quant-trading/internal/sandbox/staticcheck"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai"
 	"github.com/ruoxizhnya/quant-trading/pkg/alert"
 	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
@@ -50,6 +55,49 @@ var metrics *observability.Metrics
 
 type strategyEngineAdapter struct {
 	engine *backtest.Engine
+}
+
+// staticCheckAdapter implements strategy.CodeChecker by delegating to
+// internal/sandbox/staticcheck. S7-P1-2 (ODR-043): defined HERE in the
+// composition root (cmd/analysis) so pkg/strategy doesn't import
+// internal/sandbox/staticcheck — breaking the reverse dependency.
+type staticCheckAdapter struct{}
+
+func (staticCheckAdapter) CheckOrError(code string) error {
+	return staticcheck.CheckOrError(code)
+}
+
+// sandboxRunnerAdapter implements strategy.BuildExecutor by delegating
+// to internal/sandbox/runner. S7-P1-2 (ODR-043): defined HERE in the
+// composition root so pkg/strategy doesn't import internal/sandbox/runner.
+//
+// The runner is constructed once with the same 30s timeout + 1GiB
+// memory cap that the old inline code used (Sprint 6 P1-11 / ODR-020)
+// and reused across build attempts — Runner is stateless beyond its
+// config, so reuse is safe.
+type sandboxRunnerAdapter struct {
+	r *runner.Runner
+}
+
+func newSandboxRunnerAdapter() *sandboxRunnerAdapter {
+	return &sandboxRunnerAdapter{
+		r: runner.New(
+			runner.WithTimeout(30*time.Second),
+			runner.WithLimits(runner.Limits{
+				MemoryBytes: 1 << 30, // 1 GiB
+				CPUSeconds:  25,
+				OpenFiles:   256,
+			}),
+		),
+	}
+}
+
+func (a *sandboxRunnerAdapter) Run(ctx context.Context, name string, args []string, workingDir string) (*bytes.Buffer, *bytes.Buffer, error) {
+	return a.r.Run(ctx, name, args, runner.Options{Dir: workingDir})
+}
+
+func (a *sandboxRunnerAdapter) IsTimeout(err error) bool {
+	return errors.Is(err, runner.ErrTimeout)
 }
 
 func (a *strategyEngineAdapter) RunBacktest(
@@ -298,7 +346,17 @@ func main() {
 	factorAttributor := data.NewFactorAttributor(store)
 	logger.Info().Msg("Factor attribution service initialized")
 
+	// S7-P1-2 (ODR-043): wire the LLM client, code checker, and build
+	// executor at the composition root. Previously NewCopilotService()
+	// called ai.NewClient() internally and run() called
+	// staticcheck.CheckOrError() / sandboxrunner.New() inline — all of
+	// which created strategy → ai / strategy → internal/sandbox reverse
+	// dependencies. The DI pattern moves those imports to main.go (the
+	// composition root) where they belong.
 	copilotService := strategy.NewCopilotService().
+		WithLLMClient(ai.NewClient()).
+		WithCodeChecker(staticCheckAdapter{}).
+		WithBuildExecutor(newSandboxRunnerAdapter()).
 		WithLogger(logger.With().Str("component", "copilot").Logger()).
 		WithWorkingDir(v.GetString("copilot.working_dir"))
 	logger.Info().
