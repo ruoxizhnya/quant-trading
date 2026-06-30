@@ -61,6 +61,12 @@
       </n-grid>
     </n-card>
 
+    <!-- S7-P2-8: Kill-switch — emergency flatten all positions.
+         Bypasses T+1, requires server-side token, logs audit trail.
+         Emits 'flattened' on success → triggers fetchData() to refresh
+         the positions/orders grid immediately. -->
+    <EmergencyFlatten @flattened="fetchData" />
+
     <!-- Middle: positions (left) + today's orders (right) -->
     <n-grid :cols="24" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi span="24 l:14">
@@ -205,6 +211,7 @@ import type { Position, Order, PaperTradingStatus, Portfolio } from '@/api/paper
 import { checkSuitability } from '@/api/compliance'
 import type { CheckResponse } from '@/api/compliance'
 import { fmtNumber } from '@/utils/format'
+import EmergencyFlatten from '@/components/paper/EmergencyFlatten.vue'
 
 const message = useMessage()
 

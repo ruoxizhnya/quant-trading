@@ -155,6 +155,14 @@ const token = ref('')
 const loading = ref(false)
 const lastResult = ref<EmergencyFlattenResult | null>(null)
 
+// S7-P2-8: emit 'flattened' after a successful kill-switch fire so the
+// parent (PaperTrading) can refresh its positions/orders grid. Without
+// this signal, the parent would only update on the next 5s auto-refresh
+// tick, leaving stale positions visible right after a flatten.
+const emit = defineEmits<{
+  flattened: []
+}>()
+
 const canSubmit = computed(() => reason.value.trim() !== '' && token.value !== '')
 
 function arm() {
@@ -190,6 +198,9 @@ async function confirm() {
     // need to fire another flatten in a different scenario.
     armed.value = false
     reason.value = ''
+    // S7-P2-8: notify parent so it can refresh positions/orders
+    // immediately instead of waiting for the next auto-refresh tick.
+    emit('flattened')
   } catch (e: unknown) {
     const detail = e instanceof Error ? e.message : String(e)
     message.error(`紧急平仓失败: ${detail}`)
