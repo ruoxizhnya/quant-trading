@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/reporting"
 )
 
 func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, logger zerolog.Logger) {
@@ -222,13 +223,13 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 				return
 			}
 
-			opts := backtest.HTMLReportOptions{
+			opts := reporting.HTMLReportOptions{
 				Theme:              c.DefaultQuery("theme", "light"),
 				FooterNote:         c.Query("footer"),
 				IncludeEquityChart: c.Query("equity") != "0", // default true
 				IncludeTrades:      c.Query("trades") != "0", // default true
 			}
-			body, contentType, err := backtest.RenderHTML(resp, opts)
+			body, contentType, err := reporting.RenderHTML(resp, opts)
 			if err != nil {
 				logger.Error().Err(err).Str("backtest_id", backtestID).Msg("Failed to render HTML report")
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to render report"})
@@ -260,8 +261,8 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 			for i := range ids {
 				ids[i] = strings.TrimSpace(ids[i])
 			}
-			resolver := backtest.NewCompareResolver(engine, jobService, logger)
-			report, err := backtest.CompareReports(c.Request.Context(), ids, resolver)
+			resolver := reporting.NewCompareResolver(engine, jobService, logger)
+			report, err := reporting.CompareReports(c.Request.Context(), ids, resolver)
 			if err != nil {
 				// Min/Max count errors are user-facing (400).
 				// Anything else is an internal failure (500).

@@ -1,4 +1,4 @@
-// Package backtest — A-share call auction (集合竞价) matching.
+// Package auction — A-share call auction (集合竞价) matching.
 //
 // P1-6 (ODR-018) — 集合竞价撮合 (9:15-9:25 + 14:57-15:00).
 //
@@ -33,7 +33,7 @@
 //
 // 注意: 这是"理论撮合器"而非实盘撮合 — 实盘没有逐档 LOB 数据可用。
 // Backtest 假设的盘口快照是: prev_close (anchor) + 当日 open/close 区间。
-package backtest
+package auction
 
 import (
 	"math"

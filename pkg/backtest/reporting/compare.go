@@ -1,4 +1,4 @@
-package backtest
+package reporting
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 )
 
 // P2-2 (ODR-027): Multi-strategy comparison
@@ -22,7 +23,7 @@ import (
 // comparison" view instead of an all-or-nothing error.
 //
 // Output layout:
-//   - Reports:  every successfully-resolved BacktestResponse, in the
+//   - Reports:  every successfully-resolved backtest.BacktestResponse, in the
 //               same order as the input IDs (filtering out misses).
 //   - Missing:  IDs that could not be resolved (with reason).
 //   - Summary:  one row per report with the metrics the comparison
@@ -74,13 +75,13 @@ type CompareEntry struct {
 
 // CompareReport is the full payload returned by /api/backtest/compare.
 type CompareReport struct {
-	GeneratedAt time.Time             `json:"generated_at"`
-	Requested   int                   `json:"requested"`
-	Resolved    int                   `json:"resolved"`
-	Reports     []BacktestResponse    `json:"reports"`
-	Entries     []CompareEntry        `json:"entries"`
-	Missing     []CompareMissingEntry `json:"missing"`
-	Best        CompareBest           `json:"best"`
+	GeneratedAt time.Time                   `json:"generated_at"`
+	Requested   int                         `json:"requested"`
+	Resolved    int                         `json:"resolved"`
+	Reports     []backtest.BacktestResponse `json:"reports"`
+	Entries     []CompareEntry              `json:"entries"`
+	Missing     []CompareMissingEntry       `json:"missing"`
+	Best        CompareBest                 `json:"best"`
 }
 
 // CompareMissingEntry explains why a single ID could not be resolved.
@@ -106,17 +107,17 @@ type CompareBest struct {
 // in-memory-first / DB-fallback policy it already uses for the single
 // report endpoint, and so the tests can substitute a pure in-memory
 // implementation.
-type CompareResultResolver func(ctx context.Context, id string) (BacktestResponse, error)
+type CompareResultResolver func(ctx context.Context, id string) (backtest.BacktestResponse, error)
 
 // NewCompareResolver builds a CompareResultResolver bound to the
 // given engine + jobService. The closure mirrors the lookup policy of
 // handlers_backtest.lookupBacktestResponse, but only returns the
 // payload — the handler is still responsible for writing the HTTP
 // error response when the resolver returns a non-nil error.
-func NewCompareResolver(engine *Engine, jobService *JobService, logger zerolog.Logger) CompareResultResolver {
-	return func(ctx context.Context, id string) (BacktestResponse, error) {
+func NewCompareResolver(engine *backtest.Engine, jobService *backtest.JobService, logger zerolog.Logger) CompareResultResolver {
+	return func(ctx context.Context, id string) (backtest.BacktestResponse, error) {
 		if engine == nil && jobService == nil {
-			return BacktestResponse{}, fmt.Errorf("no resolver configured")
+			return backtest.BacktestResponse{}, fmt.Errorf("no resolver configured")
 		}
 		if engine != nil {
 			status, err := engine.GetBacktestStatus(id)
@@ -124,7 +125,7 @@ func NewCompareResolver(engine *Engine, jobService *JobService, logger zerolog.L
 				result, err := engine.GetBacktestResult(id)
 				if err == nil && result != nil {
 					params, _ := engine.GetBacktestParams(id)
-					return BacktestResponse{
+					return backtest.BacktestResponse{
 						ID:              id,
 						Status:          "completed",
 						Strategy:        params.StrategyName,
@@ -153,21 +154,21 @@ func NewCompareResolver(engine *Engine, jobService *JobService, logger zerolog.L
 		if jobService != nil {
 			job, err := jobService.GetJob(ctx, id)
 			if err != nil {
-				return BacktestResponse{}, err
+				return backtest.BacktestResponse{}, err
 			}
 			if job == nil || job.Status != "completed" {
-				return BacktestResponse{}, fmt.Errorf("backtest not found or not completed")
+				return backtest.BacktestResponse{}, fmt.Errorf("backtest not found or not completed")
 			}
-			var stored BacktestResponse
+			var stored backtest.BacktestResponse
 			if err := json.Unmarshal(job.Result, &stored); err != nil {
-				return BacktestResponse{}, fmt.Errorf("failed to parse stored result: %w", err)
+				return backtest.BacktestResponse{}, fmt.Errorf("failed to parse stored result: %w", err)
 			}
 			if stored.ID == "" {
 				stored.ID = id
 			}
 			return stored, nil
 		}
-		return BacktestResponse{}, fmt.Errorf("backtest not found")
+		return backtest.BacktestResponse{}, fmt.Errorf("backtest not found")
 	}
 }
 
@@ -204,7 +205,7 @@ func CompareReports(ctx context.Context, ids []string, resolve CompareResultReso
 	report := CompareReport{
 		GeneratedAt: time.Now().UTC(),
 		Requested:   len(deduped),
-		Reports:     make([]BacktestResponse, 0, len(deduped)),
+		Reports:     make([]backtest.BacktestResponse, 0, len(deduped)),
 		Entries:     make([]CompareEntry, 0, len(deduped)),
 		Missing:     []CompareMissingEntry{},
 	}
@@ -242,11 +243,11 @@ func CompareReports(ctx context.Context, ids []string, resolve CompareResultReso
 	return report, nil
 }
 
-// flattenEntry projects a BacktestResponse down to the columns the
+// flattenEntry projects a backtest.BacktestResponse down to the columns the
 // comparison table actually renders. Keeping this projection in Go
 // (rather than on the frontend) means the JSON contract is stable
 // across UI refactors.
-func flattenEntry(r BacktestResponse) CompareEntry {
+func flattenEntry(r backtest.BacktestResponse) CompareEntry {
 	universe := strings.Join(r.StockPool, ",")
 	return CompareEntry{
 		ID:            r.ID,

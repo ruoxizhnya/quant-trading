@@ -15,13 +15,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/reporting"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 // ──── Stubs ──────────────────────────────────────────────
 
 // compareStubStore is a minimal in-memory job store used by the
-// compare handler test. It backs a backtest.CompareResultResolver
+// compare handler test. It backs a reporting.CompareResultResolver
 // without dragging in the real JobService (which requires an Engine
 // and a Postgres store).
 type compareStubStore struct {
@@ -105,10 +106,10 @@ func newCompareTestRouter() (*gin.Engine, *compareStubStore) {
 		for i := range ids {
 			ids[i] = strings.TrimSpace(ids[i])
 		}
-		resolver := backtest.CompareResultResolver(func(_ context.Context, id string) (backtest.BacktestResponse, error) {
+		resolver := reporting.CompareResultResolver(func(_ context.Context, id string) (backtest.BacktestResponse, error) {
 			return store.Lookup(id)
 		})
-		report, err := backtest.CompareReports(c.Request.Context(), ids, resolver)
+		report, err := reporting.CompareReports(c.Request.Context(), ids, resolver)
 		if err != nil {
 			if strings.Contains(err.Error(), "at least") ||
 				strings.Contains(err.Error(), "at most") ||
@@ -139,12 +140,12 @@ func TestCompareHandler_Success(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp struct {
-		GeneratedAt time.Time                      `json:"generated_at"`
-		Requested   int                            `json:"requested"`
-		Resolved    int                            `json:"resolved"`
-		Entries     []backtest.CompareEntry        `json:"entries"`
-		Missing     []backtest.CompareMissingEntry `json:"missing"`
-		Best        backtest.CompareBest           `json:"best"`
+		GeneratedAt time.Time                       `json:"generated_at"`
+		Requested   int                             `json:"requested"`
+		Resolved    int                             `json:"resolved"`
+		Entries     []reporting.CompareEntry        `json:"entries"`
+		Missing     []reporting.CompareMissingEntry `json:"missing"`
+		Best        reporting.CompareBest           `json:"best"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 
@@ -177,8 +178,8 @@ func TestCompareHandler_PartialResolution(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var resp struct {
-		Resolved int                            `json:"resolved"`
-		Missing  []backtest.CompareMissingEntry `json:"missing"`
+		Resolved int                             `json:"resolved"`
+		Missing  []reporting.CompareMissingEntry `json:"missing"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 

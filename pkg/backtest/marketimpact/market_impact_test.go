@@ -1,4 +1,4 @@
-package backtest
+package marketimpact
 
 import (
 	"math"
