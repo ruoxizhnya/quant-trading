@@ -52,6 +52,7 @@ web/.cache/
 web/tsconfig.tsbuildinfo
 web/.eslintcache
 web/.parcel-cache
+web/coverage/
 
 # ── E2E Test Artifacts ─────────────────────────
 e2e/node_modules/

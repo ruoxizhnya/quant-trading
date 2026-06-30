@@ -84,9 +84,11 @@ export function useAsyncBacktest() {
               console.warn('[AsyncBacktest] Failed to get report, using job result', e)
               state.value.result = job.result
             }
-          } else if (job.result && !state.value.result) {
-            state.value.result = job.result
           }
+          // S7-P2-6: removed dead `else if (job.result && !state.value.result)`
+          // branch — its condition was the logical inverse of the `if` above
+          // (just operands swapped), so it could never execute. The catch
+          // block already sets state.value.result = job.result on failure.
           // CR-44 (ODR-012): the old code jumped progress from 90 (the
           // cap in the 'running' branch) directly to 100 here. The
           // user-visible "90% → 100%" hop is jarring, especially for

@@ -279,7 +279,7 @@ onMounted(async () => {
     strategiesCache.value = (res.strategies || [])
       .map(strategyLabel)
       .filter((label): label is string => label !== '')
-  } catch {}
+  } catch { /* best-effort; ignore failure */ }
   if (route.query.id) {
     await nextTick()
     await loadReport(route.query.id as string)
