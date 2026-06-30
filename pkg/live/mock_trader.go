@@ -10,6 +10,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/fees"
 	"github.com/ruoxizhnya/quant-trading/pkg/id"
+	"github.com/ruoxizhnya/quant-trading/pkg/portfolio"
 )
 
 // MockTraderConfig configures the mock trader simulation.
@@ -73,12 +74,26 @@ func NewMockTrader(config MockTraderConfig, logger zerolog.Logger) *MockTrader {
 	if config.MinCommission <= 0 {
 		config.MinCommission = defaults.MinCommission
 	}
+
 	return &MockTrader{
 		config:    config,
 		positions: make(map[string]*PositionInfo),
 		orders:    make(map[string]*OrderResult),
 		cash:      config.InitialCash,
 		logger:    logger.With().Str("component", "mock_trader").Logger(),
+	}
+}
+
+// feeSchedule returns the trader's fee configuration as a fees.AShareFees
+// struct, for use with portfolio.ComputeFees (S7-P1-1). This bridges
+// the flat MockTraderConfig fields to the shared fee-calculation primitive.
+func (m *MockTrader) feeSchedule() fees.AShareFees {
+	return fees.AShareFees{
+		CommissionRate:  m.config.CommissionRate,
+		StampTaxRate:    m.config.StampTaxRate,
+		TransferFeeRate: m.config.TransferFeeRate,
+		MinCommission:   m.config.MinCommission,
+		SlippageRate:    m.config.SlippageRate,
 	}
 }
 
@@ -123,13 +138,14 @@ func (m *MockTrader) executeBuy(symbol string, orderType domain.OrderType, quant
 	slippage := execPrice * m.config.SlippageRate
 	fillPrice := execPrice + slippage
 	tradeValue := quantity * fillPrice
-	commission := max(tradeValue*m.config.CommissionRate, m.config.MinCommission)
-	transferFee := tradeValue * m.config.TransferFeeRate
-	totalCost := tradeValue + commission + transferFee
+	// S7-P1-1: delegate fee math to the shared primitive so tracker and
+	// mock_trader can never drift on the commission/transfer formula.
+	fb := portfolio.ComputeFees(tradeValue, false, m.feeSchedule())
+	totalCost := tradeValue + fb.Total()
 
 	if totalCost > m.cash {
 		return nil, fmt.Errorf("insufficient cash: need %.2f (value=%.2f commission=%.2f transfer=%.2f), have %.2f",
-			totalCost, tradeValue, commission, transferFee, m.cash)
+			totalCost, tradeValue, fb.Commission, fb.TransferFee, m.cash)
 	}
 
 	m.cash -= totalCost
@@ -174,8 +190,8 @@ func (m *MockTrader) executeBuy(symbol string, orderType domain.OrderType, quant
 		Float64("qty", quantity).
 		Float64("price", execPrice).
 		Float64("fill_price", fillPrice).
-		Float64("commission", commission).
-		Float64("transfer_fee", transferFee).
+		Float64("commission", fb.Commission).
+		Float64("transfer_fee", fb.TransferFee).
 		Float64("cash_remaining", m.cash).
 		Msg("Mock buy order filled")
 
@@ -206,10 +222,9 @@ func (m *MockTrader) executeSell(symbol string, orderType domain.OrderType, quan
 	slippage := execPrice * m.config.SlippageRate
 	fillPrice := execPrice - slippage
 	tradeValue := quantity * fillPrice
-	commission := max(tradeValue*m.config.CommissionRate, m.config.MinCommission)
-	transferFee := tradeValue * m.config.TransferFeeRate
-	stampTax := tradeValue * m.config.StampTaxRate
-	netProceeds := tradeValue - commission - transferFee - stampTax
+	// S7-P1-1: shared fee primitive — stamp tax applies on the sell side.
+	fb := portfolio.ComputeFees(tradeValue, true, m.feeSchedule())
+	netProceeds := tradeValue - fb.Total()
 
 	m.cash += netProceeds
 
@@ -242,9 +257,9 @@ func (m *MockTrader) executeSell(symbol string, orderType domain.OrderType, quan
 		Float64("qty", quantity).
 		Float64("price", execPrice).
 		Float64("fill_price", fillPrice).
-		Float64("commission", commission).
-		Float64("transfer_fee", transferFee).
-		Float64("stamp_tax", stampTax).
+		Float64("commission", fb.Commission).
+		Float64("transfer_fee", fb.TransferFee).
+		Float64("stamp_tax", fb.StampTax).
 		Float64("net_proceeds", netProceeds).
 		Float64("cash_remaining", m.cash).
 		Msg("Mock sell order filled")
@@ -456,10 +471,10 @@ func (m *MockTrader) flattenPosition(result *EmergencyFlattenResult, sym, reason
 	slippage := execPrice * m.config.SlippageRate
 	fillPrice := execPrice - slippage
 	tradeValue := qty * fillPrice
-	commission := max(tradeValue*m.config.CommissionRate, m.config.MinCommission)
-	transferFee := tradeValue * m.config.TransferFeeRate
-	stampTax := tradeValue * m.config.StampTaxRate
-	netProceeds := tradeValue - commission - transferFee - stampTax
+	// S7-P1-1: shared fee primitive — emergency flatten is a sell-side
+	// transaction (closing longs), so stamp tax applies.
+	fb := portfolio.ComputeFees(tradeValue, true, m.feeSchedule())
+	netProceeds := tradeValue - fb.Total()
 
 	// Apply cash + position updates directly. We are already
 	// inside the mutex so we cannot call executeSell (which
