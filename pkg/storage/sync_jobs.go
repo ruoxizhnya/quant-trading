@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/ruoxizhnya/quant-trading/pkg/sync"
+	sync "github.com/ruoxizhnya/quant-trading/pkg/sync/types"
 )
 
 // CreateSyncJob inserts a new sync job.

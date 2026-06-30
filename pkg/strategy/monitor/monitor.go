@@ -19,9 +19,36 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/drift"
 	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 )
+
+// DriftResult is the local view of a drift-detection finding.
+// S7-P1-2 (ODR-043): defined HERE in pkg/strategy/monitor (lower layer)
+// rather than imported from pkg/ai/drift (higher layer) — this breaks
+// the monitor → drift reverse dependency. Only the 5 fields actually
+// consumed by CheckStatus are mirrored; the original drift.DriftResult
+// has additional fields (PValue, ReferenceMean, etc.) that the monitor
+// does not use.
+//
+// Callers that wish to plug in *drift.Detector must provide an adapter
+// that converts []*drift.DriftResult → []*monitor.DriftResult. See
+// cmd/analysis/main.go for the adapter.
+type DriftResult struct {
+	DriftDetected bool    `json:"drift_detected"`
+	DriftType     string  `json:"drift_type,omitempty"`
+	Severity      string  `json:"severity,omitempty"`
+	Statistic     float64 `json:"statistic"`
+	Message       string  `json:"message,omitempty"`
+}
+
+// DriftDetector is the local contract for a concept-drift detector.
+// S7-P1-2: defined locally to break the monitor → pkg/ai/drift reverse
+// dependency. *drift.Detector does NOT directly satisfy this interface
+// (it returns []*drift.DriftResult, not []*monitor.DriftResult), so
+// callers must wrap it in a small adapter at the composition root.
+type DriftDetector interface {
+	DetectAll(values []float64) ([]*DriftResult, error)
+}
 
 // Default threshold and window values. Operators override these by
 // passing a custom AlertThresholds to NewStrategyMonitor.
@@ -156,7 +183,7 @@ type StrategyMonitor struct {
 	logger        zerolog.Logger
 	mu            sync.RWMutex
 	strategies    map[string]*StrategyState
-	driftDetector *drift.Detector
+	driftDetector DriftDetector
 }
 
 // NewStrategyMonitor creates a new monitor with the supplied thresholds
@@ -193,7 +220,12 @@ func (m *StrategyMonitor) SetThresholds(thresholds AlertThresholds) {
 // CheckStatus runs drift detection on each active strategy's rolling
 // returns and emits a DriftDetected alert when adverse drift is found.
 // Pass nil to disable drift integration.
-func (m *StrategyMonitor) SetDriftDetector(d *drift.Detector) {
+//
+// S7-P1-2 (ODR-043): accepts the LOCAL DriftDetector interface (not
+// *drift.Detector) so this file doesn't import pkg/ai/drift. Callers
+// with a *drift.Detector must wrap it in an adapter that converts
+// []*drift.DriftResult → []*monitor.DriftResult (see cmd/analysis/main.go).
+func (m *StrategyMonitor) SetDriftDetector(d DriftDetector) {
 	m.mu.Lock()
 	m.driftDetector = d
 	m.mu.Unlock()

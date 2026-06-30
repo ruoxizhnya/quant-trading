@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 )
 
 // LiveEngine manages live trading execution
@@ -47,18 +48,12 @@ type DataFeed interface {
 	SetCallback(callback func(Quote))
 }
 
-// Quote represents a real-time market quote
-type Quote struct {
-	Symbol    string    `json:"symbol"`
-	Timestamp time.Time `json:"timestamp"`
-	Open      float64   `json:"open"`
-	High      float64   `json:"high"`
-	Low       float64   `json:"low"`
-	Close     float64   `json:"close"`
-	Volume    int64     `json:"volume"`
-	Bid       float64   `json:"bid"`
-	Ask       float64   `json:"ask"`
-}
+// Quote represents a real-time market quote.
+//
+// S7-P1-2 (ODR-043): Quote now lives in pkg/marketdata (the lower layer).
+// This alias preserves backward compatibility for all existing `live.Quote`
+// references. The canonical definition is marketdata.Quote.
+type Quote = marketdata.Quote
 
 // NewLiveEngine creates a new live trading engine
 func NewLiveEngine(

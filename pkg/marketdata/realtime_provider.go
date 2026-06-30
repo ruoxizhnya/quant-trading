@@ -3,15 +3,13 @@ package marketdata
 import (
 	"fmt"
 	"sync"
-
-	"github.com/ruoxizhnya/quant-trading/pkg/live"
 )
 
 // RealtimeProvider provides real-time market data
 type RealtimeProvider struct {
 	mu          sync.RWMutex
-	subscribers map[string][]chan live.Quote
-	quotes      map[string]live.Quote
+	subscribers map[string][]chan Quote
+	quotes      map[string]Quote
 	dataFeed    DataFeedSource
 }
 
@@ -19,14 +17,14 @@ type RealtimeProvider struct {
 type DataFeedSource interface {
 	Subscribe(symbols []string) error
 	Unsubscribe(symbols []string) error
-	SetCallback(callback func(live.Quote))
+	SetCallback(callback func(Quote))
 }
 
 // NewRealtimeProvider creates a new real-time data provider
 func NewRealtimeProvider(dataFeed DataFeedSource) *RealtimeProvider {
 	rp := &RealtimeProvider{
-		subscribers: make(map[string][]chan live.Quote),
-		quotes:      make(map[string]live.Quote),
+		subscribers: make(map[string][]chan Quote),
+		quotes:      make(map[string]Quote),
 		dataFeed:    dataFeed,
 	}
 
@@ -37,12 +35,12 @@ func NewRealtimeProvider(dataFeed DataFeedSource) *RealtimeProvider {
 }
 
 // Subscribe subscribes to real-time quotes for symbols
-func (rp *RealtimeProvider) Subscribe(symbols []string) (<-chan live.Quote, error) {
+func (rp *RealtimeProvider) Subscribe(symbols []string) (<-chan Quote, error) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
 
 	// Create a channel for this subscriber
-	ch := make(chan live.Quote, 100)
+	ch := make(chan Quote, 100)
 
 	for _, symbol := range symbols {
 		rp.subscribers[symbol] = append(rp.subscribers[symbol], ch)
@@ -57,7 +55,7 @@ func (rp *RealtimeProvider) Subscribe(symbols []string) (<-chan live.Quote, erro
 }
 
 // Unsubscribe unsubscribes from real-time quotes
-func (rp *RealtimeProvider) Unsubscribe(symbols []string, ch <-chan live.Quote) error {
+func (rp *RealtimeProvider) Unsubscribe(symbols []string, ch <-chan Quote) error {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
 
@@ -75,31 +73,31 @@ func (rp *RealtimeProvider) Unsubscribe(symbols []string, ch <-chan live.Quote) 
 }
 
 // GetLatestQuote returns the latest quote for a symbol
-func (rp *RealtimeProvider) GetLatestQuote(symbol string) (live.Quote, error) {
+func (rp *RealtimeProvider) GetLatestQuote(symbol string) (Quote, error) {
 	rp.mu.RLock()
 	defer rp.mu.RUnlock()
 
 	quote, exists := rp.quotes[symbol]
 	if !exists {
-		return live.Quote{}, fmt.Errorf("no quote available for symbol: %s", symbol)
+		return Quote{}, fmt.Errorf("no quote available for symbol: %s", symbol)
 	}
 
 	return quote, nil
 }
 
 // GetAllQuotes returns all latest quotes
-func (rp *RealtimeProvider) GetAllQuotes() map[string]live.Quote {
+func (rp *RealtimeProvider) GetAllQuotes() map[string]Quote {
 	rp.mu.RLock()
 	defer rp.mu.RUnlock()
 
-	result := make(map[string]live.Quote)
+	result := make(map[string]Quote)
 	for symbol, quote := range rp.quotes {
 		result[symbol] = quote
 	}
 	return result
 }
 
-func (rp *RealtimeProvider) handleQuote(quote live.Quote) {
+func (rp *RealtimeProvider) handleQuote(quote Quote) {
 	rp.mu.Lock()
 	rp.quotes[quote.Symbol] = quote
 	subscribers := rp.subscribers[quote.Symbol]
@@ -125,5 +123,5 @@ func (rp *RealtimeProvider) Close() {
 			close(ch)
 		}
 	}
-	rp.subscribers = make(map[string][]chan live.Quote)
+	rp.subscribers = make(map[string][]chan Quote)
 }

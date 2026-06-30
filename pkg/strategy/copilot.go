@@ -3,7 +3,6 @@ package strategy
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,15 +10,49 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
-	sandboxrunner "github.com/ruoxizhnya/quant-trading/internal/sandbox/runner"
-	"github.com/ruoxizhnya/quant-trading/internal/sandbox/staticcheck"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
+
+// LLMClient is the local contract for an LLM backend that generates
+// strategy code. S7-P1-2 (ODR-043): this interface is intentionally
+// defined HERE in pkg/strategy (lower layer) rather than imported from
+// pkg/ai (higher layer) — defining it locally breaks the
+// strategy → ai reverse dependency while preserving Go's structural
+// typing: any concrete type with these three methods (e.g. *ai.Client,
+// *ai.MockClient) satisfies this interface without an explicit adapter.
+//
+// cmd/analysis/main.go wires the real *ai.Client at the composition
+// root via WithLLMClient; tests inject *ai.MockClient or a local stub.
+type LLMClient interface {
+	IsConfigured() bool
+	GenerateStrategyCode(ctx context.Context, description string) (string, error)
+	FixStrategyCode(ctx context.Context, code string, buildErrors string) (string, error)
+}
+
+// CodeChecker is the local contract for the regex-based staticcheck
+// sandbox gate (Sprint 6 P0-4 / ADR-007 Phase 1). S7-P1-2: defined
+// locally to break the strategy → internal/sandbox/staticcheck reverse
+// dependency. The real adapter lives in cmd/analysis/main.go.
+type CodeChecker interface {
+	CheckOrError(code string) error
+}
+
+// BuildExecutor is the local contract for the process-isolation
+// sandbox runner that compiles LLM-generated strategies (Sprint 6
+// P1-11 / ODR-020). S7-P1-2: defined locally to break the
+// strategy → internal/sandbox/runner reverse dependency. The real
+// adapter lives in cmd/analysis/main.go.
+//
+// IsTimeout reports whether err is a timeout from the underlying runner
+// (mirrors errors.Is(err, sandboxrunner.ErrTimeout) without leaking
+// that sentinel across layers).
+type BuildExecutor interface {
+	Run(ctx context.Context, name string, args []string, workingDir string) (stdout, stderr *bytes.Buffer, err error)
+	IsTimeout(err error) bool
+}
 
 // BacktestRunner runs a backtest for the copilot.
 // It is implemented by cmd/analysis via a local adapter.
@@ -30,10 +63,22 @@ type BacktestRunner interface {
 // CopilotService generates Go strategy code from natural-language descriptions
 // and optionally runs a backtest against the generated strategy.
 type CopilotService struct {
-	// aiClient is the LLM backend. Typed as the ai.LLMClient interface
-	// (Sprint 6 P0-1) so tests can inject a deterministic *ai.MockClient
-	// instead of hitting a real LLM endpoint.
-	aiClient ai.LLMClient
+	// aiClient is the LLM backend. S7-P1-2: typed as the LOCAL LLMClient
+	// interface (defined in this file) so pkg/strategy no longer imports
+	// pkg/ai. *ai.Client / *ai.MockClient satisfy this interface via Go's
+	// structural typing — tests can still inject *ai.MockClient.
+	aiClient LLMClient
+
+	// codeChecker is the regex-based staticcheck sandbox gate. S7-P1-2:
+	// typed as the LOCAL CodeChecker interface so pkg/strategy no longer
+	// imports internal/sandbox/staticcheck. nil → run() fails closed.
+	codeChecker CodeChecker
+
+	// buildExecutor is the process-isolation sandbox runner. S7-P1-2:
+	// typed as the LOCAL BuildExecutor interface so pkg/strategy no
+	// longer imports internal/sandbox/runner. nil → run() fails closed
+	// at the build step.
+	buildExecutor BuildExecutor
 
 	generated  int64 // total generated (LLM called)
 	buildable  int64 // build succeeded
@@ -85,22 +130,32 @@ type GenerateParams struct {
 	EndDate     string `json:"end_date"`   // YYYY-MM-DD
 }
 
-// NewCopilotService creates a new CopilotService that reads AI credentials
-// from the AI_API_KEY / AI_API_URL environment variables.
+// NewCopilotService creates a new CopilotService with NO dependencies
+// wired. S7-P1-2 (ODR-043): the caller MUST inject the LLM client,
+// code checker, and build executor via WithLLMClient / WithCodeChecker
+// / WithBuildExecutor. This fail-closed DI pattern replaces the old
+// behavior of calling ai.NewClient() internally, which created a
+// strategy → ai reverse dependency.
+//
+// Backward-compat note: cmd/analysis/main.go previously relied on
+// NewCopilotService() to read AI_API_KEY/AI_API_URL from env. That
+// wiring now lives in main.go explicitly (composition root).
 func NewCopilotService() *CopilotService {
 	return &CopilotService{
-		aiClient: ai.NewClient(),
-		logger:   zerolog.Nop(),
+		logger: zerolog.Nop(),
 	}
 }
 
 // NewCopilotServiceWithLLM creates a CopilotService with an explicit
-// LLMClient. If client is nil, falls back to NewCopilotService() semantics.
-// This is the constructor tests should use to inject an *ai.MockClient.
-func NewCopilotServiceWithLLM(client ai.LLMClient) *CopilotService {
-	if client == nil {
-		client = ai.NewClient()
-	}
+// LLMClient. S7-P1-2: accepts the LOCAL LLMClient interface (not
+// ai.LLMClient) so this file doesn't import pkg/ai. *ai.MockClient
+// and *ai.Client satisfy this interface via structural typing.
+//
+// If client is nil, aiClient stays nil — the service is "not configured"
+// (IsConfigured returns false) and run() will fail at the first LLM
+// call. This is the fail-closed behavior; the caller must inject a
+// real client via WithLLMClient if needed.
+func NewCopilotServiceWithLLM(client LLMClient) *CopilotService {
 	return &CopilotService{aiClient: client, logger: zerolog.Nop()}
 }
 
@@ -135,6 +190,35 @@ func (s *CopilotService) WithLogger(l zerolog.Logger) *CopilotService {
 	if l.GetLevel() != zerolog.Disabled {
 		s.logger = l
 	}
+	return s
+}
+
+// WithLLMClient injects the LLM client. S7-P1-2: this is the
+// composition-root wiring point that replaces the old ai.NewClient()
+// call inside NewCopilotService(). Pass *ai.Client (production) or
+// *ai.MockClient / a local stub (tests).
+func (s *CopilotService) WithLLMClient(c LLMClient) *CopilotService {
+	s.aiClient = c
+	return s
+}
+
+// WithCodeChecker injects the regex-based staticcheck sandbox gate.
+// S7-P1-2: this is the composition-root wiring point that replaces
+// the old direct staticcheck.CheckOrError() call. Pass an adapter
+// wrapping internal/sandbox/staticcheck (see cmd/analysis/main.go).
+// If never called, run() fails closed with "code checker not configured".
+func (s *CopilotService) WithCodeChecker(c CodeChecker) *CopilotService {
+	s.codeChecker = c
+	return s
+}
+
+// WithBuildExecutor injects the process-isolation sandbox runner.
+// S7-P1-2: this is the composition-root wiring point that replaces
+// the old direct sandboxrunner.New() call. Pass an adapter wrapping
+// internal/sandbox/runner (see cmd/analysis/main.go). If never called,
+// run() fails closed at the build step with "build executor not configured".
+func (s *CopilotService) WithBuildExecutor(e BuildExecutor) *CopilotService {
+	s.buildExecutor = e
 	return s
 }
 
@@ -213,7 +297,24 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 	// This is the cheap, fail-closed filter from ADR-007 Phase 1; the
 	// process-isolation sandbox (Phase 2) is tracked under Sprint 6
 	// P1-11.
-	if err := staticcheck.CheckOrError(code); err != nil {
+	//
+	// S7-P1-2 (ODR-043): the check is delegated to s.codeChecker
+	// (local CodeChecker interface) instead of calling
+	// staticcheck.CheckOrError directly, breaking the strategy →
+	// internal/sandbox reverse dependency. If s.codeChecker is nil
+	// (caller forgot to inject), we fail closed — rejecting the code
+	// rather than silently allowing it through the gate.
+	if s.codeChecker == nil {
+		s.logger.Warn().
+			Str("job_id", jobID).
+			Msg("code checker not configured; rejecting generated strategy (fail-closed)")
+		result.Lock()
+		result.Status = "sandbox_rejected"
+		result.BuildErr = "code checker not configured; call WithCodeChecker() at the composition root"
+		result.Unlock()
+		return
+	}
+	if err := s.codeChecker.CheckOrError(code); err != nil {
 		s.logger.Warn().
 			Err(err).
 			Str("job_id", jobID).
@@ -268,40 +369,49 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 			return
 		}
 
-		// Sprint 6 P1-11 (ODR-020): process-isolation sandbox. The `go build`
-		// command is now executed via sandboxrunner.Runner which enforces a 30s
-		// wall-clock timeout, a 1GB virtual memory cap, and runs the child
-		// in its own session / process group. If the LLM produces a
-		// runaway-loop / fork-bomb / mem-leak build, the runner kills it
-		// before it can DoS the analysis service.
-		buildRunner := sandboxrunner.New(
-			sandboxrunner.WithTimeout(30*time.Second),
-			sandboxrunner.WithLimits(sandboxrunner.Limits{
-				MemoryBytes: 1 << 30, // 1 GiB
-				CPUSeconds:  25,
-				OpenFiles:   256,
-			}),
-		)
+		// S7-P1-2 (ODR-043): fail-closed if build executor is not
+		// injected. The old code called sandboxrunner.New() inline,
+		// creating a strategy → internal/sandbox/runner reverse
+		// dependency. The executor is now injected via
+		// WithBuildExecutor at the composition root; nil means the
+		// caller forgot to wire it, and we reject rather than
+		// silently skipping the build.
+		if s.buildExecutor == nil {
+			s.logger.Warn().
+				Str("job_id", jobID).
+				Msg("build executor not configured; rejecting build step (fail-closed)")
+			result.Lock()
+			result.Status = "build_failed"
+			result.BuildErr = "build executor not configured; call WithBuildExecutor() at the composition root"
+			result.Unlock()
+			return
+		}
+
+		// Sprint 6 P1-11 (ODR-020): process-isolation sandbox. The
+		// `go build` command is executed via the injected BuildExecutor
+		// (S7-P1-2: was sandboxrunner.New() inline) which enforces a
+		// 30s wall-clock timeout, a 1GB virtual memory cap, and runs
+		// the child in its own session / process group. If the LLM
+		// produces a runaway-loop / fork-bomb / mem-leak build, the
+		// executor kills it before it can DoS the analysis service.
 		var stderr bytes.Buffer
 		buildOut := filepath.Join(tmpDir, fmt.Sprintf("strategy_v%d", attempt))
-		_, buildStderr, err := buildRunner.Run(ctx, "go", []string{"build", "-o", buildOut, outFile}, sandboxrunner.Options{
-			Dir: s.workingDir, // Sprint 6 P0-4: was a hard-coded path
-		})
-		// Copy the runner's stderr capture into our local buffer so the
+		_, buildStderr, err := s.buildExecutor.Run(ctx, "go", []string{"build", "-o", buildOut, outFile}, s.workingDir)
+		// Copy the executor's stderr capture into our local buffer so the
 		// rest of the loop (LLM retry logic) keeps working unchanged.
 		if buildStderr != nil {
 			stderr.Write(buildStderr.Bytes())
 		}
 		if err != nil {
 			buildErr := stderr.String()
-			if errors.Is(err, sandboxrunner.ErrTimeout) {
+			if s.buildExecutor.IsTimeout(err) {
 				s.logger.Warn().
 					Err(err).
 					Str("job_id", jobID).
 					Int("attempt", attempt).
 					Msg("Sandbox runner killed `go build` after timeout (P1-11)")
 			}
-			if attempt < maxRetries && s.aiClient.IsConfigured() {
+			if attempt < maxRetries && s.aiClient != nil && s.aiClient.IsConfigured() {
 				fixedCode, fixErr := s.aiClient.FixStrategyCode(ctx, code, buildErr)
 				if fixErr == nil && fixedCode != "" {
 					// Re-run the sandbox gate on the LLM's fix. A
@@ -309,7 +419,7 @@ func (s *CopilotService) run(ctx context.Context, jobID string, params GenerateP
 					// accidentally introduces an os.RemoveAll
 					// (because it copied a snippet from training
 					// data) would otherwise sneak past us.
-					if recheckErr := staticcheck.CheckOrError(fixedCode); recheckErr == nil {
+					if recheckErr := s.codeChecker.CheckOrError(fixedCode); recheckErr == nil {
 						code = fixedCode
 						result.Lock()
 						result.Code = code
