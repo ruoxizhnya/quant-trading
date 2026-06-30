@@ -1615,7 +1615,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | S7-P2-3 | 拆分 cmd/analysis/main.go 372 行 main() 函数 | `cmd/analysis/main.go`, `cmd/analysis/setup.go`, `cmd/analysis/setup_test.go` | ✅ | ODR-043 |
 | S7-P2-4 | 拆分 registerRoutes 16 参数函数为 ServerDeps 结构体 | `cmd/analysis/main.go`, `cmd/analysis/deps.go`, `cmd/analysis/deps_test.go` | ✅ | ODR-043 |
 | S7-P2-5 | 拆分 cmd/data/main.go (1713 行 God File) | `cmd/data/main.go`, `cmd/data/setup.go`, `cmd/data/middleware.go`, `cmd/data/handlers_*.go`, `cmd/data/setup_test.go` | ✅ | ODR-043 |
-| S7-P2-6 | 前端补 ESLint + @vitest/coverage-v8 依赖 + lint/typecheck 脚本 | `web/package.json` | ⬜ | ODR-043 |
+| S7-P2-6 | 前端补 ESLint + @vitest/coverage-v8 依赖 + lint/typecheck 脚本（已建 eslint.config.js flat config for Vue3+TS; 添加 lint/typecheck 脚本; 安装 6 个 devDeps; 修复 13 个 lint errors: 1 死代码 bug + 2 useless-assignment + 6 empty catch + 4 配置项; 952 warnings 全为 Vue 格式规则不阻断 — 见 commit pending） | `web/package.json`, `web/eslint.config.js`, `web/src/composables/useAsyncBacktest.ts`, `web/src/utils/tradeMarkers.ts`, `web/src/stores/backtest.ts`, `web/src/pages/{Dashboard,BacktestEngine}.vue`, `web/src/components/backtest/BacktestHistory.vue` | ✅ | ODR-043 |
 | S7-P2-7 | 产品决策：AI Research 模块 2500 行不可达代码 → 上线或删除 | `web/src/pages/AIResearch.vue` + 10 组件 | ⬜ | ODR-043 |
 | S7-P2-8 | 产品决策：EmergencyFlatten.vue 311 行死代码 → 接入或删除 | `web/src/components/paper/EmergencyFlatten.vue` | ⬜ | ODR-043 |
 | S7-P2-9 | 拆分 PaperTrading.vue 654 行 God 组件 | `web/src/pages/PaperTrading.vue` | ⬜ | ODR-043 |

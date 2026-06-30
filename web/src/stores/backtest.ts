@@ -105,7 +105,7 @@ export const useBacktestStore = defineStore('backtest', () => {
       } else {
         localStorage.setItem(STORAGE_KEY, safeSerialize(history.value.slice(0, 5)))
       }
-    } catch {}
+    } catch { /* best-effort; ignore failure */ }
   }
 
   function loadHistory() {
@@ -163,13 +163,13 @@ export const useBacktestStore = defineStore('backtest', () => {
       if (history.value.length > MAX_HISTORY) {
         history.value = history.value.slice(0, MAX_HISTORY)
       }
-    } catch {}
+    } catch { /* best-effort; ignore failure */ }
   }
 
   function clearHistory() {
     history.value = []
     tradesMap.value.clear()
-    try { localStorage.removeItem(STORAGE_KEY) } catch {}
+    try { localStorage.removeItem(STORAGE_KEY) } catch { /* best-effort; ignore failure */ }
   }
 
   // Computed history with trades attached (for UI display)

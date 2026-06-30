@@ -75,7 +75,7 @@ onMounted(async () => {
   try {
     const res = await getStrategies()
     strategiesCache.value = (res.strategies || []).map((s: Strategy) => (s.name || s.id || s.description))
-  } catch {}
+  } catch { /* best-effort; ignore failure */ }
   fetchMarketData()
 })
 

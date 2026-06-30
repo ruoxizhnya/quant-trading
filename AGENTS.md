@@ -684,7 +684,6 @@ Please continue from where we left off.
 | `ChatbubbleEllipsisOutline` icon name doesn't exist | Correct name is `ChatbubbleEllipsesOutline` (with 'e' before 's') |
 | Trade markers may not render if portfolio_values is empty | Ensure backtest returns valid data before calling renderChart() |
 | **ODR-011 Multi-Source Risks** (CR-48, ODR-012) | See sub-table below |
-| **ODR-043-5 前端 lint/typecheck 脚本不存在** | `web/package.json` 无 `lint`/`typecheck` 脚本, 未安装 ESLint; AGENTS.md §5/§9 的命令实际无法执行 — 临时用 `npx vue-tsc --noEmit` 替代 |
 | **ODR-043-7 文档漂移: 服务拓扑/归档引用/ADR 状态** | ARCHITECTURE/VISION/SPEC 仍引用 risk-service(8083)/execution-service(8084) (ODR-021 已合并); NEXT_STEPS/IMPLEMENTATION_PLAN 已归档仍被引用; ADR-014 被 ADR-020 §6 取代未标记 — 详见 [ODR-043](docs/odr/odr-043-comprehensive-audit-2026-06-29.md) |
 
 ### ODR-011 Multi-Source Integration Risks (CR-48, ODR-012)

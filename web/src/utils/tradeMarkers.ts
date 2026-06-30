@@ -17,8 +17,12 @@ export function buildTradeMarkers(portfolioValues: PortfolioPoint[], trades: Tra
   })
 
   return trades.map(t => {
-    let tradeDate = ''
-    let tradePrice: number | undefined = undefined
+    // S7-P2-6: removed useless initial assignments — both branches of the
+    // if/else below always reassign these variables, so the initial '' and
+    // undefined were never read. Declaring without init is cleaner and
+    // satisfies no-useless-assignment.
+    let tradeDate: string
+    let tradePrice: number | undefined
 
     if (t.direction === 'close') {
       tradeDate = (t.timestamp || t.exit_date || '').split('T')[0]
