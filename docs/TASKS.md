@@ -1647,6 +1647,6 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 ***
 
-_Last updated: 2026-06-30 (v4.0.0) — Sprint 7 (ODR-043) 综合审计任务入库：P0×17 + P1×1 (S7-P1-4 完成) 完成 + P1×5 + P2×9 + P3×6 = 38 子任务; 4 维度审计 (Go 静态质量/模块化/测试/前端); 推翻 brainstorming "ExecutionCore 合并"假设; AGENTS.md §8.3 执行规范确立_
+_Last updated: 2026-06-30 (v4.0.0) — Sprint 7 (ODR-043) 综合审计任务入库：P0×17 + P1×2 (S7-P1-1, S7-P1-4 完成) 完成 + P1×4 + P2×9 + P3×6 = 38 子任务; 4 维度审计 (Go 静态质量/模块化/测试/前端); 推翻 brainstorming "ExecutionCore 合并"假设; AGENTS.md §8.3 执行规范确立_
 _Source: 整合自 CODE\_REVIEW\_REPORT.md + NEXT\_STEPS.md + PHASE3-PLAN.md + AGENTS.md + ODR-011 + Sprint 5 综合审查 + Sprint 6 (ODR-013) 综合审查 + Sprint 7 (ODR-043) 4 维度综合审计_
 
