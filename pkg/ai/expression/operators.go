@@ -360,6 +360,98 @@ func csPercentile(values []float64) []float64 {
 	return result
 }
 
+// csNeutralize subtracts the per-group mean from each value.
+//
+// Values are grouped by their corresponding group label (compared by
+// float64 equality). Within each group, the mean of non-NaN values is
+// computed and subtracted from each member. NaN values propagate to
+// the result and are excluded from the mean.
+//
+// If group is nil or its length doesn't match values, the function
+// falls back to global demeaning (subtract the overall mean). This
+// defensive behavior protects direct callers; the evaluator pipeline
+// always produces aligned slices.
+func csNeutralize(values, group []float64) []float64 {
+	n := len(values)
+	if n == 0 {
+		return []float64{}
+	}
+
+	// Fallback to global demean if group is unusable.
+	if group == nil || len(group) != n {
+		return globalDemean(values)
+	}
+
+	// Partition values by group label, accumulating sums and counts.
+	type groupStat struct {
+		sum   float64
+		count int
+	}
+	stats := make(map[float64]*groupStat)
+	for i, v := range values {
+		if math.IsNaN(v) {
+			continue
+		}
+		g := group[i]
+		s, ok := stats[g]
+		if !ok {
+			s = &groupStat{}
+			stats[g] = s
+		}
+		s.sum += v
+		s.count++
+	}
+
+	result := make([]float64, n)
+	for i, v := range values {
+		if math.IsNaN(v) {
+			result[i] = math.NaN()
+			continue
+		}
+		s := stats[group[i]]
+		if s == nil || s.count == 0 {
+			result[i] = math.NaN()
+			continue
+		}
+		mean := s.sum / float64(s.count)
+		result[i] = v - mean
+	}
+	return result
+}
+
+// globalDemean subtracts the mean of all non-NaN values from each value.
+// Used as a fallback by csNeutralize when group is nil/mismatched.
+func globalDemean(values []float64) []float64 {
+	n := len(values)
+	if n == 0 {
+		return []float64{}
+	}
+	sum := 0.0
+	count := 0
+	for _, v := range values {
+		if !math.IsNaN(v) {
+			sum += v
+			count++
+		}
+	}
+	result := make([]float64, n)
+	if count == 0 {
+		for i := range result {
+			result[i] = math.NaN()
+		}
+		return result
+	}
+	mean := sum / float64(count)
+	for i, v := range values {
+		if math.IsNaN(v) {
+			result[i] = math.NaN()
+		} else {
+			result[i] = v - mean
+		}
+	}
+	return result
+}
+
 // Utility functions
 //
 // The legacy inlined `correlation` helper has been removed (ODR-013

@@ -115,7 +115,7 @@ quant-trading/
 │   ├── data/               # 数据管道 (sync, marketdata, factors)
 │   ├── domain/             # 领域模型 (OHLCV, Signal, Portfolio)
 │   ├── storage/            # PostgreSQL 存储
-│   ├── strategy/           # 策略框架 + 插件
+│   ├── strategy/           # 策略框架 + 插件 + 表达式策略 (expression/, S7-P3-1)
 │   ├── risk/               # 风控模块 (stoploss, position sizing)
 │   └── live/               # 实盘/纸交易引擎 (Phase 4)
 ├── web/src/                # Vue 3 前端

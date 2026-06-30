@@ -233,6 +233,81 @@ type Strategy interface {
 
 ---
 
+## ExpressionStrategy (S7-P3-1)
+
+> **Package**: `pkg/strategy/expression/`
+> **Source**: [ADR-015](adr/adr-015-ai-agent-architecture.md) AI-Native Evolution
+
+`ExpressionStrategy` lets a DSL expression run as a `strategy.Strategy`
+inside the backtest engine. It composes four config-driven components
+into the canonical Strategy interface:
+
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| `SignalGenerator` | `signal.go` | DSL comparison expression → `[]Signal` (truthy filter) |
+| `PositionSizer` | `sizing.go` | Signals → target weights (`equal` / `strength_prop` / `fixed`) |
+| `RiskController` | `risk.go` | Weights → risk-checked weights (per-position cap, max open, cash buffer) |
+| `OHLCVDataProvider` | `data_provider.go` | `map[string][]domain.OHLCV` → `aiexpr.DataProvider` adapter |
+
+### GenerateSignals Pipeline
+
+```
+bars → OHLCVDataProvider → aiexpr.Evaluator
+                                ↓
+        SignalGenerator.Generate(bars, evaluator) → raw signals
+                                ↓
+        PositionSizer.Size(signals, portfolioValue) → weights
+                                ↓
+        RiskController.Check(weights, portfolio) → filtered weights
+                                ↓
+        signals with Strength=weight, Metadata["raw_strength"]=DSL value
+```
+
+`Weight()` returns the precomputed `signal.Strength` — risk checks are
+set-level (MaxOpenPositions, MinCashBuffer) and cannot be decomposed into
+per-signal `Weight()` calls.
+
+### Configuration Parameters
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `signal_expr` | string | `cs_rank(close) > 0.8` | DSL formula for signal generation |
+| `action` | string | `buy` | Signal action: `buy` or `sell` |
+| `direction` | string | `long` | Trade direction: `long`/`short`/`close` |
+| `min_strength` | float | `0.0` | Minimum signal strength to emit |
+| `sizing_method` | string | `equal` | `equal` / `strength_prop` / `fixed` |
+| `fixed_weight` | float | `0.05` | Per-signal weight (fixed method) |
+| `max_per_stock` | float | `0.10` | Max weight per single position |
+| `max_total` | float | `1.0` | Max total exposure |
+| `max_position_pct` | float | `0.10` | Risk: max weight per position |
+| `max_open_positions` | int | `20` | Risk: max concurrent positions |
+| `min_cash_buffer` | float | `0.05` | Risk: min cash buffer fraction |
+| `lookback` | int | `60` | Evaluator lookback window (trading days) |
+
+### AI Pipeline Integration
+
+The default `expression_template` strategy self-registers via `init()`.
+The AI pipeline (S7-P3-2, pending) will output YAML configs that map to
+the `Configure()` parameter keys above, enabling the flow:
+
+```
+LLM → YAML strategy config → ExpressionStrategy.Configure() → backtest
+```
+
+This closes the loop from natural-language strategy intent to executable
+backtest without generating Go code (per ADR-015 §3 "AI as quant researcher").
+
+### cs_neutralize Fix (S7-P3-1 Phase 1)
+
+The `cs_neutralize(x, group)` cross-sectional operator was declared in
+`IsCrossSectionalOp` and advertised in the LLM prompt as 2-arg, but the
+parser enforced 1-arg arity and the evaluator had no implementation.
+Fixed across all 4 layers: AST (`CrossSectionalNode.Group` field),
+parser (2-arg special case), evaluator (group evaluation + signature
+change), operators (`csNeutralize` + `globalDemean` helpers).
+
+---
+
 ## Multi-Factor Strategy: value_momentum
 
 ### Factor Definitions
