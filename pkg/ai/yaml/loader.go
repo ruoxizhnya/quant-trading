@@ -12,6 +12,10 @@ import (
 	"fmt"
 
 	yamlv3 "gopkg.in/yaml.v3"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy/expression"
 )
 
 // ParseConfig parses a YAML config string into a Config struct.
@@ -54,4 +58,167 @@ func ParseConfig(yamlStr string) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+// expressionTemplateName is the name self-registered by pkg/strategy/expression's
+// init() function. Loading a YAML with this name would collide with the
+// pre-registered default, so we reject it and ask the caller to pick a
+// distinct name.
+const expressionTemplateName = "expression_template"
+
+// LoadStrategy parses a YAML config and builds an executable
+// expression.ExpressionStrategy from it.
+//
+// Detection logic (which kind of strategy to build):
+//  1. If the 'expression:' section is present with a non-empty
+//     signal.expression → build an ExpressionStrategy using the
+//     section's values (defaults applied for omitted sub-fields).
+//  2. Else if strategy.type == "expression" → build an ExpressionStrategy
+//     using the package defaults (cs_rank(close) > 0.8, equal sizing,
+//     10% per stock, 20 positions, 5% cash buffer).
+//  3. Otherwise → return an error: LoadStrategy only supports
+//     expression-type strategies.
+//
+// Validation:
+//   - strategy.name must be non-empty (also enforced by ParseConfig)
+//   - strategy.name must not be "expression_template" (collides with
+//     the self-registered default)
+//   - expression.signal.direction (if present) must be one of:
+//     long, short, close, hold
+//
+// The returned strategy is NOT registered. Callers who want it in the
+// global registry should use LoadAndRegister, or call
+// strategy.GlobalRegister themselves. This keeps LoadStrategy a pure
+// "YAML → object" function for easy testing.
+func LoadStrategy(yamlStr string) (strategy.Strategy, error) {
+	config, err := ParseConfig(yamlStr)
+	if err != nil {
+		return nil, err
+	}
+
+	name := config.Strategy.Name
+	if name == expressionTemplateName {
+		return nil, fmt.Errorf(
+			"yaml: LoadStrategy: strategy.name %q is reserved by the self-registered "+
+				"expression_template default; please choose a distinct name",
+			name)
+	}
+
+	// Decide which config to build from.
+	hasExpressionSection := config.Expression.Signal.Expression != ""
+	if !hasExpressionSection && config.Strategy.Type != "expression" {
+		return nil, fmt.Errorf(
+			"yaml: LoadStrategy: only expression-type strategies are supported; "+
+				"either add an 'expression:' section with signal.expression or set "+
+				"strategy.type to \"expression\" (got type=%q)",
+			config.Strategy.Type)
+	}
+
+	exprCfg := expression.ExpressionStrategyConfig{}
+	if hasExpressionSection {
+		exprCfg, err = buildExpressionConfig(config.Expression)
+		if err != nil {
+			return nil, fmt.Errorf("yaml: LoadStrategy: %w", err)
+		}
+	}
+	// When hasExpressionSection is false but type == "expression", we
+	// pass a zero ExpressionStrategyConfig; NewExpressionStrategy applies
+	// the default signal config (cs_rank(close) > 0.8) and the sizer /
+	// risk controllers apply their own defaults for zero sub-fields.
+
+	s, err := expression.NewExpressionStrategy(name, exprCfg)
+	if err != nil {
+		return nil, fmt.Errorf("yaml: LoadStrategy: %w", err)
+	}
+	return s, nil
+}
+
+// LoadAndRegister parses YAML, builds an ExpressionStrategy, and
+// registers it with the global strategy registry. This is a convenience
+// wrapper around LoadStrategy + strategy.GlobalRegister for callers who
+// want the strategy immediately available for backtest lookup by name.
+//
+// Returns the registered strategy. If a strategy with the same name is
+// already registered, GlobalRegister returns an error which is passed
+// through to the caller; use strategy.GlobalGet to check first, or use
+// LoadStrategy + Configure for in-place reconfiguration.
+func LoadAndRegister(yamlStr string) (strategy.Strategy, error) {
+	s, err := LoadStrategy(yamlStr)
+	if err != nil {
+		return nil, err
+	}
+	if err := strategy.GlobalRegister(s); err != nil {
+		return nil, fmt.Errorf("yaml: LoadAndRegister: %w", err)
+	}
+	return s, nil
+}
+
+// buildExpressionConfig maps the YAML representation to the
+// expression.ExpressionStrategyConfig struct, validating the direction
+// string along the way.
+func buildExpressionConfig(expr ExpressionYAML) (expression.ExpressionStrategyConfig, error) {
+	signalCfg, err := buildSignalConfig(expr.Signal)
+	if err != nil {
+		return expression.ExpressionStrategyConfig{}, err
+	}
+	sizingCfg := buildSizingConfig(expr.Sizing)
+	riskCfg := buildRiskConfig(expr.Risk)
+
+	return expression.ExpressionStrategyConfig{
+		SignalCfg: signalCfg,
+		SizingCfg: sizingCfg,
+		RiskCfg:   riskCfg,
+	}, nil
+}
+
+// buildSignalConfig maps SignalYAML to expression.SignalConfig, validating
+// the direction string.
+func buildSignalConfig(s SignalYAML) (expression.SignalConfig, error) {
+	dir := domain.DirectionLong // default
+	if s.Direction != "" {
+		dir = domain.Direction(s.Direction)
+		if err := validateDirection(dir); err != nil {
+			return expression.SignalConfig{}, err
+		}
+	}
+	return expression.SignalConfig{
+		Expression:  s.Expression,
+		Action:      s.Action,
+		Direction:   dir,
+		MinStrength: s.MinStrength,
+		Lookback:    s.Lookback,
+	}, nil
+}
+
+// validateDirection returns an error if d is not one of the recognized
+// domain.Direction constants.
+func validateDirection(d domain.Direction) error {
+	switch d {
+	case domain.DirectionLong, domain.DirectionShort, domain.DirectionClose, domain.DirectionHold:
+		return nil
+	default:
+		return fmt.Errorf("invalid direction %q: must be one of long, short, close, hold", string(d))
+	}
+}
+
+// buildSizingConfig maps SizingYAML to expression.SizingConfig. Zero
+// values are preserved (NewPositionSizer applies defaults).
+func buildSizingConfig(s SizingYAML) expression.SizingConfig {
+	return expression.SizingConfig{
+		Method:      expression.SizingMethod(s.Method),
+		FixedWeight: s.FixedWeight,
+		MaxPerStock: s.MaxPerStock,
+		MaxTotal:    s.MaxTotal,
+	}
+}
+
+// buildRiskConfig maps RiskYAML to expression.RiskConfig. Zero values
+// are preserved (NewRiskController applies defaults).
+func buildRiskConfig(r RiskYAML) expression.RiskConfig {
+	return expression.RiskConfig{
+		MaxPositionPct:   r.MaxPositionPct,
+		MaxDrawdown:      r.MaxDrawdown,
+		MaxOpenPositions: r.MaxOpenPositions,
+		MinCashBuffer:    r.MinCashBuffer,
+	}
 }

@@ -284,18 +284,84 @@ per-signal `Weight()` calls.
 | `min_cash_buffer` | float | `0.05` | Risk: min cash buffer fraction |
 | `lookback` | int | `60` | Evaluator lookback window (trading days) |
 
-### AI Pipeline Integration
+### AI Pipeline Integration (S7-P3-2)
 
 The default `expression_template` strategy self-registers via `init()`.
-The AI pipeline (S7-P3-2, pending) will output YAML configs that map to
-the `Configure()` parameter keys above, enabling the flow:
+For custom expression strategies, the AI pipeline emits a YAML config
+that `pkg/ai/yaml.LoadStrategy` parses into an `ExpressionStrategy`,
+bypassing the LLM Go-codegen + compile path entirely:
 
 ```
-LLM → YAML strategy config → ExpressionStrategy.Configure() → backtest
+Intent → Generator → YAML → LoadStrategy → ExpressionStrategy → GlobalRegister → backtest
 ```
 
 This closes the loop from natural-language strategy intent to executable
 backtest without generating Go code (per ADR-015 §3 "AI as quant researcher").
+
+#### YAML Schema
+
+The `expression:` section of a strategy YAML maps 1:1 to
+`ExpressionStrategyConfig`. Example:
+
+```yaml
+strategy:
+  name: my_expr_strat
+  type: expression
+  description: top-decile by close-price rank
+expression:
+  signal:
+    expression: "cs_rank(close) > 0.8"
+    action: buy
+    direction: long
+    min_strength: 0
+    lookback: 60
+  sizing:
+    method: equal           # equal | strength_prop | fixed
+    fixed_weight: 0.05
+    max_per_stock: 0.10
+    max_total: 1.0
+  risk:
+    max_position_pct: 0.10
+    max_open_positions: 20
+    min_cash_buffer: 0.05
+```
+
+| Section | Field | Maps to | Default |
+|---------|-------|---------|---------|
+| `expression.signal` | `expression` | `SignalConfig.Expression` | (required if section present) |
+| | `action` | `SignalConfig.Action` | `buy` |
+| | `direction` | `SignalConfig.Direction` | `long` (long/short/close/hold) |
+| | `min_strength` | `SignalConfig.MinStrength` | `0` |
+| | `lookback` | `SignalConfig.Lookback` | `60` |
+| `expression.sizing` | `method` | `SizingConfig.Method` | `equal` |
+| | `fixed_weight` | `SizingConfig.FixedWeight` | `0.05` |
+| | `max_per_stock` | `SizingConfig.MaxPerStock` | `0.10` |
+| | `max_total` | `SizingConfig.MaxTotal` | `1.0` |
+| `expression.risk` | `max_position_pct` | `RiskConfig.MaxPositionPct` | `0.10` |
+| | `max_open_positions` | `RiskConfig.MaxOpenPositions` | `20` |
+| | `min_cash_buffer` | `RiskConfig.MinCashBuffer` | `0.05` |
+
+> **Note**: The top-level `risk:` section (max_positions/stop_loss/take_profit) is
+> engine-level risk control applied during backtest execution. The
+> `expression.risk:` section is post-signal weight risk control applied
+> inside `ExpressionStrategy.GenerateSignals`. They are independent.
+
+#### Loader API (`pkg/ai/yaml/loader.go`)
+
+| Function | Purpose |
+|----------|---------|
+| `yaml.ParseConfig(yamlStr) (*Config, error)` | Parse YAML into Config struct (validates strategy + name) |
+| `yaml.LoadStrategy(yamlStr) (strategy.Strategy, error)` | Parse + build ExpressionStrategy (not registered) |
+| `yaml.LoadAndRegister(yamlStr) (strategy.Strategy, error)` | Load + GlobalRegister (convenience wrapper) |
+
+**Detection logic**: `LoadStrategy` builds an ExpressionStrategy when
+either (a) the `expression:` section is present with a non-empty
+`signal.expression`, or (b) `strategy.type == "expression"`. In case
+(b) with no expression section, package defaults are used
+(`cs_rank(close) > 0.8`, equal sizing, 10% per stock, 20 positions).
+
+**Reserved name**: `expression_template` is rejected by `LoadStrategy`
+to avoid collision with the self-registered default.
 
 ### cs_neutralize Fix (S7-P3-1 Phase 1)
 

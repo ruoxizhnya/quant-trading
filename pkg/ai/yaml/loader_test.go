@@ -5,6 +5,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy/expression"
 )
 
 // TestParseConfig_ValidFullYAML verifies that a complete YAML document
@@ -128,4 +132,267 @@ data:
 	assert.Equal(t, "", config.Expression.Signal.Expression)
 	assert.Equal(t, "", config.Expression.Sizing.Method)
 	assert.Equal(t, 0, config.Expression.Risk.MaxOpenPositions)
+}
+
+// ─── LoadStrategy tests ───────────────────────────────────────────────
+
+// fullExpressionYAML returns a complete YAML string with the expression
+// section populated. Used as a fixture for the LoadStrategy tests.
+func fullExpressionYAML() string {
+	return `strategy:
+  name: test_expr_strat
+  type: expression
+  description: test expression strategy
+expression:
+  signal:
+    expression: "cs_rank(close) > 0.8"
+    action: buy
+    direction: long
+    min_strength: 0.5
+    lookback: 90
+  sizing:
+    method: equal
+    fixed_weight: 0.05
+    max_per_stock: 0.15
+    max_total: 0.9
+  risk:
+    max_position_pct: 0.15
+    max_open_positions: 25
+    min_cash_buffer: 0.10
+backtest:
+  start_date: 2022-01-01
+  end_date: 2024-01-01
+  initial_capital: 1000000
+data:
+  universe: csi300
+  timeframe: 1d
+`
+}
+
+// TestLoadStrategy_HappyPath verifies that a full YAML with expression
+// section builds an ExpressionStrategy whose Name and Parameters match
+// the YAML input.
+func TestLoadStrategy_HappyPath(t *testing.T) {
+	s, err := LoadStrategy(fullExpressionYAML())
+	require.NoError(t, err)
+	require.NotNil(t, s)
+
+	assert.Equal(t, "test_expr_strat", s.Name())
+
+	// Verify the strategy is an *ExpressionStrategy and its Parameters
+	// reflect the YAML values. We use Parameters() (part of the
+	// strategy.Configurable interface) because it's the public API.
+	exprStrat, ok := s.(*expression.ExpressionStrategy)
+	require.True(t, ok, "expected *expression.ExpressionStrategy")
+
+	params := exprStrat.Parameters()
+	require.NotEmpty(t, params)
+
+	// Build a map for easy lookup.
+	paramMap := make(map[string]interface{}, len(params))
+	for _, p := range params {
+		paramMap[p.Name] = p.Default
+	}
+
+	// Verify signal params carried over from YAML.
+	assert.Equal(t, "cs_rank(close) > 0.8", paramMap["signal_expr"])
+	assert.Equal(t, "buy", paramMap["action"])
+	assert.Equal(t, "long", paramMap["direction"])
+	assert.Equal(t, 0.5, paramMap["min_strength"])
+	assert.Equal(t, 90, paramMap["lookback"])
+
+	// Verify sizing params.
+	assert.Equal(t, "equal", paramMap["sizing_method"])
+	assert.Equal(t, 0.15, paramMap["max_per_stock"])
+	assert.Equal(t, 0.9, paramMap["max_total"])
+
+	// Verify risk params.
+	assert.Equal(t, 0.15, paramMap["max_position_pct"])
+	assert.Equal(t, 25, paramMap["max_open_positions"])
+	assert.Equal(t, 0.10, paramMap["min_cash_buffer"])
+}
+
+// TestLoadStrategy_DefaultsApplied verifies that a YAML with
+// strategy.type=expression but NO expression section builds a strategy
+// using the package defaults (cs_rank(close) > 0.8, equal sizing, etc.).
+func TestLoadStrategy_DefaultsApplied(t *testing.T) {
+	yamlStr := `strategy:
+  name: default_expr_strat
+  type: expression
+  description: uses package defaults
+backtest:
+  start_date: 2022-01-01
+data:
+  universe: csi300
+`
+	s, err := LoadStrategy(yamlStr)
+	require.NoError(t, err)
+	require.NotNil(t, s)
+
+	assert.Equal(t, "default_expr_strat", s.Name())
+
+	exprStrat, ok := s.(*expression.ExpressionStrategy)
+	require.True(t, ok)
+
+	// The default signal expression should be cs_rank(close) > 0.8.
+	params := exprStrat.Parameters()
+	for _, p := range params {
+		if p.Name == "signal_expr" {
+			assert.Equal(t, "cs_rank(close) > 0.8", p.Default)
+			return
+		}
+	}
+	t.Fatal("signal_expr parameter not found")
+}
+
+// TestLoadStrategy_InvalidDirection verifies that an unrecognized
+// direction string is rejected with a clear error.
+func TestLoadStrategy_InvalidDirection(t *testing.T) {
+	yamlStr := `strategy:
+  name: bad_dir_strat
+  type: expression
+expression:
+  signal:
+    expression: "close > 50"
+    direction: sideways
+`
+	_, err := LoadStrategy(yamlStr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "direction")
+	assert.Contains(t, err.Error(), "sideways")
+}
+
+// TestLoadStrategy_InvalidSizingMethod verifies that an unrecognized
+// sizing method is rejected by NewPositionSizer.
+func TestLoadStrategy_InvalidSizingMethod(t *testing.T) {
+	yamlStr := `strategy:
+  name: bad_sizing_strat
+  type: expression
+expression:
+  signal:
+    expression: "close > 50"
+  sizing:
+    method: martingale
+`
+	_, err := LoadStrategy(yamlStr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "martingale")
+}
+
+// TestLoadStrategy_InvalidExpression verifies that a syntactically
+// invalid DSL expression is rejected by NewSignalGenerator (the parser
+// surfaces a parse error).
+func TestLoadStrategy_InvalidExpression(t *testing.T) {
+	yamlStr := `strategy:
+  name: bad_expr_strat
+  type: expression
+expression:
+  signal:
+    expression: "cs_rank(close >"
+`
+	_, err := LoadStrategy(yamlStr)
+	require.Error(t, err)
+	// The error chain should mention parse or expression.
+	assert.Contains(t, err.Error(), "expression")
+}
+
+// TestLoadStrategy_EmptyName verifies that a YAML with an empty
+// strategy.name is rejected (ParseConfig enforces this).
+func TestLoadStrategy_EmptyName(t *testing.T) {
+	yamlStr := `strategy:
+  name: ""
+  type: expression
+expression:
+  signal:
+    expression: "close > 50"
+`
+	_, err := LoadStrategy(yamlStr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "name")
+}
+
+// TestLoadStrategy_RejectsExpressionTemplateName verifies that the
+// reserved name "expression_template" is rejected to avoid collision
+// with the self-registered default strategy.
+func TestLoadStrategy_RejectsExpressionTemplateName(t *testing.T) {
+	yamlStr := `strategy:
+  name: expression_template
+  type: expression
+expression:
+  signal:
+    expression: "close > 50"
+`
+	_, err := LoadStrategy(yamlStr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expression_template")
+	assert.Contains(t, err.Error(), "reserved")
+}
+
+// TestLoadStrategy_NonExpressionTypeWithoutSection verifies that a YAML
+// with strategy.type != "expression" and no expression section returns
+// a clear error directing the caller to add the section or change type.
+func TestLoadStrategy_NonExpressionTypeWithoutSection(t *testing.T) {
+	yamlStr := `strategy:
+  name: momentum_strat
+  type: momentum
+  description: a momentum strategy
+backtest:
+  start_date: 2022-01-01
+`
+	_, err := LoadStrategy(yamlStr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expression")
+}
+
+// TestLoadAndRegister_HappyPath verifies the convenience wrapper
+// registers the strategy so GlobalGet can find it. We use a unique name
+// to avoid collisions with other tests in the suite.
+func TestLoadAndRegister_HappyPath(t *testing.T) {
+	yamlStr := `strategy:
+  name: load_and_register_test_strat
+  type: expression
+expression:
+  signal:
+    expression: "close > 50"
+`
+	s, err := LoadAndRegister(yamlStr)
+	require.NoError(t, err)
+	require.NotNil(t, s)
+	assert.Equal(t, "load_and_register_test_strat", s.Name())
+
+	// Verify it's retrievable via the global registry.
+	retrieved, err := strategy.GlobalGet("load_and_register_test_strat")
+	require.NoError(t, err)
+	assert.Equal(t, s.Name(), retrieved.Name())
+}
+
+// TestLoadAndRegister_DuplicateName verifies that registering a strategy
+// with an already-registered name returns an error from GlobalRegister.
+func TestLoadAndRegister_DuplicateName(t *testing.T) {
+	yamlStr := `strategy:
+  name: dup_name_strat
+  type: expression
+expression:
+  signal:
+    expression: "close > 50"
+`
+	// First registration succeeds.
+	_, err := LoadAndRegister(yamlStr)
+	require.NoError(t, err)
+
+	// Second registration of the same name should fail.
+	_, err = LoadAndRegister(yamlStr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dup_name_strat")
+}
+
+// verifyDirectionConstants ensures our test assumptions about
+// domain.Direction string values are correct. If domain.Direction
+// constants change, this test fails loudly rather than letting the
+// LoadStrategy direction validation silently break.
+func TestDirectionConstants(t *testing.T) {
+	assert.Equal(t, "long", string(domain.DirectionLong))
+	assert.Equal(t, "short", string(domain.DirectionShort))
+	assert.Equal(t, "close", string(domain.DirectionClose))
+	assert.Equal(t, "hold", string(domain.DirectionHold))
 }
