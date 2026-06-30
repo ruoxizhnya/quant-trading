@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
@@ -54,11 +55,18 @@ type BuildExecutor interface {
 	IsTimeout(err error) bool
 }
 
-// BacktestRunner runs a backtest for the copilot.
-// It is implemented by cmd/analysis via a local adapter.
-type BacktestRunner interface {
-	RunBacktest(ctx context.Context, strategyName string, stockPool []string, startDate, endDate string) (*domain.BacktestResult, error)
-}
+// BacktestRunner is the canonical contract for running a backtest.
+// S7-P1-3 (ODR-043): previously defined as a local interface here AND
+// duplicated in pkg/ai/pipeline/pipeline.go. Now a zero-cost type alias
+// to the single source of truth in pkg/ai/contracts — all existing
+// adapters (*strategyEngineAdapter) and mocks continue to work
+// unchanged because Go type aliases are transparent.
+//
+// pkg/ai/contracts is a LEAF package (imports only pkg/domain), so
+// this import does NOT re-introduce the strategy → ai reverse
+// dependency that S7-P1-2 removed (that was strategy → pkg/ai, the
+// main LLM client package; contracts is a separate leaf).
+type BacktestRunner = contracts.BacktestRunner
 
 // CopilotService generates Go strategy code from natural-language descriptions
 // and optionally runs a backtest against the generated strategy.
