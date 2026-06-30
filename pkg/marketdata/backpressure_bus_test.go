@@ -1,6 +1,7 @@
 package marketdata
 
 import (
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -74,12 +75,27 @@ func TestBackpressureBus_MultipleSubscribers(t *testing.T) {
 	defer b.Close()
 
 	var count1, count2 int64
-	b.Subscribe("topic", func(e any) { atomic.AddInt64(&count1, 1) })
-	b.Subscribe("topic", func(e any) { atomic.AddInt64(&count2, 1) })
+	done := make(chan struct{})
+	var once sync.Once
+	b.Subscribe("topic", func(e any) {
+		if atomic.AddInt64(&count1, 1) == 1 && atomic.LoadInt64(&count2) == 1 {
+			once.Do(func() { close(done) })
+		}
+	})
+	b.Subscribe("topic", func(e any) {
+		if atomic.AddInt64(&count2, 1) == 1 && atomic.LoadInt64(&count1) == 1 {
+			once.Do(func() { close(done) })
+		}
+	})
 
 	b.Publish("topic", "event")
 
-	time.Sleep(50 * time.Millisecond) // let goroutines process
+	// Wait for both subscribers to receive the event, or timeout.
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for both subscribers to receive event")
+	}
 
 	assert.Equal(t, int64(1), atomic.LoadInt64(&count1))
 	assert.Equal(t, int64(1), atomic.LoadInt64(&count2))
@@ -91,17 +107,32 @@ func TestBackpressureBus_Unsubscribe(t *testing.T) {
 	defer b.Close()
 
 	var count int64
+	done := make(chan struct{})
+	var once sync.Once
+	fired := make(chan struct{})
+	var firedOnce sync.Once
 	unsub := b.Subscribe("topic", func(e any) {
-		atomic.AddInt64(&count, 1)
+		n := atomic.AddInt64(&count, 1)
+		if n == 1 {
+			once.Do(func() { close(done) })
+		} else if n == 2 {
+			firedOnce.Do(func() { close(fired) })
+		}
 	})
 
 	b.Publish("topic", "before")
-	time.Sleep(20 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for 'before' event")
+	}
 
 	unsub()
 
 	b.Publish("topic", "after")
-	time.Sleep(20 * time.Millisecond)
+	// After unsubscribe, the handler must NOT receive a second event.
+	assertNotFired(t, fired, 50*time.Millisecond,
+		"unsubscribed handler should not receive 'after' event")
 
 	assert.Equal(t, int64(1), atomic.LoadInt64(&count))
 	assert.Equal(t, 0, b.SubscriberCount("topic"))
@@ -113,14 +144,28 @@ func TestBackpressureBus_TopicIsolation(t *testing.T) {
 	defer b.Close()
 
 	var topicA, topicB int64
-	b.Subscribe("a", func(e any) { atomic.AddInt64(&topicA, 1) })
-	b.Subscribe("b", func(e any) { atomic.AddInt64(&topicB, 1) })
+	done := make(chan struct{})
+	var once sync.Once
+	b.Subscribe("a", func(e any) {
+		if atomic.AddInt64(&topicA, 1) == 2 && atomic.LoadInt64(&topicB) == 1 {
+			once.Do(func() { close(done) })
+		}
+	})
+	b.Subscribe("b", func(e any) {
+		if atomic.AddInt64(&topicB, 1) == 1 && atomic.LoadInt64(&topicA) == 2 {
+			once.Do(func() { close(done) })
+		}
+	})
 
 	b.Publish("a", 1)
 	b.Publish("b", 1)
 	b.Publish("a", 1)
 
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for all topic events")
+	}
 
 	assert.Equal(t, int64(2), atomic.LoadInt64(&topicA))
 	assert.Equal(t, int64(1), atomic.LoadInt64(&topicB))
@@ -173,11 +218,17 @@ func TestBackpressureBus_DropOldest(t *testing.T) {
 	for i := 2; i <= 5; i++ {
 		b.Publish("overflow", i)
 	}
-	time.Sleep(20 * time.Millisecond) // let publishes settle
+	// Wait for the buffer to fill and at least one drop to register, rather
+	// than sleeping a fixed duration.
+	require.Eventually(t, func() bool {
+		return b.Metrics().DroppedCount > 0
+	}, time.Second, time.Millisecond, "expected at least one drop after buffer overflow")
 
-	// Release the handler to process remaining events.
+	// Release the handler to process remaining events. Close() drains the
+	// buffer synchronously, so after it returns all remaining events are
+	// processed (no sleep needed).
 	close(block)
-	time.Sleep(50 * time.Millisecond) // let goroutine drain
+	b.Close()
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -204,14 +255,17 @@ func TestBackpressureBus_DroppedMetrics(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		b.Publish("test", i)
 	}
-	time.Sleep(20 * time.Millisecond)
+	// Wait for the buffer to fill and drops to register.
+	require.Eventually(t, func() bool {
+		return b.Metrics().DroppedCount > 0
+	}, time.Second, time.Millisecond, "events should be dropped after buffer overflow")
 
 	m := b.Metrics()
 	assert.Equal(t, int64(10), m.PublishedCount)
 	assert.Greater(t, m.DroppedCount, int64(0), "events should be dropped")
 
+	// Unblock the handler; deferred Close() drains synchronously.
 	close(block)
-	time.Sleep(20 * time.Millisecond)
 }
 
 func TestBackpressureBus_PublishedCount(t *testing.T) {
@@ -271,14 +325,14 @@ func TestBackpressureBus_Close(t *testing.T) {
 	b.Subscribe("test", func(e any) { atomic.AddInt64(&count, 1) })
 
 	b.Publish("test", 1)
-	time.Sleep(20 * time.Millisecond)
 
+	// Close() drains the buffer synchronously (calls wg.Wait), so after it
+	// returns the first event has been processed and no future handler can run.
 	b.Close()
+	assert.Equal(t, int64(1), atomic.LoadInt64(&count))
 
-	// After close, Publish is a no-op.
+	// After close, Publish is a no-op — no handler will fire.
 	b.Publish("test", 2)
-	time.Sleep(20 * time.Millisecond)
-
 	assert.Equal(t, int64(1), atomic.LoadInt64(&count))
 	assert.True(t, b.IsClosed())
 }
@@ -314,10 +368,9 @@ func TestBackpressureBus_CloseDrainsBuffer(t *testing.T) {
 		b.Publish("test", i)
 	}
 
-	// Close should drain the buffer (process all pending events).
+	// Close() drains the buffer synchronously (wg.Wait), so all 10 events
+	// are processed before Close returns. No sleep needed.
 	b.Close()
-	time.Sleep(50 * time.Millisecond)
-
 	assert.Equal(t, int64(10), atomic.LoadInt64(&count))
 }
 
@@ -329,8 +382,12 @@ func TestBackpressureBus_ConcurrentPublish(t *testing.T) {
 	defer b.Close()
 
 	var count int64
+	done := make(chan struct{})
+	var once sync.Once
 	b.Subscribe("test", func(e any) {
-		atomic.AddInt64(&count, 1)
+		if atomic.AddInt64(&count, 1) == 100 {
+			once.Do(func() { close(done) })
+		}
 	})
 
 	const n = 100
@@ -344,7 +401,11 @@ func TestBackpressureBus_ConcurrentPublish(t *testing.T) {
 	}
 	wg.Wait()
 
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for all 100 events to be processed")
+	}
 	assert.Equal(t, int64(n), atomic.LoadInt64(&count))
 }
 
@@ -360,7 +421,7 @@ func TestBackpressureBus_ConcurrentSubscribeUnsubscribe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			unsub := b.Subscribe("test", func(e any) {})
-			time.Sleep(time.Millisecond)
+			runtime.Gosched() // yield to interleave with other goroutines
 			unsub()
 		}()
 	}
@@ -373,6 +434,14 @@ func TestBackpressureBus_ConcurrentPublishSubscribe(t *testing.T) {
 	defer b.Close()
 
 	var received int64
+	// Pre-register a stable subscriber that persists for the whole test so that
+	// published events are captured regardless of the transient subscribe/
+	// unsubscribe cycles. This guarantees `received > 0` after the publisher
+	// completes, without relying on timing.
+	b.Subscribe("test", func(e any) {
+		atomic.AddInt64(&received, 1)
+	})
+
 	var wg sync.WaitGroup
 
 	// Publisher.
@@ -384,7 +453,9 @@ func TestBackpressureBus_ConcurrentPublishSubscribe(t *testing.T) {
 		}
 	}()
 
-	// Subscriber adder/remover.
+	// Subscriber adder/remover (concurrent with publisher). runtime.Gosched()
+	// yields to the scheduler so the publisher interleaves with these cycles
+	// without a time.Sleep-based wait.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -392,14 +463,21 @@ func TestBackpressureBus_ConcurrentPublishSubscribe(t *testing.T) {
 			u := b.Subscribe("test", func(e any) {
 				atomic.AddInt64(&received, 1)
 			})
-			time.Sleep(time.Millisecond)
+			runtime.Gosched()
 			u()
 		}
 	}()
 
 	wg.Wait()
-	time.Sleep(50 * time.Millisecond)
-	_ = atomic.LoadInt64(&received) // just ensure no race
+	// Drain the buffer so all in-flight events are delivered before asserting.
+	// Close is idempotent — the deferred Close above becomes a no-op.
+	b.Close()
+
+	assert.Greater(t, atomic.LoadInt64(&received), int64(0),
+		"stable subscriber must have received at least one event")
+	m := b.Metrics()
+	assert.Equal(t, int64(100), m.PublishedCount,
+		"all 100 publishes must be counted")
 }
 
 func TestBackpressureBus_StressNoBlock(t *testing.T) {
@@ -436,17 +514,25 @@ func TestBackpressureBus_HandlerPanicRecovered(t *testing.T) {
 	defer b.Close()
 
 	var afterPanic int64
+	done := make(chan struct{})
+	var once sync.Once
 	b.Subscribe("test", func(e any) {
 		if e.(int) == 1 {
 			panic("boom")
 		}
-		atomic.AddInt64(&afterPanic, 1)
+		if atomic.AddInt64(&afterPanic, 1) == 1 {
+			once.Do(func() { close(done) })
+		}
 	})
 
 	b.Publish("test", 1) // will panic
 	b.Publish("test", 2) // should still be received
 
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for post-panic event")
+	}
 	assert.Equal(t, int64(1), atomic.LoadInt64(&afterPanic),
 		"handler should continue after panic recovery")
 }
@@ -464,13 +550,15 @@ func TestBackpressureBus_SubscriberDroppedCount(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		b.Publish("test", i)
 	}
-	time.Sleep(20 * time.Millisecond)
-
-	m := b.Metrics()
-	assert.Greater(t, m.DroppedCount, int64(0))
+	// Wait for the buffer to fill and overflow rather than sleeping a fixed
+	// duration. The dropped count must become positive once the 3-slot buffer
+	// (1 in-flight + 2 buffered) overflows.
+	require.Eventually(t, func() bool {
+		return b.Metrics().DroppedCount > 0
+	}, time.Second, time.Millisecond, "events should be dropped after buffer overflow")
 
 	close(block)
-	time.Sleep(20 * time.Millisecond)
+	// Close drains synchronously, ensuring the blocked handler completes.
 }
 
 // ─── Multiple topics stress ─────────────────────────────────────
@@ -482,6 +570,10 @@ func TestBackpressureBus_MultipleTopicsStress(t *testing.T) {
 
 	var counts sync.Map
 	topics := []string{"a", "b", "c", "d", "e"}
+	// done closes once every topic has received all 50 events.
+	done := make(chan struct{})
+	var once sync.Once
+	var receivedTotal int64
 	for _, topic := range topics {
 		topic := topic
 		// Pre-register a *int64 counter for each topic.
@@ -490,6 +582,9 @@ func TestBackpressureBus_MultipleTopicsStress(t *testing.T) {
 		b.Subscribe(topic, func(e any) {
 			val, _ := counts.Load(topic)
 			atomic.AddInt64(val.(*int64), 1)
+			if atomic.AddInt64(&receivedTotal, 1) == int64(len(topics)*50) {
+				once.Do(func() { close(done) })
+			}
 		})
 	}
 
@@ -505,7 +600,11 @@ func TestBackpressureBus_MultipleTopicsStress(t *testing.T) {
 	}
 	wg.Wait()
 
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for all topics to receive their events")
+	}
 
 	for _, topic := range topics {
 		val, ok := counts.Load(topic)

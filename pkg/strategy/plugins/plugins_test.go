@@ -82,8 +82,16 @@ func TestMeanReversionStrategy(t *testing.T) {
 
 	signals, err := s.GenerateSignals(context.Background(), bars, nil)
 	require.NoError(t, err)
-	// Bollinger+RSI requires both conditions; may or may not trigger on synthetic data
-	_ = signals
+	// Bollinger+RSI requires both conditions (price ≤ lower band AND RSI ≤ oversold).
+	// On this synthetic linear down-trend the latest price (42) stays above the lower
+	// Bollinger band (~39.51), so no buy signal fires. Regardless of trigger outcome,
+	// every returned signal (if any) must be well-formed.
+	for i, sig := range signals {
+		assert.Equal(t, "600001.SH", sig.Symbol, "signal %d symbol", i)
+		assert.Contains(t, []string{"buy", "sell"}, sig.Action, "signal %d action must be buy or sell", i)
+		assert.Greater(t, sig.Strength, 0.0, "signal %d strength must be positive", i)
+		assert.Greater(t, sig.Price, 0.0, "signal %d price must be positive", i)
+	}
 }
 
 // TestTDSequentialStrategy tests the TD Sequential strategy

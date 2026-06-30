@@ -121,7 +121,10 @@ func TestBoundary_StopLossChecker_CalculateStopLossPrice_ZeroATR(t *testing.T) {
 // --- Test 5: StopLossChecker CalculateStopLossPrice with negative ATR ---
 
 func TestBoundary_StopLossChecker_CalculateStopLossPrice_NegativeATR(t *testing.T) {
-	cfg := StopLossConfig{ATRPeriod: 14, BaseMultiplier: 2.0}
+	// Set BullMultiplier explicitly so the regime-aware path actually applies a
+	// non-zero multiplier. Without it, BullMultiplier defaults to 0 and the
+	// result degenerates to entryPrice regardless of ATR.
+	cfg := StopLossConfig{ATRPeriod: 14, BaseMultiplier: 2.0, BullMultiplier: 2.0}
 	slc := NewStopLossChecker(cfg, nopLogger)
 
 	entryPrice := 100.0
@@ -129,9 +132,16 @@ func TestBoundary_StopLossChecker_CalculateStopLossPrice_NegativeATR(t *testing.
 	regime := &domain.MarketRegime{Trend: "bull"}
 
 	stopLoss := slc.CalculateStopLossPrice(entryPrice, atr, regime)
-	// With negative ATR, stop loss = entry - (mult * neg) = entry + positive
-	// This is a degenerate case; we just verify no panic.
-	_ = stopLoss
+	// stopLoss = entry - (multiplier * atr) = 100 - (2.0 * -5.0) = 100 + 10 = 110.
+	// A negative ATR inverts the stop loss direction (above entry instead of below),
+	// which is a degenerate case — but the arithmetic must be correct.
+	expected := entryPrice - (2.0 * atr)
+	if stopLoss != expected {
+		t.Errorf("stopLoss with negative ATR = %v, want %v", stopLoss, expected)
+	}
+	if stopLoss <= entryPrice {
+		t.Errorf("stopLoss (%v) should be above entryPrice (%v) when ATR is negative", stopLoss, entryPrice)
+	}
 }
 
 // --- Test 6: StopLossChecker CalculateStopLossPrice with nil regime ---

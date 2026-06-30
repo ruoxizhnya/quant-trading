@@ -4,11 +4,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/stretchr/testify/assert"
 )
 
 // ============================================================
@@ -455,6 +456,14 @@ func TestChecker_ConcurrentSetAndCheck(t *testing.T) {
 	positions := []domain.Position{makePos("X.SH", 1000, 10.00)}
 	prices := map[string]float64{"X.SH": 12.00}
 
+	// Track Check results for post-hoc validation. Every Check call sees a
+	// consistent rule map (RWMutex-protected). With price=12.00 and
+	// avgCost=10.00 (profit=20%), all configured thresholds (0%, 5%, 10%,
+	// 15%, 20%) fire at `currentPrice >= trigger`, so every Check must
+	// return exactly one action for X.SH.
+	var checkOK int64
+	var checkCount int64
+
 	// 8 个 goroutine 并发 SetRule + Check, 用 race detector 检测.
 	for i := 0; i < 8; i++ {
 		wg.Add(2)
@@ -464,11 +473,17 @@ func TestChecker_ConcurrentSetAndCheck(t *testing.T) {
 		}(i)
 		go func() {
 			defer wg.Done()
-			_ = c.Check(positions, prices)
+			actions := c.Check(positions, prices)
+			atomic.AddInt64(&checkCount, 1)
+			if len(actions) == 1 && actions[0].Symbol == "X.SH" {
+				atomic.AddInt64(&checkOK, 1)
+			}
 		}()
 	}
 	wg.Wait()
-	_ = time.Second
+
+	assert.Equal(t, int64(8), atomic.LoadInt64(&checkCount), "all 8 Check calls must complete")
+	assert.Equal(t, int64(8), atomic.LoadInt64(&checkOK), "every Check must return exactly one X.SH action")
 }
 
 // TestNewTieredTakeProfit_SourceHasNoPanic is a regression guard for
