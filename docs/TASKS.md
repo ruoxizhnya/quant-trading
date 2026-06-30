@@ -1604,7 +1604,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | S7-P1-3 | 抽取 BacktestRunner 接口到 pkg/ai/contracts/（消除 3 处重复定义） | `pkg/ai/contracts/` 新建 | ✅ | ODR-043 |
 | S7-P1-4 | 修复费率配置三重定义（const aliasing backtest 5 常量到 fees + 修复 D1/D2/D5 数值 bug） | `pkg/backtest/constants.go`, `pkg/domain/execution.go`, `pkg/ai/yaml/generator.go` | ✅ | ODR-043 |
 | S7-P1-5 | 补 pkg/ai 顶层 5 子系统测试（client/cost/metrics/ratelimit/tracer 当前 0%） | `pkg/ai/tracer_test.go`, `pkg/ai/ratelimit_test.go`, `pkg/ai/cost_test.go`, `pkg/ai/metrics_test.go`, `pkg/ai/retry_test.go`, `pkg/ai/client_http_test.go` | ✅ | ODR-043 |
-| S7-P1-6 | 修复 6 个无断言弱测试 + 改 40 处 time.Sleep 并发测试为 channel | 多处 | ⬜ | ODR-043 |
+| S7-P1-6 | 修复 6 个无断言弱测试 + 改 40 处 time.Sleep 并发测试为 channel | `pkg/strategy/plugins/coverage_test.go`, `pkg/strategy/plugins/plugins_test.go`, `pkg/risk/boundary_test.go`, `pkg/risk/take_profit_test.go`, `pkg/strategy/monitor/monitor_test.go`, `pkg/marketdata/backpressure_bus_test.go`, `pkg/marketdata/eventbus_test.go`, `pkg/sync/worker_test.go` | ✅ | ODR-043 |
 
 ### 🟡 P2 — 中优先级改进（2-3 sprint）
 
