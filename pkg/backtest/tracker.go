@@ -9,6 +9,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/fees"
+	"github.com/ruoxizhnya/quant-trading/pkg/portfolio"
+	"github.com/ruoxizhnya/quant-trading/pkg/settlement"
 )
 
 // Tracker maintains portfolio state during a backtest run.
@@ -84,6 +87,24 @@ func (t *Tracker) GetShortSellingRate() float64 {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.shortSellingRate
+}
+
+// feeSchedule returns the tracker's fee configuration as a fees.AShareFees
+// struct, for use with portfolio.ComputeFees (S7-P1-1). This bridges the
+// flat Tracker fields (commissionRate + trading.*) to the shared fee-
+// calculation primitive, ensuring tracker and mock_trader can never drift
+// on the commission/transfer/stamp formula.
+//
+// Callers must already hold t.mu (Lock or RLock) — this method is lock-free
+// to avoid reentrant RLock deadlock (Go's sync.RWMutex is NOT reentrant).
+func (t *Tracker) feeSchedule() fees.AShareFees {
+	return fees.AShareFees{
+		CommissionRate:  t.commissionRate,
+		StampTaxRate:    t.trading.StampTaxRate,
+		TransferFeeRate: t.trading.TransferFeeRate,
+		MinCommission:   t.trading.MinCommission,
+		SlippageRate:    t.slippageRate,
+	}
 }
 
 // GetPosition returns a copy of the position for a symbol.
@@ -223,15 +244,11 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 	}
 
 	tradeValue := filledQty * executionPrice
-	commission := max(tradeValue*t.commissionRate, t.trading.MinCommission)
-	transferFee := tradeValue * t.trading.TransferFeeRate
-
-	// Stamp tax applies to all sell trades: closing long (DirectionClose) and opening short (DirectionShort)
-	// A-share stamp tax: 0.1% charged on ALL sell transactions
-	stampTax := 0.0
-	if direction == domain.DirectionClose || direction == domain.DirectionShort {
-		stampTax = tradeValue * t.trading.StampTaxRate
-	}
+	// S7-P1-1: delegate fee math to the shared primitive. Stamp tax
+	// applies on the sell side: closing long (DirectionClose) and opening
+	// short (DirectionShort). A-share stamp tax: 0.1% on ALL sells.
+	isSell := direction == domain.DirectionClose || direction == domain.DirectionShort
+	fb := portfolio.ComputeFees(tradeValue, isSell, t.feeSchedule())
 
 	trade := &domain.Trade{
 		ID:          uuid.New().String(),
@@ -240,9 +257,9 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 		Quantity:    filledQty,
 		FilledQty:   filledQty,
 		Price:       executionPrice,
-		Commission:  commission,
-		TransferFee: transferFee,
-		StampTax:    stampTax,
+		Commission:  fb.Commission,
+		TransferFee: fb.TransferFee,
+		StampTax:    fb.StampTax,
 		Timestamp:   timestamp,
 		PendingQty:  quantity - filledQty, // track unfilled portion
 	}
@@ -250,7 +267,7 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 	switch direction {
 	case domain.DirectionLong:
 		// Cost includes commission + transfer fee (stamp tax does not apply to buy)
-		cost := tradeValue + commission + transferFee
+		cost := tradeValue + fb.Total()
 		if cost > t.cash {
 			return nil, fmt.Errorf("insufficient cash: required %.2f, available %.2f", cost, t.cash)
 		}
@@ -260,7 +277,7 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 
 		if existing, exists := t.positions[symbol]; exists {
 			totalQty := existing.Quantity + filledQty
-			if abs(totalQty) < 1e-8 {
+			if settlement.IsFlat(totalQty) {
 				// S7-P0-17 (ODR-043): the buy exactly offsets an existing
 				// short (e.g. short 100 + buy 100 = flat). Delete the
 				// position so a later close returns "position not found"
@@ -298,12 +315,12 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 
 	case domain.DirectionShort:
 		// Short selling: receive cash, owe shares (commission + transfer fee deducted)
-		proceeds := tradeValue - commission - transferFee
+		proceeds := tradeValue - fb.Total()
 		t.cash += proceeds
 
 		if existing, exists := t.positions[symbol]; exists {
 			existing.Quantity -= filledQty
-			if abs(existing.Quantity) < 1e-8 {
+			if settlement.IsFlat(existing.Quantity) {
 				// S7-P0-17 (ODR-043): the short exactly offsets an existing
 				// long (e.g. long 100 + short 100 = flat). Delete the ghost
 				// position; see the matching guard in DirectionLong above.
@@ -362,25 +379,24 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 						Msg("T+1 partial fill: reducing sell quantity to sellable shares")
 				}
 
-				// Recalculate commission, transfer fee, and stamp tax based on actualQty
+				// Recalculate commission, transfer fee, and stamp tax based on actualQty.
+				// S7-P1-1: closing long is a sell-side transaction (stamp tax applies).
 				actualTradeValue := actualQty * executionPrice
-				actualCommission := max(actualTradeValue*t.commissionRate, t.trading.MinCommission)
-				actualTransferFee := actualTradeValue * t.trading.TransferFeeRate
-				actualStampTax := actualTradeValue * t.trading.StampTaxRate
+				actualFb := portfolio.ComputeFees(actualTradeValue, true, t.feeSchedule())
 
 				// Update trade record
 				trade.Quantity = actualQty
-				trade.Commission = actualCommission
-				trade.TransferFee = actualTransferFee
-				trade.StampTax = actualStampTax
+				trade.Commission = actualFb.Commission
+				trade.TransferFee = actualFb.TransferFee
+				trade.StampTax = actualFb.StampTax
 
 				// Update yesterday qty
 				pos.QuantityYesterday -= actualQty
 
 				// Closing long: apply stamp tax (0.1%) + commission, calculate PnL
 				pnl := (executionPrice - pos.AvgCost) * actualQty
-				pos.RealizedPnL += pnl - actualCommission - actualStampTax
-				t.cash += actualQty*executionPrice - actualCommission - actualTransferFee - actualStampTax
+				pos.RealizedPnL += pnl - actualFb.Commission - actualFb.StampTax
+				t.cash += actualQty*executionPrice - actualFb.Total()
 				pos.Quantity -= actualQty
 			} else {
 				// Closing short position — no T+1 restriction
@@ -388,24 +404,24 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 				if actualQty <= 0 {
 					return nil, fmt.Errorf("cannot close position: quantity is zero")
 				}
+				// S7-P1-1: closing short is a buy-back (no stamp tax).
 				actualTradeValue := actualQty * executionPrice
-				actualCommission := max(actualTradeValue*t.commissionRate, t.trading.MinCommission)
-				actualTransferFee := actualTradeValue * t.trading.TransferFeeRate
+				actualFb := portfolio.ComputeFees(actualTradeValue, false, t.feeSchedule())
 
 				// Update trade record with actual values
 				trade.Quantity = actualQty
-				trade.Commission = actualCommission
-				trade.TransferFee = actualTransferFee
+				trade.Commission = actualFb.Commission
+				trade.TransferFee = actualFb.TransferFee
 				// No stamp tax for short close (stamp tax only on sell of long positions)
 
 				pnl := (pos.AvgCost - executionPrice) * actualQty
-				pos.RealizedPnL += pnl - actualCommission - actualTransferFee
-				t.cash += actualQty*executionPrice - actualCommission - actualTransferFee
+				pos.RealizedPnL += pnl - actualFb.Commission - actualFb.TransferFee
+				t.cash += actualQty*executionPrice - actualFb.Commission - actualFb.TransferFee
 				pos.Quantity += actualQty
 			}
 
 			// Remove position if fully closed
-			if abs(pos.Quantity) < 1e-8 {
+			if settlement.IsFlat(pos.Quantity) {
 				delete(t.positions, symbol)
 			}
 		} else {
@@ -443,7 +459,7 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 		Str("order_type", string(orderType)).
 		Float64("filled_qty", filledQty).
 		Float64("price", executionPrice).
-		Float64("commission", commission).
+		Float64("commission", fb.Commission).
 		Str("status", orderStatus).
 		Time("timestamp", timestamp).
 		Msg("Trade executed")
@@ -487,7 +503,7 @@ func (t *Tracker) ApplyTrade(trade domain.Trade) (*domain.Trade, error) {
 
 		if existing, exists := t.positions[symbol]; exists {
 			totalQty := existing.Quantity + quantity
-			if abs(totalQty) < 1e-8 {
+			if settlement.IsFlat(totalQty) {
 				// S7-P0-17 (ODR-043): buy exactly offsets existing short
 				// → flat. Delete to avoid ghost zero-quantity position and
 				// AvgCost NaN. See ExecuteTrade for the full rationale.
@@ -525,7 +541,7 @@ func (t *Tracker) ApplyTrade(trade domain.Trade) (*domain.Trade, error) {
 
 		if existing, exists := t.positions[symbol]; exists {
 			existing.Quantity -= quantity
-			if abs(existing.Quantity) < 1e-8 {
+			if settlement.IsFlat(existing.Quantity) {
 				// S7-P0-17 (ODR-043): short exactly offsets existing long
 				// → flat. Delete the ghost position.
 				delete(t.positions, symbol)
@@ -562,20 +578,19 @@ func (t *Tracker) ApplyTrade(trade domain.Trade) (*domain.Trade, error) {
 				}
 
 				actualTradeValue := actualQty * executionPrice
-				actualCommission := max(actualTradeValue*t.commissionRate, t.trading.MinCommission)
-				actualTransferFee := actualTradeValue * t.trading.TransferFeeRate
-				actualStampTax := actualTradeValue * t.trading.StampTaxRate
+				// S7-P1-1: closing long is a sell-side transaction (stamp tax applies).
+				actualFb := portfolio.ComputeFees(actualTradeValue, true, t.feeSchedule())
 
 				// Override trade values with actual
 				trade.Quantity = actualQty
-				trade.Commission = actualCommission
-				trade.TransferFee = actualTransferFee
-				trade.StampTax = actualStampTax
+				trade.Commission = actualFb.Commission
+				trade.TransferFee = actualFb.TransferFee
+				trade.StampTax = actualFb.StampTax
 
 				pos.QuantityYesterday -= actualQty
 				pnl := (executionPrice - pos.AvgCost) * actualQty
-				pos.RealizedPnL += pnl - actualCommission - actualStampTax
-				t.cash += actualQty*executionPrice - actualCommission - actualTransferFee - actualStampTax
+				pos.RealizedPnL += pnl - actualFb.Commission - actualFb.StampTax
+				t.cash += actualQty*executionPrice - actualFb.Total()
 				pos.Quantity -= actualQty
 			} else {
 				// Closing short position
@@ -583,21 +598,21 @@ func (t *Tracker) ApplyTrade(trade domain.Trade) (*domain.Trade, error) {
 				if actualQty <= 0 {
 					return nil, fmt.Errorf("cannot close position: quantity is zero")
 				}
+				// S7-P1-1: closing short is a buy-back (no stamp tax).
 				actualTradeValue := actualQty * executionPrice
-				actualCommission := max(actualTradeValue*t.commissionRate, t.trading.MinCommission)
-				actualTransferFee := actualTradeValue * t.trading.TransferFeeRate
+				actualFb := portfolio.ComputeFees(actualTradeValue, false, t.feeSchedule())
 
 				trade.Quantity = actualQty
-				trade.Commission = actualCommission
-				trade.TransferFee = actualTransferFee
+				trade.Commission = actualFb.Commission
+				trade.TransferFee = actualFb.TransferFee
 
 				pnl := (pos.AvgCost - executionPrice) * actualQty
-				pos.RealizedPnL += pnl - actualCommission - actualTransferFee
-				t.cash += actualQty*executionPrice - actualCommission - actualTransferFee
+				pos.RealizedPnL += pnl - actualFb.Commission - actualFb.TransferFee
+				t.cash += actualQty*executionPrice - actualFb.Commission - actualFb.TransferFee
 				pos.Quantity += actualQty
 			}
 
-			if abs(pos.Quantity) < 1e-8 {
+			if settlement.IsFlat(pos.Quantity) {
 				delete(t.positions, symbol)
 			}
 		} else {
@@ -849,7 +864,7 @@ func (t *Tracker) HasPosition(symbol string) bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	pos, exists := t.positions[symbol]
-	return exists && abs(pos.Quantity) > 1e-8
+	return exists && !settlement.IsFlat(pos.Quantity)
 }
 
 // GetPortfolio returns a snapshot of the current portfolio state.
