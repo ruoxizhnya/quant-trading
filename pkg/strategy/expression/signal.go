@@ -44,6 +44,7 @@ type SignalConfig struct {
 	Action      string           // "buy" or "sell"
 	Direction   domain.Direction // DirectionLong, DirectionShort, DirectionClose
 	MinStrength float64          // minimum value to emit a signal (default 0)
+	Lookback    int              // evaluator lookback window in trading days (default 60 if <= 0)
 }
 
 // SignalGenerator turns a DSL expression into trading signals.
@@ -82,10 +83,15 @@ func NewSignalGenerator(cfg SignalConfig) (*SignalGenerator, error) {
 		return nil, fmt.Errorf("signal: parse expression %q: %w", cfg.Expression, err)
 	}
 
+	lookback := cfg.Lookback
+	if lookback <= 0 {
+		lookback = defaultLookback
+	}
+
 	return &SignalGenerator{
 		cfg:      cfg,
 		ast:      expr,
-		lookback: defaultLookback,
+		lookback: lookback,
 	}, nil
 }
 
