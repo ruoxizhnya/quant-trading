@@ -1612,7 +1612,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 |----|------|------|------|------|
 | S7-P2-1 | 拆分 pkg/backtest 上帝包为子包（12 职责 → 12 子包） | `pkg/backtest/` | ⬜ | ODR-043 |
 | S7-P2-2 | 拆分 pkg/live 上帝包为子包（6 职责 → 子包，margin.go 1367 行拆 3 文件） | `pkg/live/` | ⬜ | ODR-043 |
-| S7-P2-3 | 拆分 cmd/analysis/main.go 372 行 main() 函数 | `cmd/analysis/main.go:86` | ⬜ | ODR-043 |
+| S7-P2-3 | 拆分 cmd/analysis/main.go 372 行 main() 函数 | `cmd/analysis/main.go`, `cmd/analysis/setup.go`, `cmd/analysis/setup_test.go` | ✅ | ODR-043 |
 | S7-P2-4 | 拆分 registerRoutes 16 参数函数为 ServerDeps 结构体 | `cmd/analysis/main.go:475` | ⬜ | ODR-043 |
 | S7-P2-5 | 拆分 cmd/data/main.go (1713 行 God File) | `cmd/data/main.go` | ⬜ | ODR-043 |
 | S7-P2-6 | 前端补 ESLint + @vitest/coverage-v8 依赖 + lint/typecheck 脚本 | `web/package.json` | ⬜ | ODR-043 |
