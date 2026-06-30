@@ -621,6 +621,77 @@ SELECT create_hypertable('factor_cache', 'date');
 
 ---
 
+## Tools API (S7-P3-3)
+
+> 架构方向：本服务作为对外的工具提供方，外部 agent 通过 HTTP 调用工具。
+
+### GET /api/tools
+
+列出所有已注册工具及其 schema。
+
+**响应**:
+```json
+{
+  "tools": [
+    {
+      "name": "backtest.run",
+      "description": "Run a backtest for a strategy",
+      "parameters": [...],
+      "output_schema": {...}
+    }
+  ],
+  "count": 8
+}
+```
+
+### GET /api/tools/:name
+
+获取单个工具的 schema。
+
+**响应**: `ToolInfo` 对象（name + description + parameters + output_schema）
+
+**错误**:
+- `404` `{"error": "...", "code": "TOOL_NOT_REGISTERED"}`
+
+### POST /api/tools/:name
+
+执行工具。
+
+**请求体**:
+```json
+{
+  "args": {
+    "strategy_name": "momentum",
+    "stock_pool": ["000001.SZ"],
+    "start_date": "2022-01-01",
+    "end_date": "2024-01-01"
+  }
+}
+```
+
+**响应**: `{"result": <任意 JSON 值>}`
+
+**错误**:
+- `404` `TOOL_NOT_REGISTERED` — 工具名未注册
+- `400` `INVALID_ARGS` — 参数缺失或类型错误
+- `400` `INVALID_BODY` — 请求体非合法 JSON
+- `500` `TOOL_EXECUTION_FAILED` — 工具执行失败
+
+### 内置工具
+
+| 工具名 | 参数 | 输出 |
+|--------|------|------|
+| `backtest.run` | strategy_name, stock_pool, start_date, end_date | BacktestResult |
+| `factor.compute` | formula, symbols, start_date, end_date | map[string][]float64 |
+| `factor.evaluate` | formula, symbols, start_date, end_date | FactorMetrics |
+| `data.ohlcv` | symbol, start_date, end_date | []OHLCV |
+| `data.stocks` | symbol? | []Stock |
+| `data.fundamentals` | symbol | []Fundamental |
+| `strategy.list` | (无) | []StrategyInfo |
+| `strategy.get` | name | StrategyInfo |
+
+---
+
 ## Microservices
 
 ### 1. Data Service (port 8081)

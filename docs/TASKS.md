@@ -1626,7 +1626,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 |----|------|------|------|------|
 | S7-P3-1 | 扩展表达式引擎到信号/仓位/风控层 + ExpressionStrategy 适配器（cs_neutralize 2-arg 修复 + SignalGenerator + PositionSizer + RiskController + OHLCVDataProvider + ExpressionStrategy 自注册） | `pkg/ai/expression/`, `pkg/strategy/expression/` | ✅ | ODR-043 |
 | S7-P3-2 | 实现 YAML → ExpressionStrategy 加载器（让 AI 输出 YAML 即可执行） | `pkg/ai/yaml/` | ✅ | ODR-043 |
-| S7-P3-3 | 建 pkg/tools/registry.go Tools Registry（AI 一等居民的最后一公里） | `pkg/tools/` 新建 | ⬜ | ODR-043 |
+| S7-P3-3 | 建 pkg/tools/registry.go Tools Registry（对外工具提供方：pkg/tools + 4 builtin Tool + /api/tools HTTP API） | `pkg/tools/`, `cmd/analysis/handlers_tools.go` | ✅ | ODR-043 |
 | S7-P3-4 | 数据层"软分层" — 新增 pkg/domain/market/ 子包 + view 过渡 | `pkg/domain/market/` 新建 | ⬜ | ODR-043 |
 | S7-P3-5 | 修复全部文档漂移（ARCHITECTURE/VISION/SPEC 同步 ODR-021 服务合并） | `docs/ARCHITECTURE.md` 等 | ⬜ | ODR-043 |
 | S7-P3-6 | 标记 ADR-014 为 Superseded by ADR-020 §6 + 更新 ADR-015/019/020 状态 | `docs/adr/adr-014*.md` 等 | ⬜ | ODR-043 |
