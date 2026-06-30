@@ -1,17 +1,29 @@
 package backtest
 
-import "time"
+import (
+	"time"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/fees"
+)
 
 // A-Share trading rules (default values)
+//
+// S7-P1-4 (ODR-043): The five fee constants below are const-aliased to
+// pkg/fees (the single source of truth) instead of being independent
+// literals. Const aliasing is zero-cost (compile-time inlining) and
+// type-safe for untyped constants. This eliminates the drift hazard
+// where changing a rate in pkg/fees would not propagate to pkg/backtest,
+// causing backtest-vs-live P&L divergence. See constants_drift_test.go
+// for the guard test.
 const (
 	// StampTaxRate is the stamp tax rate for selling A-shares (0.1%)
-	DefaultStampTaxRate = 0.001
+	DefaultStampTaxRate = fees.DefaultStampTaxRate
 
 	// MinCommission is the minimum commission per transaction (¥5)
-	DefaultMinCommission = 5.0
+	DefaultMinCommission = fees.DefaultMinCommission
 
 	// TransferFeeRate is the transfer fee rate (0.001%)
-	DefaultTransferFeeRate = 0.00001
+	DefaultTransferFeeRate = fees.DefaultTransferFeeRate
 
 	// PriceLimitNormal is the daily price limit for normal stocks (±10%)
 	DefaultPriceLimitNormal = 0.10
@@ -32,10 +44,10 @@ const (
 	DefaultInitialCapital = 1_000_000.0
 
 	// DefaultCommissionRate is the default broker commission rate (0.03%)
-	DefaultCommissionRate = 0.0003
+	DefaultCommissionRate = fees.DefaultCommissionRate
 
 	// DefaultSlippageRate is the default slippage assumption (0.01%)
-	DefaultSlippageRate = 0.0001
+	DefaultSlippageRate = fees.DefaultSlippageRate
 
 	// DefaultRiskFreeRate is the annual risk-free rate (3%, approx. Chinese bond yield)
 	DefaultRiskFreeRate = 0.03
