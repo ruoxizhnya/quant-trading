@@ -530,11 +530,35 @@ type Strategy interface {
 | bollinger_mr | `plugins/new_strategies.go` | 布林带均值回归：限价单买入（下轨挂单） |
 | vpt | `plugins/new_strategies.go` | 量价趋势：成交量确认价格突破 |
 | vol_breakout | `plugins/new_strategies.go` | 波动率突破：ATR 通道突破 |
+| expression_template | `expression/strategy.go` | DSL 表达式策略：cs_rank/sizing/risk 全流程（S7-P3-1） |
 
 ### 策略加载流程
-1. `plugins/` 包通过 `init()` 自动注册到 `strategy.GlobalRegistry`
-2. `analysis-service` 启动时 `import _ "pkg/strategy/plugins"` 触发注册
+1. `plugins/` 和 `expression/` 包通过 `init()` 自动注册到 `strategy.GlobalRegistry`
+2. `analysis-service` 启动时 `import _ "pkg/strategy/plugins"` 和 `import _ "pkg/strategy/expression"` 触发注册
 3. 回测时 engine 先查本地 registry，fallback 到外部 strategy-service
+
+### ExpressionStrategy 架构 (pkg/strategy/expression/, S7-P3-1)
+
+DSL 表达式 → 策略的端到端流水线，让 AI 输出的 YAML 表达式可直接作为策略运行：
+
+```
+GenerateSignals(ctx, bars, portfolio)
+  │
+  ├─ NewOHLCVDataProvider(bars)      → aiexpr.DataProvider 适配
+  ├─ aiexpr.NewEvaluator(provider)   → 表达式求值器
+  ├─ SignalGenerator.Generate()      → DSL 表达式 → []Signal (truthy 过滤)
+  ├─ PositionSizer.Size()            → equal/strength_prop/fixed 权重
+  ├─ RiskController.Check()          → 单仓上限 + 持仓数 + 现金缓冲
+  └─ 返回 signals (Strength = 最终权重, Metadata.raw_strength = 原始 DSL 值)
+```
+
+**组件层级**:
+- `pkg/ai/expression/` — DSL 解析器 + AST + 求值器 (cs_rank/cs_zscore/cs_neutralize/ts_*)
+- `pkg/strategy/expression/signal.go` — SignalGenerator: DSL → Signal
+- `pkg/strategy/expression/sizing.go` — PositionSizer: Signal → 权重
+- `pkg/strategy/expression/risk.go` — RiskController: 权重 → 风控过滤
+- `pkg/strategy/expression/data_provider.go` — OHLCVDataProvider: bars → DataProvider
+- `pkg/strategy/expression/strategy.go` — ExpressionStrategy: 组合以上为 strategy.Strategy
 
 ---
 
