@@ -18,6 +18,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
 	"github.com/ruoxizhnya/quant-trading/pkg/risk"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
+	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 	"github.com/spf13/viper"
 )
 
@@ -73,4 +74,10 @@ type ServerDeps struct {
 	// Viper — config reader, used by registerRoutes to load the
 	// default suitability profile and large-trade reporter config.
 	Viper *viper.Viper
+
+	// ToolsRegistry — S7-P3-3 (ODR-043): the Tools Registry exposes
+	// backtest/factor/data/strategy capabilities as discoverable Tools
+	// over /api/tools/*. Enables external agent services to call this
+	// platform without reading SPEC.md or hand-crafting HTTP requests.
+	ToolsRegistry *tools.Registry
 }

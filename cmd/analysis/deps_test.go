@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
+	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,7 +20,7 @@ import (
 // every dependency registerRoutes needs. S7-P2-4 (ODR-043): the
 // struct replaces 16 positional parameters — this test guards against
 // accidental field removal or renaming by enumerating the canonical
-// set of 16 fields.
+// set of fields. S7-P3-3 added ToolsRegistry (17th field).
 func TestServerDeps_HasExpectedFields(t *testing.T) {
 	t.Parallel()
 
@@ -40,6 +41,7 @@ func TestServerDeps_HasExpectedFields(t *testing.T) {
 		"Metrics",
 		"Logger",
 		"Viper",
+		"ToolsRegistry",
 	}
 
 	typ := reflect.TypeOf(ServerDeps{})
@@ -104,6 +106,7 @@ func TestServerDeps_FieldsAreTyped(t *testing.T) {
 //   - deps.Viper  (loadDefaultSuitabilityProfile + reporterCfg read keys now)
 //   - deps.Logger (passed by value; zero value is usable)
 //   - deps.Metrics (observability.Handler is nil-safe, returns 503)
+//   - deps.ToolsRegistry (NewToolsHandler panics on nil — provide empty registry)
 func newMinimalDeps() *ServerDeps {
 	return &ServerDeps{
 		Viper:  viper.New(),
@@ -115,6 +118,7 @@ func newMinimalDeps() *ServerDeps {
 			// the /metrics handler still works (returns an empty scrape).
 			return observability.NewMetrics()
 		}(),
+		ToolsRegistry: tools.NewRegistry(),
 	}
 }
 
@@ -166,6 +170,7 @@ func TestRegisterRoutes_RegistersCoreEndpoints(t *testing.T) {
 		"POST /api/risk/calculate_position", // RiskHandler
 		"POST /api/execution/orders",        // ExecutionHandler
 		"POST /api/compliance/check",        // ComplianceHandler
+		"GET /api/tools",                    // ToolsHandler (S7-P3-3)
 	}
 	for _, route := range handlerGroupSamples {
 		assert.True(t, seen[route],

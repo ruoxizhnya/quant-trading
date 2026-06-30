@@ -277,6 +277,11 @@ POST /api/factor/compute-returns  — 计算因子收益
 POST /api/factor/compute-ic       — 计算因子 IC
 GET  /api/factor/list             — 列出可用因子
 
+# Tools Registry (S7-P3-3, ODR-043) — 对外工具提供方
+GET  /api/tools              — 列出所有工具 + schema
+GET  /api/tools/:name        — 单工具 schema
+POST /api/tools/:name        — 执行工具 (body: {"args": {...}})
+
 # Legacy HTML (deprecated — use Vue SPA instead)
 GET  /, /screen, /dashboard, /copilot, /strategy-selector
 ```
@@ -808,6 +813,35 @@ Browser (:5173)                    Backend (:8085)
 
 `cmd/analysis/static/*.html` 是早期原型，功能已被 Vue SPA 完全替代。
 保留原因: 部分后端测试仍引用这些静态文件。计划在 Phase 3 移除。
+
+---
+
+## Tools Registry 架构 (pkg/tools/) — S7-P3-3
+
+> **设计方向**: 本服务 = 对外的 API/工具提供方；agent = 外部消费者，
+> 通过 HTTP 调用 `/api/tools/*` 发现并执行工具，基于响应生成 skills。
+
+### 包结构
+
+```
+pkg/tools/
+├── tool.go              # Tool 接口（ISP 拆分：ToolCore + SchemaProvider + Executable）
+├── registry.go          # Registry（factory 注入、allow replacement、sorted List）
+├── errors.go            # sentinel errors (ErrToolNotRegistered / ErrInvalidArgs / ...)
+├── helpers.go           # AsExecutable / AsSchemaProvider 类型断言
+└── builtin/
+    ├── backtest.go           # backtest.run → contracts.BacktestRunner
+    ├── factor.go             # factor.compute / factor.evaluate → client.FactorClient
+    ├── datafetch.go          # data.ohlcv / data.stocks / data.fundamentals → data-service HTTP
+    └── strategy_registry.go  # strategy.list / strategy.get → strategy.GlobalList/Get
+```
+
+### 设计要点
+
+- **共存适配器**: BacktestTool 委托给现有 `contracts.BacktestRunner`，不破坏现有 agent
+- **factory 注入**: Registry 通过 `ServerDeps.ToolsRegistry` 注入，无全局实例
+- **builtin/ 子包隔离**: `pkg/tools/` 保持纯净（只有接口），具体实现依赖在 `builtin/`
+- **8 个 builtin tool**: backtest.run, factor.compute, factor.evaluate, data.ohlcv, data.stocks, data.fundamentals, strategy.list, strategy.get
 
 ---
 

@@ -20,6 +20,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/client"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/alert"
 	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
@@ -31,6 +33,8 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/risk"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
+	"github.com/ruoxizhnya/quant-trading/pkg/tools"
+	"github.com/ruoxizhnya/quant-trading/pkg/tools/builtin"
 	"github.com/spf13/viper"
 )
 
@@ -340,6 +344,74 @@ func initStrategyAndPlugins(v *viper.Viper, store *storage.PostgresStore, logger
 		}
 	}
 	return strategyDB, pluginLoader
+}
+
+// buildToolsRegistry constructs the Tools Registry (S7-P3-3, ODR-043)
+// and registers the 4 builtin tool groups: backtest, factor, data-fetch,
+// strategy-registry. The registry is then exposed over /api/tools/* by
+// ToolsHandler, enabling external agent services to discover and invoke
+// platform capabilities without reading SPEC.md.
+//
+// Wiring notes:
+//   - BacktestTool reuses the same contracts.BacktestRunner (copilotRunner)
+//     already wired into the AI pipeline — zero duplication.
+//   - FactorTool uses an HTTP client pointed at this same service's
+//     /api/factor/* endpoints (the analysis-service proxies to itself;
+//     the factor endpoints are registered in registerFactorRoutes).
+//   - DataFetchTool uses the shared httpClient (observability + X-Request-ID)
+//     pointed at the data-service URL from viper config.
+//   - StrategyRegistryTool reads from the package-level strategy.DefaultRegistry,
+//     so no wiring is needed.
+func buildToolsRegistry(v *viper.Viper, runner contracts.BacktestRunner, logger zerolog.Logger) *tools.Registry {
+	reg := tools.NewRegistry()
+
+	// BacktestTool — delegates to the existing BacktestRunner.
+	if err := reg.Register(builtin.NewBacktestTool(runner)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register backtest.run tool")
+	}
+
+	// FactorTool — HTTP client pointed at this service's /api/factor/*.
+	// analysis-service listens on server.port (default 8085).
+	analysisURL := fmt.Sprintf("http://localhost:%d", v.GetInt("server.port"))
+	if v.GetInt("server.port") == 0 {
+		analysisURL = "http://localhost:8085"
+	}
+	factorClient := client.NewFactorClient(analysisURL)
+	if err := reg.Register(builtin.NewFactorComputeTool(factorClient)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register factor.compute tool")
+	}
+	if err := reg.Register(builtin.NewFactorEvaluateTool(factorClient)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register factor.evaluate tool")
+	}
+
+	// DataFetchTool — HTTP client pointed at data-service.
+	dataServiceURL := v.GetString("data_service.url")
+	if dataServiceURL == "" {
+		dataServiceURL = "http://localhost:8081"
+	}
+	dataClient := builtin.NewDataSourceClient(dataServiceURL, httpClient)
+	if err := reg.Register(builtin.NewDataOHLCVTool(dataClient)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register data.ohlcv tool")
+	}
+	if err := reg.Register(builtin.NewDataStocksTool(dataClient)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register data.stocks tool")
+	}
+	if err := reg.Register(builtin.NewDataFundamentalsTool(dataClient)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register data.fundamentals tool")
+	}
+
+	// StrategyRegistryTool — reads from strategy.DefaultRegistry.
+	if err := reg.Register(builtin.NewStrategyListTool()); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register strategy.list tool")
+	}
+	if err := reg.Register(builtin.NewStrategyGetTool()); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register strategy.get tool")
+	}
+
+	logger.Info().
+		Int("tool_count", len(reg.List())).
+		Msg("Tools Registry initialized (S7-P3-3): backtest/factor/data/strategy capabilities exposed at /api/tools/*")
+	return reg
 }
 
 // buildRouter creates the gin router with recovery, CORS, rate-limiting,

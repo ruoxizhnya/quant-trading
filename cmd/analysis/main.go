@@ -138,6 +138,11 @@ func main() {
 	copilotService, copilotRunner := buildCopilot(v, engine, logger)
 	strategyDB, pluginLoader := initStrategyAndPlugins(v, store, logger)
 
+	// S7-P3-3 (ODR-043): build the Tools Registry after copilotRunner
+	// is available (BacktestTool delegates to it) and after strategies
+	// are seeded (StrategyRegistryTool reads from the global registry).
+	toolsRegistry := buildToolsRegistry(v, copilotRunner, logger)
+
 	deps := &ServerDeps{
 		Engine:           engine,
 		JobService:       ds.JobService,
@@ -155,6 +160,7 @@ func main() {
 		Metrics:          m,
 		Logger:           logger,
 		Viper:            v,
+		ToolsRegistry:    toolsRegistry,
 	}
 
 	router := buildRouter(authSvc, v, logger)
@@ -309,6 +315,12 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 		AccountWhitelist:       map[string]bool{},
 	}
 	NewComplianceHandler(deps.Logger, defaultProfile, reporterCfg).RegisterRoutes(router)
+
+	// S7-P3-3 (ODR-043): Tools Registry endpoints. Exposes backtest /
+	// factor / data / strategy capabilities as discoverable Tools over
+	// /api/tools/* so external agent services can call without reading
+	// SPEC.md.
+	NewToolsHandler(deps.ToolsRegistry, deps.Logger).RegisterRoutes(router)
 }
 
 // loadDefaultSuitabilityProfile reads the suitability profile from
