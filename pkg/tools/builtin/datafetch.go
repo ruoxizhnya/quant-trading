@@ -12,30 +12,34 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 )
 
-// dataSourceClient is a minimal HTTP client for the data-service
+// DataSourceClient is a minimal HTTP client for the data-service
 // (port :8081). It exists only to serve the DataFetch* tools — a
 // future S7-P3-9 task may promote it to pkg/api/dataservice/ if more
-// callers need it, but for now keeping it unexported here avoids
-// premature abstraction.
+// callers need it, but for now keeping it here avoids premature
+// abstraction across packages.
 //
 // Concurrency: safe for concurrent use (the embedded *http.Client is
 // goroutine-safe; baseURL is set once at construction).
-type dataSourceClient struct {
+type DataSourceClient struct {
 	baseURL string
 	http    *http.Client
 }
 
-func newDataSourceClient(baseURL string, hc *http.Client) *dataSourceClient {
+// NewDataSourceClient constructs a DataSourceClient for the given
+// data-service base URL. If hc is nil, a default *http.Client with a
+// 30s timeout is used. In production, pass the shared httpClient from
+// cmd/analysis/main.go so outbound calls get observability + X-Request-ID.
+func NewDataSourceClient(baseURL string, hc *http.Client) *DataSourceClient {
 	if hc == nil {
 		hc = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &dataSourceClient{baseURL: strings.TrimRight(baseURL, "/"), http: hc}
+	return &DataSourceClient{baseURL: strings.TrimRight(baseURL, "/"), http: hc}
 }
 
 // doGet performs a GET request and decodes the JSON response into out.
 // The response body is expected to be a JSON object; the caller passes
 // the top-level key to extract (e.g. "ohlcv", "stock", "fundamentals").
-func (c *dataSourceClient) doGet(ctx context.Context, path string, key string, out interface{}) error {
+func (c *DataSourceClient) doGet(ctx context.Context, path string, key string, out interface{}) error {
 	url := c.baseURL + path
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -101,16 +105,16 @@ func toYYYYMMDD(s string) string {
 // marshals it directly to JSON for the external agent, and the schema
 // documents the fields.
 type DataOHLCVTool struct {
-	c *dataSourceClient
+	c *DataSourceClient
 }
 
 var _ tools.Tool = (*DataOHLCVTool)(nil)
 
 // NewDataOHLCVTool constructs a DataOHLCVTool backed by the given
 // data-service client. Panics if c is nil.
-func NewDataOHLCVTool(c *dataSourceClient) *DataOHLCVTool {
+func NewDataOHLCVTool(c *DataSourceClient) *DataOHLCVTool {
 	if c == nil {
-		panic("builtin: NewDataOHLCVTool called with nil dataSourceClient")
+		panic("builtin: NewDataOHLCVTool called with nil DataSourceClient")
 	}
 	return &DataOHLCVTool{c: c}
 }
@@ -196,15 +200,15 @@ func (t *DataOHLCVTool) Execute(ctx context.Context, args map[string]interface{}
 // Input: symbol (optional)
 // Output: []map[string]interface{} (always a slice for JSON uniformity)
 type DataStocksTool struct {
-	c *dataSourceClient
+	c *DataSourceClient
 }
 
 var _ tools.Tool = (*DataStocksTool)(nil)
 
 // NewDataStocksTool constructs a DataStocksTool. Panics if c is nil.
-func NewDataStocksTool(c *dataSourceClient) *DataStocksTool {
+func NewDataStocksTool(c *DataSourceClient) *DataStocksTool {
 	if c == nil {
-		panic("builtin: NewDataStocksTool called with nil dataSourceClient")
+		panic("builtin: NewDataStocksTool called with nil DataSourceClient")
 	}
 	return &DataStocksTool{c: c}
 }
@@ -281,15 +285,15 @@ func (t *DataStocksTool) Execute(ctx context.Context, args map[string]interface{
 // Input: symbol (required), start_date (optional), end_date (optional)
 // Output: []map[string]interface{}
 type DataFundamentalsTool struct {
-	c *dataSourceClient
+	c *DataSourceClient
 }
 
 var _ tools.Tool = (*DataFundamentalsTool)(nil)
 
 // NewDataFundamentalsTool constructs a DataFundamentalsTool. Panics if c is nil.
-func NewDataFundamentalsTool(c *dataSourceClient) *DataFundamentalsTool {
+func NewDataFundamentalsTool(c *DataSourceClient) *DataFundamentalsTool {
 	if c == nil {
-		panic("builtin: NewDataFundamentalsTool called with nil dataSourceClient")
+		panic("builtin: NewDataFundamentalsTool called with nil DataSourceClient")
 	}
 	return &DataFundamentalsTool{c: c}
 }

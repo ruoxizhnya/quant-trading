@@ -93,13 +93,13 @@ func (s *dataTestServer) close() { s.server.Close() }
 // ─── DataOHLCVTool tests ──────────────────────────────────────────────
 
 func TestDataOHLCVTool_Name(t *testing.T) {
-	c := newDataSourceClient("http://x", nil)
+	c := NewDataSourceClient("http://x", nil)
 	tt := NewDataOHLCVTool(c)
 	assert.Equal(t, "data.ohlcv", tt.Name())
 }
 
 func TestDataOHLCVTool_Parameters(t *testing.T) {
-	c := newDataSourceClient("http://x", nil)
+	c := NewDataSourceClient("http://x", nil)
 	tt := NewDataOHLCVTool(c)
 	params := tt.Parameters()
 	require.Len(t, params, 3)
@@ -109,7 +109,7 @@ func TestDataOHLCVTool_Parameters(t *testing.T) {
 }
 
 func TestDataOHLCVTool_OutputSchema(t *testing.T) {
-	c := newDataSourceClient("http://x", nil)
+	c := NewDataSourceClient("http://x", nil)
 	tt := NewDataOHLCVTool(c)
 	schema := tt.OutputSchema()
 	assert.Equal(t, "array", schema.Type)
@@ -120,7 +120,7 @@ func TestDataOHLCVTool_Execute_HappyPath(t *testing.T) {
 	srv := newDataTestServer()
 	defer srv.close()
 
-	c := newDataSourceClient(srv.server.URL, nil)
+	c := NewDataSourceClient(srv.server.URL, nil)
 	tt := NewDataOHLCVTool(c)
 
 	args := map[string]interface{}{
@@ -146,7 +146,7 @@ func TestDataOHLCVTool_Execute_MissingSymbol(t *testing.T) {
 	srv := newDataTestServer()
 	defer srv.close()
 
-	tt := NewDataOHLCVTool(newDataSourceClient(srv.server.URL, nil))
+	tt := NewDataOHLCVTool(NewDataSourceClient(srv.server.URL, nil))
 	args := map[string]interface{}{
 		"start_date": "2022-01-01",
 		"end_date":   "2022-01-31",
@@ -161,7 +161,7 @@ func TestDataOHLCVTool_Execute_MissingStartDate(t *testing.T) {
 	srv := newDataTestServer()
 	defer srv.close()
 
-	tt := NewDataOHLCVTool(newDataSourceClient(srv.server.URL, nil))
+	tt := NewDataOHLCVTool(NewDataSourceClient(srv.server.URL, nil))
 	args := map[string]interface{}{
 		"symbol":   "000001.SZ",
 		"end_date": "2022-01-31",
@@ -177,7 +177,7 @@ func TestDataOHLCVTool_Execute_DownstreamError(t *testing.T) {
 	srv.failWith = "data-service down"
 	defer srv.close()
 
-	tt := NewDataOHLCVTool(newDataSourceClient(srv.server.URL, nil))
+	tt := NewDataOHLCVTool(NewDataSourceClient(srv.server.URL, nil))
 	args := map[string]interface{}{
 		"symbol":     "000001.SZ",
 		"start_date": "2022-01-01",
@@ -196,12 +196,12 @@ func TestNewDataOHLCVTool_NilClientPanics(t *testing.T) {
 // ─── DataStocksTool tests ─────────────────────────────────────────────
 
 func TestDataStocksTool_Name(t *testing.T) {
-	tt := NewDataStocksTool(newDataSourceClient("http://x", nil))
+	tt := NewDataStocksTool(NewDataSourceClient("http://x", nil))
 	assert.Equal(t, "data.stocks", tt.Name())
 }
 
 func TestDataStocksTool_Parameters(t *testing.T) {
-	tt := NewDataStocksTool(newDataSourceClient("http://x", nil))
+	tt := NewDataStocksTool(NewDataSourceClient("http://x", nil))
 	params := tt.Parameters()
 	require.Len(t, params, 1)
 	assert.False(t, params[0].Required, "symbol should be optional for data.stocks")
@@ -211,7 +211,7 @@ func TestDataStocksTool_Execute_AllStocks(t *testing.T) {
 	srv := newDataTestServer()
 	defer srv.close()
 
-	tt := NewDataStocksTool(newDataSourceClient(srv.server.URL, nil))
+	tt := NewDataStocksTool(NewDataSourceClient(srv.server.URL, nil))
 	result, err := tt.Execute(context.Background(), map[string]interface{}{})
 	require.NoError(t, err)
 
@@ -225,7 +225,7 @@ func TestDataStocksTool_Execute_SingleStock(t *testing.T) {
 	srv := newDataTestServer()
 	defer srv.close()
 
-	tt := NewDataStocksTool(newDataSourceClient(srv.server.URL, nil))
+	tt := NewDataStocksTool(NewDataSourceClient(srv.server.URL, nil))
 	args := map[string]interface{}{"symbol": "000001.SZ"}
 	result, err := tt.Execute(context.Background(), args)
 	require.NoError(t, err)
@@ -241,7 +241,7 @@ func TestDataStocksTool_Execute_DownstreamError(t *testing.T) {
 	srv.failWith = "db down"
 	defer srv.close()
 
-	tt := NewDataStocksTool(newDataSourceClient(srv.server.URL, nil))
+	tt := NewDataStocksTool(NewDataSourceClient(srv.server.URL, nil))
 	_, err := tt.Execute(context.Background(), map[string]interface{}{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "data.stocks")
@@ -254,12 +254,12 @@ func TestNewDataStocksTool_NilClientPanics(t *testing.T) {
 // ─── DataFundamentalsTool tests ───────────────────────────────────────
 
 func TestDataFundamentalsTool_Name(t *testing.T) {
-	tt := NewDataFundamentalsTool(newDataSourceClient("http://x", nil))
+	tt := NewDataFundamentalsTool(NewDataSourceClient("http://x", nil))
 	assert.Equal(t, "data.fundamentals", tt.Name())
 }
 
 func TestDataFundamentalsTool_Parameters(t *testing.T) {
-	tt := NewDataFundamentalsTool(newDataSourceClient("http://x", nil))
+	tt := NewDataFundamentalsTool(NewDataSourceClient("http://x", nil))
 	params := tt.Parameters()
 	require.Len(t, params, 3)
 	// symbol is required; dates are optional.
@@ -272,7 +272,7 @@ func TestDataFundamentalsTool_Execute_NoDateRange(t *testing.T) {
 	srv := newDataTestServer()
 	defer srv.close()
 
-	tt := NewDataFundamentalsTool(newDataSourceClient(srv.server.URL, nil))
+	tt := NewDataFundamentalsTool(NewDataSourceClient(srv.server.URL, nil))
 	args := map[string]interface{}{"symbol": "000001.SZ"}
 	result, err := tt.Execute(context.Background(), args)
 	require.NoError(t, err)
@@ -287,7 +287,7 @@ func TestDataFundamentalsTool_Execute_WithDateRange(t *testing.T) {
 	srv := newDataTestServer()
 	defer srv.close()
 
-	tt := NewDataFundamentalsTool(newDataSourceClient(srv.server.URL, nil))
+	tt := NewDataFundamentalsTool(NewDataSourceClient(srv.server.URL, nil))
 	args := map[string]interface{}{
 		"symbol":     "000001.SZ",
 		"start_date": "2022-01-01",
@@ -305,7 +305,7 @@ func TestDataFundamentalsTool_Execute_MissingSymbol(t *testing.T) {
 	srv := newDataTestServer()
 	defer srv.close()
 
-	tt := NewDataFundamentalsTool(newDataSourceClient(srv.server.URL, nil))
+	tt := NewDataFundamentalsTool(NewDataSourceClient(srv.server.URL, nil))
 	_, err := tt.Execute(context.Background(), map[string]interface{}{})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, tools.ErrInvalidArgs))
@@ -317,7 +317,7 @@ func TestDataFundamentalsTool_Execute_DownstreamError(t *testing.T) {
 	srv.failWith = "db error"
 	defer srv.close()
 
-	tt := NewDataFundamentalsTool(newDataSourceClient(srv.server.URL, nil))
+	tt := NewDataFundamentalsTool(NewDataSourceClient(srv.server.URL, nil))
 	args := map[string]interface{}{"symbol": "000001.SZ"}
 	_, err := tt.Execute(context.Background(), args)
 	require.Error(t, err)
@@ -340,7 +340,7 @@ func TestToYYYYMMDD(t *testing.T) {
 // ─── Registry integration ─────────────────────────────────────────────
 
 func TestDataTools_RegisterInRegistry(t *testing.T) {
-	c := newDataSourceClient("http://x", nil)
+	c := NewDataSourceClient("http://x", nil)
 	ohlcv := NewDataOHLCVTool(c)
 	stocks := NewDataStocksTool(c)
 	fund := NewDataFundamentalsTool(c)
