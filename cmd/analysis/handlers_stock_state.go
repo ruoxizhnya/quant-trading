@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/quant-trading/pkg/live"
+	"github.com/ruoxizhnya/quant-trading/pkg/live/stockstate"
 )
 
 // P2-13 (Sprint 6 ODR-030): Stock state / 退市 handler.
@@ -29,15 +29,15 @@ import (
 // all business rules (legal transitions / delisting window) live in
 // pkg/live/stock_state.go (P2-13) and are unit-tested there.
 type StockStateHandler struct {
-	registry   *live.StockStateRegistry
-	liquidator *live.ForcedLiquidator
+	registry   *stockstate.StockStateRegistry
+	liquidator *stockstate.ForcedLiquidator
 	logger     zerolog.Logger
 }
 
 // NewStockStateHandler wires the handler. liquidator may be nil if the
 // feature is disabled (LiquidationWindow < 0). The handler returns 503
 // for /scan in that case.
-func NewStockStateHandler(registry *live.StockStateRegistry, liquidator *live.ForcedLiquidator, logger zerolog.Logger) *StockStateHandler {
+func NewStockStateHandler(registry *stockstate.StockStateRegistry, liquidator *stockstate.ForcedLiquidator, logger zerolog.Logger) *StockStateHandler {
 	return &StockStateHandler{
 		registry:   registry,
 		liquidator: liquidator,
@@ -64,11 +64,11 @@ func (h *StockStateHandler) list(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "stock state registry is not enabled"})
 		return
 	}
-	state := live.StockState(c.Query("state"))
+	state := stockstate.StockState(c.Query("state"))
 	if state != "" {
 		switch state {
-		case live.StockStateListed, live.StockStateSuspended,
-			live.StockStateDelisting, live.StockStateDelisted:
+		case stockstate.StockStateListed, stockstate.StockStateSuspended,
+			stockstate.StockStateDelisting, stockstate.StockStateDelisted:
 		default:
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid state filter"})
 			return
@@ -120,7 +120,7 @@ func (h *StockStateHandler) set(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	state := live.StockState(req.State)
+	state := stockstate.StockState(req.State)
 	if state == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "state is required"})
 		return
@@ -177,7 +177,7 @@ func (h *StockStateHandler) scan(c *gin.Context) {
 	// actual flatten happens via the periodic scan or a manual
 	// emergency-flatten call.
 	now := time.Now()
-	recs := h.registry.ListByState(live.StockStateDelisting)
+	recs := h.registry.ListByState(stockstate.StockStateDelisting)
 	actions := make([]map[string]any, 0, len(recs))
 	for _, r := range recs {
 		actions = append(actions, map[string]any{

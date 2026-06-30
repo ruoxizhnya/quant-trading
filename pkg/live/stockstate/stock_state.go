@@ -1,4 +1,4 @@
-// Package live — 退市 + 北交所 30% 涨跌停 (P2-13).
+// Package stockstate implements 退市状态机 + 强制清仓 (P2-13).
 //
 // 监管依据:
 //   - 《上海证券交易所股票上市规则》(2024 修订) §13.1.1 / 《深圳证券交易所
@@ -22,9 +22,10 @@
 //   - 不在这里实现券商摘牌后的现金清算 (cfd 现金返还), 仅记录
 //     LiquidationRecord, 真实结算交给清算所 / broker.
 //
-// 注: BSE 30% 涨跌停已在 board.go 落地, 本文件聚焦 "退市时间线 +
-// 强制清仓" 维度的实现。
-package live
+// S7-P2-2: extracted from pkg/live/stock_state.go as a leaf sub-package.
+// Depends only on parent's exported LiveTrader interface (one-way, no
+// import cycle).
+package stockstate
 
 import (
 	"context"
@@ -34,6 +35,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/live"
 )
 
 // ============================================================
@@ -361,7 +363,7 @@ func NewForcedLiquidator(registry *StockStateRegistry, cfg StockStateConfig, log
 //
 // This call is synchronous and stateless — safe to invoke from a
 // ticker. The function does NOT start a goroutine.
-func (f *ForcedLiquidator) Scan(ctx context.Context, trader LiveTrader) (*LiquidationResult, error) {
+func (f *ForcedLiquidator) Scan(ctx context.Context, trader live.LiveTrader) (*LiquidationResult, error) {
 	if trader == nil {
 		return nil, fmt.Errorf("trader is required")
 	}
