@@ -1611,7 +1611,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
 | S7-P2-1 | 拆分 pkg/backtest 上帝包为子包（4/12 完成：auction/marketimpact/metrics/reporting 叶子包已提取，父包 8714→6925 行 -20%；剩余 engine/tracker/state/cache/job/batch/walkforward 耦合过紧，engine 被 12 文件引用，需独立接口重构 — 见 commit cdbf8b2） | `pkg/backtest/auction/`, `pkg/backtest/marketimpact/`, `pkg/backtest/metrics/`, `pkg/backtest/reporting/`, `pkg/backtest/engine.go` | 🔵 | ODR-043 |
-| S7-P2-2 | 拆分 pkg/live 上帝包为子包（6 职责 → 子包，margin.go 1367 行拆 3 文件） | `pkg/live/` | ⬜ | ODR-043 |
+| S7-P2-2 | 拆分 pkg/live 上帝包为子包（3 子包提取：margin/(1363行,3文件拆分) + reconciliation/(922行) + stockstate/(498行)；删除 types.go 死代码 90 行；父包 5629→2750 行 -51%，16→12 文件 — 见 commit c483160） | `pkg/live/margin/`, `pkg/live/reconciliation/`, `pkg/live/stockstate/`, `cmd/analysis/handlers_reconciliation.go`, `cmd/analysis/handlers_stock_state.go` | ✅ | ODR-043 |
 | S7-P2-3 | 拆分 cmd/analysis/main.go 372 行 main() 函数 | `cmd/analysis/main.go`, `cmd/analysis/setup.go`, `cmd/analysis/setup_test.go` | ✅ | ODR-043 |
 | S7-P2-4 | 拆分 registerRoutes 16 参数函数为 ServerDeps 结构体 | `cmd/analysis/main.go`, `cmd/analysis/deps.go`, `cmd/analysis/deps_test.go` | ✅ | ODR-043 |
 | S7-P2-5 | 拆分 cmd/data/main.go (1713 行 God File) | `cmd/data/main.go`, `cmd/data/setup.go`, `cmd/data/middleware.go`, `cmd/data/handlers_*.go`, `cmd/data/setup_test.go` | ✅ | ODR-043 |
