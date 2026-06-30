@@ -85,17 +85,33 @@ func (n *FunctionNode) Children() []Node {
 	return n.Args
 }
 
-// CrossSectionalNode represents a cross-sectional operation (e.g., cs_rank, cs_zscore)
+// CrossSectionalNode represents a cross-sectional operation (e.g., cs_rank,
+// cs_zscore, cs_neutralize).
+//
+// For 1-arg ops (cs_rank, cs_zscore, cs_percentile), Group is nil.
+// For cs_neutralize, Group is the grouping expression — typically an
+// identifier like `sector`, but may be any expression (e.g.
+// `market_cap > 1e10` for binary grouping). The evaluator uses the
+// latest group value per symbol as a categorical label.
 type CrossSectionalNode struct {
-	Op   string
-	Expr Node
+	Op    string
+	Expr  Node
+	Group Node // optional; non-nil only for cs_neutralize
 }
 
 func (n *CrossSectionalNode) Type() NodeType { return NodeTypeCrossSectional }
 func (n *CrossSectionalNode) String() string {
+	if n.Group != nil {
+		return fmt.Sprintf("%s(%s, %s)", n.Op, n.Expr.String(), n.Group.String())
+	}
 	return fmt.Sprintf("%s(%s)", n.Op, n.Expr.String())
 }
-func (n *CrossSectionalNode) Children() []Node { return []Node{n.Expr} }
+func (n *CrossSectionalNode) Children() []Node {
+	if n.Group != nil {
+		return []Node{n.Expr, n.Group}
+	}
+	return []Node{n.Expr}
+}
 
 // Expression represents a complete factor expression
 type Expression struct {
@@ -148,6 +164,7 @@ func extractInputsRecursive(node Node, inputs map[string]bool) {
 		}
 	case *CrossSectionalNode:
 		extractInputsRecursive(n.Expr, inputs)
+		extractInputsRecursive(n.Group, inputs)
 	}
 }
 

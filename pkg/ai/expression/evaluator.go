@@ -158,6 +158,25 @@ func (e *Evaluator) evaluateCrossSectional(n *CrossSectionalNode, lookback int) 
 		return nil, err
 	}
 
+	// If the op has a group expression (cs_neutralize), evaluate it and
+	// build a group-values slice aligned with latestValues. The latest
+	// group value per symbol acts as a categorical label.
+	var groupValues []float64
+	if n.Group != nil {
+		groupExpr, err := e.Evaluate(n.Group, lookback)
+		if err != nil {
+			return nil, fmt.Errorf("group expr: %w", err)
+		}
+		symbols := e.provider.GetSymbols()
+		groupValues = make([]float64, len(symbols))
+		for i, symbol := range symbols {
+			vals := groupExpr[symbol]
+			if len(vals) > 0 {
+				groupValues[i] = vals[len(vals)-1]
+			}
+		}
+	}
+
 	result := make(map[string][]float64)
 	symbols := e.provider.GetSymbols()
 
@@ -171,7 +190,7 @@ func (e *Evaluator) evaluateCrossSectional(n *CrossSectionalNode, lookback int) 
 		}
 	}
 
-	ranked := applyCrossSectionalOp(n.Op, latestValues)
+	ranked := applyCrossSectionalOp(n.Op, latestValues, groupValues)
 	for i, symbol := range symbols {
 		result[symbol] = []float64{ranked[i]}
 	}
@@ -318,8 +337,12 @@ func applyTimeSeriesOp(op string, args [][]float64) ([]float64, error) {
 	}
 }
 
-// applyCrossSectionalOp applies a cross-sectional operator
-func applyCrossSectionalOp(op string, values []float64) []float64 {
+// applyCrossSectionalOp applies a cross-sectional operator.
+//
+// For 1-arg ops (cs_rank, cs_zscore, cs_percentile), group is nil and
+// ignored. For cs_neutralize, group carries the per-symbol categorical
+// labels used for per-group mean subtraction.
+func applyCrossSectionalOp(op string, values, group []float64) []float64 {
 	switch op {
 	case "cs_rank":
 		return csRank(values)
@@ -327,6 +350,8 @@ func applyCrossSectionalOp(op string, values []float64) []float64 {
 		return csZScore(values)
 	case "cs_percentile":
 		return csPercentile(values)
+	case "cs_neutralize":
+		return csNeutralize(values, group)
 	default:
 		return values
 	}
