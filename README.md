@@ -57,7 +57,7 @@ cd e2e && npx playwright test
 | [ROADMAP](docs/ROADMAP.md) | Sprint 规划、Phase 里程碑、状态追踪 |
 | [ADR](docs/ADR.md) | 架构决策记录 (10 条 ADR) |
 | [TEST](docs/TEST.md) | 测试策略、覆盖率目标、测试规范 |
-| [NEXT_STEPS](docs/NEXT_STEPS.md) | 审计报告、问题清单、下一步计划 |
+| [NEXT_STEPS](docs/archive/NEXT_STEPS.md) | 审计报告、问题清单、下一步计划 (archived) |
 
 ## 技术栈
 

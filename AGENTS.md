@@ -453,7 +453,7 @@ Browser (Vue SPA :5173)
 | 决策文档 | `docs/adr/` | 记录架构决策的上下文和影响 | adr-001 ~ adr-015 |
 | 运营决策 | `docs/odr/` | 记录运营/流程/治理决策 | odr-001 ~ odr-008 |
 | 任务文档 | `docs/TASKS.md` | 统一追踪可执行任务 | — |
-| 参考文档 | `docs/` | 持续维护的状态/进度文档 | ROADMAP.md, NEXT_STEPS.md |
+| 参考文档 | `docs/` | 持续维护的状态/进度文档 | ROADMAP.md, TASKS.md |
 | 指南文档 | `docs/guides/` | 迁移、部署等操作指南 | migration-phase3-to-phase4.md |
 | 归档文档 | `docs/archive/` | 过时但保留作历史参考 | reports-2026-Q2/ |
 
@@ -593,7 +593,7 @@ AGENTS.md 是活文档。以下情况主动更新：
 | 文档 | Content | Updated When |
 |------|---------|-------------|
 | [ROADMAP.md](docs/ROADMAP.md) | Sprint 进度、Phase 里程碑、状态跟踪 | 规划工作时、检查进度时 |
-| [NEXT_STEPS.md](docs/NEXT_STEPS.md) | 审查发现、TODO list、行动项 | 代码审查后、规划下一步时 |
+| [NEXT_STEPS.md](docs/archive/NEXT_STEPS.md) (archived) | 审查发现、TODO list、行动项（历史） | 代码审查后、规划下一步时（见 TASKS.md） |
 | [TEST.md](docs/TEST.md) | 测试策略、覆盖率目标、T+1/涨跌停规格 | 编写测试、验证正确性时 |
 
 ### How-to (执行任务)
@@ -670,7 +670,7 @@ Please continue from where we left off.
 > Phase 4 任务（AI Agent + Live Trading）在 tasks-phase-2.md 中维护。
 
 ### 技术债
-- Phase 3 大部分已完成（见 [NEXT_STEPS.md](docs/NEXT_STEPS.md)）
+- Phase 3 大部分已完成（见 [TASKS.md](docs/TASKS.md)；NEXT_STEPS 已归档）
 - Phase 4 新增技术债：AI Agent 测试覆盖、表达式引擎性能、LLM 成本优化
 - LiveTrader 已实现接口和 MockTrader，但缺少真实券商对接实现
 
@@ -684,7 +684,7 @@ Please continue from where we left off.
 | `ChatbubbleEllipsisOutline` icon name doesn't exist | Correct name is `ChatbubbleEllipsesOutline` (with 'e' before 's') |
 | Trade markers may not render if portfolio_values is empty | Ensure backtest returns valid data before calling renderChart() |
 | **ODR-011 Multi-Source Risks** (CR-48, ODR-012) | See sub-table below |
-| **ODR-043-7 文档漂移: 服务拓扑/归档引用/ADR 状态** | ARCHITECTURE/VISION/SPEC 仍引用 risk-service(8083)/execution-service(8084) (ODR-021 已合并); NEXT_STEPS/IMPLEMENTATION_PLAN 已归档仍被引用; ADR-014 被 ADR-020 §6 取代未标记 — 详见 [ODR-043](docs/odr/odr-043-comprehensive-audit-2026-06-29.md) |
+| **ODR-043-7 文档漂移: ADR 状态 (剩余)** | ADR-014 被 ADR-020 §6 取代未标记; ADR-019 状态需更新为 Accepted — S7-P3-6 范围 — 详见 [ODR-043](docs/odr/odr-043-comprehensive-audit-2026-06-29.md) |
 
 ### ODR-011 Multi-Source Integration Risks (CR-48, ODR-012)
 
@@ -716,7 +716,7 @@ Please continue from where we left off.
 | 理解系统架构 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | 检查测试策略 | [TEST.md](docs/TEST.md) |
 | 查看路线图 | [ROADMAP.md](docs/ROADMAP.md) |
-| 了解待办事项 | [NEXT_STEPS.md](docs/NEXT_STEPS.md) |
+| 了解待办事项 | [TASKS.md](docs/TASKS.md) |
 | 查阅架构决策 | [ADR.md](docs/ADR.md) → `docs/adr/` |
 | 查阅运营决策 | [ADR.md](docs/ADR.md) → `docs/odr/` |
 | **前端设计系统** | **[docs/design/index.md](docs/design/index.md)** |
@@ -724,7 +724,7 @@ Please continue from where we left off.
 | 查看组件使用规范 | [docs/design/components.md](docs/design/components.md) |
 | 查看视觉规范 | [docs/design/visual.md](docs/design/visual.md) |
 | **AI 研究架构** | **[ADR-015](docs/adr/adr-015-ai-agent-architecture.md)** |
-| **Phase 4 实施计划** | **[IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)** |
+| **Phase 4 实施计划** | **[tasks-phase-2.md](docs/tasks-phase-2.md)** (IMPLEMENTATION_PLAN 已归档) |
 | **Phase 4 任务追踪** | **[tasks-phase-2.md](docs/tasks-phase-2.md)** |
 | 使用本模板 | [AGENTS_TEMPLATE.md](docs/AGENTS_TEMPLATE.md) |
 
@@ -732,4 +732,4 @@ Please continue from where we left off.
 _Last updated: 2026-05-06_
 _Source: 基于 AGENTS Template v2.0 迁移，融合 quant-trading + Claudeer 最佳实践_
 _Migration ODR: odr-005-agents-md-v3-migration (pending creation)_
-_Phase 4 Update: AI-Native Evolution architecture documented in ADR-015, IMPLEMENTATION_PLAN.md, tasks-phase-2.md_
+_Phase 4 Update: AI-Native Evolution architecture documented in ADR-015, tasks-phase-2.md (IMPLEMENTATION_PLAN.md 已归档至 archive/)_

@@ -259,7 +259,7 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 
 ### Phase 4 详细实施计划
 
-详见 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) Phase 0-5。
+详见 [tasks-phase-2.md](tasks-phase-2.md) (IMPLEMENTATION_PLAN.md 已归档至 archive/)。
 
 ### Phase 4 验收标准
 
