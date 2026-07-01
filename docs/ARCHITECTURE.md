@@ -667,7 +667,12 @@ quant-trading/
 │   │   ├── factor.go   — 因子计算 + 缓存
 │   │   └── factor_attribution.go — 因子归因分析
 │   ├── domain/
-│   │   └── types.go    — 核心类型（OHLCV, Trade, Position, Signal, OrderType 等）
+│   │   ├── types.go    — 核心类型（OHLCV, Trade, Position, Signal, OrderType 等）
+│   │   │                 （S7-P3-4: 市场类型已迁移至 market/，此处为 type alias）
+│   │   └── market/     — 市场数据类型 canonical 定义（S7-P3-4 软分层）
+│   │       ├── types.go    — OHLCV, Stock, Fundamental, FundamentalData 等
+│   │       ├── provider.go — Provider 接口（原 MarketDataProvider，重命名）
+│   │       └── doc.go      — 包文档 + 软分层策略说明
 │   ├── live/           — 实盘交易接口与模拟实现
 │   │   ├── trader.go           — LiveTrader 核心接口定义 (A-share 规则)
 │   │   ├── mock_trader.go      — MockTrader 模拟交易 (T+1/印花税/过户费)
@@ -842,6 +847,80 @@ pkg/tools/
 - **factory 注入**: Registry 通过 `ServerDeps.ToolsRegistry` 注入，无全局实例
 - **builtin/ 子包隔离**: `pkg/tools/` 保持纯净（只有接口），具体实现依赖在 `builtin/`
 - **8 个 builtin tool**: backtest.run, factor.compute, factor.evaluate, data.ohlcv, data.stocks, data.fundamentals, strategy.list, strategy.get
+
+---
+
+## Domain Market 软分层架构 (pkg/domain/market/) — S7-P3-4
+
+> **设计来源**: [ODR-043](odr/odr-043-comprehensive-audit-2026-06-29.md) D3 决策 —
+> "不做 big-bang schema 重构，采用'软分层 + view 过渡'，新增 `pkg/domain/market/` 子包"
+> **目标**: 将市场数据类型从扁平的 `pkg/domain/types.go` 迁移到专用子包，
+> 同时通过 Go type alias 保持 199 个消费者文件零修改。
+
+### 软分层策略
+
+采用 **type alias**（`type OHLCV = market.OHLCV`）而非新类型（`type OHLCV market.OHLCV`）。
+两者区别：
+
+| 写法 | 含义 | 消费者影响 |
+|------|------|-----------|
+| `type OHLCV = market.OHLCV` | alias — 同一类型 | 零修改，`domain.OHLCV` 与 `market.OHLCV` 可互换 |
+| `type OHLCV market.OHLCV` | 新类型 — 需显式转换 | 199 个文件需在边界做类型转换 |
+
+本架构选择 alias，实现"零破坏"重构：旧代码继续工作，新代码可逐步迁移到
+`market.` 命名空间。
+
+### 包结构
+
+```
+pkg/domain/
+├── types.go              # 保留 Signal/Order/Position 等交易类型 + 8 个市场类型 alias
+├── market_alias_test.go  # 编译期断言：alias 同一性 canary
+└── market/               # 市场数据类型 canonical 定义（S7-P3-4 新增）
+    ├── doc.go            # 包文档 + 软分层策略说明
+    ├── types.go          # OHLCV, Stock, IndexConstituent, Split, Dividend,
+    │                     # Fundamental, FundamentalData（7 个 struct）
+    ├── provider.go       # Provider 接口（原 MarketDataProvider，重命名）
+    └── types_test.go     # 9 个 JSON 往返测试 + nil 指针边界
+```
+
+### 迁移的类型（8 个）
+
+| 类型 | 原位置 | 新位置 | 性质 |
+|------|--------|--------|------|
+| `OHLCV` | `domain.OHLCV` | `market.OHLCV` | 行情数据 |
+| `Stock` | `domain.Stock` | `market.Stock` | 标的基础信息 |
+| `IndexConstituent` | `domain.IndexConstituent` | `market.IndexConstituent` | 指数成分股 |
+| `Split` | `domain.Split` | `market.Split` | 除权事件 |
+| `Dividend` | `domain.Dividend` | `market.Dividend` | 分红事件 |
+| `Fundamental` | `domain.Fundamental` | `market.Fundamental` | 财务基本面（纯领域） |
+| `FundamentalData` | `domain.FundamentalData` | `market.FundamentalData` | 持久化视图（带 ID/CreatedAt） |
+| `MarketDataProvider` | `domain.MarketDataProvider` | `market.Provider` | 接口（重命名，旧名 alias 保留） |
+
+### 设计要点
+
+- **alias 而非新类型**: `type X = Y` 让 `domain.X` 与 `market.X` 是同一类型，199 个消费者零修改
+- **`MarketDataProvider` → `Provider` 重命名**: 0 外部消费者，重命名安全；旧名通过 alias 保留
+- **FundamentalData 作为持久化视图**: 与纯领域类型 `Fundamental` 区分 — 前者带 DB 元数据
+  (ID/CreatedAt) 且使用 `*float64` 区分 "missing"(nil) 与 "zero"(0.0)
+- **不迁移的类型**: 交易类型（Signal/Order/Position）、风控类型、Config 类型保留在 `pkg/domain/`
+- **编译期 canary**: `TestAlias_MarketTypesIdentical` 通过编译时类型赋值断言 alias 同一性，
+  若未来 refactor 破坏 alias，测试将**编译失败**（比运行时断言更强）
+
+### 消费者迁移指引
+
+新代码 SHOULD 直接 `import "github.com/ruoxizhnya/quant-trading/pkg/domain/market"`
+并使用 `market.OHLCV` 等命名。旧代码无需修改 — alias 保证向后兼容。
+
+```go
+// 旧写法（仍可用）
+import "github.com/ruoxizhnya/quant-trading/pkg/domain"
+var bar domain.OHLCV
+
+// 新写法（推荐）
+import "github.com/ruoxizhnya/quant-trading/pkg/domain/market"
+var bar market.OHLCV
+```
 
 ---
 
