@@ -1,4 +1,4 @@
-package backtest
+package batch
 
 import (
 	"context"
@@ -15,6 +15,8 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/walkforward"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
@@ -97,8 +99,8 @@ func DefaultBatchConfig() BatchConfig {
 }
 
 type BatchEngine struct {
-	engine *Engine
-	wfEng  *WalkForwardEngine
+	runner contracts.EngineRunner
+	wfEng  *walkforward.WalkForwardEngine
 	config BatchConfig
 	logger zerolog.Logger
 	scorer *Scorer
@@ -108,12 +110,12 @@ type BatchEngine struct {
 	reportsMu sync.RWMutex
 }
 
-func NewBatchEngine(engine *Engine, wfEng *WalkForwardEngine, config BatchConfig, logger zerolog.Logger) *BatchEngine {
+func NewBatchEngine(runner contracts.EngineRunner, wfEng *walkforward.WalkForwardEngine, config BatchConfig, logger zerolog.Logger) *BatchEngine {
 	if config.Concurrency <= 0 {
 		config.Concurrency = 4
 	}
 	return &BatchEngine{
-		engine:  engine,
+		runner:  runner,
 		wfEng:   wfEng,
 		config:  config,
 		logger:  logger.With().Str("component", "batch_engine").Logger(),
@@ -219,7 +221,7 @@ func (b *BatchEngine) runSingleTask(ctx context.Context, task BatchTask) *BatchR
 		Status:   "running",
 	}
 
-	req := BacktestRequest{
+	req := contracts.BacktestRequest{
 		Strategy:       task.Strategy,
 		StockPool:      task.StockPool,
 		StartDate:      task.StartDate,
@@ -228,7 +230,7 @@ func (b *BatchEngine) runSingleTask(ctx context.Context, task BatchTask) *BatchR
 		RiskFreeRate:   task.RiskFreeRate,
 	}
 
-	resp, err := b.engine.RunBacktest(ctx, req)
+	resp, err := b.runner.RunBacktest(ctx, req)
 	if err != nil {
 		result.Status = "failed"
 		result.Error = err.Error()
@@ -242,7 +244,7 @@ func (b *BatchEngine) runSingleTask(ctx context.Context, task BatchTask) *BatchR
 	result.DurationMs = time.Since(taskStart).Milliseconds()
 
 	if b.config.RunWF && b.wfEng != nil && len(task.StockPool) > 0 {
-		wfReq := WalkForwardRequest{
+		wfReq := walkforward.WalkForwardRequest{
 			Strategy:       task.Strategy,
 			StockPool:      task.StockPool,
 			StartDate:      task.StartDate,
@@ -401,7 +403,7 @@ func gradeFromScore(score float64) string {
 	}
 }
 
-func toBacktestResult(r *BacktestResponse) *domain.BacktestResult {
+func toBacktestResult(r *contracts.BacktestResponse) *domain.BacktestResult {
 	if r == nil {
 		return nil
 	}

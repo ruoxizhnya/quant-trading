@@ -2,6 +2,7 @@ package backtest
 
 import (
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/batch"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/cache"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/execution"
@@ -145,6 +146,32 @@ type (
 func NewWalkForwardEngine(engine *Engine, store *storage.PostgresStore) *WalkForwardEngine {
 	return walkforward.NewWalkForwardEngine(engine, store, engine.logger)
 }
+
+// --- batch/ subpackage re-exports (S7-P2-1 Commit 7) ---
+
+type (
+	BatchEngine  = batch.BatchEngine
+	BatchConfig  = batch.BatchConfig
+	BatchTask    = batch.BatchTask
+	BatchResult  = batch.BatchResult
+	BatchScore   = batch.BatchScore
+	BatchReport  = batch.BatchReport
+	BatchSummary = batch.BatchSummary
+	Scorer       = batch.Scorer
+)
+
+// NewBatchEngine wrapper — runner accepts *Engine (satisfies EngineRunner)
+// or any contracts.EngineRunner impl. wfEng passes through via the
+// WalkForwardEngine alias (= *walkforward.WalkForwardEngine).
+func NewBatchEngine(runner contracts.EngineRunner, wfEng *WalkForwardEngine, config BatchConfig, logger zerolog.Logger) *BatchEngine {
+	return batch.NewBatchEngine(runner, wfEng, config, logger)
+}
+
+// NewScorer wrapper — delegates to batch.NewScorer.
+func NewScorer() *Scorer { return batch.NewScorer() }
+
+// DefaultBatchConfig wrapper — delegates to batch.DefaultBatchConfig.
+func DefaultBatchConfig() BatchConfig { return batch.DefaultBatchConfig() }
 
 // Compile-time assertion: *Engine satisfies contracts.EngineRunner.
 // If the RunBacktest signature ever drifts from the interface, the
