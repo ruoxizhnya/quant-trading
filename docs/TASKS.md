@@ -1610,7 +1610,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
-| S7-P2-1 | 拆分 pkg/backtest 上帝包为子包（4/12 完成：auction/marketimpact/metrics/reporting 叶子包已提取，父包 8714→6925 行 -20%；剩余 engine/tracker/state/cache/job/batch/walkforward 耦合过紧，engine 被 12 文件引用，需独立接口重构 — 见 commit cdbf8b2） | `pkg/backtest/auction/`, `pkg/backtest/marketimpact/`, `pkg/backtest/metrics/`, `pkg/backtest/reporting/`, `pkg/backtest/engine.go` | 🔵 | ODR-043 |
+| S7-P2-1 | 拆分 pkg/backtest 上帝包为子包（12/12 完成 ✅：8 个原子提交提取 contracts/cache/execution/tracker/state/walkforward/batch/job 叶子包；*Engine→contracts.EngineRunner 窄接口解耦；aliases.go 零成本 type alias 保持外部调用方零改动；newTestJobService 用 fakeRunner stub 断开循环依赖 — 见 commits e858a60..4f294be） | `pkg/backtest/contracts/`, `pkg/backtest/cache/`, `pkg/backtest/execution/`, `pkg/backtest/tracker/`, `pkg/backtest/state/`, `pkg/backtest/walkforward/`, `pkg/backtest/batch/`, `pkg/backtest/job/`, `pkg/backtest/aliases.go`, `pkg/backtest/engine.go` | ✅ | ODR-043 |
 | S7-P2-2 | 拆分 pkg/live 上帝包为子包（3 子包提取：margin/(1363行,3文件拆分) + reconciliation/(922行) + stockstate/(498行)；删除 types.go 死代码 90 行；父包 5629→2750 行 -51%，16→12 文件 — 见 commit c483160） | `pkg/live/margin/`, `pkg/live/reconciliation/`, `pkg/live/stockstate/`, `cmd/analysis/handlers_reconciliation.go`, `cmd/analysis/handlers_stock_state.go` | ✅ | ODR-043 |
 | S7-P2-3 | 拆分 cmd/analysis/main.go 372 行 main() 函数 | `cmd/analysis/main.go`, `cmd/analysis/setup.go`, `cmd/analysis/setup_test.go` | ✅ | ODR-043 |
 | S7-P2-4 | 拆分 registerRoutes 16 参数函数为 ServerDeps 结构体 | `cmd/analysis/main.go`, `cmd/analysis/deps.go`, `cmd/analysis/deps_test.go` | ✅ | ODR-043 |
