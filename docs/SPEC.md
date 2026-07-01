@@ -63,6 +63,14 @@ A production-grade quantitative trading system targeting A-share markets with ma
 
 ## Core Domain Models
 
+> **Canonical Path (S7-P3-4)**: 市场数据类型（OHLCV / Stock / Fundamental /
+> FundamentalData / IndexConstituent / Split / Dividend / Provider）的 canonical
+> 定义位于 [`pkg/domain/market/`](../pkg/domain/market/)。
+> `pkg/domain/types.go` 通过 Go type alias（`type OHLCV = market.OHLCV`）重导出
+> 这些类型以保持向后兼容 — 旧代码 `domain.OHLCV` 仍可用，新代码应直接 import
+> `pkg/domain/market`。详见
+> [ARCHITECTURE.md — Domain Market 软分层架构](ARCHITECTURE.md#domain-market-软分层架构-pkgdomainmarket-s7-p3-4)。
+
 ### Stock
 ```go
 type Stock struct {
