@@ -3,7 +3,7 @@
 > **Version**: 1.3.0  
 > **Date**: 2026-05-06  
 > **Status**: In Progress (95% Complete)  
-> **Related**: IMPLEMENTATION_PLAN.md, ROADMAP.md, ADR-015  
+> **Related**: ROADMAP.md, ADR-015 (IMPLEMENTATION_PLAN.md 已归档至 archive/)  
 > **Scope**: Phase 4 — AI Agent Quantitative Research Platform
 
 ---

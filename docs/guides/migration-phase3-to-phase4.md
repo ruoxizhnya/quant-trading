@@ -4,7 +4,7 @@
 > **Date**: 2026-05-06
 > **Status**: Active
 > **Scope**: Migration from Phase 3 (Integration & Scale) to Phase 4 (AI-Native Evolution)
-> **Related**: [VISION.md](../VISION.md), [ADR-015](../adr/adr-015-ai-agent-architecture.md), [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md)
+> **Related**: [VISION.md](../VISION.md), [ADR-015](../adr/adr-015-ai-agent-architecture.md), [tasks-phase-2.md](../tasks-phase-2.md) (IMPLEMENTATION_PLAN.md 已归档)
 
 ---
 

@@ -327,7 +327,7 @@ Active → Stale → Archived → Purged
 | 文档 | 内容 | 更新频率 |
 |------|------|---------|
 | [ROADMAP.md] | 进度里程碑 | Sprint 结束时 |
-| [NEXT_STEPS.md] | TODO 和行动项 | 代码审查后 |
+| [TASKS.md] | TODO 和行动项 | 代码审查后 |
 | [ADR.md] + decisions/ | 架构决策索引 | 新增决策时 |
 | [ODR 索引] | 运营决策索引 | 新增运营决策时 |
 

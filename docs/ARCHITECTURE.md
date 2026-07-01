@@ -69,18 +69,18 @@ _原最后更新: 2026-04-08 (Phase 3)_
 │  GET  /api/factor/list     → 因子列表                        │
 │  GET  /ohlcv/:sym          → proxy → data-service:8081     │
 │  POST /screen              → proxy → data-service:8081     │
+│  POST /api/risk/*         → in-process risk.RiskManager    │
+│  POST /api/execution/*    → in-process live.MockTrader     │
 └─────────────────────────────────────────────────────────────┘
-         │              │              │
-         │              │              │
-         ▼              ▼              ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│ Data Service │ │Risk Service  │ │Execution Svc │
-│   (:8081)    │ │  (:8083)     │ │  (:8084)     │
-└──────┬───────┘ └──────┬───────┘ └──────┬───────┘
-       │                │                │
-       └────────────────┴────────────────┘
-                          │
-                          ▼
+         │
+         │  (ODR-021: risk + execution merged in-process)
+         ▼
+┌──────────────┐
+│ Data Service │
+│   (:8081)    │
+└──────┬───────┘
+       │
+       ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                      PostgreSQL (:5432)                      │
 │                                                             │
@@ -106,14 +106,17 @@ _原最后更新: 2026-04-08 (Phase 3)_
 
 | 服务 | 容器内端口 | Host 端口 | 用途 | 状态 |
 |------|-----------|----------|------|------|
-| analysis-service | 8085 | 8085 | 回测 API 网关 | ✅ 运行中 |
+| analysis-service | 8085 | 8085 | 回测 API 网关 + in-process risk/execution | ✅ 运行中 |
 | data-service | 8081 | 8081 | 数据同步 + 选股 API | ✅ 运行中 |
 | strategy-service | 8082 | - | 外部策略服务（备用）| 🔄 备用 |
-| ai-research-service | 8086 | 8086 | AI 研究服务 | ✅ 运行中 |
+| ai-research-service | 8086 | 8086 | AI 研究服务（独立运行，非 docker-compose） | ✅ 运行中 |
 | postgres | 5432 | - | 数据库 | ✅ 运行中 |
 | redis | 6379 | - | 缓存层 | ✅ 运行中 |
-| risk-service | 8083 | 8083 | 风控服务 | ✅ 运行中 |
-| execution-service | 8084 | 8084 | 执行服务 | ✅ 运行中 |
+
+> **ODR-021 (P1-15, 2026-06-12)**: `risk-service(8083)` + `execution-service(8084)`
+> 已合并入 `analysis-service` 作为 in-process 组件（`risk.RiskManager` +
+> `live.MockTrader`）。端点暴露在 `/api/risk/*` 和 `/api/execution/*`
+> （均带 legacy 无 `/api` 前缀的别名）。docker-compose 服务数 7 → 5。
 
 ---
 

@@ -400,8 +400,8 @@ type Position struct {
 - Analysis service (8085): HTTP gateway, backtest orchestration, report generation
 - Data service (8081): data sync from tushare, serve OHLCV/fundamentals/screen queries
 - Strategy service (8082): strategy registry, hot-swap management (backup/external)
-- Risk service (8083): position sizing, VaR/CVaR, regime detection, stop-loss
-- Execution service (8084): order management (stub for v1, real integration later)
+- Risk API (`/api/risk/*` on :8085, in-process): position sizing, VaR/CVaR, regime detection, stop-loss (ODR-021)
+- Execution API (`/api/execution/*` on :8085, in-process): order management, MockTrader implemented, real broker integration planned for Phase 4
 - **AI Research service (8086)**: LLM-driven strategy generation, factor discovery, evolution pipeline — `cmd/ai/main.go`
 - All inter-service communication via HTTP over Docker network
 - REST API with JSON payloads; no message queue dependency for v1
@@ -418,7 +418,7 @@ type Position struct {
 - `strategy_genes`: id PK, name, code, params JSONB, fitness JSONB, genealogy JSONB, generation int — AI strategy gene pool
 
 **Docker / services:**
-- `docker-compose.yml` defines all services: postgres (TimescaleDB image), redis, analysis-service, data-service, strategy-service, risk-service, **ai-research-service**
+- `docker-compose.yml` defines 5 services (ODR-021): postgres (TimescaleDB image), redis, analysis-service (incl. in-process risk + execution), data-service, strategy-service. AI research service runs separately via `cmd/ai/main.go`.
 - Each Go service is a separate Docker container
 - Volume mounts for data persistence and config
 - `Dockerfile.service` multi-stage build: Go build → minimal distroless image
