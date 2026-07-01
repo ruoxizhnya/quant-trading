@@ -1,4 +1,4 @@
-package backtest
+package job
 
 import (
 	"context"
@@ -10,12 +10,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 )
 
 // JobService handles async backtest job lifecycle.
 type JobService struct {
 	store  JobStore
-	engine *Engine
+	runner contracts.EngineRunner
 	logger zerolog.Logger
 
 	// cancelFuncs holds cancellation functions for running jobs.
@@ -121,11 +122,11 @@ func mapToJobRecord(m map[string]any) *JobRecord {
 }
 
 // NewJobService creates a new JobService.
-func NewJobService(store JobStore, engine *Engine) *JobService {
+func NewJobService(store JobStore, runner contracts.EngineRunner, logger zerolog.Logger) *JobService {
 	return &JobService{
 		store:    store,
-		engine:   engine,
-		logger:   engine.logger.With().Str("component", "job_service").Logger(),
+		runner:   runner,
+		logger:   logger.With().Str("component", "job_service").Logger(),
 		shutdown: make(chan struct{}),
 	}
 }
@@ -307,7 +308,7 @@ func (s *JobService) StartJob(parentCtx context.Context, jobID string) {
 			Str("end_date", record.EndDate).
 			Msg("Executing backtest")
 
-		backtestReq := BacktestRequest{
+		backtestReq := contracts.BacktestRequest{
 			Strategy:  record.StrategyID,
 			StockPool: stockPool,
 			StartDate: record.StartDate,
@@ -322,7 +323,7 @@ func (s *JobService) StartJob(parentCtx context.Context, jobID string) {
 			backtestReq.InitialCapital = v
 		}
 
-		result, err := s.engine.RunBacktest(jobCtx, backtestReq)
+		result, err := s.runner.RunBacktest(jobCtx, backtestReq)
 		elapsed := time.Since(startTime)
 
 		if err != nil {
@@ -539,7 +540,7 @@ func (s *JobService) CleanupStaleRunning(ctx context.Context) (int, error) {
 }
 
 // SaveSyncResult persists a completed synchronous backtest result to the DB.
-func (s *JobService) SaveSyncResult(ctx context.Context, resp *BacktestResponse) error {
+func (s *JobService) SaveSyncResult(ctx context.Context, resp *contracts.BacktestResponse) error {
 	resultJSON, err := json.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("failed to marshal result: %w", err)

@@ -6,6 +6,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/cache"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/execution"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/job"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/state"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/tracker"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/walkforward"
@@ -172,6 +173,23 @@ func NewScorer() *Scorer { return batch.NewScorer() }
 
 // DefaultBatchConfig wrapper — delegates to batch.DefaultBatchConfig.
 func DefaultBatchConfig() BatchConfig { return batch.DefaultBatchConfig() }
+
+// --- job/ subpackage re-exports (S7-P2-1 Commit 8) ---
+
+type (
+	JobService       = job.JobService
+	JobStore         = job.JobStore
+	JobRecord        = job.JobRecord
+	CreateJobRequest = job.CreateJobRequest
+	Job              = job.Job
+)
+
+// NewJobService wrapper preserves the original signature (store, engine *Engine)
+// by extracting engine.logger internally, so cmd/analysis/setup.go and all
+// external callers compile unchanged.
+func NewJobService(store JobStore, engine *Engine) *JobService {
+	return job.NewJobService(store, engine, engine.logger)
+}
 
 // Compile-time assertion: *Engine satisfies contracts.EngineRunner.
 // If the RunBacktest signature ever drifts from the interface, the

@@ -1,4 +1,4 @@
-package backtest
+package job
 
 import (
 	"context"
@@ -9,8 +9,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
-	"github.com/spf13/viper"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,6 +22,22 @@ type mockJobStore struct {
 
 func newMockJobStore() *mockJobStore {
 	return &mockJobStore{jobs: make(map[string]map[string]any)}
+}
+
+// fakeRunner — 测试用 contracts.EngineRunner stub。
+// 替代真实 *Engine, 断开 job/ → 父包循环依赖。
+// 默认返回非 nil 的空 BacktestResponse, 防止 StartJob 中
+// result.TotalReturn 等 logger 字段触发 NPE。
+type fakeRunner struct {
+	mu    sync.Mutex
+	calls []contracts.BacktestRequest
+}
+
+func (f *fakeRunner) RunBacktest(ctx context.Context, req contracts.BacktestRequest) (*contracts.BacktestResponse, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, req)
+	f.mu.Unlock()
+	return &contracts.BacktestResponse{}, nil
 }
 
 // cloneJobMap returns a deep copy of a job map. The JobStore mock
@@ -150,21 +165,8 @@ func (m *mockJobStore) DeleteBacktestJob(ctx context.Context, jobID string) erro
 func newTestJobService(t *testing.T) (*JobService, *mockJobStore) {
 	t.Helper()
 	store := newMockJobStore()
-	v := viper.New()
-	v.Set("backtest.initial_capital", 1000000.0)
-	v.Set("backtest.commission_rate", 0.0003)
-	v.Set("backtest.slippage_rate", 0.0001)
-	v.Set("backtest.risk_free_rate", 0.03)
-	v.Set("backtest.trading.stamp_tax_rate", 0.001)
-	v.Set("backtest.trading.min_commission", 5.0)
-	v.Set("backtest.trading.transfer_fee_rate", 0.00001)
-	v.Set("backtest.trading.price_limit.normal", 0.10)
-	v.Set("backtest.trading.price_limit.st", 0.05)
-	v.Set("backtest.trading.price_limit.new", 0.20)
-	v.Set("backtest.trading.new_stock_days", 60)
-	eng, err := NewEngine(v, marketdata.NewInMemoryProvider(), zerolog.Nop())
-	require.NoError(t, err)
-	svc := NewJobService(store, eng)
+	runner := &fakeRunner{}
+	svc := NewJobService(store, runner, zerolog.Nop())
 	return svc, store
 }
 
@@ -172,7 +174,7 @@ func TestJobService_NewJobService(t *testing.T) {
 	svc, _ := newTestJobService(t)
 	assert.NotNil(t, svc)
 	assert.NotNil(t, svc.store)
-	assert.NotNil(t, svc.engine)
+	assert.NotNil(t, svc.runner)
 }
 
 func TestJobService_CreateJob(t *testing.T) {
@@ -358,7 +360,7 @@ func TestJobService_CancelJob_NotFound(t *testing.T) {
 func TestJobService_SaveSyncResult(t *testing.T) {
 	svc, store := newTestJobService(t)
 
-	resp := &BacktestResponse{
+	resp := &contracts.BacktestResponse{
 		ID:          "sync-1",
 		Strategy:    "momentum",
 		StockPool:   []string{"600000.SH", "600001.SH"},
@@ -375,7 +377,7 @@ func TestJobService_SaveSyncResult(t *testing.T) {
 	assert.NotNil(t, stored)
 	assert.Equal(t, "completed", stored["status"])
 
-	var result BacktestResponse
+	var result contracts.BacktestResponse
 	resultBytes, ok := stored["result"].([]byte)
 	require.True(t, ok)
 	require.NoError(t, json.Unmarshal(resultBytes, &result))
@@ -385,7 +387,7 @@ func TestJobService_SaveSyncResult(t *testing.T) {
 func TestJobService_SaveSyncResult_EmptyStockPool(t *testing.T) {
 	svc, store := newTestJobService(t)
 
-	resp := &BacktestResponse{
+	resp := &contracts.BacktestResponse{
 		ID:        "sync-2",
 		Strategy:  "value",
 		StockPool: []string{},
