@@ -36,36 +36,11 @@ type Config struct {
 	Trading TradingConfig `mapstructure:"trading"`
 }
 
-// TradingConfig holds A-share trading rules
-type TradingConfig struct {
-	StampTaxRate    float64          `mapstructure:"stamp_tax_rate"`
-	MinCommission   float64          `mapstructure:"min_commission"`
-	TransferFeeRate float64          `mapstructure:"transfer_fee_rate"`
-	PriceLimit      PriceLimitConfig `mapstructure:"price_limit"`
-	NewStockDays    int              `mapstructure:"new_stock_days"`
-}
-
-// PriceLimitConfig holds price limit rules
-type PriceLimitConfig struct {
-	Normal float64 `mapstructure:"normal"`
-	ST     float64 `mapstructure:"st"`
-	New    float64 `mapstructure:"new"`
-}
-
-// Default trading constants (fallback if not configured)
-func defaultTradingConfig() TradingConfig {
-	return TradingConfig{
-		StampTaxRate:    DefaultStampTaxRate,
-		MinCommission:   DefaultMinCommission,
-		TransferFeeRate: DefaultTransferFeeRate,
-		PriceLimit: PriceLimitConfig{
-			Normal: DefaultPriceLimitNormal,
-			ST:     DefaultPriceLimitST,
-			New:    DefaultPriceLimitNew,
-		},
-		NewStockDays: DefaultNewStockDays,
-	}
-}
+// S7-P2-1: TradingConfig, PriceLimitConfig, and defaultTradingConfig()
+// moved to pkg/backtest/contracts/contracts.go. They are re-exported
+// here via type aliases in aliases.go so all callers
+// (backtest.TradingConfig / backtest.defaultTradingConfig()) keep
+// working unchanged.
 
 // Engine is the backtesting engine that simulates trading strategies.
 type Engine struct {
@@ -172,45 +147,8 @@ type Engine struct {
 // contract and accessor methods (GetStatus / SetStatus / Freeze /
 // Snapshot / ...).
 
-// BacktestRequest represents the API request to start a backtest.
-type BacktestRequest struct {
-	Strategy       string   `json:"strategy" binding:"required"`
-	StockPool      []string `json:"stock_pool"`
-	IndexCode      string   `json:"index_code"`
-	StartDate      string   `json:"start_date" binding:"required"`
-	EndDate        string   `json:"end_date" binding:"required"`
-	InitialCapital float64  `json:"initial_capital"`
-	RiskFreeRate   float64  `json:"risk_free_rate"`
-}
-
-// BacktestResponse represents the API response for a backtest run.
-type BacktestResponse struct {
-	ID              string                  `json:"id"`
-	Status          string                  `json:"status"`
-	Strategy        string                  `json:"strategy,omitempty"`
-	StrategyGitHash string                  `json:"strategy_git_hash,omitempty"`
-	StartDate       string                  `json:"start_date,omitempty"`
-	EndDate         string                  `json:"end_date,omitempty"`
-	TotalReturn     float64                 `json:"total_return,omitempty"`
-	AnnualReturn    float64                 `json:"annual_return,omitempty"`
-	SharpeRatio     float64                 `json:"sharpe_ratio,omitempty"`
-	SortinoRatio    float64                 `json:"sortino_ratio,omitempty"`
-	MaxDrawdown     float64                 `json:"max_drawdown,omitempty"`
-	MaxDrawdownDate string                  `json:"max_drawdown_date,omitempty"`
-	WinRate         float64                 `json:"win_rate,omitempty"`
-	TotalTrades     int                     `json:"total_trades,omitempty"`
-	WinTrades       int                     `json:"win_trades,omitempty"`
-	LoseTrades      int                     `json:"lose_trades,omitempty"`
-	AvgHoldingDays  float64                 `json:"avg_holding_days,omitempty"`
-	CalmarRatio     float64                 `json:"calmar_ratio,omitempty"`
-	StartedAt       string                  `json:"started_at,omitempty"`
-	CompletedAt     string                  `json:"completed_at,omitempty"`
-	Error           string                  `json:"error,omitempty"`
-	PortfolioValues []domain.PortfolioValue `json:"portfolio_values,omitempty"`
-	Trades          []domain.Trade          `json:"trades,omitempty"`
-	StockPool       []string                `json:"stock_pool,omitempty"`
-	InitialCapital  float64                 `json:"initial_capital,omitempty"`
-}
+// S7-P2-1: BacktestRequest and BacktestResponse moved to
+// pkg/backtest/contracts/contracts.go. Re-exported via aliases.go.
 
 // NewEngine creates a new backtest engine.
 func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logger) (*Engine, error) {
