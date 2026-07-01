@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/cache"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/metrics"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
@@ -36,36 +37,11 @@ type Config struct {
 	Trading TradingConfig `mapstructure:"trading"`
 }
 
-// TradingConfig holds A-share trading rules
-type TradingConfig struct {
-	StampTaxRate    float64          `mapstructure:"stamp_tax_rate"`
-	MinCommission   float64          `mapstructure:"min_commission"`
-	TransferFeeRate float64          `mapstructure:"transfer_fee_rate"`
-	PriceLimit      PriceLimitConfig `mapstructure:"price_limit"`
-	NewStockDays    int              `mapstructure:"new_stock_days"`
-}
-
-// PriceLimitConfig holds price limit rules
-type PriceLimitConfig struct {
-	Normal float64 `mapstructure:"normal"`
-	ST     float64 `mapstructure:"st"`
-	New    float64 `mapstructure:"new"`
-}
-
-// Default trading constants (fallback if not configured)
-func defaultTradingConfig() TradingConfig {
-	return TradingConfig{
-		StampTaxRate:    DefaultStampTaxRate,
-		MinCommission:   DefaultMinCommission,
-		TransferFeeRate: DefaultTransferFeeRate,
-		PriceLimit: PriceLimitConfig{
-			Normal: DefaultPriceLimitNormal,
-			ST:     DefaultPriceLimitST,
-			New:    DefaultPriceLimitNew,
-		},
-		NewStockDays: DefaultNewStockDays,
-	}
-}
+// S7-P2-1: TradingConfig, PriceLimitConfig, and defaultTradingConfig()
+// moved to pkg/backtest/contracts/contracts.go. They are re-exported
+// here via type aliases in aliases.go so all callers
+// (backtest.TradingConfig / backtest.defaultTradingConfig()) keep
+// working unchanged.
 
 // Engine is the backtesting engine that simulates trading strategies.
 type Engine struct {
@@ -172,45 +148,8 @@ type Engine struct {
 // contract and accessor methods (GetStatus / SetStatus / Freeze /
 // Snapshot / ...).
 
-// BacktestRequest represents the API request to start a backtest.
-type BacktestRequest struct {
-	Strategy       string   `json:"strategy" binding:"required"`
-	StockPool      []string `json:"stock_pool"`
-	IndexCode      string   `json:"index_code"`
-	StartDate      string   `json:"start_date" binding:"required"`
-	EndDate        string   `json:"end_date" binding:"required"`
-	InitialCapital float64  `json:"initial_capital"`
-	RiskFreeRate   float64  `json:"risk_free_rate"`
-}
-
-// BacktestResponse represents the API response for a backtest run.
-type BacktestResponse struct {
-	ID              string                  `json:"id"`
-	Status          string                  `json:"status"`
-	Strategy        string                  `json:"strategy,omitempty"`
-	StrategyGitHash string                  `json:"strategy_git_hash,omitempty"`
-	StartDate       string                  `json:"start_date,omitempty"`
-	EndDate         string                  `json:"end_date,omitempty"`
-	TotalReturn     float64                 `json:"total_return,omitempty"`
-	AnnualReturn    float64                 `json:"annual_return,omitempty"`
-	SharpeRatio     float64                 `json:"sharpe_ratio,omitempty"`
-	SortinoRatio    float64                 `json:"sortino_ratio,omitempty"`
-	MaxDrawdown     float64                 `json:"max_drawdown,omitempty"`
-	MaxDrawdownDate string                  `json:"max_drawdown_date,omitempty"`
-	WinRate         float64                 `json:"win_rate,omitempty"`
-	TotalTrades     int                     `json:"total_trades,omitempty"`
-	WinTrades       int                     `json:"win_trades,omitempty"`
-	LoseTrades      int                     `json:"lose_trades,omitempty"`
-	AvgHoldingDays  float64                 `json:"avg_holding_days,omitempty"`
-	CalmarRatio     float64                 `json:"calmar_ratio,omitempty"`
-	StartedAt       string                  `json:"started_at,omitempty"`
-	CompletedAt     string                  `json:"completed_at,omitempty"`
-	Error           string                  `json:"error,omitempty"`
-	PortfolioValues []domain.PortfolioValue `json:"portfolio_values,omitempty"`
-	Trades          []domain.Trade          `json:"trades,omitempty"`
-	StockPool       []string                `json:"stock_pool,omitempty"`
-	InitialCapital  float64                 `json:"initial_capital,omitempty"`
-}
+// S7-P2-1: BacktestRequest and BacktestResponse moved to
+// pkg/backtest/contracts/contracts.go. Re-exported via aliases.go.
 
 // NewEngine creates a new backtest engine.
 func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logger) (*Engine, error) {
@@ -294,8 +233,8 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 		riskServiceURL:     riskServiceURL,
 		httpClient:         httpclient.New("", 30*time.Second, 3),
 		logger:             componentLogger,
-		cache:              NewCacheManager(componentLogger),
-		factor:             NewFactorCacheAccessor(componentLogger),
+		cache:              cache.NewCacheManager(componentLogger),
+		factor:             cache.NewFactorCacheAccessor(componentLogger),
 		stateStore:         stateStore,
 		liveBridge:         NewLiveBridge(componentLogger),
 		executionBridge:    executionBridge,
@@ -371,8 +310,8 @@ func NewEngineWithOptions(cfg Config, provider marketdata.Provider, opts ...Engi
 		provider:        provider,
 		httpClient:      httpclient.New("", 30*time.Second, 3),
 		logger:          componentLogger,
-		cache:           NewCacheManager(componentLogger),
-		factor:          NewFactorCacheAccessor(componentLogger),
+		cache:           cache.NewCacheManager(componentLogger),
+		factor:          cache.NewFactorCacheAccessor(componentLogger),
 		stateStore:      stateStore,
 		liveBridge:      NewLiveBridge(componentLogger),
 		executionBridge: executionBridge,
@@ -560,7 +499,7 @@ func (e *Engine) newBacktestState(backtestID string, req BacktestRequest, stockP
 			e.config.Trading,
 			e.logger,
 		),
-		targetPositions: make(map[string]*domain.TargetPosition),
+		TargetPositions: make(map[string]*domain.TargetPosition),
 	}
 }
 
@@ -825,7 +764,7 @@ func (e *Engine) getOHLCV(ctx context.Context, symbol string, start, end time.Ti
 // pkg/backtest/cache.go (P1-16 ADR-020). The unexported alias below is
 // kept for any in-package callers that still reference the old name.
 func dateRangeBounds(bars []domain.OHLCV, start, end time.Time) (int, int) {
-	return DateRangeBounds(bars, start, end)
+	return cache.DateRangeBounds(bars, start, end)
 }
 
 // detectRegime detects market regime using risk service.
@@ -1044,11 +983,10 @@ func (e *Engine) calculatePosition(ctx context.Context, signal domain.Signal, po
 	e.mu.RUnlock()
 
 	if rm != nil {
-		// P1-16 (ADR-020): read snapshot via CacheManager
-		var ohlcv []domain.OHLCV
-		if snap := e.cache.inMemoryOHLCVAtomic.Load(); snap != nil {
-			ohlcv = (*snap)[signal.Symbol]
-		}
+		// P1-16 (ADR-020): read cached snapshot via CacheManager.Peek
+		// (peek-only — no provider fallback; calculatePosition is a
+		// best-effort read of already-warmed data).
+		ohlcv := e.cache.Peek(signal.Symbol)
 		pos, err := rm.CalculatePosition(ctx, signal, portfolio, regime, currentPrice, ohlcv)
 		if err != nil {
 			return domain.PositionSize{}, apperrors.Wrap(err, apperrors.ErrCodeInternal, "in-process position calculation failed", "calculatePosition")

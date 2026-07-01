@@ -16,11 +16,10 @@ func TestEngine_NewEngine_DefaultConfig(t *testing.T) {
 	tracker := NewTracker(1000000, 0.0003, 0.001, defaultTradingConfig(), logger)
 
 	assert.Equal(t, 1000000.0, tracker.GetCash())
-	assert.Equal(t, 1000000.0, tracker.initialCash)
-	assert.NotNil(t, tracker.positions)
-	assert.Empty(t, tracker.positions)
-	assert.Equal(t, 0.0003, tracker.commissionRate)
-	assert.Equal(t, 0.001, tracker.slippageRate)
+	// Unexported field assertions (initialCash, positions, commissionRate,
+	// slippageRate) removed in S7-P2-1: Tracker moved to tracker/ subpackage,
+	// parent can no longer white-box test internals. Initialization is
+	// covered by tracker/'s own NewTracker tests + behavioral tests below.
 }
 
 func TestEngine_Tracker_BuyAndSellCycle(t *testing.T) {

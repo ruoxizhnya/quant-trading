@@ -6,37 +6,12 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/fees"
 )
 
-// A-Share trading rules (default values)
-//
-// S7-P1-4 (ODR-043): The five fee constants below are const-aliased to
-// pkg/fees (the single source of truth) instead of being independent
-// literals. Const aliasing is zero-cost (compile-time inlining) and
-// type-safe for untyped constants. This eliminates the drift hazard
-// where changing a rate in pkg/fees would not propagate to pkg/backtest,
-// causing backtest-vs-live P&L divergence. See constants_drift_test.go
-// for the guard test.
-const (
-	// StampTaxRate is the stamp tax rate for selling A-shares (0.1%)
-	DefaultStampTaxRate = fees.DefaultStampTaxRate
-
-	// MinCommission is the minimum commission per transaction (¥5)
-	DefaultMinCommission = fees.DefaultMinCommission
-
-	// TransferFeeRate is the transfer fee rate (0.001%)
-	DefaultTransferFeeRate = fees.DefaultTransferFeeRate
-
-	// PriceLimitNormal is the daily price limit for normal stocks (±10%)
-	DefaultPriceLimitNormal = 0.10
-
-	// PriceLimitST is the daily price limit for ST stocks (±5%)
-	DefaultPriceLimitST = 0.05
-
-	// PriceLimitNew is the daily price limit for new stocks on listing day (±20% for ChiNext/STAR)
-	DefaultPriceLimitNew = 0.20
-
-	// NewStockDays is the number of days a stock is considered "new" after IPO
-	DefaultNewStockDays = 60
-)
+// S7-P2-1: A-share trading-rule constants (DefaultStampTaxRate,
+// DefaultMinCommission, DefaultTransferFeeRate, DefaultPriceLimitNormal/ST/New,
+// DefaultNewStockDays, DefaultShortSellingRate, TradingDaysPerYear) moved to
+// pkg/backtest/contracts/contracts.go. Re-exported here via aliases.go.
+// The drift guard test in constants_drift_test.go still passes because the
+// aliases resolve to the same fees.Default* values.
 
 // Backtest engine operational constants
 const (
@@ -51,19 +26,6 @@ const (
 
 	// DefaultRiskFreeRate is the annual risk-free rate (3%, approx. Chinese bond yield)
 	DefaultRiskFreeRate = 0.03
-
-	// DefaultShortSellingRate is the annual securities lending rate
-	// for short selling (10.6%, per VISION.md). Accrued daily on the
-	// market value of open short positions in Tracker.AdvanceDay using
-	// a 252-trading-day convention.
-	DefaultShortSellingRate = 0.106
-
-	// TradingDaysPerYear is the convention used to convert annual rates
-	// (e.g. short-selling interest) to daily accruals in the backtest
-	// tracker. The live margin module uses 365 (natural days); the
-	// backtest engine advances one trading day at a time, so 252 is the
-	// correct divisor here.
-	TradingDaysPerYear = 252
 )
 
 // Polling and timeout constants
@@ -76,14 +38,4 @@ const (
 
 	// MaxJobPollAttempts is the maximum number of polling attempts before giving up
 	MaxJobPollAttempts = 150 // 5min / 2s ≈ 150 attempts
-)
-
-// StateStore defaults (P1-18, ADR-020)
-const (
-	// DefaultStateStoreCapacity is the default LRU capacity for the
-	// backtest state store. 1000 entries balances memory footprint
-	// (~100KB per state × 1000 ≈ 100MB) against the typical batch
-	// backtest run size. Callers needing more (or fewer) entries can
-	// inject a custom StateStore via WithStateStore.
-	DefaultStateStoreCapacity = 1000
 )
