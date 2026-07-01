@@ -273,7 +273,7 @@ func (e *Engine) processSignalsAndExecuteTrades(
 
 		targetQty := positionSize.Size
 
-		tp, exists := state.targetPositions[signal.Symbol]
+		tp, exists := state.TargetPositions[signal.Symbol]
 		if !exists {
 			tp = &domain.TargetPosition{
 				Symbol:      signal.Symbol,
@@ -282,7 +282,7 @@ func (e *Engine) processSignalsAndExecuteTrades(
 				PendingQty:  0,
 				LastUpdated: date,
 			}
-			state.targetPositions[signal.Symbol] = tp
+			state.TargetPositions[signal.Symbol] = tp
 		}
 
 		effectiveTarget := e.computeEffectiveTarget(tp, targetQty, signal.Direction, date, logger)
@@ -332,7 +332,7 @@ func (e *Engine) processSignalsFallback(
 			continue
 		}
 		targetQty := positionSize.Size
-		tp, exists := state.targetPositions[signal.Symbol]
+		tp, exists := state.TargetPositions[signal.Symbol]
 		if !exists {
 			tp = &domain.TargetPosition{
 				Symbol:      signal.Symbol,
@@ -341,7 +341,7 @@ func (e *Engine) processSignalsFallback(
 				PendingQty:  0,
 				LastUpdated: date,
 			}
-			state.targetPositions[signal.Symbol] = tp
+			state.TargetPositions[signal.Symbol] = tp
 		}
 		effectiveTarget := e.computeEffectiveTarget(tp, targetQty, signal.Direction, date, logger)
 		if effectiveTarget < 0 {
@@ -484,7 +484,7 @@ func (e *Engine) executeSignalTrade(
 		if trade != nil {
 			trade.PendingQty = 0
 		}
-		delete(state.targetPositions, signal.Symbol)
+		delete(state.TargetPositions, signal.Symbol)
 		return
 
 	case domain.DirectionHold:
@@ -600,7 +600,7 @@ func (e *Engine) updateTargetPositionAfterTrade(
 	tp.LastUpdated = date
 
 	if tp.PendingQty <= 0 && tp.TargetQty <= 0 {
-		delete(state.targetPositions, signal.Symbol)
+		delete(state.TargetPositions, signal.Symbol)
 	}
 }
 

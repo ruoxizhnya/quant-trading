@@ -5,6 +5,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/cache"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/execution"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/state"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/tracker"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
@@ -101,6 +102,32 @@ type (
 // param resolves through the TradingConfig alias (= contracts.TradingConfig).
 func NewTracker(initialCapital, commissionRate, slippageRate float64, trading TradingConfig, logger zerolog.Logger) *Tracker {
 	return tracker.NewTracker(initialCapital, commissionRate, slippageRate, trading, logger)
+}
+
+// --- state/ subpackage re-exports (S7-P2-1 Commit 5) ---
+
+type (
+	BacktestState         = state.BacktestState
+	BacktestStateSnapshot = state.BacktestStateSnapshot
+	StateStore            = state.StateStore
+	LRUStateStore         = state.LRUStateStore
+	NoopStateStore        = state.NoopStateStore
+	DiskStateStore        = state.DiskStateStore
+)
+
+// DefaultStateStoreCapacity re-exported from state/.
+const DefaultStateStoreCapacity = state.DefaultStateStoreCapacity
+
+var (
+	ErrStateNotFound  = state.ErrStateNotFound
+	ErrInvalidStateID = state.ErrInvalidStateID
+)
+
+// Constructor wrappers (Go has no function alias, so we delegate).
+func NewLRUStateStore(capacity int) *LRUStateStore { return state.NewLRUStateStore(capacity) }
+func NewNoopStateStore() *NoopStateStore           { return state.NewNoopStateStore() }
+func NewDiskStateStore(dir string) (*DiskStateStore, error) {
+	return state.NewDiskStateStore(dir)
 }
 
 // Compile-time assertion: *Engine satisfies contracts.EngineRunner.

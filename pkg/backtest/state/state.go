@@ -1,4 +1,4 @@
-package backtest
+package state
 
 import (
 	"sync"
@@ -66,11 +66,11 @@ type BacktestState struct {
 	// Error is set on failure; nil otherwise. Protected by mu.
 	Error error
 
-	// targetPositions is only mutated by the running backtest goroutine.
+	// TargetPositions is only mutated by the running backtest goroutine.
 	// It is not read by API handlers, so the BacktestState-level mu is
 	// not required for these accesses. Future code that exposes
-	// targetPositions to readers should add locking here.
-	targetPositions map[string]*domain.TargetPosition
+	// TargetPositions to readers should add locking here.
+	TargetPositions map[string]*domain.TargetPosition
 }
 
 // SetStatus atomically updates the status. No-op if the state is frozen.

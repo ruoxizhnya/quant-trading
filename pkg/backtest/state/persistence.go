@@ -1,4 +1,4 @@
-package backtest
+package state
 
 // P2-29 (TQ-016): Cross-day state persistence.
 //

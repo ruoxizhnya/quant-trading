@@ -499,7 +499,7 @@ func (e *Engine) newBacktestState(backtestID string, req BacktestRequest, stockP
 			e.config.Trading,
 			e.logger,
 		),
-		targetPositions: make(map[string]*domain.TargetPosition),
+		TargetPositions: make(map[string]*domain.TargetPosition),
 	}
 }
 

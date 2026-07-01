@@ -1,4 +1,4 @@
-package backtest
+package state
 
 // P1-18 (ODR-013 Sprint 6): StateStore interface + LRU eviction.
 //
@@ -25,6 +25,16 @@ package backtest
 import (
 	"container/list"
 	"sync"
+)
+
+// StateStore defaults (P1-18, ADR-020)
+const (
+	// DefaultStateStoreCapacity is the default LRU capacity for the
+	// backtest state store. 1000 entries balances memory footprint
+	// (~100KB per state × 1000 ≈ 100MB) against the typical batch
+	// backtest run size. Callers needing more (or fewer) entries can
+	// inject a custom StateStore via WithStateStore.
+	DefaultStateStoreCapacity = 1000
 )
 
 // StateStore is the contract for a backtest state cache with
