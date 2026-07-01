@@ -1,5 +1,5 @@
 // Package backtest provides the backtesting engine for quantitative trading strategies.
-package backtest
+package tracker
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/fees"
 	"github.com/ruoxizhnya/quant-trading/pkg/portfolio"
@@ -35,7 +36,7 @@ type Tracker struct {
 	shortSellingRate float64 // annual securities lending rate accrued daily on short positions
 
 	// Trading rules (loaded from config)
-	trading TradingConfig
+	trading contracts.TradingConfig
 
 	// Order log for tracking all orders
 	orderLog *OrderLog
@@ -44,10 +45,10 @@ type Tracker struct {
 }
 
 // NewTracker creates a new portfolio tracker.
-func NewTracker(initialCapital, commissionRate, slippageRate float64, trading TradingConfig, logger zerolog.Logger) *Tracker {
+func NewTracker(initialCapital, commissionRate, slippageRate float64, trading contracts.TradingConfig, logger zerolog.Logger) *Tracker {
 	// Use defaults if trading config is empty
 	if trading.StampTaxRate == 0 {
-		trading = defaultTradingConfig()
+		trading = contracts.DefaultTradingConfig()
 	}
 
 	return &Tracker{
@@ -57,7 +58,7 @@ func NewTracker(initialCapital, commissionRate, slippageRate float64, trading Tr
 		commissionRate:   commissionRate,
 		slippageRate:     slippageRate,
 		liquidityFactor:  0.1, // default: 10% of prev day volume
-		shortSellingRate: DefaultShortSellingRate,
+		shortSellingRate: contracts.DefaultShortSellingRate,
 		trading:          trading,
 		orderLog:         &OrderLog{},
 		logger:           logger.With().Str("component", "tracker").Logger(),
@@ -741,7 +742,7 @@ func (t *Tracker) AdvanceDay(date time.Time) {
 	if t.shortSellingRate <= 0 {
 		return
 	}
-	dailyRate := t.shortSellingRate / float64(TradingDaysPerYear)
+	dailyRate := t.shortSellingRate / float64(contracts.TradingDaysPerYear)
 	totalLendingCost := 0.0
 	for sym, pos := range t.positions {
 		if pos.Quantity >= 0 {

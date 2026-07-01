@@ -5,6 +5,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/cache"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/execution"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/tracker"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
@@ -86,6 +87,20 @@ func NewExecutionBridge(logger zerolog.Logger) *ExecutionBridge {
 
 func NewLiveBridge(logger zerolog.Logger) *LiveBridge {
 	return execution.NewLiveBridge(logger)
+}
+
+// --- tracker/ subpackage re-exports (S7-P2-1 Commit 4) ---
+
+type (
+	Tracker            = tracker.Tracker
+	OrderLog           = tracker.OrderLog
+	OrderExecutionOpts = tracker.OrderExecutionOpts
+)
+
+// NewTracker wrapper — delegates to tracker.NewTracker. The trading
+// param resolves through the TradingConfig alias (= contracts.TradingConfig).
+func NewTracker(initialCapital, commissionRate, slippageRate float64, trading TradingConfig, logger zerolog.Logger) *Tracker {
+	return tracker.NewTracker(initialCapital, commissionRate, slippageRate, trading, logger)
 }
 
 // Compile-time assertion: *Engine satisfies contracts.EngineRunner.

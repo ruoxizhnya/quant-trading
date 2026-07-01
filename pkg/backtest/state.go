@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/tracker"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
@@ -53,7 +54,7 @@ type BacktestState struct {
 	// from multiple goroutines; the BacktestState-level mu is not
 	// held during Tracker access. The Tracker pointer itself never
 	// changes after construction.
-	Tracker *Tracker
+	Tracker *tracker.Tracker
 
 	// StartedAt is set at construction and never changes.
 	StartedAt time.Time

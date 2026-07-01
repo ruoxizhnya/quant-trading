@@ -1,16 +1,17 @@
-package backtest
+package tracker
 
 import (
 	"testing"
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 func newTestTracker(initialCapital float64) *Tracker {
 	logger := zerolog.Nop()
-	return NewTracker(initialCapital, 0.0003, 0.001, defaultTradingConfig(), logger)
+	return NewTracker(initialCapital, 0.0003, 0.001, contracts.DefaultTradingConfig(), logger)
 }
 
 func TestTracker_TPlusOne_BasicViolation(t *testing.T) {

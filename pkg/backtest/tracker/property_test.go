@@ -1,4 +1,4 @@
-package backtest
+package tracker
 
 // P1-9 (ODR-013 Sprint 6): property-based 5 invariants.
 //
@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,7 +124,7 @@ func p1_9Replay(actions []p1_9TradeAction) *Tracker {
 		1_000_000.0,
 		0.0003,
 		0.0001,
-		defaultTradingConfig(),
+		contracts.DefaultTradingConfig(),
 		logger,
 	)
 	for _, a := range actions {
@@ -145,7 +146,7 @@ func p1_9ReplayWithAdvance(actions []p1_9TradeAction) *Tracker {
 		1_000_000.0,
 		0.0003,
 		0.0001,
-		defaultTradingConfig(),
+		contracts.DefaultTradingConfig(),
 		logger,
 	)
 	currentDay := 0
@@ -269,7 +270,7 @@ func TestProperty_T1Enforced(t *testing.T) {
 	f := func(seq p1_9TradeSequence) bool {
 		// Replay with day-by-day AdvanceDay so T+1 rollover fires.
 		logger := zerolog.New(nil)
-		tracker := NewTracker(1_000_000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+		tracker := NewTracker(1_000_000, 0.0003, 0.0001, contracts.DefaultTradingConfig(), logger)
 		currentDay := 0
 		for _, a := range seq.Actions {
 			ts := p1_9DayBase.AddDate(0, 0, a.Day)
@@ -340,7 +341,7 @@ func TestP1_9_AllInvariants_ManuallySeeded(t *testing.T) {
 		}
 
 		logger := zerolog.New(nil)
-		tracker := NewTracker(1_000_000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+		tracker := NewTracker(1_000_000, 0.0003, 0.0001, contracts.DefaultTradingConfig(), logger)
 		for i, a := range actions {
 			ts := p1_9DayBase.AddDate(0, 0, a.Day)
 			sym := p1_9SymbolPool[a.Symbol]

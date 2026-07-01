@@ -720,3 +720,12 @@ func (e *Engine) forceCloseAllPositions(
 		}
 	}
 }
+
+// abs returns the absolute value of x. Local copy — tracker/ and metrics/
+// each have their own (S7-P2-1: tracker.go moved to tracker/ subpackage).
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}

@@ -1,6 +1,7 @@
-package backtest
+package tracker
 
 import (
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -27,7 +28,7 @@ func TestS7P1_1_TrackerUsesSharedFeePrimitive(t *testing.T) {
 		1_000_000,
 		fees.DefaultCommissionRate,
 		fees.DefaultSlippageRate,
-		defaultTradingConfig(),
+		contracts.DefaultTradingConfig(),
 		zerolog.Nop(),
 	)
 

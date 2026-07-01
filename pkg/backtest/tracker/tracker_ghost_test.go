@@ -1,4 +1,4 @@
-package backtest
+package tracker
 
 // S7-P0-17 (ODR-043): regression test for the "ghost zero-quantity
 // position" bug discovered by TestProperty_T1Enforced.
@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,7 +37,7 @@ import (
 // returns "position not found" rather than "quantity is zero".
 func TestGhostPosition_LongBuyOffsetsShort(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1_000_000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+	tracker := NewTracker(1_000_000, 0.0003, 0.0001, contracts.DefaultTradingConfig(), logger)
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	// 1. Open short 100 shares @ 10.00.
@@ -67,7 +68,7 @@ func TestGhostPosition_LongBuyOffsetsShort(t *testing.T) {
 // exactly the long quantity flattens the position.
 func TestGhostPosition_ShortOffsetsLong(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1_000_000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+	tracker := NewTracker(1_000_000, 0.0003, 0.0001, contracts.DefaultTradingConfig(), logger)
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	// 1. Buy 100 long @ 10.00.
@@ -92,7 +93,7 @@ func TestGhostPosition_ShortOffsetsLong(t *testing.T) {
 // symptom (AvgCost NaN from divide-by-zero) is also resolved.
 func TestGhostPosition_AvgCostNotNaNAfterOffset(t *testing.T) {
 	logger := zerolog.New(nil)
-	tracker := NewTracker(1_000_000, 0.0003, 0.0001, defaultTradingConfig(), logger)
+	tracker := NewTracker(1_000_000, 0.0003, 0.0001, contracts.DefaultTradingConfig(), logger)
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	_, _ = tracker.ExecuteTrade("S1", domain.DirectionShort, 100, 10.0, ts, nil)

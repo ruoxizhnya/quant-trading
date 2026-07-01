@@ -1,9 +1,10 @@
-package backtest
+package tracker
 
 import (
 	"testing"
 	"time"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
@@ -496,15 +497,15 @@ func TestTracker_PortfolioValueCalculation(t *testing.T) {
 
 // TestShortSellingCost_Accrual verifies that AdvanceDay accrues one
 // day of securities lending interest on an open short position using
-// the default annual rate (DefaultShortSellingRate = 10.6%) over 252
+// the default annual rate (contracts.DefaultShortSellingRate = 10.6%) over 252
 // trading days, and deducts the cost from cash.
 func TestShortSellingCost_Accrual(t *testing.T) {
 	tracker := newTestTracker(1_000_000)
 	date := time.Date(2026, 4, 10, 0, 0, 0, 0, time.Local)
 
 	// Default rate must be 10.6%/year.
-	if rate := tracker.GetShortSellingRate(); abs(rate-DefaultShortSellingRate) > 1e-9 {
-		t.Fatalf("default short selling rate = %f, want %f", rate, DefaultShortSellingRate)
+	if rate := tracker.GetShortSellingRate(); abs(rate-contracts.DefaultShortSellingRate) > 1e-9 {
+		t.Fatalf("default short selling rate = %f, want %f", rate, contracts.DefaultShortSellingRate)
 	}
 
 	// Open a short position: 100 shares @ 50.0.
@@ -523,7 +524,7 @@ func TestShortSellingCost_Accrual(t *testing.T) {
 
 	cashAfter := tracker.GetCash()
 	positionValue := 100 * 50.0
-	expectedCost := positionValue * DefaultShortSellingRate / float64(TradingDaysPerYear)
+	expectedCost := positionValue * contracts.DefaultShortSellingRate / float64(contracts.TradingDaysPerYear)
 	actualCost := cashBefore - cashAfter
 
 	if actualCost <= 0 {
@@ -532,7 +533,7 @@ func TestShortSellingCost_Accrual(t *testing.T) {
 	}
 	if abs(actualCost-expectedCost) > 1e-6 {
 		t.Errorf("short selling daily cost = %.6f, want %.6f (position_value=%.2f, rate=%f, days=%d)",
-			actualCost, expectedCost, positionValue, DefaultShortSellingRate, TradingDaysPerYear)
+			actualCost, expectedCost, positionValue, contracts.DefaultShortSellingRate, contracts.TradingDaysPerYear)
 	}
 }
 
@@ -588,7 +589,7 @@ func TestShortSellingCost_SetRate(t *testing.T) {
 	cashAfter := tracker.GetCash()
 
 	positionValue := 100 * 50.0
-	expectedCost := positionValue * customRate / float64(TradingDaysPerYear)
+	expectedCost := positionValue * customRate / float64(contracts.TradingDaysPerYear)
 	actualCost := cashBefore - cashAfter
 
 	if actualCost <= 0 {
@@ -599,7 +600,7 @@ func TestShortSellingCost_SetRate(t *testing.T) {
 	}
 
 	// Sanity check: the custom-rate cost must differ from the default-rate cost.
-	defaultCost := positionValue * DefaultShortSellingRate / float64(TradingDaysPerYear)
+	defaultCost := positionValue * contracts.DefaultShortSellingRate / float64(contracts.TradingDaysPerYear)
 	if abs(actualCost-defaultCost) < 1e-9 {
 		t.Errorf("custom rate cost (%.6f) should differ from default rate cost (%.6f)", actualCost, defaultCost)
 	}
