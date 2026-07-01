@@ -4,6 +4,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/cache"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/execution"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
 // S7-P2-1 (ODR-043): this file re-exports the canonical types,
@@ -60,6 +62,32 @@ type (
 // ErrQuintileNotFound re-exported from cache/.
 var ErrQuintileNotFound = cache.ErrQuintileNotFound
 
+// --- execution/ subpackage re-exports (S7-P2-1 Commit 3) ---
+
+type (
+	ExecutionService         = execution.ExecutionService
+	Quote                    = execution.Quote
+	BacktestExecutionService = execution.BacktestExecutionService
+	ExecutionBridge          = execution.ExecutionBridge
+	LiveBridge               = execution.LiveBridge
+)
+
+// Constructor wrappers (Go has no function alias, so we delegate).
+// Callers that used backtest.NewBacktestExecutionService / NewExecutionBridge
+// / NewLiveBridge keep working unchanged.
+
+func NewBacktestExecutionService(config domain.ExecutionConfig) *BacktestExecutionService {
+	return execution.NewBacktestExecutionService(config)
+}
+
+func NewExecutionBridge(logger zerolog.Logger) *ExecutionBridge {
+	return execution.NewExecutionBridge(logger)
+}
+
+func NewLiveBridge(logger zerolog.Logger) *LiveBridge {
+	return execution.NewLiveBridge(logger)
+}
+
 // Compile-time assertion: *Engine satisfies contracts.EngineRunner.
 // If the RunBacktest signature ever drifts from the interface, the
 // build fails here rather than at a distant call site.
@@ -73,10 +101,3 @@ var _ contracts.EngineRunner = (*Engine)(nil)
 func defaultTradingConfig() TradingConfig {
 	return contracts.DefaultTradingConfig()
 }
-
-// Compile-time use of zerolog to keep the import alive even before the
-// sibling-extraction commits add constructor wrappers that need it.
-// Without this, `goimports` would strip the import on the first
-// commit. Once Commit 3 (execution/) lands, the import is used by
-// the NewExecutionBridge / NewLiveBridge wrappers below (added then).
-var _ zerolog.Logger

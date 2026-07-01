@@ -1,4 +1,4 @@
-package backtest
+package execution
 
 // P1-17 (Sprint 6, ODR-013 CQ-001, ADR-020):
 // LiveBridge — 引擎与 live.LiveTrader 之间的桥接组件。
