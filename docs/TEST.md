@@ -80,7 +80,7 @@ all_trades.have_timestamp        // Every trade is time-stamped
 
 **Service Communication:**
 - `analysis-service → data-service`: HTTP call returns OHLCV for known date range
-- `analysis-service → risk-service`: signal weight adjustment returns within timeout
+- `analysis-service` in-process `risk.RiskManager`: signal weight adjustment (no cross-service HTTP, ODR-021)
 - Health endpoints return 200 on all services
 
 **Data Pipeline:**

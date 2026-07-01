@@ -756,8 +756,9 @@ POST /signals                     - Generate signals
 GET  /signals/:date               - Get signals for date
 ```
 
-### 3. Risk Service (port 8083) ⚠️ *Planned — Phase 3*
-> **Status**: Not yet implemented. Endpoints below are design targets.
+### 3. Risk API (in-process, /api/risk/* on :8085) ✅ *Implemented — P1-15 (ODR-021)*
+> **Status**: Implemented as in-process `risk.RiskManager` in analysis-service.
+> Merged from standalone risk-service(8083) per ODR-021 (P1-15, 2026-06-12).
 
 **Responsibilities**:
 - Calculate position sizes
@@ -765,20 +766,27 @@ GET  /signals/:date               - Get signals for date
 - Apply dynamic stop-losses
 - Market regime detection
 
-**Endpoints**:
+**Endpoints** (all on analysis-service :8085):
 ```
-GET  /health                      - Health check
-POST /calculate_position          - Calculate position size
+POST /api/risk/calculate_position   - Calculate position size
      {"portfolio_value": 1000000, "signal": {...}, "market_regime": {...}}
-GET  /risk_metrics                - Get current risk metrics
-     ?portfolio_value=1000000
-POST /stop_loss                   - Check stop-loss triggers
+POST /api/risk/detect_regime        - Detect current market regime
+POST /api/risk/check_stoploss       - Check stop-loss triggers
      {"positions": [...], "current_prices": {...}}
-GET  /regime                      - Get current market regime
+GET  /api/risk/metrics              - Get current risk metrics
+     ?portfolio_value=1000000
+
+# Legacy aliases (no /api/risk prefix, backward compat):
+POST /calculate_position            - legacy alias for /api/risk/calculate_position
+POST /detect_regime                 - legacy alias
+POST /check_stoploss                - legacy alias
+GET  /risk_metrics                  - legacy alias
 ```
 
-### 4. Execution Service (port 8084) ✅ *Implemented — Phase 3*
-> **Status**: LiveTrader interface defined, MockTrader implemented with A-share rules, AdvancedTrader with batch operations and quote streaming. Real broker integration planned for Phase 4.
+> **Source**: `cmd/analysis/handlers_risk.go` — `RiskHandler.RegisterRoutes`
+
+### 4. Execution API (in-process, /api/execution/* on :8085) ✅ *Implemented — P1-15 (ODR-021)*
+> **Status**: LiveTrader interface defined, MockTrader implemented with A-share rules, AdvancedTrader with batch operations and quote streaming. Real broker integration planned for Phase 4. Merged from standalone execution-service(8084) per ODR-021 (P1-15, 2026-06-12).
 
 **Responsibilities**:
 - Order management (submit, cancel, query)
@@ -808,17 +816,26 @@ type LiveTrader interface {
 - Transfer fee: 0.001% of trade value
 - Slippage: 0.01% applied to execution price
 
-**Endpoints**:
+**Endpoints** (all on analysis-service :8085):
 ```
-GET  /health                      - Health check
-POST /orders                      - Create new order
+POST /api/execution/orders            - Create new order
      {"symbol": "000001.SZ", "quantity": 100, "side": "buy", "type": "market"}
-GET  /orders                      - List orders
-GET  /orders/:id                  - Get order status
-POST /orders/:id/cancel            - Cancel order
-GET  /positions                   - Get current positions
-GET  /account                     - Get account summary
+GET  /api/execution/orders            - List orders
+GET  /api/execution/orders/:id        - Get order status
+POST /api/execution/orders/:id/cancel - Cancel order
+GET  /api/execution/positions         - Get current positions
+GET  /api/execution/account          - Get account summary
+
+# Legacy aliases (root-level, backward compat):
+POST /orders                          - legacy alias
+GET  /orders                          - legacy alias
+GET  /orders/:id                      - legacy alias
+POST /orders/:id/cancel               - legacy alias
+GET  /positions                       - legacy alias
+GET  /account                        - legacy alias
 ```
+
+> **Source**: `cmd/analysis/handlers_execution.go` — `ExecutionHandler.RegisterRoutes`
 
 ### 5. Paper Trading Service (port 8085 /api/paper)
 **Responsibilities**:
@@ -1217,7 +1234,7 @@ GET  /api/walkforward/:id         - Get walk-forward result
 3. **Daily Loop**:
    - Update market regime
    - Generate signals from strategy
-   - Calculate positions via risk service
+   - Calculate positions via in-process risk.RiskManager (ODR-021)
    - Execute "orders" at close price
    - Update portfolio
 4. **Daily Rebalance**: At month-end or threshold breach
@@ -1313,10 +1330,8 @@ services:
     port: 8081
   strategy:
     port: 8082
-  risk:
-    port: 8083
-  execution:
-    port: 8084
+  # ODR-021 (P1-15): risk + execution are in-process under analysis-service,
+  # no separate service config / port needed.
   analysis:
     port: 8085
 ```

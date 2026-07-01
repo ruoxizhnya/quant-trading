@@ -196,7 +196,7 @@ npx playwright test --report=html      # Generate HTML report
 
 ### Infrastructure
 ```bash
-docker compose up -d                    # Start all 7 services
+docker compose up -d                    # Start all 5 services (ODR-021: risk+exec merged into analysis)
 docker compose ps                       # Check service health
 docker compose logs -f analysis-service  # Tail analysis service logs
 docker compose down                     # Stop all services
