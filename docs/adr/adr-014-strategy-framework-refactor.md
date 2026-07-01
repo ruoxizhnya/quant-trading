@@ -1,10 +1,11 @@
 # ADR-014: Strategy Framework Refactor & Unified Interface
 
-> **Status**: Proposed  
+> **Status**: Superseded by [ADR-020 §6](adr-020-engine-decomposition.md)  
 > **Date**: 2026-05-04  
 > **Category**: Architecture  
 > **Related ADRs**: ADR-001 (Plugin Loading), ADR-005 (Strategy Config), ADR-012 (Strategy Service Standby)  
 > **Supersedes**: None (enhances existing decisions)  
+> **Superseded By**: [ADR-020 §6](adr-020-engine-decomposition.md) — Strategy 接口 ISP 拆分 (CQ-006)
 > **Author**: AI Assistant (Code Review 2026-05-04)
 
 ---

@@ -25,12 +25,12 @@
 | [ADR-011](adr/adr-011-vue-spa-frontend.md) | Vue 3 SPA as Official Frontend (Replacing Legacy HTML) | Accepted | 2026-04-11 |
 | [ADR-012](adr/adr-012-strategy-service-standby.md) | Strategy-Service Standby Decision | Accepted | 2026-04-11 |
 | [ADR-013](adr/adr-013-data-sync-enhancement.md) | Data Synchronization Enhancement | Proposed | 2026-05-03 |
-| [ADR-014](adr/adr-014-strategy-framework-refactor.md) | Strategy Framework Refactor & Unified Interface | Proposed | 2026-05-04 |
-| [ADR-015](adr/adr-015-ai-agent-architecture.md) | AI Agent Quantitative Research Architecture | Proposed | 2026-05-04 |
+| [ADR-014](adr/adr-014-strategy-framework-refactor.md) | Strategy Framework Refactor & Unified Interface | Superseded by ADR-020 §6 | 2026-05-04 |
+| [ADR-015](adr/adr-015-ai-agent-architecture.md) | AI Agent Quantitative Research Architecture | Accepted | 2026-05-04 |
 | [ADR-016](adr/adr-016-multi-source-data-architecture.md) | Multi-Source Data Architecture | Proposed | 2026-05-17 |
 | [ADR-017](adr/adr-017-observability-and-auth.md) | Observability Stack + API Authentication (前置 Phase 4) | Proposed | 2026-06-11 |
 | [ADR-018](adr/adr-018-test-and-async-safety.md) | Testing Architecture + Async Safety + Determinism | Proposed | 2026-06-11 |
-| [ADR-019](adr/adr-019-service-merge-ai-copilot.md) | Service 合并 + AI Copilot Sandbox 重构 | Proposed | 2026-06-11 |
+| [ADR-019](adr/adr-019-service-merge-ai-copilot.md) | Service 合并 + AI Copilot Sandbox 重构 | Accepted | 2026-06-11 |
 | [ADR-020](adr/adr-020-engine-decomposition.md) | Engine God Object 拆分 + 函数式依赖注入 (含 Strategy 接口 ISP §6) | **Accepted** (P1-16~20,24) | 2026-06-11 |
 
 ---
@@ -145,3 +145,4 @@ _2026-06-11 状态变更: ADR-007 OPEN→Accepted, ADR-008 PARTIAL→Accepted, A
 _docs/ 新增内容: VISION.md §Principle 8 (Documentation-Path Consistency) + TASKS.md §Sprint 6 启动期 待校核项 (6 项)_
 _.trae/ 临时目录: 已清空并删除 (3 个文件迁至 docs/specs/ 后已合并回 ODR-013/VISION.md/TASKS.md)_
 _docs/specs/ 临时目录: 已清空并删除 (内容合并至 ODR-013 §对齐审计复核 + VISION.md §Principle 8 + TASKS.md §Sprint 6 启动期 待校核项)_
+_2026-07-01 状态变更: ADR-014 Proposed→Superseded by ADR-020 §6 (Strategy 接口 ISP 拆分取代单一接口); ADR-015 Proposed→Accepted (文件头早已正确，索引漂移修复); ADR-019 Proposed→Accepted (§1→ODR-021, §2→ODR-020, §3→ODR-017 全部落地); ADR-020 文件头 Proposed→Accepted (索引早已正确，文件头漂移修复) — S7-P3-6 ODR-043-7_

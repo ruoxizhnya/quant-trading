@@ -1,7 +1,7 @@
 # ADR-020: Engine God Object 拆分 + 函数式依赖注入
 
 **Date:** 2026-06-11
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 

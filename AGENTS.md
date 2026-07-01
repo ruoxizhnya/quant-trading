@@ -684,7 +684,6 @@ Please continue from where we left off.
 | `ChatbubbleEllipsisOutline` icon name doesn't exist | Correct name is `ChatbubbleEllipsesOutline` (with 'e' before 's') |
 | Trade markers may not render if portfolio_values is empty | Ensure backtest returns valid data before calling renderChart() |
 | **ODR-011 Multi-Source Risks** (CR-48, ODR-012) | See sub-table below |
-| **ODR-043-7 文档漂移: ADR 状态 (剩余)** | ADR-014 被 ADR-020 §6 取代未标记; ADR-019 状态需更新为 Accepted — S7-P3-6 范围 — 详见 [ODR-043](docs/odr/odr-043-comprehensive-audit-2026-06-29.md) |
 
 ### ODR-011 Multi-Source Integration Risks (CR-48, ODR-012)
 
