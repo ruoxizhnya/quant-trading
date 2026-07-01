@@ -611,7 +611,7 @@ AGENTS.md 是活文档。以下情况主动更新：
 |------|------|
 | [ADR.md](docs/ADR.md) + `docs/adr/` + `docs/odr/` | 架构 (ADR) + 运营 (ODR) 决策记录 | 质疑过往决策、理解理由时 |
 
-**Archived** (在 `docs/archive/`): CLEANUP_REPORT.md, DOC_AUDIT_REPORT.md, MIGRATION_REPORT.md — 见 `docs/archive/README.md`
+**Archived** (在 `docs/archive/`): CLEANUP_REPORT.md, DOC_AUDIT_REPORT.md, MIGRATION_REPORT.md, `plans-2026-Q3/` (S7 执行计划 14 件 — 见 [ODR-044](docs/odr/odr-044-s7-plan-archive-and-pattern-extraction.md)) — 见 `docs/archive/README.md`
 
 ---
 

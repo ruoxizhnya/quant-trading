@@ -82,6 +82,7 @@
 | [ODR-041](odr/odr-041-p2-31-p2-33-code-quality.md) | P2-31~P2-33 代码质量 — 拆 3 个长函数为 11 个子函数 + 删 4 个空测试 + 替换 placeholder 为 7 个 SQL 构建子测试 | Completed | Implementation | 2026-06-14 |
 | [ODR-042](odr/odr-042-p1-4-xtp-broker.md) | P1-4 中泰 XTP 券商对接 — XTPTrader 接口层 + Config + 7 状态机 + OfflineMode stub + A 股 100 股校验 + EmergencyFlatten + 30 TestXxx race-clean; SDK CGo binding 待接入 | Completed | Implementation | 2026-06-14 |
 | [ODR-043](odr/odr-043-comprehensive-audit-2026-06-29.md) | 全项目可维护性、模块化与测试覆盖综合审计 (4 维度 40 问题点) — 推翻 brainstorming "ExecutionCore 合并"假设 / 确认 3 共享原语包方案 / 暴露 5 真实 bug / 修正 AGENTS.md 文档漂移 (ADR/ODR 数量 15/8→20/43) | Accepted | Audit | 2026-06-29 |
+| [ODR-044](odr/odr-044-s7-plan-archive-and-pattern-extraction.md) | S7 执行计划归档 + 5 个工程模式提取 (leaf+aliases 提取 / narrow interface 解耦 / fake stub 测试 / soft layering / test-first atomic commit) | Completed | Migration | 2026-07-01 |
 
 ---
 
