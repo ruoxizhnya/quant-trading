@@ -1,10 +1,17 @@
-// Package domain contains core domain types and interfaces for the quant trading system.
-// All types are market-agnostic and can be used across different markets.
+// Package domain contains core domain types and interfaces for the
+// quant trading system.
+//
+// S7-P3-4 (ODR-043 D3): Market-data types (OHLCV, Stock, Fundamental,
+// etc.) now live in pkg/domain/market. This package re-exports them as
+// type aliases for backward compatibility. New code SHOULD import
+// pkg/domain/market directly.
 package domain
 
 import (
 	"context"
 	"time"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/domain/market"
 )
 
 // Direction represents trading direction
@@ -33,109 +40,24 @@ const (
 	OrderTypeTrailing OrderType = "trailing"
 )
 
-// OHLCV represents daily candlestick data
-type OHLCV struct {
-	Symbol    string    `json:"symbol"`
-	Date      time.Time `json:"date"`
-	Open      float64   `json:"open"`
-	High      float64   `json:"high"`
-	Low       float64   `json:"low"`
-	Close     float64   `json:"close"`
-	Volume    float64   `json:"volume"`
-	Turnover  float64   `json:"turnover"`
-	TradeDays int       `json:"trade_days"`
-	// LimitUp indicates the stock hit the upper price limit today (涨停)
-	LimitUp bool `json:"limit_up"`
-	// LimitDown indicates the stock hit the lower price limit today (跌停)
-	LimitDown bool `json:"limit_down"`
-}
-
-// Stock represents a tradable security
-type Stock struct {
-	Symbol    string    `json:"symbol"`
-	Name      string    `json:"name"`
-	Exchange  string    `json:"exchange"`
-	Industry  string    `json:"industry"`
-	MarketCap float64   `json:"market_cap"`
-	ListDate  time.Time `json:"list_date"`
-	Status    string    `json:"status"` // active, suspended, delisted
-}
-
-// IndexConstituent represents a constituent stock of an index.
-type IndexConstituent struct {
-	ID        int64     `json:"id"`
-	IndexCode string    `json:"index_code"` // e.g. "000300.SH" (CSI 300), "000500.SH" (CSI 500), "000852.SH" (CSI 800)
-	Symbol    string    `json:"symbol"`     // stock ts_code, e.g. "000001.SZ"
-	InDate    time.Time `json:"in_date"`    // date when stock entered index
-	OutDate   time.Time `json:"out_date"`   // date when stock exited index (zero if still in)
-	Weight    float64   `json:"weight"`     // weight in index (if available from index_weight API)
-}
-
-// Split represents a stock split or rights issue event.
-// Used for forward-price adjustment verification.
-type Split struct {
-	ID           int64     `json:"id"`
-	Symbol       string    `json:"symbol"`
-	TradeDate    time.Time `json:"trade_date"`     // ex-date of the split
-	AnnDate      time.Time `json:"ann_date"`       // announcement date
-	StkDivRatio  float64   `json:"stk_div_ratio"`  // stock dividend / split ratio (e.g., 0.1 = 10% stock dividend)
-	CashDivRatio float64   `json:"cash_div_ratio"` // cash dividend ratio
-	Currency     string    `json:"currency"`       // usually CNY
-}
-
-// Dividend represents a dividend event for a stock.
-type Dividend struct {
-	ID        int64     `json:"id"`
-	Symbol    string    `json:"symbol"`
-	AnnDate   time.Time `json:"ann_date"`   // announcement date
-	RecDate   time.Time `json:"rec_date"`   // record date (shareholders as of this date receive dividend)
-	PayDate   time.Time `json:"pay_date"`   // payment date / ex-dividend date
-	DivAmt    float64   `json:"div_amt"`    // cash dividend amount per share
-	StkDiv    float64   `json:"stk_div"`    // stock dividend per share (bonus shares)
-	StkRatio  float64   `json:"stk_ratio"`  // stock split ratio
-	CashRatio float64   `json:"cash_ratio"` // cash dividend ratio
-}
-
-// Fundamental represents fundamental financial data
-type Fundamental struct {
-	Symbol       string    `json:"symbol"`
-	Date         time.Time `json:"date"`
-	PE           float64   `json:"pe"`
-	PB           float64   `json:"pb"`
-	PS           float64   `json:"ps"`
-	ROE          float64   `json:"roe"`
-	ROA          float64   `json:"roa"`
-	DebtToEquity float64   `json:"debt_to_equity"`
-	GrossMargin  float64   `json:"gross_margin"`
-	NetMargin    float64   `json:"net_margin"`
-	Revenue      float64   `json:"revenue"`
-	NetProfit    float64   `json:"net_profit"`
-	TotalAssets  float64   `json:"total_assets"`
-	TotalLiab    float64   `json:"total_liab"`
-}
-
-// FundamentalData represents financial data from Tushare financial_data API.
-// Used for factor-based screening (PE, PB, PS, ROE, ROA, etc.).
-type FundamentalData struct {
-	ID           int       `json:"id"`
-	TsCode       string    `json:"ts_code"`
-	TradeDate    time.Time `json:"trade_date"`
-	AnnDate      time.Time `json:"ann_date"` // announcement date
-	EndDate      time.Time `json:"end_date"` // reporting period
-	PE           *float64  `json:"pe"`
-	PB           *float64  `json:"pb"`
-	PS           *float64  `json:"ps"`
-	ROE          *float64  `json:"roe"`
-	ROA          *float64  `json:"roa"`
-	DebtToEquity *float64  `json:"debt_to_equity"`
-	GrossMargin  *float64  `json:"gross_margin"`
-	NetMargin    *float64  `json:"net_margin"`
-	Revenue      *float64  `json:"revenue"`
-	NetProfit    *float64  `json:"net_profit"`
-	TotalAssets  *float64  `json:"total_assets"`
-	TotalLiab    *float64  `json:"total_liab"`
-	CreatedAt    time.Time `json:"created_at"`
-}
+// S7-P3-4 (ODR-043 D3): Market-data types migrated to pkg/domain/market.
+// These aliases preserve backward compatibility: domain.OHLCV and
+// market.OHLCV are the SAME type (not two different types), so all
+// existing consumer code compiles unchanged. New code SHOULD prefer
+// the `market.` package path.
+//
+// To migrate a file: change `domain.OHLCV` → `market.OHLCV` and the
+// import. No type conversion is needed.
+type (
+	OHLCV              = market.OHLCV
+	Stock              = market.Stock
+	IndexConstituent   = market.IndexConstituent
+	Split              = market.Split
+	Dividend           = market.Dividend
+	Fundamental        = market.Fundamental
+	FundamentalData    = market.FundamentalData
+	MarketDataProvider = market.Provider // renamed; alias keeps old name
+)
 
 // Signal represents a trading signal generated by a strategy
 type Signal struct {
@@ -245,14 +167,9 @@ type TargetPosition struct {
 	LastUpdated time.Time `json:"last_updated"`
 }
 
-// MarketDataProvider defines the interface for accessing market data
-type MarketDataProvider interface {
-	GetOHLCV(ctx context.Context, symbol string, start, end time.Time) ([]OHLCV, error)
-	GetFundamental(ctx context.Context, symbol string, date time.Time) (*Fundamental, error)
-	GetStocks(ctx context.Context, exchange string) ([]Stock, error)
-	GetLatestPrice(ctx context.Context, symbol string) (float64, error)
-	GetIndexConstituents(ctx context.Context, indexCode string) ([]string, error)
-}
+// MarketDataProvider is now a type alias for market.Provider — see the
+// alias block above (S7-P3-4). The interface definition was moved to
+// pkg/domain/market/provider.go and renamed to market.Provider.
 
 // RiskManager defines the interface for risk management
 type RiskManager interface {
