@@ -1,4 +1,4 @@
-package backtest
+package cache
 
 // P1-16 (Sprint 6, ODR-013 CQ-001, ADR-020):
 // FactorCacheAccessor 独立单元测试 — 不依赖 Engine / PostgresStore。

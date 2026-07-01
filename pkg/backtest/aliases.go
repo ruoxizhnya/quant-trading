@@ -2,6 +2,7 @@ package backtest
 
 import (
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/cache"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 )
 
@@ -47,6 +48,17 @@ const (
 // subpackage wrappers in this same file) can reference it as
 // `backtest.EngineRunner` without importing contracts directly.
 type EngineRunner = contracts.EngineRunner
+
+// --- cache/ subpackage re-exports (S7-P2-1 Commit 2) ---
+
+type (
+	CacheManager        = cache.CacheManager
+	FactorCacheAccessor = cache.FactorCacheAccessor
+	FactorStore         = cache.FactorStore
+)
+
+// ErrQuintileNotFound re-exported from cache/.
+var ErrQuintileNotFound = cache.ErrQuintileNotFound
 
 // Compile-time assertion: *Engine satisfies contracts.EngineRunner.
 // If the RunBacktest signature ever drifts from the interface, the

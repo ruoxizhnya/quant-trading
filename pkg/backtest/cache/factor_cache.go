@@ -1,4 +1,4 @@
-package backtest
+package cache
 
 // P1-16 (Sprint 6, ODR-013 CQ-001, ADR-020):
 // FactorCacheAccessor — L1 因子 z-score 缓存子组件，从 Engine 抽离。

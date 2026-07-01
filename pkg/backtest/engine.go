@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/cache"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/metrics"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
@@ -232,8 +233,8 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 		riskServiceURL:     riskServiceURL,
 		httpClient:         httpclient.New("", 30*time.Second, 3),
 		logger:             componentLogger,
-		cache:              NewCacheManager(componentLogger),
-		factor:             NewFactorCacheAccessor(componentLogger),
+		cache:              cache.NewCacheManager(componentLogger),
+		factor:             cache.NewFactorCacheAccessor(componentLogger),
 		stateStore:         stateStore,
 		liveBridge:         NewLiveBridge(componentLogger),
 		executionBridge:    executionBridge,
@@ -309,8 +310,8 @@ func NewEngineWithOptions(cfg Config, provider marketdata.Provider, opts ...Engi
 		provider:        provider,
 		httpClient:      httpclient.New("", 30*time.Second, 3),
 		logger:          componentLogger,
-		cache:           NewCacheManager(componentLogger),
-		factor:          NewFactorCacheAccessor(componentLogger),
+		cache:           cache.NewCacheManager(componentLogger),
+		factor:          cache.NewFactorCacheAccessor(componentLogger),
 		stateStore:      stateStore,
 		liveBridge:      NewLiveBridge(componentLogger),
 		executionBridge: executionBridge,
@@ -763,7 +764,7 @@ func (e *Engine) getOHLCV(ctx context.Context, symbol string, start, end time.Ti
 // pkg/backtest/cache.go (P1-16 ADR-020). The unexported alias below is
 // kept for any in-package callers that still reference the old name.
 func dateRangeBounds(bars []domain.OHLCV, start, end time.Time) (int, int) {
-	return DateRangeBounds(bars, start, end)
+	return cache.DateRangeBounds(bars, start, end)
 }
 
 // detectRegime detects market regime using risk service.
@@ -982,11 +983,10 @@ func (e *Engine) calculatePosition(ctx context.Context, signal domain.Signal, po
 	e.mu.RUnlock()
 
 	if rm != nil {
-		// P1-16 (ADR-020): read snapshot via CacheManager
-		var ohlcv []domain.OHLCV
-		if snap := e.cache.inMemoryOHLCVAtomic.Load(); snap != nil {
-			ohlcv = (*snap)[signal.Symbol]
-		}
+		// P1-16 (ADR-020): read cached snapshot via CacheManager.Peek
+		// (peek-only — no provider fallback; calculatePosition is a
+		// best-effort read of already-warmed data).
+		ohlcv := e.cache.Peek(signal.Symbol)
 		pos, err := rm.CalculatePosition(ctx, signal, portfolio, regime, currentPrice, ohlcv)
 		if err != nil {
 			return domain.PositionSize{}, apperrors.Wrap(err, apperrors.ErrCodeInternal, "in-process position calculation failed", "calculatePosition")

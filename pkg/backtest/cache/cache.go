@@ -1,4 +1,4 @@
-package backtest
+package cache
 
 // P1-16 (Sprint 6, ODR-013 CQ-001, ADR-020):
 // CacheManager — L1 OHLCV 缓存子组件，从 Engine God Object 抽离。
@@ -139,6 +139,38 @@ func (cm *CacheManager) Load(data map[string][]domain.OHLCV) {
 	}
 	cm.inMemoryOHLCVAtomic.Store(&cm.inMemoryOHLCV)
 	cm.mu.Unlock()
+}
+
+// Peek returns the cached OHLCV bars for a symbol, or nil if the symbol
+// is not in the L1 cache. Unlike Get, Peek does NOT fall back to the
+// provider on miss — it only checks the in-memory atomic snapshot.
+//
+// Used by Engine.calculatePosition to read cached bars without
+// triggering a provider call. Callers that need provider fallback
+// should use Get instead.
+func (cm *CacheManager) Peek(symbol string) []domain.OHLCV {
+	snap := cm.inMemoryOHLCVAtomic.Load()
+	if snap == nil {
+		return nil
+	}
+	return (*snap)[symbol]
+}
+
+// Snapshot returns the current L1 OHLCV cache state as a map.
+//
+// Used by tests (notably TestEngine_LoadOHLCVInMemory) to verify cache
+// contents without accessing the unexported inMemoryOHLCVAtomic field.
+// Returns nil if the cache has never been initialized (which never
+// happens in practice because NewCacheManager publishes an empty map).
+//
+// The returned map shares memory with the internal cache — callers
+// must treat it as read-only.
+func (cm *CacheManager) Snapshot() map[string][]domain.OHLCV {
+	snap := cm.inMemoryOHLCVAtomic.Load()
+	if snap == nil {
+		return nil
+	}
+	return *snap
 }
 
 // Get 读取单个 symbol 的 OHLCV 区间。
