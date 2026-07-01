@@ -1,4 +1,4 @@
-package backtest
+package walkforward
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
@@ -14,15 +16,17 @@ import (
 
 // WalkForwardEngine runs walk-forward validation for a strategy.
 type WalkForwardEngine struct {
-	engine *Engine
+	runner contracts.EngineRunner
 	store  *storage.PostgresStore
+	logger zerolog.Logger
 }
 
 // NewWalkForwardEngine creates a new WalkForwardEngine.
-func NewWalkForwardEngine(engine *Engine, store *storage.PostgresStore) *WalkForwardEngine {
+func NewWalkForwardEngine(runner contracts.EngineRunner, store *storage.PostgresStore, logger zerolog.Logger) *WalkForwardEngine {
 	return &WalkForwardEngine{
-		engine: engine,
+		runner: runner,
 		store:  store,
+		logger: logger.With().Str("component", "walkforward").Logger(),
 	}
 }
 
@@ -97,7 +101,7 @@ func (wf *WalkForwardEngine) RunWalkForward(ctx context.Context, req WalkForward
 		return nil, fmt.Errorf("no walk-forward windows could be generated")
 	}
 
-	wf.engine.logger.Info().
+	wf.logger.Info().
 		Int("windows", len(windows)).
 		Int("symbols", len(req.StockPool)).
 		Str("range", req.StartDate+" ~ "+req.EndDate).
@@ -125,7 +129,7 @@ func (wf *WalkForwardEngine) RunWalkForward(ctx context.Context, req WalkForward
 	wf.detectOverfitting(report)
 
 	if err := wf.store.SaveWalkForwardReport(ctx, report); err != nil {
-		wf.engine.logger.Warn().Err(err).Msg("Failed to save walk-forward report to DB")
+		wf.logger.Warn().Err(err).Msg("Failed to save walk-forward report to DB")
 	}
 
 	return report, nil
@@ -176,7 +180,7 @@ func (wf *WalkForwardEngine) runSingleWindow(
 	windowIdx int,
 	win wfWindow,
 ) *domain.WalkForwardResult {
-	wf.engine.logger.Info().
+	wf.logger.Info().
 		Int("window", windowIdx+1).
 		Int("total", windowIdx).
 		Str("train", win.trainStart.Format("2006-01-02")+"~"+win.trainEnd.Format("2006-01-02")).
@@ -189,7 +193,7 @@ func (wf *WalkForwardEngine) runSingleWindow(
 	}
 	riskFree := req.RiskFreeRate
 
-	trainReq := BacktestRequest{
+	trainReq := contracts.BacktestRequest{
 		Strategy:       req.Strategy,
 		StockPool:      req.StockPool,
 		StartDate:      win.trainStart.Format("2006-01-02"),
@@ -198,7 +202,7 @@ func (wf *WalkForwardEngine) runSingleWindow(
 		RiskFreeRate:   riskFree,
 	}
 
-	testReq := BacktestRequest{
+	testReq := contracts.BacktestRequest{
 		Strategy:       req.Strategy,
 		StockPool:      req.StockPool,
 		StartDate:      win.testStart.Format("2006-01-02"),
@@ -207,15 +211,15 @@ func (wf *WalkForwardEngine) runSingleWindow(
 		RiskFreeRate:   riskFree,
 	}
 
-	trainResp, err := wf.engine.RunBacktest(ctx, trainReq)
+	trainResp, err := wf.runner.RunBacktest(ctx, trainReq)
 	if err != nil {
-		wf.engine.logger.Warn().Err(err).Int("window", windowIdx+1).Msg("Train backtest failed")
+		wf.logger.Warn().Err(err).Int("window", windowIdx+1).Msg("Train backtest failed")
 		return nil
 	}
 
-	testResp, err := wf.engine.RunBacktest(ctx, testReq)
+	testResp, err := wf.runner.RunBacktest(ctx, testReq)
 	if err != nil {
-		wf.engine.logger.Warn().Err(err).Int("window", windowIdx+1).Msg("Test backtest failed")
+		wf.logger.Warn().Err(err).Int("window", windowIdx+1).Msg("Test backtest failed")
 		return nil
 	}
 
@@ -437,7 +441,7 @@ func (wf *WalkForwardEngine) buildWindows(days []time.Time, params domain.WalkFo
 }
 
 // toBacktestResult converts a BacktestResponse to a BacktestResult.
-func (wf *WalkForwardEngine) toBacktestResult(r *BacktestResponse) *domain.BacktestResult {
+func (wf *WalkForwardEngine) toBacktestResult(r *contracts.BacktestResponse) *domain.BacktestResult {
 	if r == nil {
 		return nil
 	}

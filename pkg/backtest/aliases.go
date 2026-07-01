@@ -7,7 +7,9 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/execution"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/state"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/tracker"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/walkforward"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 )
 
 // S7-P2-1 (ODR-043): this file re-exports the canonical types,
@@ -128,6 +130,20 @@ func NewLRUStateStore(capacity int) *LRUStateStore { return state.NewLRUStateSto
 func NewNoopStateStore() *NoopStateStore           { return state.NewNoopStateStore() }
 func NewDiskStateStore(dir string) (*DiskStateStore, error) {
 	return state.NewDiskStateStore(dir)
+}
+
+// --- walkforward/ subpackage re-exports (S7-P2-1 Commit 6) ---
+
+type (
+	WalkForwardEngine  = walkforward.WalkForwardEngine
+	WalkForwardRequest = walkforward.WalkForwardRequest
+)
+
+// NewWalkForwardEngine wrapper preserves the original signature
+// (engine *Engine, store) by extracting engine.logger internally,
+// so cmd/analysis/setup.go and all external callers compile unchanged.
+func NewWalkForwardEngine(engine *Engine, store *storage.PostgresStore) *WalkForwardEngine {
+	return walkforward.NewWalkForwardEngine(engine, store, engine.logger)
 }
 
 // Compile-time assertion: *Engine satisfies contracts.EngineRunner.

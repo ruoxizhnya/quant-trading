@@ -1,9 +1,10 @@
-package backtest
+package walkforward
 
 import (
 	"testing"
 	"time"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -214,7 +215,7 @@ func TestWalkForwardEngine_detectOverfitting_NegativeWindows(t *testing.T) {
 func TestWalkForwardEngine_toBacktestResult(t *testing.T) {
 	wf := &WalkForwardEngine{}
 
-	resp := &BacktestResponse{
+	resp := &contracts.BacktestResponse{
 		TotalReturn:     0.25,
 		AnnualReturn:    0.15,
 		SharpeRatio:     1.5,
