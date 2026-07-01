@@ -1,7 +1,7 @@
 # ADR-019: Service 合并 + AI Copilot Sandbox 重构
 
 **Date:** 2026-06-11
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
