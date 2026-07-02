@@ -50,6 +50,11 @@ func TestSummarizeBacktestTool_OutputSchema(t *testing.T) {
 		"risk_level":             true,
 		"portfolio_values_count": true,
 		"trades_count":           true,
+		// L3 GateDecision fields.
+		"level":          true,
+		"passed":         true,
+		"reason":         true,
+		"recommendation": true,
 	}
 	for _, f := range schema.Fields {
 		delete(expected, f.Name)
@@ -102,6 +107,12 @@ func TestSummarizeBacktestTool_Execute_HappyPath(t *testing.T) {
 	assert.Equal(t, 142, summary.TradesCount)
 	// Sharpe=1.2 (>=1.0), max_dd=-0.15 (between -0.10 and -0.20) → medium.
 	assert.Equal(t, "medium", summary.RiskLevel)
+
+	// L3 GateDecision: Sharpe=1.2 >= 0.50 AND MaxDD=-0.15 > -0.30 → passed.
+	assert.Equal(t, "L3", summary.Level, "level should be L3")
+	assert.True(t, summary.Passed, "Sharpe=1.2>=0.50 AND MaxDD=-0.15>-0.30 should pass L3")
+	assert.Equal(t, GateReasonPassed, summary.Reason, "reason should be 'passed' for healthy backtest")
+	assert.NotEmpty(t, summary.Recommendation, "recommendation should be non-empty")
 }
 
 // TestSummarizeBacktestTool_Execute_Compression verifies the summary is
@@ -195,6 +206,13 @@ func TestSummarizeBacktestTool_Execute_EmptyResult(t *testing.T) {
 	assert.Equal(t, 0, summary.TotalTrades)
 	// Sharpe=0 (<0.5), max_dd=0 (>−0.20) → "high" (sharpe<0.5 triggers high).
 	assert.Equal(t, "high", summary.RiskLevel)
+
+	// L3 GateDecision: Sharpe=0 < 0.50 → fail with low_sharpe.
+	// MaxDrawdown=0 > -0.30 so drawdown is OK; failure is purely Sharpe.
+	assert.Equal(t, "L3", summary.Level)
+	assert.False(t, summary.Passed, "Sharpe=0 < 0.50 should fail L3")
+	assert.Equal(t, GateReasonLowSharpe, summary.Reason, "reason should be 'low_sharpe' since Sharpe fails")
+	assert.NotEmpty(t, summary.Recommendation)
 }
 
 // ─── summarizeBacktestResult unit tests ─────────────────────────────────
@@ -220,6 +238,96 @@ func TestSummarizeBacktestResult_PreservesMetrics(t *testing.T) {
 	assert.InDelta(t, 0.65, summary.WinRate, 1e-9)
 	assert.Equal(t, 50, summary.TotalTrades)
 	assert.InDelta(t, 4.0, summary.CalmarRatio, 1e-9)
+}
+
+// ─── L3 GateDecision table-driven tests ────────────────────────────────
+
+// TestSummarizeBacktestResult_L3GateDecision verifies the L3 gate pass/fail
+// logic across the (Sharpe, MaxDrawdown) space:
+//   - pass: Sharpe ≥ 0.50 AND MaxDrawdown > -0.30
+//   - low_sharpe: Sharpe < 0.50 (priority when both fail)
+//   - excessive_drawdown: Sharpe ≥ 0.50 AND MaxDrawdown ≤ -0.30
+func TestSummarizeBacktestResult_L3GateDecision(t *testing.T) {
+	cases := []struct {
+		name       string
+		sharpe     float64
+		maxDD      float64
+		wantPassed bool
+		wantReason string
+	}{
+		{
+			name:       "pass: high Sharpe + shallow DD",
+			sharpe:     1.5,
+			maxDD:      -0.10,
+			wantPassed: true,
+			wantReason: GateReasonPassed,
+		},
+		{
+			name:       "pass: boundary Sharpe=0.50",
+			sharpe:     0.50,
+			maxDD:      -0.10,
+			wantPassed: true,
+			wantReason: GateReasonPassed,
+		},
+		{
+			name:       "pass: boundary MaxDD=-0.299",
+			sharpe:     1.0,
+			maxDD:      -0.299,
+			wantPassed: true,
+			wantReason: GateReasonPassed,
+		},
+		{
+			name:       "fail: Sharpe below threshold",
+			sharpe:     0.30,
+			maxDD:      -0.10,
+			wantPassed: false,
+			wantReason: GateReasonLowSharpe,
+		},
+		{
+			name:       "fail: drawdown too deep",
+			sharpe:     1.0,
+			maxDD:      -0.40,
+			wantPassed: false,
+			wantReason: GateReasonExcessiveDrawdown,
+		},
+		{
+			name:       "fail: boundary MaxDD exactly -0.30 → drawdown fail",
+			sharpe:     1.0,
+			maxDD:      -0.30,
+			wantPassed: false,
+			wantReason: GateReasonExcessiveDrawdown,
+		},
+		{
+			name:       "fail: both fail → prefers low_sharpe (more actionable)",
+			sharpe:     0.20,
+			maxDD:      -0.50,
+			wantPassed: false,
+			wantReason: GateReasonLowSharpe,
+		},
+		{
+			name:       "fail: zero Sharpe + zero DD (empty result)",
+			sharpe:     0.0,
+			maxDD:      0.0,
+			wantPassed: false,
+			wantReason: GateReasonLowSharpe,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := &domain.BacktestResult{
+				SharpeRatio: tc.sharpe,
+				MaxDrawdown: tc.maxDD,
+			}
+			summary := summarizeBacktestResult(result)
+			require.NotNil(t, summary)
+			assert.Equal(t, "L3", summary.Level)
+			assert.Equal(t, tc.wantPassed, summary.Passed,
+				"passed: sharpe=%.3f maxDD=%.3f", tc.sharpe, tc.maxDD)
+			assert.Equal(t, tc.wantReason, summary.Reason,
+				"reason: sharpe=%.3f maxDD=%.3f", tc.sharpe, tc.maxDD)
+			assert.NotEmpty(t, summary.Recommendation, "recommendation should always be non-empty")
+		})
+	}
 }
 
 // ─── deriveRiskLevel table-driven tests ────────────────────────────────

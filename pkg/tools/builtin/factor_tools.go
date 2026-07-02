@@ -18,7 +18,15 @@ import (
 //
 // Tool name: "validate_factor"
 // Input: expression (required)
-// Output: { valid: bool, inputs: []string, ast: string, error: string }
+// Output: { valid, inputs, ast, error, level, passed, reason, recommendation }
+//
+// The four `level/passed/reason/recommendation` fields constitute the
+// GateDecision (see gate.go). They let Hermes uniformly check "did this
+// gate pass?" without parsing tool-specific fields. For L1:
+//   - level    = "L1"
+//   - passed   = valid (the parse result)
+//   - reason   = "passed" or "syntax_error"
+//   - recommendation = LLM-facing actionable hint (Chinese)
 //
 // Note on error semantics: a parse failure is NOT returned as a Go error
 // from Execute — it's a successful validation result with valid=false.
@@ -56,12 +64,16 @@ func (t *ValidateFactorTool) Parameters() []tools.Parameter {
 func (t *ValidateFactorTool) OutputSchema() tools.OutputSchema {
 	return tools.OutputSchema{
 		Type:        "object",
-		Description: "Validation result. If valid is false, error explains the syntax problem.",
+		Description: "Validation result. If valid is false, error explains the syntax problem. The level/passed/reason/recommendation fields are the L1 GateDecision — Hermes reads `passed` to decide whether to advance to L2.",
 		Fields: []tools.OutputField{
 			{Name: "valid", Type: "bool", Description: "true if the expression parses successfully."},
 			{Name: "inputs", Type: "array", Description: "Required data fields (e.g. [\"close\", \"volume\"]). Empty if invalid."},
 			{Name: "ast", Type: "string", Description: "String representation of the parsed AST. Empty if invalid."},
 			{Name: "error", Type: "string", Description: "Parse error message. Empty if valid."},
+			{Name: "level", Type: "string", Description: "Gate identifier: always \"L1\"."},
+			{Name: "passed", Type: "bool", Description: "true if the gate passed (mirrors `valid`)."},
+			{Name: "reason", Type: "string", Description: "Machine-readable reason code: \"passed\" or \"syntax_error\"."},
+			{Name: "recommendation", Type: "string", Description: "LLM-facing actionable hint (Chinese)."},
 		},
 	}
 }
@@ -80,19 +92,29 @@ func (t *ValidateFactorTool) Execute(ctx context.Context, args map[string]interf
 	if err != nil {
 		// Parse failure is a validation result, not a tool error. The
 		// agent inspects valid=false and the error string to retry.
+		passed := false
 		return map[string]interface{}{
-			"valid":  false,
-			"inputs": []string{},
-			"ast":    "",
-			"error":  err.Error(),
+			"valid":          false,
+			"inputs":         []string{},
+			"ast":            "",
+			"error":          err.Error(),
+			"level":          "L1",
+			"passed":         passed,
+			"reason":         gateReasonL1(passed),
+			"recommendation": gateRecommendationL1(passed),
 		}, nil
 	}
 
+	passed := true
 	return map[string]interface{}{
-		"valid":  true,
-		"inputs": parsed.Inputs,
-		"ast":    parsed.AST.String(),
-		"error":  "",
+		"valid":          true,
+		"inputs":         parsed.Inputs,
+		"ast":            parsed.AST.String(),
+		"error":          "",
+		"level":          "L1",
+		"passed":         passed,
+		"reason":         gateReasonL1(passed),
+		"recommendation": gateRecommendationL1(passed),
 	}, nil
 }
 
@@ -104,7 +126,13 @@ func (t *ValidateFactorTool) Execute(ctx context.Context, args map[string]interf
 //
 // Tool name: "compute_factor_ic"
 // Input: expression, symbols, start_date, end_date (all required)
-// Output: *client.FactorMetrics { IC, IR }
+// Output: *computeFactorICResult (embeds GateDecision + IC/IR metrics)
+//
+// GateDecision (L2):
+//   - level    = "L2"
+//   - passed   = (IC >= GateL2MinIC)
+//   - reason   = "passed" or "low_ic"
+//   - recommendation = LLM-facing actionable hint (Chinese)
 //
 // Design note (deviation from hermes-agent-integration-system-design.md
 // §3.2): the design doc specifies a `universe` parameter (default
@@ -168,10 +196,14 @@ func (t *ComputeFactorICTool) Parameters() []tools.Parameter {
 func (t *ComputeFactorICTool) OutputSchema() tools.OutputSchema {
 	return tools.OutputSchema{
 		Type:        "object",
-		Description: "Factor quality metrics.",
+		Description: "Factor quality metrics + L2 GateDecision. Hermes reads `passed` to decide whether the factor is worth a full backtest (L3).",
 		Fields: []tools.OutputField{
 			{Name: "ic", Type: "float", Description: "Information Coefficient: rank correlation between factor value and forward return. |IC| > 0.03 is useful."},
 			{Name: "ir", Type: "float", Description: "Information Ratio: IC mean / IC std. IR > 0.5 is strong."},
+			{Name: "level", Type: "string", Description: "Gate identifier: always \"L2\"."},
+			{Name: "passed", Type: "bool", Description: "true if IC >= 0.02 (the L2 threshold)."},
+			{Name: "reason", Type: "string", Description: "Machine-readable reason code: \"passed\" or \"low_ic\"."},
+			{Name: "recommendation", Type: "string", Description: "LLM-facing actionable hint (Chinese)."},
 		},
 	}
 }
@@ -198,5 +230,29 @@ func (t *ComputeFactorICTool) Execute(ctx context.Context, args map[string]inter
 	if err != nil {
 		return nil, fmt.Errorf("compute_factor_ic: %w", err)
 	}
-	return m, nil
+
+	passed := m.IC >= GateL2MinIC
+	return &computeFactorICResult{
+		GateDecision: GateDecision{
+			Level:          "L2",
+			Passed:         passed,
+			Reason:         gateReasonL2(m.IC),
+			Recommendation: gateRecommendationL2(m.IC),
+		},
+		IC: m.IC,
+		IR: m.IR,
+	}, nil
+}
+
+// computeFactorICResult wraps *client.FactorMetrics with the L2
+// GateDecision. We define a local struct (rather than embedding
+// GateDecision in client.FactorMetrics) to keep the gate decision
+// logic inside the builtin package — the upstream client should not
+// depend on gate concepts.
+//
+// JSON shape: { ic, ir, level, passed, reason, recommendation }
+type computeFactorICResult struct {
+	GateDecision
+	IC float64 `json:"ic"`
+	IR float64 `json:"ir"`
 }

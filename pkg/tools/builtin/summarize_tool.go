@@ -21,9 +21,16 @@ import (
 // call. Risk warnings and natural-language suggestions are Hermes's job
 // — the tool provides the structured data, Hermes interprets it.
 //
+// L3 GateDecision is embedded in the summary. Pass requires:
+//   - SharpeRatio >= GateL3MinSharpe (0.50)
+//   - MaxDrawdown  >  GateL3MaxDrawdown (-0.30, i.e. not deeper than 30%)
+//
+// Both conditions must hold. If either fails, the gate fails and the
+// reason code identifies the dominant cause.
+//
 // Tool name: "summarize_backtest"
 // Input: result_json (string, required) — JSON-serialized BacktestResult
-// Output: *backtestSummary
+// Output: *backtestSummary (embeds GateDecision + compressed metrics)
 type SummarizeBacktestTool struct{}
 
 var _ tools.Tool = (*SummarizeBacktestTool)(nil)
@@ -52,7 +59,7 @@ func (t *SummarizeBacktestTool) Parameters() []tools.Parameter {
 func (t *SummarizeBacktestTool) OutputSchema() tools.OutputSchema {
 	return tools.OutputSchema{
 		Type:        "object",
-		Description: "Compressed backtest summary. ~200 bytes vs ~50KB for the full result. Includes derived risk_level.",
+		Description: "Compressed backtest summary + L3 GateDecision. ~200 bytes vs ~50KB for the full result. Hermes reads `passed` to decide whether to advance to L4 Walk-Forward.",
 		Fields: []tools.OutputField{
 			{Name: "total_return", Type: "float", Description: "Cumulative return (e.g. 0.15 = +15%)."},
 			{Name: "annual_return", Type: "float", Description: "Annualized return."},
@@ -69,6 +76,10 @@ func (t *SummarizeBacktestTool) OutputSchema() tools.OutputSchema {
 			{Name: "risk_level", Type: "string", Description: "Derived risk assessment: 'low', 'medium', or 'high'."},
 			{Name: "portfolio_values_count", Type: "int", Description: "Number of data points in the equity curve (drill-down hint)."},
 			{Name: "trades_count", Type: "int", Description: "Number of trade records available in the full result."},
+			{Name: "level", Type: "string", Description: "Gate identifier: always \"L3\"."},
+			{Name: "passed", Type: "bool", Description: "true if Sharpe >= 0.50 AND MaxDrawdown > -0.30."},
+			{Name: "reason", Type: "string", Description: "Machine-readable reason code: \"passed\", \"low_sharpe\", or \"excessive_drawdown\"."},
+			{Name: "recommendation", Type: "string", Description: "LLM-facing actionable hint (Chinese)."},
 		},
 	}
 }
@@ -92,7 +103,8 @@ func (t *SummarizeBacktestTool) Execute(ctx context.Context, args map[string]int
 // backtestSummary is the LLM-friendly compressed view of a
 // domain.BacktestResult. Strips the PortfolioValues and Trades arrays
 // (which can be 500+ and 100+ elements respectively) and keeps only
-// the decision-relevant scalars + a derived risk_level.
+// the decision-relevant scalars + a derived risk_level + the L3
+// GateDecision (embedded).
 type backtestSummary struct {
 	TotalReturn     float64 `json:"total_return"`
 	AnnualReturn    float64 `json:"annual_return"`
@@ -116,14 +128,23 @@ type backtestSummary struct {
 
 	PortfolioValuesCount int `json:"portfolio_values_count"`
 	TradesCount          int `json:"trades_count"`
+
+	// GateDecision is the L3 gate result. Pass requires:
+	//   SharpeRatio >= GateL3MinSharpe AND MaxDrawdown > GateL3MaxDrawdown
+	GateDecision
 }
 
-// summarizeBacktestResult compresses a full BacktestResult into a summary.
-// Returns nil for nil input (defensive).
+// summarizeBacktestResult compresses a full BacktestResult into a summary
+// and computes the L3 GateDecision. Returns nil for nil input (defensive).
 func summarizeBacktestResult(r *domain.BacktestResult) *backtestSummary {
 	if r == nil {
 		return nil
 	}
+
+	// L3 gate: both conditions must hold.
+	sharpeOK := r.SharpeRatio >= GateL3MinSharpe
+	drawdownOK := r.MaxDrawdown > GateL3MaxDrawdown // e.g. -0.20 > -0.30
+	passed := sharpeOK && drawdownOK
 
 	summary := &backtestSummary{
 		TotalReturn:          r.TotalReturn,
@@ -141,6 +162,12 @@ func summarizeBacktestResult(r *domain.BacktestResult) *backtestSummary {
 		RiskLevel:            deriveRiskLevel(r.MaxDrawdown, r.SharpeRatio),
 		PortfolioValuesCount: len(r.PortfolioValues),
 		TradesCount:          len(r.Trades),
+		GateDecision: GateDecision{
+			Level:          "L3",
+			Passed:         passed,
+			Reason:         gateReasonL3(passed, r.SharpeRatio, r.MaxDrawdown),
+			Recommendation: gateRecommendationL3(passed, r.SharpeRatio, r.MaxDrawdown),
+		},
 	}
 
 	return summary

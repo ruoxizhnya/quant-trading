@@ -27,6 +27,10 @@ type factorTestServer struct {
 	// If failWith is non-empty, the server returns HTTP 500 with that
 	// message — simulates a downstream error.
 	failWith string
+	// If icOverride is non-nil, the evaluate endpoint returns that IC
+	// (and a matching IR=IC*10) instead of the default 0.045. Used by
+	// L2 gate tests to exercise both pass and fail paths.
+	icOverride *float64
 }
 
 func newFactorTestServer() *factorTestServer {
@@ -61,9 +65,15 @@ func (s *factorTestServer) handle(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(resp)
 
 	case "/api/factor/evaluate":
+		ic := 0.045
+		ir := 0.62
+		if s.icOverride != nil {
+			ic = *s.icOverride
+			ir = ic * 10.0 // arbitrary but stable for tests
+		}
 		resp := client.ComputeFactorResponse{
-			IC: 0.045,
-			IR: 0.62,
+			IC: ic,
+			IR: ir,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)

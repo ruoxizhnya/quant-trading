@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -113,6 +114,11 @@ func TestWalkForwardValidateTool_OutputSchema(t *testing.T) {
 		"overall_pass":    true,
 		"pass_rate":       true,
 		"windows":         true,
+		// L4 GateDecision fields.
+		"level":          true,
+		"passed":         true,
+		"reason":         true,
+		"recommendation": true,
 	}
 	for _, f := range schema.Fields {
 		delete(expected, f.Name)
@@ -157,6 +163,15 @@ func TestWalkForwardValidateTool_Execute_HappyPath(t *testing.T) {
 	require.Len(t, summary.Windows, 1)
 	assert.InDelta(t, 1.5, summary.Windows[0].TrainSharpe, 1e-9)
 	assert.InDelta(t, 1.1, summary.Windows[0].TestSharpe, 1e-9)
+
+	// L4 GateDecision: gap = 1 - 0.73 = 0.27 <= 0.30 AND oosSharpe=1.1 >= 0.30 → pass.
+	// Note: OverallPass (engine's check using 0.5/0.7 thresholds) also passes here,
+	// so L4 `passed` aligns with `overall_pass` for this healthy case.
+	assert.Equal(t, "L4", summary.Level)
+	assert.True(t, summary.Passed,
+		"gap=0.27<=0.30 AND oosSharpe=1.1>=0.30 should pass L4")
+	assert.Equal(t, GateReasonPassed, summary.Reason)
+	assert.NotEmpty(t, summary.Recommendation)
 
 	// Verify runner was called with correct args.
 	assert.Equal(t, 1, runner.calls)
@@ -366,6 +381,126 @@ func TestSummarizeWalkForwardReport_NilWindowsSkipped(t *testing.T) {
 	require.Len(t, summary.Windows, 2, "nil windows should be skipped")
 	assert.Equal(t, 0, summary.Windows[0].WindowIndex)
 	assert.Equal(t, 2, summary.Windows[1].WindowIndex)
+}
+
+// ─── L4 GateDecision table-driven tests ───────────────────────────────
+
+// TestSummarizeWalkForwardReport_L4GateDecision verifies the L4 gate logic
+// across the (AvgDegradation, AvgTestSharpe) space. AvgDegradation is the
+// OOS/IS Sharpe ratio (higher = less overfit); the gate uses the
+// complementary "gap" measure: gap = 1 - ratio.
+//
+//   - pass: gap <= 0.30 AND oosSharpe >= 0.30
+//   - sharpe_gap_exceeded: gap > 0.30 (priority when both fail)
+//   - low_oos_sharpe: gap <= 0.30 AND oosSharpe < 0.30
+//
+// Also verifies that L4 `passed` may legitimately differ from the engine's
+// `overall_pass` field (which uses different thresholds).
+func TestSummarizeWalkForwardReport_L4GateDecision(t *testing.T) {
+	cases := []struct {
+		name           string
+		avgDegradation float64 // OOS/IS ratio
+		avgTestSharpe  float64
+		engineOverall  bool // engine's OverallPass field (informational)
+		wantPassed     bool
+		wantReason     string
+	}{
+		{
+			name:           "pass: low overfit + strong OOS",
+			avgDegradation: 0.80, // gap = 0.20
+			avgTestSharpe:  1.0,
+			engineOverall:  true,
+			wantPassed:     true,
+			wantReason:     GateReasonPassed,
+		},
+		{
+			name:           "pass: just below gap boundary (ratio=0.71 → gap=0.29)",
+			avgDegradation: 0.71, // gap = 0.29, safely below 0.30 threshold
+			avgTestSharpe:  1.0,
+			engineOverall:  true,
+			wantPassed:     true,
+			wantReason:     GateReasonPassed,
+		},
+		{
+			name:           "pass: boundary oosSharpe=0.30",
+			avgDegradation: 0.80,
+			avgTestSharpe:  0.30,
+			engineOverall:  false, // engine requires > 0.5, so engine fails
+			wantPassed:     true,  // but L4 gate only requires >= 0.30
+			wantReason:     GateReasonPassed,
+		},
+		{
+			name:           "fail: high overfit (gap > 0.30)",
+			avgDegradation: 0.50, // gap = 0.50 > 0.30
+			avgTestSharpe:  1.0,
+			engineOverall:  false,
+			wantPassed:     false,
+			wantReason:     GateReasonSharpeGapExceeded,
+		},
+		{
+			name:           "fail: low OOS Sharpe (gap OK)",
+			avgDegradation: 0.80, // gap = 0.20 <= 0.30
+			avgTestSharpe:  0.20, // < 0.30
+			engineOverall:  false,
+			wantPassed:     false,
+			wantReason:     GateReasonLowOOSSharpe,
+		},
+		{
+			name:           "fail: both fail → prefers sharpe_gap_exceeded",
+			avgDegradation: 0.40, // gap = 0.60 > 0.30
+			avgTestSharpe:  0.10, // < 0.30
+			engineOverall:  false,
+			wantPassed:     false,
+			wantReason:     GateReasonSharpeGapExceeded,
+		},
+		{
+			name:           "fail: zero everything (empty report)",
+			avgDegradation: 0.0, // gap = 1.0 > 0.30
+			avgTestSharpe:  0.0, // < 0.30
+			engineOverall:  false,
+			wantPassed:     false,
+			wantReason:     GateReasonSharpeGapExceeded,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			report := &domain.WalkForwardReport{
+				StrategyID:     "test",
+				AvgTestSharpe:  tc.avgTestSharpe,
+				AvgDegradation: tc.avgDegradation,
+				OverallPass:    tc.engineOverall,
+			}
+			summary := summarizeWalkForwardReport(report)
+			require.NotNil(t, summary)
+			assert.Equal(t, "L4", summary.Level)
+			assert.Equal(t, tc.wantPassed, summary.Passed,
+				"passed: degr=%.3f oosSharpe=%.3f", tc.avgDegradation, tc.avgTestSharpe)
+			assert.Equal(t, tc.wantReason, summary.Reason,
+				"reason: degr=%.3f oosSharpe=%.3f", tc.avgDegradation, tc.avgTestSharpe)
+			assert.NotEmpty(t, summary.Recommendation, "recommendation should always be non-empty")
+			// Engine's OverallPass should be preserved as-is (informational).
+			assert.Equal(t, tc.engineOverall, summary.OverallPass,
+				"overall_pass should be preserved from engine without modification")
+		})
+	}
+}
+
+// TestSummarizeWalkForwardReport_L4GateDecision_NaNDegradation covers the
+// NaN-safe path: if AvgDegradation is NaN (e.g. all windows had zero
+// train Sharpe), the gate fails with gap=1.0 → sharpe_gap_exceeded.
+func TestSummarizeWalkForwardReport_L4GateDecision_NaNDegradation(t *testing.T) {
+	report := &domain.WalkForwardReport{
+		StrategyID:     "test",
+		AvgTestSharpe:  1.0,
+		AvgDegradation: math.NaN(),
+		OverallPass:    false,
+	}
+	summary := summarizeWalkForwardReport(report)
+	require.NotNil(t, summary)
+	assert.Equal(t, "L4", summary.Level)
+	assert.False(t, summary.Passed, "NaN degradation should fail L4")
+	assert.Equal(t, GateReasonSharpeGapExceeded, summary.Reason,
+		"NaN degradation → gap=1.0 > 0.30 → sharpe_gap_exceeded")
 }
 
 // ─── Construction ───────────────────────────────────────────────────────

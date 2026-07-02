@@ -46,10 +46,14 @@ func TestValidateFactorTool_OutputSchema(t *testing.T) {
 	require.NotEmpty(t, schema.Fields)
 
 	expected := map[string]string{
-		"valid":  "bool",
-		"inputs": "array",
-		"ast":    "string",
-		"error":  "string",
+		"valid":          "bool",
+		"inputs":         "array",
+		"ast":            "string",
+		"error":          "string",
+		"level":          "string",
+		"passed":         "bool",
+		"reason":         "string",
+		"recommendation": "string",
 	}
 	assert.Len(t, schema.Fields, len(expected))
 	for _, f := range schema.Fields {
@@ -87,6 +91,16 @@ func TestValidateFactorTool_Execute_ValidExpression(t *testing.T) {
 	errStr, ok := m["error"].(string)
 	require.True(t, ok, "error should be string, got %T", m["error"])
 	assert.Empty(t, errStr, "error should be empty for valid expression")
+
+	// L1 GateDecision fields.
+	assert.Equal(t, "L1", m["level"], "level should be L1")
+	passed, ok := m["passed"].(bool)
+	require.True(t, ok, "passed should be bool, got %T", m["passed"])
+	assert.True(t, passed, "passed should mirror valid")
+	assert.Equal(t, GateReasonPassed, m["reason"], "reason should be 'passed' for valid expression")
+	recommendation, ok := m["recommendation"].(string)
+	require.True(t, ok, "recommendation should be string, got %T", m["recommendation"])
+	assert.NotEmpty(t, recommendation, "recommendation should be non-empty for L1 result")
 }
 
 func TestValidateFactorTool_Execute_ComplexExpression(t *testing.T) {
@@ -130,6 +144,16 @@ func TestValidateFactorTool_Execute_InvalidSyntax(t *testing.T) {
 	inputs, ok := m["inputs"].([]string)
 	require.True(t, ok, "inputs should be []string even when invalid")
 	assert.Empty(t, inputs, "inputs should be empty for invalid expression")
+
+	// L1 GateDecision: parse failure → passed=false, reason=syntax_error.
+	assert.Equal(t, "L1", m["level"], "level should be L1")
+	passed, ok := m["passed"].(bool)
+	require.True(t, ok, "passed should be bool, got %T", m["passed"])
+	assert.False(t, passed, "passed should be false for syntax error")
+	assert.Equal(t, GateReasonSyntaxError, m["reason"], "reason should be 'syntax_error' for parse failure")
+	recommendation, ok := m["recommendation"].(string)
+	require.True(t, ok, "recommendation should be string, got %T", m["recommendation"])
+	assert.NotEmpty(t, recommendation, "recommendation should be non-empty to guide retry")
 }
 
 func TestValidateFactorTool_Execute_EmptyFormula(t *testing.T) {
@@ -226,6 +250,11 @@ func TestComputeFactorICTool_OutputSchema(t *testing.T) {
 	}
 	assert.Equal(t, "float", found["ic"], "ic field should be float")
 	assert.Equal(t, "float", found["ir"], "ir field should be float")
+	// L2 GateDecision fields.
+	assert.Equal(t, "string", found["level"], "level field should be string")
+	assert.Equal(t, "bool", found["passed"], "passed field should be bool")
+	assert.Equal(t, "string", found["reason"], "reason field should be string")
+	assert.Equal(t, "string", found["recommendation"], "recommendation field should be string")
 }
 
 func TestComputeFactorICTool_Execute_HappyPath(t *testing.T) {
@@ -244,10 +273,18 @@ func TestComputeFactorICTool_Execute_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	m, ok := result.(*client.FactorMetrics)
-	require.True(t, ok, "result should be *client.FactorMetrics, got %T", result)
+	// L2 changed its return type from *client.FactorMetrics to the local
+	// *computeFactorICResult (which embeds GateDecision + IC/IR).
+	m, ok := result.(*computeFactorICResult)
+	require.True(t, ok, "result should be *computeFactorICResult, got %T", result)
 	assert.InDelta(t, 0.045, m.IC, 1e-9)
 	assert.InDelta(t, 0.62, m.IR, 1e-9)
+
+	// L2 GateDecision: IC=0.045 >= GateL2MinIC(0.02) → passed=true.
+	assert.Equal(t, "L2", m.Level, "level should be L2")
+	assert.True(t, m.Passed, "IC=0.045 >= 0.02 should pass L2 gate")
+	assert.Equal(t, GateReasonPassed, m.Reason, "reason should be 'passed' for IC above threshold")
+	assert.NotEmpty(t, m.Recommendation, "recommendation should be non-empty")
 
 	// Verify the server received the correct request body.
 	assert.Equal(t, "ts_rank(close, 20)", srv.lastBody["formula"])
@@ -406,6 +443,73 @@ func TestPipeline_ValidateThenComputeIC(t *testing.T) {
 	// L2: compute IC (only because L1 passed)
 	icResult, err := icTool.Execute(context.Background(), args)
 	require.NoError(t, err)
-	m := icResult.(*client.FactorMetrics)
+	m := icResult.(*computeFactorICResult)
 	assert.InDelta(t, 0.045, m.IC, 1e-9)
+	// Cross-gate consistency: L1 passed, so L2 should also report its gate state.
+	assert.Equal(t, "L2", m.Level)
+	assert.True(t, m.Passed, "L2 should pass since IC >= threshold")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  L2 GateDecision — failure path
+// ═══════════════════════════════════════════════════════════════════════
+
+// TestComputeFactorICTool_Execute_LowIC_FailsGate verifies that an IC
+// below GateL2MinIC (0.02) sets passed=false with reason="low_ic".
+// This is the L2 fail path Hermes uses to decide "abandon this factor".
+func TestComputeFactorICTool_Execute_LowIC_FailsGate(t *testing.T) {
+	srv := newFactorTestServer()
+	defer srv.close()
+	lowIC := 0.005 // well below 0.02 threshold
+	srv.icOverride = &lowIC
+
+	tt := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))
+	args := map[string]interface{}{
+		"expression": "ts_rank(close, 20)",
+		"symbols":    []string{"000001.SZ"},
+		"start_date": "2022-01-01",
+		"end_date":   "2024-01-01",
+	}
+
+	result, err := tt.Execute(context.Background(), args)
+	require.NoError(t, err, "low IC is not a tool error — it's a gate failure")
+	require.NotNil(t, result)
+
+	m, ok := result.(*computeFactorICResult)
+	require.True(t, ok, "result should be *computeFactorICResult, got %T", result)
+	assert.InDelta(t, 0.005, m.IC, 1e-9)
+
+	// L2 GateDecision: IC=0.005 < 0.02 → passed=false, reason=low_ic.
+	assert.Equal(t, "L2", m.Level)
+	assert.False(t, m.Passed, "IC=0.005 < 0.02 should fail L2 gate")
+	assert.Equal(t, GateReasonLowIC, m.Reason, "reason should be 'low_ic' for IC below threshold")
+	assert.NotEmpty(t, m.Recommendation, "recommendation should guide the agent toward a retry or abandon")
+}
+
+// TestComputeFactorICTool_Execute_ZeroIC_FailsGate covers the special case
+// where IC == 0 (no predictive power). The reason code is the same
+// ("low_ic"), but the recommendation string differs to advise abandon.
+func TestComputeFactorICTool_Execute_ZeroIC_FailsGate(t *testing.T) {
+	srv := newFactorTestServer()
+	defer srv.close()
+	zeroIC := 0.0
+	srv.icOverride = &zeroIC
+
+	tt := NewComputeFactorICTool(client.NewFactorClient(srv.server.URL))
+	args := map[string]interface{}{
+		"expression": "close",
+		"symbols":    []string{"000001.SZ"},
+		"start_date": "2022-01-01",
+		"end_date":   "2024-01-01",
+	}
+
+	result, err := tt.Execute(context.Background(), args)
+	require.NoError(t, err)
+
+	m := result.(*computeFactorICResult)
+	assert.Equal(t, "L2", m.Level)
+	assert.False(t, m.Passed, "IC=0 should fail L2 gate")
+	assert.Equal(t, GateReasonLowIC, m.Reason)
+	// Recommendation for zero/negative IC should hint at abandoning.
+	assert.Contains(t, m.Recommendation, "放弃", "zero-IC recommendation should hint at abandoning the factor direction")
 }

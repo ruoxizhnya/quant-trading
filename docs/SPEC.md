@@ -707,16 +707,30 @@ SELECT create_hypertable('factor_cache', 'date');
 
 | 工具名 | 参数 | 输出 | 验证门禁 |
 |--------|------|------|---------|
-| `validate_factor` | expression | {valid, inputs, ast, error} | L1 (<1s) |
-| `compute_factor_ic` | expression, symbols, start_date, end_date | {ic, ir, turnover, ic_decay} | L2 (<10s) |
-| `walk_forward_validate` | strategy_name, stock_pool, start_date, end_date, train_days?, test_days? | walkForwardSummary | L4 (<10min) |
+| `validate_factor` | expression | {valid, inputs, ast, error, level, passed, reason, recommendation} | L1 (<1s) |
+| `compute_factor_ic` | expression, symbols, start_date, end_date | computeFactorICResult {ic, ir, level, passed, reason, recommendation} | L2 (<10s) |
+| `walk_forward_validate` | strategy_name, stock_pool, start_date, end_date, train_days?, test_days? | walkForwardSummary {..., level, passed, reason, recommendation} | L4 (<10min) |
 | `list_factors` | category?, min_ic?, limit? | []FactorGene | — |
 | `save_factor` | name, category, formula, description, rationale?, ic, turnover, sharpe? | {factor_id} | — |
 | `list_strategies` | strategy_type?, min_fitness?, limit? | []StrategyGene | — |
 | `save_strategy` | name, strategy_yaml, factor_ids?, sharpe, max_drawdown, total_return | {strategy_id} | — |
-| `summarize_backtest` | result_json | backtestSummary (~200 bytes) | — |
+| `summarize_backtest` | result_json | backtestSummary {..., level, passed, reason, recommendation} | L3 |
 
 > **验证门禁架构**: L1 语法检查 → L2 快速 IC → L3 标准回测 → L4 Walk-Forward 过拟合检测。
+>
+> **GateDecision (Phase 2.1)**: 所有 L1-L4 门禁工具的返回值都嵌入统一的
+> `GateDecision { level, passed, reason, recommendation }` 结构。
+> - `level`: 门禁标识 ("L1"/"L2"/"L3"/"L4")
+> - `passed`: 是否通过门禁阈值（机器可读）
+> - `reason`: 失败原因代码（`passed`/`syntax_error`/`low_ic`/`low_sharpe`/
+>   `excessive_drawdown`/`sharpe_gap_exceeded`/`low_oos_sharpe`）
+> - `recommendation`: LLM 可读的中文建议
+>
+> Hermes 只需读取 `passed` 字段即可决定是否进入下一层，无需解析工具特定字段。
+> 门禁阈值在 `pkg/tools/builtin/gate.go` 集中定义（`GateL2MinIC=0.02`、
+> `GateL3MinSharpe=0.50`、`GateL3MaxDrawdown=-0.30`、`GateL4MaxSharpeGap=0.30`、
+> `GateL4MinOOSSharpe=0.30`）。L4 的 `passed` 可能与引擎的 `overall_pass`
+> 不同——前者使用更严格的门禁阈值，是 Hermes 决定是否保存到基因池的权威依据。
 > 因子/策略必须按序通过 L1→L2→L3→L4 才能保存到基因池。
 > 详见 [Hermes Agent Integration System Design](.trae/documents/hermes-agent-integration-system-design.md) §6。
 
