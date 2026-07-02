@@ -347,10 +347,24 @@ func initStrategyAndPlugins(v *viper.Viper, store *storage.PostgresStore, logger
 }
 
 // buildToolsRegistry constructs the Tools Registry (S7-P3-3, ODR-043)
-// and registers the 4 builtin tool groups: backtest, factor, data-fetch,
-// strategy-registry. The registry is then exposed over /api/tools/* by
-// ToolsHandler, enabling external agent services to discover and invoke
-// platform capabilities without reading SPEC.md.
+// and registers all builtin tool groups. The registry is then exposed
+// over /api/tools/* by ToolsHandler, enabling external agent services
+// (e.g. Hermes Agent) to discover and invoke platform capabilities
+// without reading SPEC.md.
+//
+// S7-P3-4 (Hermes Phase 1.7): the registry now hosts 16 tools across
+// 7 groups:
+//   - backtest.run          (S7-P3-3, L3 gate)
+//   - factor.compute        (S7-P3-3, L2 gate)
+//   - factor.evaluate       (S7-P3-3)
+//   - data.ohlcv / .stocks / .fundamentals  (S7-P3-3)
+//   - strategy.list / .get                 (S7-P3-3)
+//   - validate_factor        (Hermes Phase 1.1, L1 gate)
+//   - compute_factor_ic      (Hermes Phase 1.2, L2 gate)
+//   - walk_forward_validate  (Hermes Phase 1.3, L4 gate)
+//   - list_factors / save_factor           (Hermes Phase 1.4, gene pool)
+//   - list_strategies / save_strategy     (Hermes Phase 1.5, gene pool)
+//   - summarize_backtest     (Hermes Phase 1.6)
 //
 // Wiring notes:
 //   - BacktestTool reuses the same contracts.BacktestRunner (copilotRunner)
@@ -362,16 +376,28 @@ func initStrategyAndPlugins(v *viper.Viper, store *storage.PostgresStore, logger
 //     pointed at the data-service URL from viper config.
 //   - StrategyRegistryTool reads from the package-level strategy.DefaultRegistry,
 //     so no wiring is needed.
-func buildToolsRegistry(v *viper.Viper, runner contracts.BacktestRunner, logger zerolog.Logger) *tools.Registry {
+//   - WalkForwardValidateTool takes a builtin.WalkForwardRunner, satisfied
+//     by walkForwardEngineAdapter (defined in main.go) wrapping ds.WFEngine.
+//   - Gene Pool tools (list_factors / save_factor / list_strategies /
+//     save_strategy) take narrow interfaces satisfied by *gene_pool.FactorPool
+//     and *gene_pool.StrategyPool constructed from store.DB().
+//   - ValidateFactor / ComputeFactorIC / SummarizeBacktest have no DI.
+func buildToolsRegistry(
+	v *viper.Viper,
+	runner contracts.BacktestRunner,
+	wfRunner builtin.WalkForwardRunner,
+	factorPool builtin.FactorPoolClient,
+	strategyPool builtin.StrategyPoolClient,
+	logger zerolog.Logger,
+) *tools.Registry {
 	reg := tools.NewRegistry()
 
-	// BacktestTool — delegates to the existing BacktestRunner.
+	// ── Group 1: Backtest (S7-P3-3) ──────────────────────────────────
 	if err := reg.Register(builtin.NewBacktestTool(runner)); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register backtest.run tool")
 	}
 
-	// FactorTool — HTTP client pointed at this service's /api/factor/*.
-	// analysis-service listens on server.port (default 8085).
+	// ── Group 2: Factor — HTTP + expression-based (S7-P3-3 + Hermes 1.1/1.2) ─
 	analysisURL := fmt.Sprintf("http://localhost:%d", v.GetInt("server.port"))
 	if v.GetInt("server.port") == 0 {
 		analysisURL = "http://localhost:8085"
@@ -383,8 +409,16 @@ func buildToolsRegistry(v *viper.Viper, runner contracts.BacktestRunner, logger 
 	if err := reg.Register(builtin.NewFactorEvaluateTool(factorClient)); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register factor.evaluate tool")
 	}
+	// Hermes Phase 1.1: L1 syntax gate — no DI, creates fresh parser per Execute.
+	if err := reg.Register(builtin.NewValidateFactorTool()); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register validate_factor tool")
+	}
+	// Hermes Phase 1.2: L2 quick IC gate — reuses the same factor HTTP client.
+	if err := reg.Register(builtin.NewComputeFactorICTool(factorClient)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register compute_factor_ic tool")
+	}
 
-	// DataFetchTool — HTTP client pointed at data-service.
+	// ── Group 3: Data fetch (S7-P3-3) ───────────────────────────────
 	dataServiceURL := v.GetString("data_service.url")
 	if dataServiceURL == "" {
 		dataServiceURL = "http://localhost:8081"
@@ -400,7 +434,7 @@ func buildToolsRegistry(v *viper.Viper, runner contracts.BacktestRunner, logger 
 		logger.Fatal().Err(err).Msg("failed to register data.fundamentals tool")
 	}
 
-	// StrategyRegistryTool — reads from strategy.DefaultRegistry.
+	// ── Group 4: Strategy registry (S7-P3-3) ─────────────────────────
 	if err := reg.Register(builtin.NewStrategyListTool()); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register strategy.list tool")
 	}
@@ -408,9 +442,33 @@ func buildToolsRegistry(v *viper.Viper, runner contracts.BacktestRunner, logger 
 		logger.Fatal().Err(err).Msg("failed to register strategy.get tool")
 	}
 
+	// ── Group 5: Walk-forward validation (Hermes Phase 1.3, L4 gate) ─
+	if err := reg.Register(builtin.NewWalkForwardValidateTool(wfRunner)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register walk_forward_validate tool")
+	}
+
+	// ── Group 6: Gene Pool — factor + strategy CRUD (Hermes Phase 1.4/1.5) ─
+	if err := reg.Register(builtin.NewListFactorsTool(factorPool)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register list_factors tool")
+	}
+	if err := reg.Register(builtin.NewSaveFactorTool(factorPool)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register save_factor tool")
+	}
+	if err := reg.Register(builtin.NewListStrategiesTool(strategyPool)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register list_strategies tool")
+	}
+	if err := reg.Register(builtin.NewSaveStrategyTool(strategyPool)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register save_strategy tool")
+	}
+
+	// ── Group 7: Summarization (Hermes Phase 1.6) ───────────────────
+	if err := reg.Register(builtin.NewSummarizeBacktestTool()); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register summarize_backtest tool")
+	}
+
 	logger.Info().
 		Int("tool_count", len(reg.List())).
-		Msg("Tools Registry initialized (S7-P3-3): backtest/factor/data/strategy capabilities exposed at /api/tools/*")
+		Msg("Tools Registry initialized (S7-P3-3 + Hermes Phase 1.7): 16 tools exposed at /api/tools/* — backtest/factor/data/strategy/gene-pool/walk-forward/summarize")
 	return reg
 }
 

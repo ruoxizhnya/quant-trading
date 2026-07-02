@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/internal/sandbox/runner"
 	"github.com/ruoxizhnya/quant-trading/internal/sandbox/staticcheck"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/compliance"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -110,6 +111,39 @@ func (a *strategyEngineAdapter) RunBacktest(
 	}, nil
 }
 
+// walkForwardEngineAdapter wraps *backtest.WalkForwardEngine (=
+// *walkforward.WalkForwardEngine) to satisfy builtin.WalkForwardRunner.
+//
+// The concrete engine's RunWalkForward takes a WalkForwardRequest struct,
+// while the narrow Tool interface takes individual params. This adapter
+// bridges the two, assembling the struct at the composition root so the
+// Tool layer stays decoupled from the engine's request DTO.
+//
+// S7-P3-4 (Hermes Phase 1.7): defined HERE in the composition root
+// (cmd/analysis) following the strategyEngineAdapter pattern — the
+// builtin package defines the interface, the adapter implements it
+// structurally without importing builtin.
+type walkForwardEngineAdapter struct {
+	engine *backtest.WalkForwardEngine
+}
+
+func (a *walkForwardEngineAdapter) RunWalkForward(
+	ctx context.Context,
+	strategyName string,
+	stockPool []string,
+	startDate, endDate string,
+	params domain.WalkForwardParams,
+) (*domain.WalkForwardReport, error) {
+	req := backtest.WalkForwardRequest{
+		Strategy:          strategyName,
+		StockPool:         stockPool,
+		StartDate:         startDate,
+		EndDate:           endDate,
+		WalkForwardParams: params,
+	}
+	return a.engine.RunWalkForward(ctx, req)
+}
+
 // main is the composition root for the analysis service. It wires
 // together all services via the builder functions in setup.go and
 // orchestrates startup + graceful shutdown. S7-P2-3 (ODR-043): the
@@ -141,7 +175,16 @@ func main() {
 	// S7-P3-3 (ODR-043): build the Tools Registry after copilotRunner
 	// is available (BacktestTool delegates to it) and after strategies
 	// are seeded (StrategyRegistryTool reads from the global registry).
-	toolsRegistry := buildToolsRegistry(v, copilotRunner, logger)
+	//
+	// S7-P3-4 (Hermes Phase 1.7): the registry now also wires:
+	//   - WalkForwardValidateTool (via walkForwardEngineAdapter wrapping ds.WFEngine)
+	//   - ListFactors/SaveFactor tools (via gene_pool.NewFactorPool(store.DB()))
+	//   - ListStrategies/SaveStrategy tools (via gene_pool.NewStrategyPool(store.DB()))
+	//   - ValidateFactor / ComputeFactorIC / SummarizeBacktest tools (no DI)
+	factorPool := gene_pool.NewFactorPool(store.DB())
+	strategyPool := gene_pool.NewStrategyPool(store.DB())
+	wfRunner := &walkForwardEngineAdapter{engine: ds.WFEngine}
+	toolsRegistry := buildToolsRegistry(v, copilotRunner, wfRunner, factorPool, strategyPool, logger)
 
 	deps := &ServerDeps{
 		Engine:           engine,
