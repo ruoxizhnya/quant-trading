@@ -76,10 +76,16 @@ func TestServerDeps_FieldsAreTyped(t *testing.T) {
 		// All service fields are pointer-to-struct or interface types —
 		// nil must be a valid zero value so registerRoutes can wire
 		// closures that defer dereference to request time.
+		//
+		// S7-P2-1 note: JobService / WFEngine / BatchEngine are declared
+		// as *backtest.X (type aliases) in deps.go, but reflect.TypeOf
+		// resolves aliases to their canonical subpackage paths
+		// (*job.JobService, *walkforward.WalkForwardEngine,
+		// *batch.BatchEngine). The alias targets are the source of truth.
 		"Engine":           "*backtest.Engine",
-		"JobService":       "*backtest.JobService",
-		"WFEngine":         "*backtest.WalkForwardEngine",
-		"BatchEngine":      "*backtest.BatchEngine",
+		"JobService":       "*job.JobService",
+		"WFEngine":         "*walkforward.WalkForwardEngine",
+		"BatchEngine":      "*batch.BatchEngine",
 		"StrategyDB":       "*strategy.StrategyDB",
 		"CopilotService":   "*strategy.CopilotService",
 		"FactorAttributor": "*data.FactorAttributor",
