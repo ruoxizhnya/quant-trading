@@ -32,6 +32,12 @@ Thumbs.db
 /bin/
 /dist/
 
+# Root-level Go build outputs (cmd/analysis, cmd/ai, etc. — `go build` produces
+# binary named after the package at CWD root if no -o flag is given).
+/analysis
+/data
+/ai
+
 # Source test files (Go convention: *_test.go) are ignored by the rule above.
 # Pre-existing tracked test files (e.g. pkg/storage/postgres_test.go) remain
 # tracked because they were committed before the rule was added. New tests
