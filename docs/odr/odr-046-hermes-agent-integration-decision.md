@@ -17,7 +17,8 @@ ADR-015 defined an "AI-Native Evolution" architecture with two layers:
    EvolutionObs, etc. — human-in-the-loop research interface.
 
 The backend layer was implemented and is functional. The frontend layer was
-**never built** (see [ODR-045](odr-045-frontend-ai-component-deprecation.md)).
+**created in P1-13 (ODR-017) then deleted as dead code in S7-P2-7 (ODR-043)**
+— see [ODR-045](odr-045-frontend-ai-component-deprecation.md) for the full history.
 
 During Sprint 7 (2026-06 to 2026-07), the project pivoted to a different
 autonomous research approach: **Hermes Agent** (by Nous Research), an

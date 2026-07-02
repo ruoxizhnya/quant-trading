@@ -8,8 +8,21 @@
 >
 > **CR-35 (ODR-012)**: Status updated from "Proposed" to "Accepted" — the
 > AI Research Service (`cmd/ai`, port 8086) is implemented, registered in
-> `docker-compose.yml`, and exercised by the AIResearch.vue page. Pipeline
-> end-to-end works: intent → YAML → code → compile → backtest.
+> `docker-compose.yml`. Backend pipeline works: intent → YAML → code →
+> compile → backtest.
+>
+> **ODR-045 (2026-07-02)**: The planned frontend AI components (FactorLab,
+> StrategyWorkshop, EvolutionObs, PipelineDashboard, AIResearch.vue, etc.)
+> were **created in P1-13 (ODR-017) then deleted as dead code in S7-P2-7
+> (ODR-043)** — `web/src/components/ai/` directory no longer exists.
+> All 9 planned components are deprecated. See
+> [ODR-045](../odr/odr-045-frontend-ai-component-deprecation.md).
+>
+> **ODR-046 (2026-07-02)**: Hermes Agent adopted as the autonomous research
+> layer, replacing the frontend AI UI approach. The Go-native agents in
+> `pkg/ai/agents/` are deprecated (retained for backward compat). The
+> primary research path is now Hermes → MCP bridge (18 tools) → Go backend.
+> See [ODR-046](../odr/odr-046-hermes-agent-integration-decision.md).
 
 ---
 
@@ -162,7 +175,7 @@ CREATE TABLE strategy_genes (
 
 - New service: `cmd/ai/main.go` (AI Research Service)
 - New packages: `pkg/ai/agents/`, `pkg/ai/expression/`, `pkg/ai/gene_pool/`, `pkg/ai/client/`
-- New frontend: `web/src/components/ai/`, `web/src/pages/AIResearch.vue`
+- ~~New frontend: `web/src/components/ai/`, `web/src/pages/AIResearch.vue`~~ — **DEPRECATED (ODR-045)**: frontend AI components were created in P1-13 (ODR-017) then deleted as dead code in S7-P2-7 (ODR-043). Hermes Agent replaces them (ODR-046).
 - New tables: `factor_genes`, `strategy_genes`
 - New ADR: This document
 
@@ -221,7 +234,7 @@ CREATE TABLE strategy_genes (
 | L2 | 快速回测 (1yr/100 stocks) | ✅ | IC > 0.02 (< 10s) |
 | L3 | 标准回测 (3yr/500 stocks) | ✅ | Sharpe > 0.5 (< 2min) |
 | L4 | Walk-Forward 验证 | ✅ | Out-of-sample IC > 0.015 (< 10min) |
-| L5 | 人工审查 | ⚠️ | UI 集成中 (PipelineDashboard.vue 已实现) |
+| L5 | 人工审查 | ⚠️ | 前端 UI 未实现 — Hermes Agent 提供自然语言交互替代 (ODR-045/046) |
 
 ### 维度 5: Gene Pool 持久化
 
@@ -239,13 +252,13 @@ CREATE TABLE strategy_genes (
 | 1. AI 增强层架构 | 100% | ✅ 5/5 |
 | 2. 多 Agent 架构 | 100% | ✅ 4/4 agents |
 | 3. Factor DSL | 100% | ✅ 解析 + 求值 + 内置函数 |
-| 4. 分层验证 | 90% | ⚠️ L5 人工审查 UI 待完善 |
+| 4. 分层验证 | 80% | ⚠️ L1-L4 通过 MCP 工具实现; L5 前端 UI 弃用 (ODR-045), Hermes Agent 提供自然语言交互 (ODR-046) |
 | 5. Gene Pool | 100% | ✅ 因子 + 策略表完整 |
-| **综合** | **98%** | Phase 4 核心交付完成 |
+| **综合** | **90%** | 后端核心完成; 前端 UI 弃用, Hermes Agent 替代 |
 
 ### 验收遗留项
 
-1. **P2-20-a**: L5 人工审查 UI 完善 (PipelineDashboard.vue 增补)
+1. **P2-20-a**: ~~L5 人工审查 UI 完善 (PipelineDashboard.vue 增补)~~ — **DEPRECATED (ODR-045)**: 前端 UI 弃用, Hermes Agent 提供自然语言交互替代 (ODR-046)
 2. **P2-20-b**: 指标追踪（ADR-015 §Metrics）建立 dashboard
 3. **P2-20-c**: LLM 成本监控接入
 

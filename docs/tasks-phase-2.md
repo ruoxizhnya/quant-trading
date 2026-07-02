@@ -2,7 +2,7 @@
 
 > **Version**: 1.3.0  
 > **Date**: 2026-05-06  
-> **Status**: In Progress (95% Complete)  
+> **Status**: Backend ✅ Complete / Frontend AI UI ❌ Deprecated (ODR-045, 2026-07-02)  
 > **Related**: ROADMAP.md, ADR-015 (IMPLEMENTATION_PLAN.md 已归档至 archive/)  
 > **Scope**: Phase 4 — AI Agent Quantitative Research Platform
 
@@ -46,8 +46,8 @@
 | S8-5 | Implement factor mutation operators | New | 1d | ✅ |
 | S8-6 | Create `pkg/ai/agents/validate.go` — Validate Agent MVP (L1-L2) | New | 1d | ✅ |
 | S8-7 | Database migration: `factor_genes` and `strategy_genes` tables | `migrations/` | 0.5d | ✅ |
-| S8-8 | Create `web/src/components/ai/FactorLab.vue` — Factor Lab UI | New | 1.5d | ✅ |
-| S8-9 | Create `web/src/components/ai/FactorCard.vue` — Factor card component | New | 0.5d | ✅ |
+| ~~S8-8~~ | ~~Create `web/src/components/ai/FactorLab.vue` — Factor Lab UI~~ | ~~New~~ | ~~1.5d~~ | ❌ DEPRECATED (ODR-045): P1-13 创建 → S7-P2-7 死代码删除, Hermes Agent 替代 (ODR-046) |
+| ~~S8-9~~ | ~~Create `web/src/components/ai/FactorCard.vue` — Factor card component~~ | ~~New~~ | ~~0.5d~~ | ❌ DEPRECATED (ODR-045): P1-13 创建 → S7-P2-7 死代码删除, Hermes Agent 替代 (ODR-046) |
 | S8-10 | Integration: Research Agent → Expression Engine → Validate Agent | — | 1d | ✅ |
 | S8-11 | Run factor discovery batch: target 10+ factors with IC > 0.03 | — | 1d | ✅ |
 
@@ -66,9 +66,9 @@
 | S9-3 | Create `pkg/ai/prompts/strategy_generate.txt` — Strategy generation prompt | New | 0.5d | ✅ |
 | S9-4 | Create `pkg/ai/validator/code_validator.go` — Code validation (syntax + compile) | New | 1d | ✅ |
 | S9-5 | Extend Validate Agent to L3 (standard backtest) | `pkg/ai/agents/validate.go` | 0.5d | ✅ |
-| S9-6 | Create `web/src/components/ai/StrategyWorkshop.vue` — Strategy Workshop UI | New | 1.5d | ✅ |
-| S9-7 | Create `web/src/components/ai/StrategyCard.vue` — Strategy card component | New | 0.5d | ✅ |
-| S9-8 | Create `web/src/pages/AIResearch.vue` — AI Research main page | New | 1d | ✅ |
+| ~~S9-6~~ | ~~Create `web/src/components/ai/StrategyWorkshop.vue` — Strategy Workshop UI~~ | ~~New~~ | ~~1.5d~~ | ❌ DEPRECATED (ODR-045): P1-13 创建 → S7-P2-7 死代码删除, Hermes Agent 替代 (ODR-046) |
+| ~~S9-7~~ | ~~Create `web/src/components/ai/StrategyCard.vue` — Strategy card component~~ | ~~New~~ | ~~0.5d~~ | ❌ DEPRECATED (ODR-045): P1-13 创建 → S7-P2-7 死代码删除, Hermes Agent 替代 (ODR-046) |
+| ~~S9-8~~ | ~~Create `web/src/pages/AIResearch.vue` — AI Research main page~~ | ~~New~~ | ~~1d~~ | ❌ DEPRECATED (ODR-045): P1-13 创建 → S7-P2-7 死代码删除, Hermes Agent 替代 (ODR-046) |
 | S9-9 | Integration: Generate Agent → Code Validator → Backtest Client | — | 1d | ✅ |
 | S9-10 | Run strategy generation batch: target 5+ compilable strategies | — | 0.5d | ✅ |
 
@@ -82,7 +82,7 @@
 
 | ID | Task | File | Effort | Status |
 |----|------|------|--------|--------|
-| S10-1 | Create `pkg/ai/agents/optimize.go` — Optimize Agent (TPE + GA) | New | 1.5d | ✅ |
+| ~~S10-1~~ | ~~Create `pkg/ai/agents/optimize.go` — Optimize Agent (TPE + GA)~~ | ~~New~~ | ~~1.5d~~ | ❌ NOT IMPLEMENTED: 文件从未创建 (TPE/遗传算法在 `pkg/ai/search/`, 无 agent 包装层) |
 | S10-2 | Create `pkg/ai/search/tpe.go` — TPE Bayesian optimization | New | 1d | ✅ |
 | S10-3 | Create `pkg/ai/search/genetic.go` — Genetic algorithm | New | 1d | ✅ |
 | S10-4 | Create `pkg/ai/search/walkforward.go` — Walk-Forward validation | New | 1d | ✅ |
@@ -92,9 +92,9 @@
 | S10-8 | Create `pkg/ai/evolution/crossover.go` — Crossover operators | New | 0.5d | ✅ |
 | S10-9 | Create `pkg/ai/evolution/mutation.go` — Mutation operators | New | 0.5d | ✅ |
 | S10-10 | Create `pkg/ai/drift/detector.go` — Concept drift detection | New | 1d | ✅ |
-| S10-11 | Create `web/src/components/ai/EvolutionObs.vue` — Evolution Observatory UI | New | 1d | ✅ |
-| S10-12 | Create `web/src/components/ai/GenealogyTree.vue` — Genealogy tree | New | 1d | ✅ |
-| S10-13 | Create `web/src/components/ai/FitnessChart.vue` — Fitness chart | New | 0.5d | ✅ |
+| ~~S10-11~~ | ~~Create `web/src/components/ai/EvolutionObs.vue` — Evolution Observatory UI~~ | ~~New~~ | ~~1d~~ | ❌ DEPRECATED (ODR-045): P1-13 创建 → S7-P2-7 死代码删除, Hermes Agent 替代 (ODR-046) |
+| ~~S10-12~~ | ~~Create `web/src/components/ai/GenealogyTree.vue` — Genealogy tree~~ | ~~New~~ | ~~1d~~ | ❌ DEPRECATED (ODR-045): P1-13 创建 → S7-P2-7 死代码删除, Hermes Agent 替代 (ODR-046) |
+| ~~S10-13~~ | ~~Create `web/src/components/ai/FitnessChart.vue` — Fitness chart~~ | ~~New~~ | ~~0.5d~~ | ❌ DEPRECATED (ODR-045): P1-13 创建 → S7-P2-7 死代码删除, Hermes Agent 替代 (ODR-046) |
 
 **Sprint 10 Milestone**: 50-strategy population with automatic drift detection
 
@@ -199,4 +199,4 @@ Sprint 7 (Infrastructure)
 
 ---
 
-_Last updated: 2026-05-06 (All tasks completed - Phase 4 ready for release)_
+_Last updated: 2026-07-02 (Backend tasks ✅ complete; 8 frontend UI tasks (S8-8/9, S9-6/7/8, S10-11/12/13) deprecated per ODR-045 — Hermes Agent replaces them per ODR-046; S10-1 optimize.go agent wrapper NOT IMPLEMENTED — TPE/GA search primitives exist in `pkg/ai/search/` but no agent layer was ever created)_

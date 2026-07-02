@@ -20,7 +20,7 @@
 > - Concept drift detection for strategy monitoring (`pkg/ai/drift/`)
 > - Live trading engine with paper trading support (`pkg/live/`)
 > - ExecutionService abstraction unifying backtest/paper/live execution
-> - AI Research UI: FactorLab, StrategyWorkshop, EvolutionObs, PipelineDashboard
+> - ~~AI Research UI: FactorLab, StrategyWorkshop, EvolutionObs, PipelineDashboard~~ — **DEPRECATED (ODR-045, 2026-07-02)**: 前端 AI 组件 P1-13 创建后 S7-P2-7 作为死代码删除, 由 Hermes Agent 自然语言交互替代 (ODR-046)
 > - Test coverage: ai package top-level 0% / sub-packages avg ~67% (range 16-95%) — Phase 4 子包优先 / 顶层滞后模式为已知技术债 (CR-34, ODR-012)
 >
 > **Changelog v1.3 (Migration):**
@@ -373,19 +373,26 @@ type Position struct {
 - Validate strategy: AI reviews code for common mistakes
 - One-click backtest after code generation
 
-**AI Research Platform (Phase 4 — ✅ Implemented):**
-- **Factor Lab** (`FactorLab.vue`): Discover factors via natural language; visualize IC, Sharpe, turnover; browse gene pool
-- **Strategy Workshop** (`StrategyWorkshop.vue`): Generate strategies from selected factors; edit code; validate via backtest
-- **Evolution Observatory** (`EvolutionObs.vue`): Monitor strategy population; view genealogy tree; track fitness evolution
-- **Expression Engine** (`pkg/ai/expression/`): Custom DSL for factor definitions; AST-based evaluation; A-share operators
-- **Pipeline Dashboard** (`PipelineDashboard.vue`): End-to-end AI pipeline visualization: intent → YAML → code → compile → backtest
+**AI Research Platform (Phase 4 — Backend ✅ / Frontend ❌ Deprecated):**
 
-**AI Components (Backend):**
+> **ODR-045 (2026-07-02)**: 前端 AI 组件 (FactorLab, StrategyWorkshop, EvolutionObs, PipelineDashboard)
+> P1-13 创建后 S7-P2-7 作为死代码删除 — `web/src/components/ai/` 目录已不存在。所有 9 个计划组件弃用。
+> **ODR-046 (2026-07-02)**: Hermes Agent 作为自主研究层替代前端 UI 方案,
+> 通过 MCP bridge (18 个工具) 调用 Go 后端。Go-native agents 保留向后兼容但已弃用。
+
+- ~~**Factor Lab** (`FactorLab.vue`)~~ — **DEPRECATED**: 见 ODR-045
+- ~~**Strategy Workshop** (`StrategyWorkshop.vue`)~~ — **DEPRECATED**: 见 ODR-045
+- ~~**Evolution Observatory** (`EvolutionObs.vue`)~~ — **DEPRECATED**: 见 ODR-045
+- ~~**Pipeline Dashboard** (`PipelineDashboard.vue`)~~ — **DEPRECATED**: 见 ODR-045
+- **Expression Engine** (`pkg/ai/expression/`): ✅ Custom DSL for factor definitions; AST-based evaluation; A-share operators
+- **Hermes Agent Bridge** (`cmd/analysis/handlers_tools.go` + `pkg/tools/builtin/`): ✅ 18 MCP tools for autonomous research loop (Phase 2 完成)
+
+**AI Components (Backend — DEPRECATED per ODR-046, retained for backward compat):**
 - **Research Agent** (`pkg/ai/agents/research.go`): Generates factor hypotheses from research topics via LLM
 - **Generate Agent** (`pkg/ai/agents/generate.go`): Generates strategy code from natural language descriptions
 - **Validate Agent** (`pkg/ai/agents/validate.go`): L1-L4 validation pipeline (syntax → quick eval → backtest → walk-forward)
 - **Evolve Agent** (`pkg/ai/agents/evolve.go`): Genetic algorithm optimization with population management
-- **Optimize Agent** (`pkg/ai/agents/optimize.go`): TPE Bayesian optimization + genetic search hybrid
+- ~~**Optimize Agent** (`pkg/ai/agents/optimize.go`)~~ — **NOT IMPLEMENTED**: 文件从未创建 (TPE/遗传算法实现在 `pkg/ai/search/` 包, 但无 agent 包装层)
 
 **Strategy Editor (future — Phase 5):**
 - Visual strategy builder: drag factors, set thresholds, define rebalance rules

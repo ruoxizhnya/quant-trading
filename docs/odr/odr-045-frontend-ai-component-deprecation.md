@@ -8,7 +8,7 @@
 
 ## Context
 
-ADR-015 (AI Agent Architecture) planned 8 frontend AI components for the
+ADR-015 (AI Agent Architecture) planned 9 frontend AI components for the
 "AI Research Platform" UI layer:
 
 | Component | Purpose | Planned File |
@@ -23,11 +23,31 @@ ADR-015 (AI Agent Architecture) planned 8 frontend AI components for the
 | PipelineDashboard | AI pipeline visualization | `web/src/components/ai/PipelineDashboard.vue` |
 | AIResearch | Main AI research page | `web/src/pages/AIResearch.vue` |
 
-**None of these were ever created.** The directory `web/src/components/ai/`
-does not exist in the codebase.
+**These components were created, then deleted as dead code.** The full history:
 
-Despite this, three design documents falsely claimed the frontend was
-"complete" or "implemented":
+1. **Created** in P1-13 (commit `4354409`, [ODR-017](odr-017-p1-13-p1-14-ai-hardening.md))
+   as the "AI L5 人工审查 UI — Approve / Reject / Edit YAML" feature.
+   11 Vue components + 2 test files + `api/factor.ts` + `types/pipeline.ts`
+   were implemented (3406 lines total).
+
+2. **Deleted** in S7-P2-7 (commit `d7c2a38`, ODR-043) as unreachable dead code.
+   The audit found `AIResearch.vue` (36 lines) was never registered in the
+   Vue router, making all 11 components unreachable. The user decided to
+   delete all 15 files (-3406 lines).
+
+3. **Deprecated** in this ODR (2026-07-02): with Hermes Agent adoption
+   ([ODR-046](odr-046-hermes-agent-integration-decision.md)), the autonomous
+   research capability is delivered via MCP tools + natural language
+   interaction, making a Vue-based AI UI unnecessary.
+
+> **Correction note**: An earlier draft of this ODR claimed the components
+> were "never created." Git history (`git log --all --oneline --
+> web/src/components/ai/PipelineDashboard.vue`) disproves this — the files
+> were created in `4354409` and deleted in `d7c2a38`. This ODR has been
+> corrected to reflect the accurate timeline.
+
+Despite the deletion, three design documents continued to claim the frontend
+was "complete" or "implemented" (documentation drift):
 
 1. **ADR-015** (4 locations):
    - Line 9-12: "exercised by the AIResearch.vue page"
@@ -46,8 +66,8 @@ Despite this, three design documents falsely claimed the frontend was
    - Footer claims "All tasks completed - Phase 4 ready for release"
 
 The backend Phase 4 work (Go packages: `pkg/ai/agents/`, `pkg/ai/expression/`,
-`pkg/ai/gene_pool/`, etc.) **was genuinely completed** — only the frontend
-UI layer was never built.
+`pkg/ai/gene_pool/`, etc.) **was genuinely completed and retained** — only
+the frontend UI layer was deleted and is now deprecated.
 
 ## Decision
 
@@ -60,12 +80,14 @@ Rationale for cancellation (not deferral):
 1. **Architecture shift**: Hermes Agent (LLM-driven) replaces the
    human-in-the-loop Vue UI approach. The agent autonomously drives the
    research loop — no UI interaction needed.
-2. **Maintenance burden**: Building 9 Vue components + maintaining them
-   against an evolving backend API is high cost for low marginal value
-   when Hermes provides the same capability via MCP tools.
-3. **Consistency**: The `web/src/components/ai/` directory was referenced
-   in docs for months without existing. Canceling removes the false
-   expectation and the documentation drift.
+2. **Maintenance burden**: The 11 components were already deleted as
+   unreachable dead code (S7-P2-7, -3406 lines). Rebuilding them against
+   an evolving backend API is high cost for low marginal value when
+   Hermes provides the same capability via MCP tools.
+3. **Consistency**: The `web/src/components/ai/` directory was deleted
+   in S7-P2-7 but design docs continued to reference it as "complete"
+   for months. Canceling removes the false expectation and the
+   documentation drift.
 
 ## Consequences
 
@@ -90,7 +112,8 @@ Rationale for cancellation (not deferral):
 
 ### Files NOT affected:
 - No Go code deleted — `pkg/ai/agents/*.go` retained but deprecated
-- No frontend code deleted — nothing existed to delete
+- No frontend code deleted in this ODR — the 15 files were already deleted
+  in S7-P2-7 (commit `d7c2a38`, ODR-043)
 
 ## Metrics
 
@@ -98,7 +121,7 @@ Rationale for cancellation (not deferral):
 |--------|--------|-------|
 | Planned frontend AI components | 9 | 0 (deprecated) |
 | False "complete" claims in docs | 17 | 0 |
-| `web/src/components/ai/` files | 0 | 0 (confirmed: never existed) |
+| `web/src/components/ai/` files | 0 (deleted in S7-P2-7) | 0 (deprecated, not rebuilt) |
 
 ## Lessons Learned
 
@@ -108,12 +131,21 @@ Rationale for cancellation (not deferral):
    completion. Regular doc-code consistency checks (AGENTS.md §10 Rule 5)
    should catch this earlier.
 
-2. **"Planned" ≠ "Complete"**: The tasks-phase-2.md marked frontend tasks
-   as ✅ without corresponding code review or file existence verification.
-   Task status should require a `git log --oneline -- <file>` verification
-   before marking ✅.
+2. **Deletions must update task/doc status**: The frontend components were
+   created (P1-13) and legitimately marked ✅. They were later deleted as
+   dead code (S7-P2-7), but the task status in tasks-phase-2.md was never
+   reverted to reflect the deletion. **When code is deleted, all docs/tasks
+   referencing it must be updated in the same commit.** A `git log --oneline
+   -- <file>` check should be part of the doc-sync checklist.
 
 3. **Architecture pivots need explicit ODRs**: The shift from Vue-based AI
    UI to Hermes Agent was a significant architectural pivot that should
    have been recorded immediately, not deferred until documentation drift
    accumulated. This ODR (and ODR-046) retroactively document the decision.
+
+4. **Verify claims against git history**: The initial draft of this ODR
+   incorrectly stated the components were "never created." A simple
+   `git log --all -- <file>` check would have revealed the creation
+   (commit `4354409`) and deletion (commit `d7c2a38`). Decision records
+   must verify historical claims against git evidence, not rely on
+   current filesystem state alone.

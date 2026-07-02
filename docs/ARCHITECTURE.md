@@ -1069,22 +1069,26 @@ type FactorExpression struct {
 | L4 Walk-Forward | 过拟合检测 | 5年/全市场 | < 10min | 4% |
 | L5 人类审核 | 最终决策 | — | — | 1% |
 
-### 前端 AI 模块
+### 前端 AI 模块 — ❌ DEPRECATED (ODR-045, 2026-07-02)
+
+> 以下组件 P1-13 创建 (ODR-017) 后 S7-P2-7 作为死代码删除 (ODR-043, commit `d7c2a38`)。
+> `web/src/components/ai/` 目录已不存在。Hermes Agent 自然语言交互替代 (ODR-046)。
+> 不要重建这些组件 — 研究主路径现为 Hermes → MCP bridge (`pkg/tools/builtin/`, 18 工具) → Go 后端。
 
 ```
-web/src/components/ai/
-├── FactorLab.vue           # 因子实验室：发现、验证、可视化
-├── StrategyWorkshop.vue    # 策略工坊：生成、编辑、回测
-├── EvolutionObs.vue        # 进化观察室：种群、谱系、漂移
-├── FactorCard.vue          # 因子卡片
-├── StrategyCard.vue        # 策略卡片
-├── GenealogyTree.vue       # 策略谱系树
-└── FitnessChart.vue        # 适应度进化曲线
+web/src/components/ai/     # ❌ 目录已删除 (S7-P2-7)
+├── FactorLab.vue           # ❌ 已删除 (was 362 lines)
+├── StrategyWorkshop.vue    # ❌ 已删除 (was 297 lines)
+├── EvolutionObs.vue        # ❌ 已删除 (was 304 lines)
+├── FactorCard.vue          # ❌ 已删除 (was 233 lines)
+├── StrategyCard.vue        # ❌ 已删除 (was 225 lines)
+├── GenealogyTree.vue       # ❌ 已删除 (was 182 lines)
+└── FitnessChart.vue        # ❌ 已删除 (was 254 lines)
 ```
 
-### 新增页面
+### 新增页面 — ❌ DEPRECATED
 
 ```
 web/src/pages/
-└── AIResearch.vue          # AI 研究主页面 (整合 FactorLab + StrategyWorkshop + EvolutionObs)
+└── AIResearch.vue          # ❌ 已删除 (was 36 lines, never registered in router)
 ```

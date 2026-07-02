@@ -101,7 +101,7 @@ quant-trading/
 │   │   ├── intent/         # LLM 意图解析：自然语言 → 结构化策略参数
 │   │   ├── yaml/           # YAML 配置生成器：结构化意图 → 策略配置
 │   │   ├── pipeline/       # 策略生成流水线：意图 → YAML → 代码 → 编译 → 回测
-│   │   ├── agents/         # Research/Generate/Validate/Evolve Agents
+│   │   ├── agents/         # ⚠️ DEPRECATED (ODR-046): Research/Generate/Validate/Evolve — 保留向后兼容
 │   │   ├── expression/     # 因子表达式 DSL + AST
 │   │   ├── gene_pool/      # 因子/策略基因池
 │   │   ├── client/         # 回测/因子 HTTP 客户端
@@ -111,6 +111,10 @@ quant-trading/
 │   │   ├── drift/          # 概念漂移检测
 │   │   ├── validator/      # 代码验证器
 │   │   └── prompts/        # LLM 提示模板
+│   ├── tools/              # MCP 工具桥 (Phase 4) — Hermes Agent 调用入口
+│   │   ├── server.go       # Tool 接口 + Server
+│   │   ├── http.go         # HTTP handler (GET/POST /api/tools)
+│   │   └── builtin/        # 18 内置工具 (backtest/factor/gene_pool/gate/...)
 │   ├── backtest/           # 回测引擎 (engine, job, batch, walkforward)
 │   ├── data/               # 数据管道 (sync, marketdata, factors)
 │   ├── domain/             # 领域模型 (OHLCV, Signal, Portfolio)
@@ -118,25 +122,25 @@ quant-trading/
 │   ├── strategy/           # 策略框架 + 插件 + 表达式策略 (expression/, S7-P3-1)
 │   ├── risk/               # 风控模块 (stoploss, position sizing)
 │   └── live/               # 实盘/纸交易引擎 (Phase 4)
-├── web/src/                # Vue 3 前端
+├── web/src/                # Vue 3 前端 (无 AI 组件 — 见下方说明)
 │   ├── api/                # API 客户端
-│   ├── pages/              # 页面组件
-│   │   └── AIResearch.vue  # AI 研究主页面 — Phase 4
-│   ├── components/         # 可复用组件
-│   │   └── ai/             # AI 模块组件 — Phase 4
-│   │       ├── PipelineDashboard.vue  # AI 策略生成流水线仪表盘
-│   │       ├── FactorLab.vue
-│   │       ├── StrategyWorkshop.vue
-│   │       ├── EvolutionObs.vue
-│   │       ├── FactorCard.vue
-│   │       ├── StrategyCard.vue
-│   │       ├── GenealogyTree.vue
-│   │       └── FitnessChart.vue
+│   ├── pages/              # 页面组件 (无 AIResearch.vue — ODR-045 弃用)
+│   ├── components/         # 可复用组件 (无 ai/ 子目录 — ODR-045 弃用)
 │   └── utils/              # 工具函数
 ├── docs/                   # 文档 (见下方导航)
+│   └── hermes/             # Hermes Agent 配置 + Skill + 验收测试 (Phase 4)
 ├── e2e/tests/              # Playwright E2E 测试
 └── migrations/             # 数据库迁移 SQL
 ```
+
+> **ODR-045 (2026-07-02)**: 原计划的 9 个前端 AI 组件 (FactorLab.vue,
+> StrategyWorkshop.vue, EvolutionObs.vue, PipelineDashboard.vue,
+> AIResearch.vue, FactorCard.vue, StrategyCard.vue, GenealogyTree.vue,
+> FitnessChart.vue) **P1-13 创建后 S7-P2-7 作为死代码删除** — `web/src/components/ai/` 目录已不存在。
+>
+> **ODR-046 (2026-07-02)**: Hermes Agent 作为自主研究层替代前端 AI UI 方案。
+> 研究主路径现为: Hermes → MCP bridge (`pkg/tools/`, 18 个工具) → Go 后端。
+> `pkg/ai/agents/` Go-native agents 保留向后兼容但已弃用 (见 `doc.go`)。
 
 ---
 
@@ -604,6 +608,7 @@ AGENTS.md 是活文档。以下情况主动更新：
 | [TASKS.md](docs/TASKS.md) | 统一任务追踪（含 Phase 3 实施任务） |
 | [guides/migration-phase3-to-phase4.md](docs/guides/migration-phase3-to-phase4.md) | Phase 3 → Phase 4 迁移指南 |
 | [benchmark-results.md](docs/benchmark-results.md) | 性能基准测试结果 |
+| **Hermes Agent 集成** (`docs/hermes/`) | **AI 研究层**: `skills/autonomous_factor_mining.md` (自主挖掘 Skill), `config/hermes.yaml` (Agent 配置 + 预算), `e2e-acceptance-test.md` (验收测试), `tools-quant-backtest.yaml` (MCP 工具清单), `prompts/quant-research.md` (研究员 prompt) — 见 [ODR-046](docs/odr/odr-046-hermes-agent-integration-decision.md) |
 
 ### Decisions (架构决策)
 
@@ -660,6 +665,7 @@ Please continue from where we left off.
 - **Phase**: 3 (Integration & Scale) → 4 (AI-Native Evolution) 进行中
 - **测试覆盖** (2026-06-29 实测, 总体 62.9% statement-weighted): backtest 76.0% | strategy 64.4% (顶层) / plugins 83.1% (子包) | data/source 60.9% | data/sentiment 76.8% | storage 13.2% (无 DB 时 skip) | ai 28.9% (顶层) / 子包 16-95% (avg ~67%) | live 75.8% | marketdata 79.0% | risk 85.3% | compliance 91.6% | fees 100% | expression 74.5%
 - **关键服务**: Analysis ✅ | Data ✅ | **Sync ✅** | **AI Research ✅ (running)** | Strategy ⏸️ (standby per ADR-012, awaiting Phase 3 D3 activation)
+- **Hermes Agent 集成** (2026-07-02, ODR-046): Phase 1-2 完成 — 18 个 MCP 工具 (`pkg/tools/builtin/`) + L1-L4 验证门禁 + 自主挖掘 Skill + 预算控制器配置. 前端 AI UI 已弃用 (ODR-045), Hermes 自然语言交互替代. `pkg/ai/agents/` Go-native agents 保留向后兼容但已弃用.
 - **审计状态** (2026-06-29 ODR-043): 4 维度审计完成, 12 Critical / 18 High / 10 Medium 问题点; 5 真实 bug 已识别待修复
 
 ### 任务追踪
@@ -683,6 +689,8 @@ Please continue from where we left off.
 | Legacy HTML UI still exists at `cmd/analysis/static/` | Deprecated; Vue SPA is the official frontend. Do not modify legacy HTML. |
 | `ChatbubbleEllipsisOutline` icon name doesn't exist | Correct name is `ChatbubbleEllipsesOutline` (with 'e' before 's') |
 | Trade markers may not render if portfolio_values is empty | Ensure backtest returns valid data before calling renderChart() |
+| **前端 AI 组件已删除** (ODR-045, 2026-07-02) | 9 个组件 P1-13 创建后 S7-P2-7 作为死代码删除; Hermes Agent 自然语言交互替代 (ODR-046). 不要重建 `web/src/components/ai/` — 使用 `pkg/tools/builtin/` MCP 工具层 |
+| `pkg/ai/agents/optimize.go` 不存在 | S10-1 误标 ✅; TPE/遗传算法在 `pkg/ai/search/` 但无 agent 包装层. 新代码用 MCP 工具 `walk_forward_validate` (ODR-046) |
 | **ODR-011 Multi-Source Risks** (CR-48, ODR-012) | See sub-table below |
 
 ### ODR-011 Multi-Source Integration Risks (CR-48, ODR-012)
@@ -722,7 +730,8 @@ Please continue from where we left off.
 | 查看页面设计规范 | [docs/design/pages/](docs/design/pages/) |
 | 查看组件使用规范 | [docs/design/components.md](docs/design/components.md) |
 | 查看视觉规范 | [docs/design/visual.md](docs/design/visual.md) |
-| **AI 研究架构** | **[ADR-015](docs/adr/adr-015-ai-agent-architecture.md)** |
+| **AI 研究架构** | **[ADR-015](docs/adr/adr-015-ai-agent-architecture.md)** (Go-native agents, ⚠️ 已弃用) |
+| **Hermes Agent 集成** (主路径) | **[ODR-046](docs/odr/odr-046-hermes-agent-integration-decision.md)** → `docs/hermes/` (Skill + config + 验收测试) |
 | **Phase 4 实施计划** | **[tasks-phase-2.md](docs/tasks-phase-2.md)** (IMPLEMENTATION_PLAN 已归档) |
 | **Phase 4 任务追踪** | **[tasks-phase-2.md](docs/tasks-phase-2.md)** |
 | 使用本模板 | [AGENTS_TEMPLATE.md](docs/AGENTS_TEMPLATE.md) |

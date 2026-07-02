@@ -342,6 +342,13 @@ Response:
 
 ## Frontend Changes
 
+> **⚠️ DEPRECATED (ODR-045, 2026-07-02)**: 以下前端 AI 组件 (FactorLab,
+> StrategyWorkshop, EvolutionObs, PipelineDashboard, AIResearch.vue 等)
+> P1-13 创建 (ODR-017) 后 S7-P2-7 作为死代码删除 (ODR-043, commit `d7c2a38`)。
+> `web/src/components/ai/` 目录已不存在。Hermes Agent 自然语言交互替代 (ODR-046)。
+> 以下内容保留作历史参考, **不要据此创建新组件** — 研究主路径现为
+> Hermes → MCP bridge (`pkg/tools/builtin/`, 18 工具) → Go 后端。
+
 ### New Routes
 
 | Route | Component | Description |
