@@ -33,6 +33,11 @@ type FactorPoolClient interface {
 type StrategyPoolClient interface {
 	List(ctx context.Context, strategyType, status string, minFitness float64, limit int) ([]*gene_pool.StrategyGene, error)
 	Save(ctx context.Context, gene *gene_pool.StrategyGene) error
+	// Get retrieves a single strategy gene by ID. Returns the wrapped
+	// pgx.ErrNoRows (or equivalent) when the ID is not in the pool —
+	// callers should treat any error as "not found" for their domain.
+	// Required by GetStrategyLineageTool (Hermes Phase 2.2).
+	Get(ctx context.Context, id string) (*gene_pool.StrategyGene, error)
 }
 
 // Compile-time assertions that the concrete pool types satisfy the interfaces.

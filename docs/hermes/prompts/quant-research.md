@@ -40,6 +40,7 @@
 - `save_factor` — 保存已验证的因子
 - `list_strategies` — 查询策略基因池
 - `save_strategy` — 保存已验证的策略
+- `get_strategy_lineage` — 递归查询策略的系谱树（祖先链 + 变异历史），用于"反思"步骤避免重挖
 
 ### 摘要
 - `summarize_backtest` — 压缩回测结果为 ~200 字节摘要（节省 context）
@@ -90,8 +91,10 @@ expression:
 ```
 1. list_factors(category, min_ic=0.8*target)
    → 了解已有因子，避免重复
+   → 对 top 1-2 策略调用 get_strategy_lineage(strategy_id, max_depth=3)
+     了解已有变体路径，避免重挖相似变体
 
-2. LLM 推理: 基于已有因子 + 市场知识，生成因子假设
+2. LLM 推理: 基于已有因子 + 系谱路径 + 市场知识，生成因子假设
    → 输出: factor_expression = "ts_rank(close, 20) * cs_rank(volume)"
 
 3. validate_factor(expression)
@@ -119,11 +122,16 @@ expression:
    save_strategy(name, strategy_yaml, factor_ids, sharpe, ...)
    → 沉淀到基因池
 
-9. 检查终止条件:
-   - 成功: 因子通过 L4 ✓
-   - 预算耗尽: cost ≥ budget
-   - 迭代上限: iterations ≥ max_iterations
-   - 收敛停滞: 连续 5 轮无改进
+9. 反思 (reflect):
+   → get_strategy_lineage(strategy_id=新保存的ID, max_depth=3)
+   → 分析: 此策略相对于其父策略的改进点是什么？哪些维度还没探索？
+   → 用作下一轮假设生成的上下文
+
+10. 检查终止条件:
+    - 成功: 因子通过 L4 ✓
+    - 预算耗尽: cost ≥ budget
+    - 迭代上限: iterations ≥ max_iterations
+    - 收敛停滞: 连续 5 轮无改进
 ```
 
 ### 关键决策点

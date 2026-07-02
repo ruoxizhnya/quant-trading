@@ -140,14 +140,14 @@ func (stubWFRunner) RunWalkForward(_ context.Context, _ string, _ []string, _, _
 	return &domain.WalkForwardReport{}, nil
 }
 
-// TestBuildToolsRegistry_RegistersAll16Tools verifies that
-// buildToolsRegistry registers all 16 tools (8 original S7-P3-3 tools +
-// 8 new Hermes Phase 1 tools) with the correct names. This is the
-// wiring-level test — individual tool behavior is covered in
-// pkg/tools/builtin/*_test.go.
+// TestBuildToolsRegistry_RegistersAll17Tools verifies that
+// buildToolsRegistry registers all 17 tools (8 original S7-P3-3 tools +
+// 8 Hermes Phase 1 tools + 1 Hermes Phase 2.2 tool) with the correct
+// names. This is the wiring-level test — individual tool behavior is
+// covered in pkg/tools/builtin/*_test.go.
 //
 // Reuses stubBacktestRunner from handlers_pipeline_test.go (same package).
-func TestBuildToolsRegistry_RegistersAll16Tools(t *testing.T) {
+func TestBuildToolsRegistry_RegistersAll17Tools(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	// Minimal viper config — only the keys buildToolsRegistry reads.
@@ -162,7 +162,7 @@ func TestBuildToolsRegistry_RegistersAll16Tools(t *testing.T) {
 	require.NotNil(t, reg)
 
 	tools := reg.List()
-	assert.Len(t, tools, 16, "registry should contain exactly 16 tools (8 original + 8 Hermes Phase 1)")
+	assert.Len(t, tools, 17, "registry should contain exactly 17 tools (8 original + 8 Hermes Phase 1 + 1 Phase 2.2)")
 
 	// Collect names into a set for O(1) lookup.
 	names := make(map[string]bool, len(tools))
@@ -170,7 +170,7 @@ func TestBuildToolsRegistry_RegistersAll16Tools(t *testing.T) {
 		names[tool.Name] = true
 	}
 
-	// Verify all 16 expected tool names are present.
+	// Verify all 17 expected tool names are present.
 	expectedTools := []string{
 		// ── Original 8 (S7-P3-3) ──
 		"backtest.run",
@@ -190,6 +190,8 @@ func TestBuildToolsRegistry_RegistersAll16Tools(t *testing.T) {
 		"list_strategies",       // Phase 1.5 (gene pool)
 		"save_strategy",         // Phase 1.5 (gene pool)
 		"summarize_backtest",    // Phase 1.6
+		// ── Hermes Phase 2.2 additions (1) ──
+		"get_strategy_lineage", // Phase 2.2 (gene pool lineage)
 	}
 	for _, name := range expectedTools {
 		assert.True(t, names[name], "tool %q should be registered", name)

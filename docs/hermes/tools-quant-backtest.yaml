@@ -1,7 +1,7 @@
 # MCP Tool Configuration — A-Share Quant Backtest Engine
 #
 # This file is the declarative MCP tool registry for the Hermes Agent.
-# It mirrors the 16 tools registered in the Go backend's Tools Registry
+# It mirrors the 17 tools registered in the Go backend's Tools Registry
 # (cmd/analysis/setup.go → buildToolsRegistry). Hermes loads this at
 # startup for static tool discovery; the live schemas are also available
 # via GET /api/tools on the analysis-service.
@@ -14,7 +14,8 @@
 # Endpoint pattern: POST /api/tools/{tool_name}
 #
 # Phase 1 (Hermes Agent Integration): 16 tools across 7 groups.
-# Phase 2 will add: get_strategy_lineage, get_market_regime.
+# Phase 2.2: +1 tool (get_strategy_lineage) — 17 tools across 8 groups.
+# Phase 2.3 (pending): +1 tool (get_market_regime) → 18 tools.
 
 # ─── Connection ──────────────────────────────────────────────────────
 base_url: "http://localhost:8085"
@@ -373,3 +374,27 @@ tools:
         type: string
         description: "JSON-serialized BacktestResult from backtest.run. Pass the entire response body."
         required: true
+
+  # ═══ Group 8: Lineage (Hermes Phase 2.2) ═════════════════════════════
+
+  - name: "get_strategy_lineage"
+    description: >
+      Recursively fetch the lineage (ancestor tree) of a strategy from
+      the gene pool. Use this to understand a strategy's mutation history
+      (which parents it was derived from) before mutating/improving it —
+      avoids re-discovering variants you already explored. Returns a
+      nested tree of ancestors with key metrics, plus diagnostics for
+      cycles (pathological data) and missing parent IDs (deleted or never
+      saved). Default max_depth=5; raise for deeper chains, lower to
+      speed up the call.
+    endpoint: "/api/tools/get_strategy_lineage"
+    parameters:
+      - name: strategy_id
+        type: string
+        description: "ID of the strategy whose lineage to retrieve (e.g. 'sg_abc123')."
+        required: true
+      - name: max_depth
+        type: int
+        description: "Maximum recursion depth. 0 = return only the root. Default 5. Clamped to 10 if higher."
+        required: false
+        default: 5

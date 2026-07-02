@@ -716,6 +716,28 @@ SELECT create_hypertable('factor_cache', 'date');
 | `save_strategy` | name, strategy_yaml, factor_ids?, sharpe, max_drawdown, total_return | {strategy_id} | — |
 | `summarize_backtest` | result_json | backtestSummary {..., level, passed, reason, recommendation} | L3 |
 
+#### Hermes Phase 2 新增工具
+
+| 工具名 | 参数 | 输出 | 验证门禁 |
+|--------|------|------|---------|
+| `get_strategy_lineage` | strategy_id, max_depth? (default 5) | strategyLineageResult {root, depth_reached, max_depth, cycles_detected?, missing_parent_ids?} | — |
+
+> **GetStrategyLineageTool (Phase 2.2)**: 递归查询策略的系谱树（祖先链）。
+> 输入 `strategy_id`，沿 `ParentIDs` 向上遍历，构造嵌套树形结构。
+> 每个节点携带 id/name/strategy_type/factor_ids/parent_ids/sharpe/fitness/
+> generation/status；丢弃重型字段（Code/Params/Description/timestamps）以保持
+> LLM 友好的 JSON 大小（< 500 tokens）。
+>
+> 遍历使用标准 DFS 白/灰/黑三色算法区分两种情况：
+> - **BLACK**（已完全展开的共享祖先）— 静默跳过，避免重复子树
+> - **GRAY**（递归栈上的祖先，构成真环）— 记录到 `cycles_detected`
+>
+> 缺失父策略（Get 返回错误）记录到 `missing_parent_ids`，分支终止但兄弟继续展开。
+> 同一缺失 ID 经多条路径到达时去重。
+>
+> `max_depth` 限制递归深度（默认 5，上限 10）。0 = 只返回根节点。
+> 根节点本身找不到时返回错误（区别于"找到但树中有缺失"）。
+
 > **验证门禁架构**: L1 语法检查 → L2 快速 IC → L3 标准回测 → L4 Walk-Forward 过拟合检测。
 >
 > **GateDecision (Phase 2.1)**: 所有 L1-L4 门禁工具的返回值都嵌入统一的

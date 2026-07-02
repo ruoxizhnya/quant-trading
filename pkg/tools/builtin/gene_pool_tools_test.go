@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -56,6 +57,12 @@ type mockStrategyPool struct {
 
 	savedGene *gene_pool.StrategyGene
 	saveErr   error
+
+	// byID holds strategies returned by Get. If a requested ID is not
+	// present here, Get returns getErr (defaulting to pgx-no-rows-like
+	// error). Tests for GetStrategyLineageTool populate this map.
+	byID   map[string]*gene_pool.StrategyGene
+	getErr error
 }
 
 func (m *mockStrategyPool) List(ctx context.Context, strategyType, status string, minFitness float64, limit int) ([]*gene_pool.StrategyGene, error) {
@@ -72,6 +79,21 @@ func (m *mockStrategyPool) List(ctx context.Context, strategyType, status string
 func (m *mockStrategyPool) Save(ctx context.Context, gene *gene_pool.StrategyGene) error {
 	m.savedGene = gene
 	return m.saveErr
+}
+
+// Get returns the strategy stored under byID[id], or getErr if not found.
+// A nil getErr with no entry returns a sentinel "not found" error so
+// callers can distinguish "ID absent" from "ID present but pool broken".
+func (m *mockStrategyPool) Get(ctx context.Context, id string) (*gene_pool.StrategyGene, error) {
+	if m.byID != nil {
+		if gene, ok := m.byID[id]; ok {
+			return gene, nil
+		}
+	}
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	return nil, fmt.Errorf("get strategy gene: not found (id=%q)", id)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
