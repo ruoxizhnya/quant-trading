@@ -721,6 +721,7 @@ SELECT create_hypertable('factor_cache', 'date');
 | 工具名 | 参数 | 输出 | 验证门禁 |
 |--------|------|------|---------|
 | `get_strategy_lineage` | strategy_id, max_depth? (default 5) | strategyLineageResult {root, depth_reached, max_depth, cycles_detected?, missing_parent_ids?} | — |
+| `get_market_regime` | start_date, end_date, symbol? (default 000300.SH) | marketRegimeResult {symbol, start_date, end_date, bars_analyzed, trend, volatility, sentiment, as_of} | — |
 
 > **GetStrategyLineageTool (Phase 2.2)**: 递归查询策略的系谱树（祖先链）。
 > 输入 `strategy_id`，沿 `ParentIDs` 向上遍历，构造嵌套树形结构。
@@ -737,6 +738,21 @@ SELECT create_hypertable('factor_cache', 'date');
 >
 > `max_depth` 限制递归深度（默认 5，上限 10）。0 = 只返回根节点。
 > 根节点本身找不到时返回错误（区别于"找到但树中有缺失"）。
+
+> **GetMarketRegimeTool (Phase 2.3)**: 分析指定时间段的市场状态
+> （牛市/熊市/震荡 + 波动率水平 + 情绪分数）。包装
+> `risk.RiskManager.DetectRegime()`，输入 OHLCV 序列，输出
+> `*domain.MarketRegime`。
+>
+> 工具内部完成 OHLCV 获取 → 类型转换 → 状态检测的完整流水线：
+> 1. 通过 `DataSourceClient.FetchOHLCV` 从 data-service 获取原始 OHLCV 记录
+> 2. `recordsToOHLCV` 将 `[]map[string]interface{}` 转换为 `[]domain.OHLCV`
+>    （按日期升序排序，防御性处理多种日期格式）
+> 3. 调用 `DetectRegime` 进行 MA 交叉 + 波动率分类
+>
+> 默认 symbol 为 `000300.SH`（沪深 300 指数，A 股市场基准）。
+> `DetectRegime` 需要至少 `SlowMAPeriod`（通常 200）根 K 线，不足时返回错误。
+> 结果扁平化为 `marketRegimeResult`（避免嵌套，LLM 友好）。
 
 > **验证门禁架构**: L1 语法检查 → L2 快速 IC → L3 标准回测 → L4 Walk-Forward 过拟合检测。
 >

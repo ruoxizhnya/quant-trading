@@ -92,6 +92,25 @@ func toYYYYMMDD(s string) string {
 	return t.Format("20060102")
 }
 
+// FetchOHLCV retrieves OHLCV records for a single symbol over a date range
+// from the data-service. This is the same fetch logic that DataOHLCVTool
+// uses inline, extracted as a public method so other tools (notably
+// GetMarketRegimeTool, Hermes Phase 2.3) can reuse it without duplicating
+// the endpoint path construction.
+//
+// Dates must be in YYYY-MM-DD format (they are converted to YYYYMMDD
+// internally for the data-service). Returns the raw data-service response
+// as a slice of generic maps — the same shape as DataOHLCVTool's output.
+func (c *DataSourceClient) FetchOHLCV(ctx context.Context, symbol, startDate, endDate string) ([]map[string]interface{}, error) {
+	path := fmt.Sprintf("/ohlcv/%s?start_date=%s&end_date=%s",
+		symbol, toYYYYMMDD(startDate), toYYYYMMDD(endDate))
+	var out []map[string]interface{}
+	if err := c.doGet(ctx, path, "ohlcv", &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ─── DataOHLCVTool ────────────────────────────────────────────────────
 
 // DataOHLCVTool fetches OHLCV candlestick data for a single symbol.

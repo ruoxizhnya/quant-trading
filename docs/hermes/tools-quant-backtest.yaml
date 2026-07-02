@@ -15,7 +15,7 @@
 #
 # Phase 1 (Hermes Agent Integration): 16 tools across 7 groups.
 # Phase 2.2: +1 tool (get_strategy_lineage) — 17 tools across 8 groups.
-# Phase 2.3 (pending): +1 tool (get_market_regime) → 18 tools.
+# Phase 2.3: +1 tool (get_market_regime) — 18 tools across 9 groups.
 
 # ─── Connection ──────────────────────────────────────────────────────
 base_url: "http://localhost:8085"
@@ -398,3 +398,30 @@ tools:
         description: "Maximum recursion depth. 0 = return only the root. Default 5. Clamped to 10 if higher."
         required: false
         default: 5
+
+  # ═══ Group 9: Market regime (Hermes Phase 2.3) ══════════════════════
+
+  - name: "get_market_regime"
+    description: >
+      Fetch market regime analysis (bull/bear/sideways trend + volatility
+      level + sentiment score) for a given symbol and date range. Defaults
+      to CSI 300 index (000300.SH) as the A-share market benchmark. Uses
+      moving-average crossover + volatility classification. Requires
+      sufficient OHLCV history (typically 200+ trading days). Use this
+      before strategy design to understand the prevailing market regime
+      and pick strategies that fit it.
+    endpoint: "/api/tools/get_market_regime"
+    parameters:
+      - name: start_date
+        type: string
+        description: "Analysis start date (YYYY-MM-DD, inclusive)."
+        required: true
+      - name: end_date
+        type: string
+        description: "Analysis end date (YYYY-MM-DD, inclusive)."
+        required: true
+      - name: symbol
+        type: string
+        description: "Symbol to analyze. Defaults to '000300.SH' (CSI 300 index). Override with any stock or index symbol."
+        required: false
+        default: "000300.SH"

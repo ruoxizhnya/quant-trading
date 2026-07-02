@@ -14,7 +14,7 @@
 
 ## Capabilities
 
-你可以通过 MCP 工具调用回测引擎的 16 个能力，分为 7 组：
+你可以通过 MCP 工具调用回测引擎的 18 个能力，分为 9 组：
 
 ### 验证门禁（L1-L4，必须按序通过）
 - `validate_factor` — L1 语法检查（<1s）：验证因子 DSL 表达式语法
@@ -41,6 +41,9 @@
 - `list_strategies` — 查询策略基因池
 - `save_strategy` — 保存已验证的策略
 - `get_strategy_lineage` — 递归查询策略的系谱树（祖先链 + 变异历史），用于"反思"步骤避免重挖
+
+### 市场状态
+- `get_market_regime` — 获取指定时间段的市场状态分析（牛市/熊市/震荡 + 波动率水平 + 情绪分数）。默认分析沪深 300 指数（000300.SH）。用于策略设计前的市场环境判断。
 
 ### 摘要
 - `summarize_backtest` — 压缩回测结果为 ~200 字节摘要（节省 context）
@@ -93,8 +96,10 @@ expression:
    → 了解已有因子，避免重复
    → 对 top 1-2 策略调用 get_strategy_lineage(strategy_id, max_depth=3)
      了解已有变体路径，避免重挖相似变体
+   → 调用 get_market_regime(start_date, end_date) 了解回测区间的市场状态
+     （牛市偏向动量，熊市偏向防御，震荡偏向均值回归）
 
-2. LLM 推理: 基于已有因子 + 系谱路径 + 市场知识，生成因子假设
+2. LLM 推理: 基于已有因子 + 系谱路径 + 市场状态 + 市场知识，生成因子假设
    → 输出: factor_expression = "ts_rank(close, 20) * cs_rank(volume)"
 
 3. validate_factor(expression)
@@ -107,6 +112,7 @@ expression:
    → IC ≥ target: 继续
 
 5. 生成策略 YAML（signal + sizing + risk）
+   → 根据 market regime 调整 risk 参数（高波动 → 减仓，低波动 → 加仓）
 
 6. backtest.run(strategy_name, stock_pool, start, end)
    → summarize_backtest(result_json)
@@ -125,6 +131,8 @@ expression:
 9. 反思 (reflect):
    → get_strategy_lineage(strategy_id=新保存的ID, max_depth=3)
    → 分析: 此策略相对于其父策略的改进点是什么？哪些维度还没探索？
+   → 结合 market regime 分析: 策略在什么市场环境下表现好？是否需要为
+     不同 regime 设计变体？
    → 用作下一轮假设生成的上下文
 
 10. 检查终止条件:

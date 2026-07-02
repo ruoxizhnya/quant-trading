@@ -184,7 +184,7 @@ func main() {
 	factorPool := gene_pool.NewFactorPool(store.DB())
 	strategyPool := gene_pool.NewStrategyPool(store.DB())
 	wfRunner := &walkForwardEngineAdapter{engine: ds.WFEngine}
-	toolsRegistry := buildToolsRegistry(v, copilotRunner, wfRunner, factorPool, strategyPool, logger)
+	toolsRegistry := buildToolsRegistry(v, copilotRunner, wfRunner, factorPool, strategyPool, riskManager, logger)
 
 	deps := &ServerDeps{
 		Engine:           engine,

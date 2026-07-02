@@ -352,8 +352,8 @@ func initStrategyAndPlugins(v *viper.Viper, store *storage.PostgresStore, logger
 // (e.g. Hermes Agent) to discover and invoke platform capabilities
 // without reading SPEC.md.
 //
-// S7-P3-4 (Hermes Phase 1.7 + Phase 2.2): the registry now hosts 17 tools
-// across 8 groups:
+// S7-P3-4 (Hermes Phase 1.7 + Phase 2.2-2.3): the registry now hosts 18 tools
+// across 9 groups:
 //   - backtest.run          (S7-P3-3, L3 gate)
 //   - factor.compute        (S7-P3-3, L2 gate)
 //   - factor.evaluate       (S7-P3-3)
@@ -366,6 +366,7 @@ func initStrategyAndPlugins(v *viper.Viper, store *storage.PostgresStore, logger
 //   - list_strategies / save_strategy     (Hermes Phase 1.5, gene pool)
 //   - summarize_backtest     (Hermes Phase 1.6)
 //   - get_strategy_lineage    (Hermes Phase 2.2, gene pool lineage)
+//   - get_market_regime       (Hermes Phase 2.3, market regime detection)
 //
 // Wiring notes:
 //   - BacktestTool reuses the same contracts.BacktestRunner (copilotRunner)
@@ -382,6 +383,10 @@ func initStrategyAndPlugins(v *viper.Viper, store *storage.PostgresStore, logger
 //   - Gene Pool tools (list_factors / save_factor / list_strategies /
 //     save_strategy) take narrow interfaces satisfied by *gene_pool.FactorPool
 //     and *gene_pool.StrategyPool constructed from store.DB().
+//   - GetStrategyLineageTool (Phase 2.2) reuses the same StrategyPoolClient.
+//   - GetMarketRegimeTool (Phase 2.3) takes a builtin.RegimeDetectorClient
+//     (satisfied by *risk.RiskManager) and reuses the dataClient constructed
+//     below for OHLCV fetching.
 //   - ValidateFactor / ComputeFactorIC / SummarizeBacktest have no DI.
 func buildToolsRegistry(
 	v *viper.Viper,
@@ -389,6 +394,7 @@ func buildToolsRegistry(
 	wfRunner builtin.WalkForwardRunner,
 	factorPool builtin.FactorPoolClient,
 	strategyPool builtin.StrategyPoolClient,
+	regimeDetector builtin.RegimeDetectorClient,
 	logger zerolog.Logger,
 ) *tools.Registry {
 	reg := tools.NewRegistry()
@@ -472,9 +478,15 @@ func buildToolsRegistry(
 		logger.Fatal().Err(err).Msg("failed to register get_strategy_lineage tool")
 	}
 
+	// ── Group 9: Market regime (Hermes Phase 2.3) ──────────────────
+	// Reuses the dataClient from Group 3 for OHLCV fetching.
+	if err := reg.Register(builtin.NewGetMarketRegimeTool(regimeDetector, dataClient)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register get_market_regime tool")
+	}
+
 	logger.Info().
 		Int("tool_count", len(reg.List())).
-		Msg("Tools Registry initialized (S7-P3-3 + Hermes Phase 1.7 + Phase 2.2): 17 tools exposed at /api/tools/* — backtest/factor/data/strategy/gene-pool/walk-forward/summarize/lineage")
+		Msg("Tools Registry initialized (S7-P3-3 + Hermes Phase 1.7 + Phase 2.2-2.3): 18 tools exposed at /api/tools/* — backtest/factor/data/strategy/gene-pool/walk-forward/summarize/lineage/regime")
 	return reg
 }
 

@@ -140,14 +140,23 @@ func (stubWFRunner) RunWalkForward(_ context.Context, _ string, _ []string, _, _
 	return &domain.WalkForwardReport{}, nil
 }
 
-// TestBuildToolsRegistry_RegistersAll17Tools verifies that
-// buildToolsRegistry registers all 17 tools (8 original S7-P3-3 tools +
-// 8 Hermes Phase 1 tools + 1 Hermes Phase 2.2 tool) with the correct
-// names. This is the wiring-level test — individual tool behavior is
-// covered in pkg/tools/builtin/*_test.go.
+// stubRegimeDetector satisfies builtin.RegimeDetectorClient for registry
+// construction tests. DetectRegime is never called — we only verify tool
+// registration, not execution.
+type stubRegimeDetector struct{}
+
+func (stubRegimeDetector) DetectRegime(_ context.Context, _ []domain.OHLCV) (*domain.MarketRegime, error) {
+	return &domain.MarketRegime{}, nil
+}
+
+// TestBuildToolsRegistry_RegistersAll18Tools verifies that
+// buildToolsRegistry registers all 18 tools (8 original S7-P3-3 tools +
+// 8 Hermes Phase 1 tools + 1 Hermes Phase 2.2 tool + 1 Hermes Phase 2.3 tool)
+// with the correct names. This is the wiring-level test — individual tool
+// behavior is covered in pkg/tools/builtin/*_test.go.
 //
 // Reuses stubBacktestRunner from handlers_pipeline_test.go (same package).
-func TestBuildToolsRegistry_RegistersAll17Tools(t *testing.T) {
+func TestBuildToolsRegistry_RegistersAll18Tools(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	// Minimal viper config — only the keys buildToolsRegistry reads.
@@ -158,11 +167,11 @@ func TestBuildToolsRegistry_RegistersAll17Tools(t *testing.T) {
 	factorPool := gene_pool.NewFactorPool(nil)
 	strategyPool := gene_pool.NewStrategyPool(nil)
 
-	reg := buildToolsRegistry(v, &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, zerolog.Nop())
+	reg := buildToolsRegistry(v, &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubRegimeDetector{}, zerolog.Nop())
 	require.NotNil(t, reg)
 
 	tools := reg.List()
-	assert.Len(t, tools, 17, "registry should contain exactly 17 tools (8 original + 8 Hermes Phase 1 + 1 Phase 2.2)")
+	assert.Len(t, tools, 18, "registry should contain exactly 18 tools (8 original + 8 Hermes Phase 1 + 1 Phase 2.2 + 1 Phase 2.3)")
 
 	// Collect names into a set for O(1) lookup.
 	names := make(map[string]bool, len(tools))
@@ -170,7 +179,7 @@ func TestBuildToolsRegistry_RegistersAll17Tools(t *testing.T) {
 		names[tool.Name] = true
 	}
 
-	// Verify all 17 expected tool names are present.
+	// Verify all 18 expected tool names are present.
 	expectedTools := []string{
 		// ── Original 8 (S7-P3-3) ──
 		"backtest.run",
@@ -192,6 +201,8 @@ func TestBuildToolsRegistry_RegistersAll17Tools(t *testing.T) {
 		"summarize_backtest",    // Phase 1.6
 		// ── Hermes Phase 2.2 additions (1) ──
 		"get_strategy_lineage", // Phase 2.2 (gene pool lineage)
+		// ── Hermes Phase 2.3 additions (1) ──
+		"get_market_regime", // Phase 2.3 (market regime detection)
 	}
 	for _, name := range expectedTools {
 		assert.True(t, names[name], "tool %q should be registered", name)
@@ -206,7 +217,7 @@ func TestBuildToolsRegistry_NoDuplicateNames(t *testing.T) {
 	factorPool := gene_pool.NewFactorPool(nil)
 	strategyPool := gene_pool.NewStrategyPool(nil)
 
-	reg := buildToolsRegistry(v, &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, zerolog.Nop())
+	reg := buildToolsRegistry(v, &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubRegimeDetector{}, zerolog.Nop())
 	require.NotNil(t, reg)
 
 	tools := reg.List()
