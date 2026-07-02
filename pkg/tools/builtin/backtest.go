@@ -278,3 +278,30 @@ func optionalInt(args map[string]interface{}, field string, defaultVal int) (int
 		return 0, fmt.Errorf("%w: field %q must be an int, got %T", tools.ErrInvalidArgs, field, v)
 	}
 }
+
+// optionalStringSlice extracts an optional []string field; returns nil if
+// absent. Accepts both []string and []interface{} of strings (the latter is
+// what json.Unmarshal produces for a JSON array). Returns an empty (non-nil)
+// slice if the field is present but empty — callers should check len().
+func optionalStringSlice(args map[string]interface{}, field string) ([]string, error) {
+	v, ok := args[field]
+	if !ok {
+		return nil, nil
+	}
+	switch s := v.(type) {
+	case []string:
+		return s, nil
+	case []interface{}:
+		out := make([]string, 0, len(s))
+		for i, item := range s {
+			str, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("%w: field %q[%d] must be a string, got %T", tools.ErrInvalidArgs, field, i, item)
+			}
+			out = append(out, str)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("%w: field %q must be a []string, got %T", tools.ErrInvalidArgs, field, v)
+	}
+}
