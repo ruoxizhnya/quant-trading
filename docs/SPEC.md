@@ -772,6 +772,53 @@ SELECT create_hypertable('factor_cache', 'date');
 > 因子/策略必须按序通过 L1→L2→L3→L4 才能保存到基因池。
 > 详见 [Hermes Agent Integration System Design](.trae/documents/hermes-agent-integration-system-design.md) §6。
 
+#### Hermes Agent Configuration & Skill (Phase 2.4-2.5)
+
+Hermes 端的配置和工作流定义存放在 `docs/hermes/` 下，Go 后端不读取这些文件
+（per System Design §7 边界划分 — Hermes 是唯一工作流存储）。三组文件协同：
+
+| 文件 | 角色 | 部署路径 | 关注点 |
+|------|------|---------|--------|
+| [docs/hermes/prompts/quant-research.md](hermes/prompts/quant-research.md) | System Prompt | `~/.hermes/prompts/quant-research.md` | 研究员角色 + 能力描述 + 约束规则 |
+| [docs/hermes/skills/autonomous_factor_mining.md](hermes/skills/autonomous_factor_mining.md) | Skill 定义 | `~/.hermes/skills/autonomous_factor_mining.md` | 10 步自主挖掘循环 + 终止条件 |
+| [docs/hermes/config/hermes.yaml](hermes/config/hermes.yaml) | Agent 配置 | `~/.hermes/config/hermes.yaml` | 模型 + 内存 + 预算 + 安全护栏 |
+| [docs/hermes/tools-quant-backtest.yaml](hermes/tools-quant-backtest.yaml) | MCP 工具镜像 | `~/.hermes/tools/quant-backtest.yaml` | 18 个工具的静态 schema |
+
+**autonomous_factor_mining Skill (Phase 2.4)** 定义 10 步循环：
+
+1. `list_factors` + `get_strategy_lineage` + `get_market_regime` — 查询已有因子 + 系谱路径 + 市场状态
+2. LLM 推理生成因子假设（DSL 表达式）
+3. `validate_factor` — L1 语法门禁
+4. `compute_factor_ic` — L2 快速 IC 门禁
+5. 生成策略 YAML（根据 market regime 调整 risk 参数）
+6. `backtest.run` + `summarize_backtest` — L3 标准回测
+7. `walk_forward_validate` — L4 过拟合检测
+8. `save_factor` + `save_strategy` — 沉淀到基因池
+9. `get_strategy_lineage` 反思 — 为下一轮提供上下文
+10. 检查终止条件（成功 / 预算耗尽 / 迭代上限 / 收敛停滞）
+
+**Budget Controller (Phase 2.5)** 采用两层预算模型：
+
+- **Layer 1 — Session-wide hard cap** (`hermes.yaml` `budget.*`):
+  `max_cost_per_session=5.0` USD, `max_iterations=50`, `max_llm_calls=200`。
+  Hermes 启动时读取，整个会话期间不可超过；即使 Skill 传入更大的值也会被截断。
+- **Layer 2 — Per-skill-invocation soft default** (Skill 输入 `max_iterations`):
+  默认 30，比 session cap 保守，留出 headroom 给其他 Skill。调用方可显式传入
+  更小的值（如验收测试用 20）。
+
+成本模型：`cost = (tokens_in + tokens_out) / 1000 * rate`，其中
+Ollama 本地 `rate=0`，Together.ai hermes-3-8b `rate=$0.0002`，
+Together.ai nous-hermes-3-70b `rate=$0.0006`（高质量可选模式）。
+
+**安全护栏** (per System Design §附录A 风险登记):
+- R1 过拟合幻觉 → 强制 L4 Walk-Forward (`require_l4_before_save: true`)
+- R2 LLM 幻觉因子 → 强制 L1 语法门禁 (`require_l1_before_l2: true`)
+- R3 成本爆炸 → 预算控制器 (`budget.max_cost_per_session`)
+- R4 数据泄露 → 优先 Ollama 本地部署 (`prefer_local_model: true`)
+
+**验收标准** (Phase 2): 给定 `{target_ic: 0.04, category: "momentum", budget: 2.0,
+max_iterations: 20}`，Hermes 在 $2 预算内自主完成 L1-L4 验证并保存到基因池。
+
 ---
 
 ## Microservices
