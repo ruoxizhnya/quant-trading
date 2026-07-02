@@ -258,3 +258,23 @@ func optionalFloat(args map[string]interface{}, field string) (float64, error) {
 		return 0, fmt.Errorf("%w: field %q must be a float, got %T", tools.ErrInvalidArgs, field, v)
 	}
 }
+
+// optionalInt extracts an optional int field; returns defaultVal if absent.
+// Accepts int, int64, and float64 (json.Unmarshal produces float64 for all
+// numbers — a whole-number float is accepted and truncated to int).
+func optionalInt(args map[string]interface{}, field string, defaultVal int) (int, error) {
+	v, ok := args[field]
+	if !ok {
+		return defaultVal, nil
+	}
+	switch n := v.(type) {
+	case int:
+		return n, nil
+	case int64:
+		return int(n), nil
+	case float64:
+		return int(n), nil
+	default:
+		return 0, fmt.Errorf("%w: field %q must be an int, got %T", tools.ErrInvalidArgs, field, v)
+	}
+}
