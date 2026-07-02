@@ -648,7 +648,7 @@ SELECT create_hypertable('factor_cache', 'date');
       "output_schema": {...}
     }
   ],
-  "count": 8
+  "count": 16
 }
 ```
 
@@ -687,16 +687,38 @@ SELECT create_hypertable('factor_cache', 'date');
 
 ### 内置工具
 
-| 工具名 | 参数 | 输出 |
-|--------|------|------|
-| `backtest.run` | strategy_name, stock_pool, start_date, end_date | BacktestResult |
-| `factor.compute` | formula, symbols, start_date, end_date | map[string][]float64 |
-| `factor.evaluate` | formula, symbols, start_date, end_date | FactorMetrics |
-| `data.ohlcv` | symbol, start_date, end_date | []OHLCV |
-| `data.stocks` | symbol? | []Stock |
-| `data.fundamentals` | symbol | []Fundamental |
-| `strategy.list` | (无) | []StrategyInfo |
-| `strategy.get` | name | StrategyInfo |
+> S7-P3-3 注册了原始 8 个工具；Hermes Phase 1 (S7-P3-4) 新增 8 个工具，
+> 当前共 16 个，分为 7 组。详见 `cmd/analysis/setup.go` `buildToolsRegistry()`。
+
+#### 原始工具 (S7-P3-3, 8 个)
+
+| 工具名 | 参数 | 输出 | 验证门禁 |
+|--------|------|------|---------|
+| `backtest.run` | strategy_name, stock_pool, start_date, end_date | BacktestResult | L3 |
+| `factor.compute` | formula, symbols, start_date, end_date | map[string][]float64 | — |
+| `factor.evaluate` | formula, symbols, start_date, end_date | FactorMetrics | — |
+| `data.ohlcv` | symbol, start_date, end_date | []OHLCV | — |
+| `data.stocks` | symbol? | []Stock | — |
+| `data.fundamentals` | symbol, start_date?, end_date? | []Fundamental | — |
+| `strategy.list` | (无) | []StrategyInfo | — |
+| `strategy.get` | name | StrategyInfo | — |
+
+#### Hermes Phase 1 新增工具 (S7-P3-4, 8 个)
+
+| 工具名 | 参数 | 输出 | 验证门禁 |
+|--------|------|------|---------|
+| `validate_factor` | expression | {valid, inputs, ast, error} | L1 (<1s) |
+| `compute_factor_ic` | expression, symbols, start_date, end_date | {ic, ir, turnover, ic_decay} | L2 (<10s) |
+| `walk_forward_validate` | strategy_name, stock_pool, start_date, end_date, train_days?, test_days? | walkForwardSummary | L4 (<10min) |
+| `list_factors` | category?, min_ic?, limit? | []FactorGene | — |
+| `save_factor` | name, category, formula, description, rationale?, ic, turnover, sharpe? | {factor_id} | — |
+| `list_strategies` | strategy_type?, min_fitness?, limit? | []StrategyGene | — |
+| `save_strategy` | name, strategy_yaml, factor_ids?, sharpe, max_drawdown, total_return | {strategy_id} | — |
+| `summarize_backtest` | result_json | backtestSummary (~200 bytes) | — |
+
+> **验证门禁架构**: L1 语法检查 → L2 快速 IC → L3 标准回测 → L4 Walk-Forward 过拟合检测。
+> 因子/策略必须按序通过 L1→L2→L3→L4 才能保存到基因池。
+> 详见 [Hermes Agent Integration System Design](.trae/documents/hermes-agent-integration-system-design.md) §6。
 
 ---
 
