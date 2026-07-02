@@ -818,6 +818,25 @@ Together.ai nous-hermes-3-70b `rate=$0.0006`（高质量可选模式）。
 
 **验收标准** (Phase 2): 给定 `{target_ic: 0.04, category: "momentum", budget: 2.0,
 max_iterations: 20}`，Hermes 在 $2 预算内自主完成 L1-L4 验证并保存到基因池。
+详见 [docs/hermes/e2e-acceptance-test.md](hermes/e2e-acceptance-test.md)。
+
+#### Hermes Integration Tests (Phase 2.6-2.7)
+
+| 测试层 | 文件 | 覆盖范围 |
+|--------|------|---------|
+| Go 单元测试 | `pkg/tools/builtin/*_test.go` | 每个工具的 Execute 方法（含 mock 依赖） |
+| Go HTTP 集成测试 | `cmd/analysis/handlers_tools_integration_test.go` | 6 个测试：L1 门禁成功/失败 HTTP 往返、发现 schema 与执行一致性、save→list 往返、L1→save 链式、GateDecision 全字段 JSON 序列化 |
+| Go 注册测试 | `cmd/analysis/setup_test.go` | 18 个工具全部注册、无重名 |
+| Go HTTP plumbing | `cmd/analysis/handlers_tools_test.go` | 假工具测试 HTTP 层（状态码、错误分类、JSON 结构） |
+| E2E 验收测试 | `docs/hermes/e2e-acceptance-test.md` | Hermes + Ollama + 全栈基础设施下的自主挖掘验收（手动执行） |
+
+Go 集成测试 (Phase 2.7) 使用真实 builtin 工具 + mock 依赖，验证 L1 GateDecision
+结构体通过 HTTP JSON 序列化往返后保持完整（level/passed/reason/recommendation 四
+字段全部存在且类型正确）。这是 Hermes 自主循环的关键契约 — 如果任何字段缺失或类型
+错误，自主循环会中断。
+
+E2E 验收测试 (Phase 2.6) 需要 Hermes + Ollama + 全栈基础设施运行，包含 3 个冒烟
+测试（工具发现、L1 门禁、市场状态）+ 完整自主循环 + 结果验证脚本。
 
 ---
 
