@@ -92,24 +92,6 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			PRIMARY KEY (symbol, trade_date)
 		)`,
-		`CREATE TABLE IF NOT EXISTS fundamentals (
-			symbol VARCHAR(20) NOT NULL,
-			trade_date DATE NOT NULL,
-			pe DOUBLE PRECISION,
-			pb DOUBLE PRECISION,
-			ps DOUBLE PRECISION,
-			roe DOUBLE PRECISION,
-			roa DOUBLE PRECISION,
-			debt_to_equity DOUBLE PRECISION,
-			gross_margin DOUBLE PRECISION,
-			net_margin DOUBLE PRECISION,
-			revenue DOUBLE PRECISION,
-			net_profit DOUBLE PRECISION,
-			total_assets DOUBLE PRECISION,
-			total_liab DOUBLE PRECISION,
-			created_at TIMESTAMPTZ DEFAULT NOW(),
-			PRIMARY KEY (symbol, trade_date)
-		)`,
 		`CREATE TABLE IF NOT EXISTS stock_fundamentals (
 			id SERIAL PRIMARY KEY,
 			ts_code VARCHAR(20) NOT NULL,
@@ -341,6 +323,42 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`ALTER TABLE factor_cache ALTER COLUMN factor_name TYPE VARCHAR(32)`,
 		`ALTER TABLE factor_returns ALTER COLUMN factor_name TYPE VARCHAR(32)`,
 		`ALTER TABLE ic_analysis ALTER COLUMN factor_name TYPE VARCHAR(32)`,
+		// Migration 025: docs/migrations/025_equitydeep_field_consolidation.sql (EQD-P3-1 / C-8)
+		// fundamentals 与 stock_fundamentals 的 12 个指标列同名同义，两条写入路径同源于
+		// tushare fina_indicator 且都把 trade_date 取成 end_date，故存量按 symbol→ts_code
+		// 直通并入幸存表 stock_fundamentals 后 DROP 旧表。DO 块守卫存在性以保证重复启动为 no-op;
+		// 冲突时保留幸存表已有非空值（COALESCE 方向为「幸存表优先」）。
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1 FROM information_schema.tables
+				WHERE table_schema = 'public' AND table_name = 'fundamentals'
+			) THEN
+				INSERT INTO stock_fundamentals (
+					ts_code, trade_date, end_date,
+					pe, pb, ps, roe, roa, debt_to_equity, gross_margin, net_margin,
+					revenue, net_profit, total_assets, total_liab
+				)
+				SELECT f.symbol, f.trade_date, f.trade_date,
+					f.pe, f.pb, f.ps, f.roe, f.roa, f.debt_to_equity, f.gross_margin,
+					f.net_margin, f.revenue, f.net_profit, f.total_assets, f.total_liab
+				FROM fundamentals f
+				ON CONFLICT (ts_code, trade_date) DO UPDATE SET
+					pe             = COALESCE(stock_fundamentals.pe, EXCLUDED.pe),
+					pb             = COALESCE(stock_fundamentals.pb, EXCLUDED.pb),
+					ps             = COALESCE(stock_fundamentals.ps, EXCLUDED.ps),
+					roe            = COALESCE(stock_fundamentals.roe, EXCLUDED.roe),
+					roa            = COALESCE(stock_fundamentals.roa, EXCLUDED.roa),
+					debt_to_equity = COALESCE(stock_fundamentals.debt_to_equity, EXCLUDED.debt_to_equity),
+					gross_margin   = COALESCE(stock_fundamentals.gross_margin, EXCLUDED.gross_margin),
+					net_margin     = COALESCE(stock_fundamentals.net_margin, EXCLUDED.net_margin),
+					revenue        = COALESCE(stock_fundamentals.revenue, EXCLUDED.revenue),
+					net_profit     = COALESCE(stock_fundamentals.net_profit, EXCLUDED.net_profit),
+					total_assets   = COALESCE(stock_fundamentals.total_assets, EXCLUDED.total_assets),
+					total_liab     = COALESCE(stock_fundamentals.total_liab, EXCLUDED.total_liab);
+				DROP TABLE fundamentals;
+			END IF;
+		END $$`,
 	}
 
 	for _, m := range migrations {
@@ -361,8 +379,6 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	indexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_ohlcv_symbol ON ohlcv_daily_qfq(symbol)`,
 		`CREATE INDEX IF NOT EXISTS idx_ohlcv_trade_date ON ohlcv_daily_qfq(trade_date)`,
-		`CREATE INDEX IF NOT EXISTS idx_fundamentals_symbol ON fundamentals(symbol)`,
-		`CREATE INDEX IF NOT EXISTS idx_fundamentals_trade_date ON fundamentals(trade_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_stock_fundamentals_code ON stock_fundamentals(ts_code)`,
 		`CREATE INDEX IF NOT EXISTS idx_stock_fundamentals_date ON stock_fundamentals(trade_date)`,
 		`CREATE INDEX IF NOT EXISTS idx_stocks_exchange ON stocks(exchange)`,

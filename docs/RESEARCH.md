@@ -304,6 +304,8 @@ evals/data_quality/spot_check.py
 | C-8 | 修复 `fundamentals` / `stock_fundamentals` 表重叠 | `docs/migrations/025_equitydeep_field_consolidation.sql` | 独立 |
 | C-9 | 文档漂移修复 8 项 | 见 [ODR-047](odr/odr-047-equitydeep-integration-audit.md) | — |
 
+> **落地状态**: C-1 / C-2 / C-7（[ODR-052](odr/odr-052-p1-contract-freeze-and-spot-check.md) + [ODR-053](odr/odr-053-p3-fundamentals-detail-table.md)）、C-3 / C-4（[ODR-055](odr/odr-055-eqd-p1-2-vertical-factors.md)）、C-9（[ODR-047](odr/odr-047-equitydeep-integration-audit.md) + [ODR-054](odr/odr-054-dr-reverification.md)）已落地；**C-8 已收口** —— `fundamentals` 存量并入 `stock_fundamentals` 后 DROP 旧表（`EQD-P3-1` / [ODR-056](odr/odr-056-fundamentals-table-consolidation.md)）。C-5 / C-6 待阶段 P4。
+
 ### 3.8 EquityDeep 侧加固项（本审计发现）
 
 > 这 6 项是**本 proposal 对 EquityDeep 上游规格提出的修改建议**，其中 #1 是护城河级别的缺陷。

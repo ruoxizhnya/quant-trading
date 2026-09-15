@@ -656,25 +656,8 @@ CREATE TABLE ohlcv_daily (
 SELECT create_hypertable('ohlcv_daily', 'date');
 
 -- Fundamentals
-CREATE TABLE fundamentals (
-    symbol TEXT,
-    date TIMESTAMPTZ,
-    pe FLOAT,
-    pb FLOAT,
-    ps FLOAT,
-    roe FLOAT,
-    roa FLOAT,
-    debt_to_equity FLOAT,
-    gross_margin FLOAT,
-    net_margin FLOAT,
-    revenue FLOAT,
-    net_profit FLOAT,
-    total_assets FLOAT,
-    total_liab FLOAT,
-    PRIMARY KEY (symbol, date)
-);
-
-SELECT create_hypertable('fundamentals', 'date');
+-- 原独立的 fundamentals 表已在 EQD-P3-1（C-8）中并入 stock_fundamentals 并 DROP：
+-- 两表 12 个指标列同名同义，读写路径统一为 stock_fundamentals（见 ODR-056 / migration 025）。
 
 -- Factor cache for faster computation
 CREATE TABLE factor_cache (

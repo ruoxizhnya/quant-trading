@@ -2,7 +2,7 @@
 
 > **Location:** `docs/adr/` — architectural ADR files | `docs/odr/` — operational ODR files
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Version:** 3.11.0
+> **Version:** 3.12.0
 > **Created:** 2026-03-24
 > **Updated:** 2026-09-15
 
@@ -96,6 +96,7 @@
 | [ODR-053](odr/odr-053-p3-fundamentals-detail-table.md) | P3 计算面起步 — EQD-P1-1 `fundamentals_detail` 表落地 (契约 C1: 逐字段行存 + `ann_date` PIT + `snapshot_uri` 溯源 + 主键含 `fetched_at` 支持 restatement; 内联 `migrate()` Migration 022 + `docs/migrations/022_*.sql` 副本) + 三副本自动一致性校验 (补齐 ODR-052 遗留缺口: `ThreeCopiesAgree` / `FrozenSemantics` / `AppliedByMigrate`); 活跃表数 38 → 39; 仅新增不改存量表 | Completed | Implementation | 2026-09-15 |
 | [ODR-054](odr/odr-054-dr-reverification.md) | P1 收口 — EQD-P3-2 文档漂移 8 项 (DR-1~DR-8) 一致性复核: 逐项「文档声明 ↔ 物理事实」双向取证 (builtin 工具实测 18 个 / `pkg/ai/agents` + `gene_pool` 存在 / `docs/odr` 53 文件 / `docs/adr` 22 文件 / `design/equitydeep/` 迁移引用一致); 结论 DR-1/2/5/6/8 未回退, DR-7 由 `EQD-P3-1` 承接; 回填 3 处残留漂移 (ADR.md 尾注 ADR 拆分缺 ADR-021 = 21≠22 / Implementation 区间含已归 Refactor 的 ODR-022 = 31≠30 / AGENTS.md 目录树 `ODR-001~049`) | Completed | Audit | 2026-09-15 |
 | [ODR-055](odr/odr-055-eqd-p1-2-vertical-factors.md) | P3 计算面 — EQD-P1-2 摄取链 + 5 个纵向基本面因子 (C-3/C-4): `pkg/data/equitydeep/` 归一化纯包 (契约白名单 + `unit_scale` 换算 + 闭集后缀表 + 千分位剥离; 表外一律丢弃不猜量级) + `fundamentals_detail` 落库/读取 (读取强制 `ann_date <= asOf`) + HTTP 写门 `POST /api/ingest/equitydeep` (ndjson, 须携 `ingest.raw` 的 `content_hash` 作溯源门); 5 因子 `gross_margin_trend`/`contract_liability_ratio`/`ocf_to_net_profit`/`roe_dupont_leverage`/`inventory_turnover_delta` (累计→TTM→单季口径依契约) + 迁移 026 `factor_name` 放宽 VARCHAR(32); 入口形态经裁决由「非 HTTP」改为 HTTP 写门 | Completed | Implementation | 2026-09-15 |
+| [ODR-056](odr/odr-056-fundamentals-table-consolidation.md) | P3 计算面收口 — EQD-P3-1 `fundamentals` / `stock_fundamentals` 表重叠（C-8 / DR-7）: 经裁决以 `stock_fundamentals` 为唯一幸存表, 迁移 025 守卫式 `DO` 块按 `symbol → ts_code` 直通并入（`ON CONFLICT` 取 `COALESCE(幸存表值, 旧表值)` = 幸存表优先）后 `DROP TABLE fundamentals`（两表同源于同一 tushare `fina_indicator` API 且 `trade_date = end_date`, 故为纯列名直通、零口径转换）; 代码侧 4 个 `symbol` 系读写函数收敛 + `SaveFundamentalBatch` 的 `DO UPDATE` 6 列补齐为 12 列（修复重摄取静默保留陈旧值）; 内联 DDL 与两索引清理; 活跃表数 39 → 38（内联 21 → 20）; 阶段 P3 3/3 全部关闭 | Completed | Implementation | 2026-09-15 |
 
 ---
 
@@ -144,7 +145,8 @@ ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical examp
 ---
 _Last updated by: AI Assistant — 2026-06-14 (P2-9~P2-12 + P2-17~P2-33 全部完成 → ODR-034~041 新建 Completed; Sprint 6 P2 累计 33 项全部 ✅)_
 _ADR 累计 22 条: 架构 17 (ADR-001~016 + ADR-022) + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020) + 研究层 1 (ADR-021); 其中 ADR-014 由 ADR-020 §6 取代、ADR-021 由 ADR-022 取代_
-_ODR 累计 55 条: Cleanup 4 (ODR-001/006/008/045) | Audit 10 (ODR-002/009/010/012/013/015/043/047/049/054) | Migration 7 (ODR-003/005/007/011/014/044/046) | Process 1 (ODR-004) | Implementation 31 (ODR-016~021 + ODR-023~042 + ODR-050~053 + ODR-055) | Refactor 2 (ODR-022/048)_
+_ODR 累计 56 条: Cleanup 4 (ODR-001/006/008/045) | Audit 10 (ODR-002/009/010/012/013/015/043/047/049/054) | Migration 7 (ODR-003/005/007/011/014/044/046) | Process 1 (ODR-004) | Implementation 32 (ODR-016~021 + ODR-023~042 + ODR-050~053 + ODR-055~056) | Refactor 2 (ODR-022/048)_
+_2026-09-15 状态变更 (本次): ODR-056 新建 Completed (阶段 P3 收口 — EQD-P3-1 `fundamentals` / `stock_fundamentals` 表重叠: 以 `stock_fundamentals` 为唯一幸存表, 迁移 025 守卫式 `DO` 块按 `symbol → ts_code` 直通并入 (`COALESCE(幸存表值, EXCLUDED)` = 幸存表优先) 后 `DROP TABLE fundamentals`; 两表同源于同一 tushare `fina_indicator` API 且 `trade_date = end_date` ⇒ 纯列名直通零口径转换; 4 个 `symbol` 系读写函数收敛 + `SaveFundamentalBatch` 的 `DO UPDATE` 6 → 12 列; 活跃表数 39 → 38 (内联 21 → 20); **阶段 P3 3/3 全部关闭**); ADR.md index 3.11.0 → 3.12.0 (ODR 55 → 56, Implementation 31 → 32) — ODR-056_
 _2026-09-15 状态变更 (本次): ODR-055 新建 Completed (阶段 P3 — EQD-P1-2 摄取链 + 5 个纵向基本面因子: `pkg/data/equitydeep/` 归一化纯包 (契约白名单 + `unit_scale` 换算 + 闭集后缀表 + 千分位剥离, 表外一律丢弃) + `fundamentals_detail` 落库/读取 (读取强制 `ann_date <= asOf`) + HTTP 写门 `POST /api/ingest/equitydeep` (ndjson, 须携 `ingest.raw` 的 `content_hash` 作溯源门, 词典缺失返回 503) + 5 因子 `gross_margin_trend`/`contract_liability_ratio`/`ocf_to_net_profit`/`roe_dupont_leverage`/`inventory_turnover_delta` (累计→TTM→单季口径依契约) + 迁移 026 `factor_name` 放宽 VARCHAR(32) 于 factor_cache/factor_returns/ic_analysis 三表; 入口形态经裁决由「非 HTTP」改为 HTTP 写门; 阶段 P3 2/3); ADR.md index 3.10.1 → 3.11.0 (ODR 54 → 55, Implementation 30 → 31) — ODR-055_
 _2026-09-15 状态变更 (本次): ODR-054 新建 Completed (P1 收口 — EQD-P3-2 文档漂移 8 项 DR-1~DR-8 一致性复核: DR-1/2/5/6/8 未回退, DR-7 由 EQD-P3-1 承接; 回填 3 处残留漂移 DR-3-R1/DR-3-R2/DR-4-R1; 阶段 P1 全部关闭); ADR.md index 3.10.0 → 3.10.1 (ODR 53 → 54, Audit 9 → 10; 尾注 ADR/ODR 拆分改为枚举可验算形式) — ODR-054_
 _2026-09-15 状态变更 (本次): ODR-053 新建 Completed (P3 计算面起步 — EQD-P1-1 `fundamentals_detail` 表落地: 内联 `migrate()` Migration 022 + `docs/migrations/022_*.sql` 副本 + 三副本自动一致性校验补齐 ODR-052 遗留缺口; 活跃表数 38 → 39); ADR.md index 3.9.0 → 3.10.0 (ODR 52 → 53, Implementation 29 → 30) — ODR-053_

@@ -49,12 +49,19 @@ func (s *PostgresStore) GetFundamentalsSnapshot(ctx context.Context, cutoffDate 
 }
 
 // SaveFundamental saves or updates fundamental data.
+//
+// Targets stock_fundamentals since migration 025 (EQD-P3-1) dropped the
+// overlapping `fundamentals` table. f.Symbol carries a ts_code literal — the
+// Tushare client passes ts_code as the query key and stores item[0] verbatim —
+// and end_date is backfilled from trade_date, mirroring the ETL convention in
+// pkg/data/tushare.go (normalizeFundamentals / normalizeFundamentalsData).
+// ann_date is not part of domain.Fundamental and is left NULL.
 func (s *PostgresStore) SaveFundamental(ctx context.Context, f *domain.Fundamental) error {
 	query := `
-		INSERT INTO fundamentals (symbol, trade_date, pe, pb, ps, roe, roa, debt_to_equity,
+		INSERT INTO stock_fundamentals (ts_code, trade_date, end_date, pe, pb, ps, roe, roa, debt_to_equity,
 			gross_margin, net_margin, revenue, net_profit, total_assets, total_liab)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-		ON CONFLICT (symbol, trade_date) DO UPDATE SET
+		VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		ON CONFLICT (ts_code, trade_date) DO UPDATE SET
 			pe = EXCLUDED.pe, pb = EXCLUDED.pb, ps = EXCLUDED.ps,
 			roe = EXCLUDED.roe, roa = EXCLUDED.roa, debt_to_equity = EXCLUDED.debt_to_equity,
 			gross_margin = EXCLUDED.gross_margin, net_margin = EXCLUDED.net_margin,
@@ -73,6 +80,10 @@ func (s *PostgresStore) SaveFundamental(ctx context.Context, f *domain.Fundament
 }
 
 // SaveFundamentalBatch saves multiple fundamental records in a batch.
+//
+// Target table and column semantics match SaveFundamental; the DO UPDATE list
+// covers all 12 metric columns (it previously refreshed only 6, silently
+// keeping stale margins/revenue/profit/balance-sheet values on re-ingest).
 func (s *PostgresStore) SaveFundamentalBatch(ctx context.Context, records []*domain.Fundamental) error {
 	if len(records) == 0 {
 		return nil
@@ -81,12 +92,15 @@ func (s *PostgresStore) SaveFundamentalBatch(ctx context.Context, records []*dom
 	batch := &pgx.Batch{}
 	for _, f := range records {
 		batch.Queue(`
-			INSERT INTO fundamentals (symbol, trade_date, pe, pb, ps, roe, roa, debt_to_equity,
+			INSERT INTO stock_fundamentals (ts_code, trade_date, end_date, pe, pb, ps, roe, roa, debt_to_equity,
 				gross_margin, net_margin, revenue, net_profit, total_assets, total_liab)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-			ON CONFLICT (symbol, trade_date) DO UPDATE SET
+			VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+			ON CONFLICT (ts_code, trade_date) DO UPDATE SET
 				pe = EXCLUDED.pe, pb = EXCLUDED.pb, ps = EXCLUDED.ps,
-				roe = EXCLUDED.roe, roa = EXCLUDED.roa, debt_to_equity = EXCLUDED.debt_to_equity
+				roe = EXCLUDED.roe, roa = EXCLUDED.roa, debt_to_equity = EXCLUDED.debt_to_equity,
+				gross_margin = EXCLUDED.gross_margin, net_margin = EXCLUDED.net_margin,
+				revenue = EXCLUDED.revenue, net_profit = EXCLUDED.net_profit,
+				total_assets = EXCLUDED.total_assets, total_liab = EXCLUDED.total_liab
 		`, f.Symbol, f.Date, f.PE, f.PB, f.PS, f.ROE, f.ROA, f.DebtToEquity,
 			f.GrossMargin, f.NetMargin, f.Revenue, f.NetProfit, f.TotalAssets, f.TotalLiab)
 	}
@@ -107,9 +121,9 @@ func (s *PostgresStore) SaveFundamentalBatch(ctx context.Context, records []*dom
 // GetFundamental retrieves fundamental data for a symbol on a specific date.
 func (s *PostgresStore) GetFundamental(ctx context.Context, symbol string, date time.Time) (*domain.Fundamental, error) {
 	query := `
-		SELECT symbol, trade_date, pe, pb, ps, roe, roa, debt_to_equity,
+		SELECT ts_code, trade_date, pe, pb, ps, roe, roa, debt_to_equity,
 			gross_margin, net_margin, revenue, net_profit, total_assets, total_liab
-		FROM fundamentals WHERE symbol = $1 AND trade_date = $2
+		FROM stock_fundamentals WHERE ts_code = $1 AND trade_date = $2
 	`
 	var f domain.Fundamental
 	err := s.pool.QueryRow(ctx, query, symbol, date).Scan(
@@ -126,10 +140,10 @@ func (s *PostgresStore) GetFundamental(ctx context.Context, symbol string, date 
 // Returns an empty slice if no records found.
 func (s *PostgresStore) GetFundamentals(ctx context.Context, symbol string, date time.Time) ([]domain.Fundamental, error) {
 	query := `
-		SELECT symbol, trade_date, pe, pb, ps, roe, roa, debt_to_equity,
+		SELECT ts_code, trade_date, pe, pb, ps, roe, roa, debt_to_equity,
 			gross_margin, net_margin, revenue, net_profit, total_assets, total_liab
-		FROM fundamentals
-		WHERE symbol = $1 AND trade_date <= $2
+		FROM stock_fundamentals
+		WHERE ts_code = $1 AND trade_date <= $2
 		ORDER BY trade_date DESC
 	`
 	rows, err := s.pool.Query(ctx, query, symbol, date)

@@ -207,7 +207,7 @@ func newTestStore(t *testing.T) (*PostgresStore, context.Context) {
 func truncateAll(t *testing.T, ctx context.Context, store *PostgresStore) {
 	t.Helper()
 	tables := []string{
-		"stocks", "ohlcv_daily_qfq", "fundamentals", "stock_fundamentals",
+		"stocks", "ohlcv_daily_qfq", "stock_fundamentals",
 		"trading_calendar", "dividends", "index_constituents", "factor_cache",
 		"splits", "factor_returns", "ic_analysis", "walk_forward_reports",
 		"strategies", "backtest_jobs",

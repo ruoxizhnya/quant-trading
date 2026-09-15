@@ -314,8 +314,9 @@ POST /screen                  — 选股筛选
 
 ## 数据模型
 
-> **状态**: 39 张活跃表 (2026-09-15 由 [ODR-053](odr/odr-053-p3-fundamentals-detail-table.md) 复核:
-> `pkg/storage/postgres.go` 内联定义 21 张 + 根 `migrations/` 迁移新增 18 张 —
+> **状态**: 38 张活跃表 (2026-09-15 由 [ODR-056](odr/odr-056-fundamentals-table-consolidation.md) 更新:
+> `fundamentals` 已并入 `stock_fundamentals` 并 DROP, 原 39 张由 [ODR-053](odr/odr-053-p3-fundamentals-detail-table.md) 复核:
+> `pkg/storage/postgres.go` 内联定义 20 张 + 根 `migrations/` 迁移新增 18 张 —
 > `factor_genes`, `strategy_genes`, `sync_jobs`, `sync_schedules`,
 > `sectors`, `stock_sector_map`, `top_list`, `limit_up_pool`, `announcements`,
 > `news`, `hot_search`, `global_ohlcv`, `ohlcv_minute`, `capital_flow`,
@@ -343,6 +344,12 @@ POST /screen                  — 选股筛选
 > `migrate()` 为实际执行路径, `docs/migrations/022_*` 与
 > `contracts/fundamentals_detail.schema.sql` 为同源副本（分歧时**以 `contracts/` 为准**）。
 > 活跃表数 38 → 39。
+>
+> **表合并（已落地 — ODR-056 / EQD-P3-1）**: `fundamentals` 与 `stock_fundamentals` 的
+> 12 个指标列同名同义、同源于同一 tushare `fina_indicator` API, 经裁决以
+> `stock_fundamentals` 为唯一幸存表：迁移 `025` 把存量按 `symbol → ts_code` 直通并入
+> （`ON CONFLICT` 取「幸存表优先」）后 `DROP TABLE fundamentals`，`pkg/storage/fundamentals.go`
+> 的 4 个读写函数同步收敛。**活跃表数 39 → 38**（内联 21 → 20 + 迁移新增 18）。
 
 ### 主表（核心 6 张）
 
@@ -436,7 +443,6 @@ Indexes: idx_bj_status, idx_bj_created_at
 |------|------|---------|
 | `dividends` | 分红送股数据 | symbol, ex_date, cash_div, share_div |
 | `splits` | 拆股数据 | symbol, ex_date, split_ratio |
-| `fundamentals` | 财务数据（独立接口） | ts_code, trade_date, pe, pb, roe |
 | `fundamentals_detail`  | **深财务明细快照（未落地 — ADR-022 契约 C1 / EQD-P1-1）** 逐字段行存 + `ann_date` PIT 对齐 + `snapshot_uri` 溯源 | ts_code, end_date, ann_date, field_code, raw_field_name, value, unit, source, fetched_at, snapshot_uri |
 | `factor_cache` | 因子计算结果缓存 | symbol, trade_date, factor_name, value |
 | `factor_returns` | 因子收益分析 | factor_name, period, return |
@@ -464,7 +470,7 @@ Indexes: idx_bj_status, idx_bj_created_at
 | `ingest.raw` | **原始源响应归档（已落地 — ADR-022 §2 类 A / L0-2）** 所有外部源响应按 `content_hash` 唯一归档，是全部数字的最终证据坐标 | content_hash PK, source, dataset, key, as_of, payload JSONB, fetched_at |
 | `research.*` | **研究结构化状态投影（已落地 — ADR-022 §2 类 E / L0-4）** 3 张表 `profile` / `conclusion` / `question`（结论/疑点字段 + citations），可由 vault markdown 确定性重建（可 DROP） | content_hash FK, conclusion, thesis, citations JSONB, evidence_pointer |
 
-> 备注: `fundamentals` 与 `stock_fundamentals` 字段重叠但使用场景不同 —— **已登记为正式任务 `TASKS.md` C-8（表合并，`docs/migrations/025_equitydeep_field_consolidation.sql`），见 [ODR-047](odr/odr-047-equitydeep-integration-audit.md) DR-7**（原先仅自承「未来评估合并」而无任务跟踪，本次补齐）。`orders` 表 (migrations/003 定义) 当前未被代码引用，可考虑删除。
+> 备注: `fundamentals` 与 `stock_fundamentals` 的字段重叠**已收口** —— 原先登记为 `TASKS.md` C-8（[ODR-047](odr/odr-047-equitydeep-integration-audit.md) DR-7），已于 `EQD-P3-1` 落地（[ODR-056](odr/odr-056-fundamentals-table-consolidation.md)：迁移 `025` 存量并入 `stock_fundamentals` 后 `DROP TABLE fundamentals`）。**基本面数据一律读写 `stock_fundamentals`。** `orders` 表 (migrations/003 定义) 当前未被代码引用，可考虑删除。
 >
 > `fundamentals_detail`（契约 C1）为 **ADR-022 计算面（原 ADR-021 桥 B1）前置**：EquityDeep 侧 Stage2 派生指标经 ETL 落库后，横截面工作面（工作面 2）的 5 个纵向因子消费此表。schema 定义见 [RESEARCH.md §3.2](RESEARCH.md)，建表 SQL 见 `docs/migrations/022_equitydeep_fundamentals.sql`（任务 `TASKS.md` C-1）。
 
