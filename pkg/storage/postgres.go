@@ -181,7 +181,7 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			currency VARCHAR(10) DEFAULT 'CNY',
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
-		// Migration 009: factor_returns table
+		// Migration 024: docs/migrations/024_add_factor_returns_table.sql
 		`CREATE TABLE IF NOT EXISTS factor_returns (
 			id SERIAL PRIMARY KEY,
 			factor_name VARCHAR(20) NOT NULL,
@@ -266,6 +266,58 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			status_code INT NOT NULL,
 			timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+		// Migration 020: docs/migrations/020_add_ingest_raw.sql (ADR-022 §2 类 A)
+		`CREATE SCHEMA IF NOT EXISTS ingest`,
+		`CREATE TABLE IF NOT EXISTS ingest.raw (
+			content_hash VARCHAR(64) PRIMARY KEY,
+			source VARCHAR(64) NOT NULL,
+			dataset VARCHAR(128) NOT NULL,
+			key TEXT NOT NULL,
+			as_of DATE,
+			payload JSONB NOT NULL,
+			fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ingest_raw_source_dataset ON ingest.raw(source, dataset)`,
+		`CREATE INDEX IF NOT EXISTS idx_ingest_raw_as_of ON ingest.raw(as_of DESC)`,
+		// Migration 021: docs/migrations/021_add_research_schema.sql (ADR-022 §2 类 E)
+		`CREATE SCHEMA IF NOT EXISTS research`,
+		`CREATE TABLE IF NOT EXISTS research.profile (
+			ticker VARCHAR(20) PRIMARY KEY,
+			name VARCHAR(100) NOT NULL,
+			schema_version INT NOT NULL DEFAULT 1,
+			source_file TEXT,
+			source_mtime TIMESTAMPTZ,
+			last_researched DATE,
+			needs_review BOOLEAN NOT NULL DEFAULT FALSE,
+			review_reason TEXT,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS research.conclusion (
+			ticker VARCHAR(20) NOT NULL REFERENCES research.profile(ticker) ON DELETE CASCADE,
+			conclusion_id VARCHAR(16) NOT NULL,
+			title TEXT NOT NULL,
+			body TEXT,
+			as_of VARCHAR(16),
+			confidence VARCHAR(8),
+			status VARCHAR(16) NOT NULL DEFAULT 'active',
+			citations JSONB NOT NULL DEFAULT '[]',
+			evidence_pointer TEXT,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (ticker, conclusion_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS research.question (
+			ticker VARCHAR(20) NOT NULL REFERENCES research.profile(ticker) ON DELETE CASCADE,
+			question_id VARCHAR(16) NOT NULL,
+			text TEXT NOT NULL,
+			status VARCHAR(16) NOT NULL DEFAULT 'open',
+			raised_at VARCHAR(16),
+			PRIMARY KEY (ticker, question_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_research_conclusion_ticker ON research.conclusion(ticker)`,
+		`CREATE INDEX IF NOT EXISTS idx_research_conclusion_status ON research.conclusion(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_research_question_ticker ON research.question(ticker)`,
+		`CREATE INDEX IF NOT EXISTS idx_research_question_status ON research.question(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_research_profile_needs_review ON research.profile(needs_review) WHERE needs_review = TRUE`,
 	}
 
 	for _, m := range migrations {
@@ -321,6 +373,15 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_audit_endpoint ON audit_logs(endpoint, timestamp DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_role ON users(role) WHERE disabled = FALSE`,
+		// Migration 020: ingest.raw indexes (类 A 原始源响应归档)
+		`CREATE INDEX IF NOT EXISTS idx_ingest_raw_source_dataset ON ingest.raw(source, dataset)`,
+		`CREATE INDEX IF NOT EXISTS idx_ingest_raw_as_of ON ingest.raw(as_of DESC)`,
+		// Migration 021: research schema indexes (类 E 研究结构化投影)
+		`CREATE INDEX IF NOT EXISTS idx_research_conclusion_ticker ON research.conclusion(ticker)`,
+		`CREATE INDEX IF NOT EXISTS idx_research_conclusion_status ON research.conclusion(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_research_question_ticker ON research.question(ticker)`,
+		`CREATE INDEX IF NOT EXISTS idx_research_question_status ON research.question(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_research_profile_needs_review ON research.profile(needs_review) WHERE needs_review = TRUE`,
 	}
 
 	for _, idx := range indexes {

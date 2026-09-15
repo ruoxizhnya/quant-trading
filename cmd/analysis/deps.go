@@ -17,6 +17,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/live"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
 	"github.com/ruoxizhnya/quant-trading/pkg/risk"
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 	"github.com/spf13/viper"
@@ -80,4 +81,11 @@ type ServerDeps struct {
 	// over /api/tools/*. Enables external agent services to call this
 	// platform without reading SPEC.md or hand-crafting HTTP requests.
 	ToolsRegistry *tools.Registry
+
+	// Store — L0-3 (ADR-022 §5): the Postgres store backs the read-only
+	// Evidence API (GET /api/evidence/:content_hash), which resolves a
+	// citation's content_hash to its unique archived source response in
+	// `ingest.raw`. Work faces read data through this door instead of
+	// keeping their own copy.
+	Store *storage.PostgresStore
 }

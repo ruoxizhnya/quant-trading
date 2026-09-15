@@ -204,6 +204,7 @@ func main() {
 		Logger:           logger,
 		Viper:            v,
 		ToolsRegistry:    toolsRegistry,
+		Store:            store,
 	}
 
 	router := buildRouter(authSvc, v, logger)
@@ -364,6 +365,12 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 	// /api/tools/* so external agent services can call without reading
 	// SPEC.md.
 	NewToolsHandler(deps.ToolsRegistry, deps.Logger).RegisterRoutes(router)
+
+	// L0-3 (ADR-022 §5): read-only Evidence API. Resolves a citation's
+	// content_hash to its unique archived source response in `ingest.raw`
+	// (404 = not ingested). This is the platform's single evidence
+	// coordinate — work faces read through it instead of storing copies.
+	NewEvidenceHandler(deps.Store, deps.Logger).RegisterRoutes(router)
 }
 
 // loadDefaultSuitabilityProfile reads the suitability profile from

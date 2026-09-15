@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -21,6 +22,7 @@ import (
 // struct replaces 16 positional parameters — this test guards against
 // accidental field removal or renaming by enumerating the canonical
 // set of fields. S7-P3-3 added ToolsRegistry (17th field).
+// L0-3 (ADR-022 §5) added Store (18th field) for the Evidence API.
 func TestServerDeps_HasExpectedFields(t *testing.T) {
 	t.Parallel()
 
@@ -42,6 +44,7 @@ func TestServerDeps_HasExpectedFields(t *testing.T) {
 		"Logger",
 		"Viper",
 		"ToolsRegistry",
+		"Store",
 	}
 
 	typ := reflect.TypeOf(ServerDeps{})
@@ -93,6 +96,7 @@ func TestServerDeps_FieldsAreTyped(t *testing.T) {
 		"AuthSvc":          "*auth.Service",
 		"RiskManager":      "*risk.RiskManager",
 		"Metrics":          "*observability.Metrics",
+		"Store":            "*storage.PostgresStore",
 	}
 	for field, wantType := range cases {
 		f, ok := typ.FieldByName(field)
@@ -113,6 +117,9 @@ func TestServerDeps_FieldsAreTyped(t *testing.T) {
 //   - deps.Logger (passed by value; zero value is usable)
 //   - deps.Metrics (observability.Handler is nil-safe, returns 503)
 //   - deps.ToolsRegistry (NewToolsHandler panics on nil — provide empty registry)
+//   - deps.Store (NewEvidenceHandler panics on nil — provide a zero-value
+//     store; it is only dereferenced when a request hits /api/evidence/*,
+//     which these tests never do)
 func newMinimalDeps() *ServerDeps {
 	return &ServerDeps{
 		Viper:  viper.New(),
@@ -125,6 +132,7 @@ func newMinimalDeps() *ServerDeps {
 			return observability.NewMetrics()
 		}(),
 		ToolsRegistry: tools.NewRegistry(),
+		Store:         &storage.PostgresStore{},
 	}
 }
 
@@ -177,6 +185,7 @@ func TestRegisterRoutes_RegistersCoreEndpoints(t *testing.T) {
 		"POST /api/execution/orders",        // ExecutionHandler
 		"POST /api/compliance/check",        // ComplianceHandler
 		"GET /api/tools",                    // ToolsHandler (S7-P3-3)
+		"GET /api/evidence/:content_hash",   // EvidenceHandler (L0-3)
 	}
 	for _, route := range handlerGroupSamples {
 		assert.True(t, seen[route],
