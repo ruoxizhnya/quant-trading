@@ -10,7 +10,6 @@ import type {
 import {
   getDataSourceStatus,
   getDataSourceHealth,
-  switchDataSource,
   getSyncStatus,
   startDataImport,
 } from '@/api/sync'
@@ -60,21 +59,6 @@ export const useSyncStore = defineStore('sync', () => {
       dataSourceHealth.value = await getDataSourceHealth()
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to fetch data source health'
-      throw err
-    } finally {
-      isLoading.value = false
-    }
-  }
-
-  async function switchSource(name: string, type: 'http' | 'inmemory', url?: string) {
-    isLoading.value = true
-    error.value = null
-    try {
-      const response = await switchDataSource({ name, type, url })
-      await fetchDataSourceStatus()
-      return response
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to switch data source'
       throw err
     } finally {
       isLoading.value = false
@@ -192,7 +176,6 @@ export const useSyncStore = defineStore('sync', () => {
     // Actions
     fetchDataSourceStatus,
     fetchDataSourceHealth,
-    switchSource,
     fetchSyncStatus,
     importData,
     clearError,

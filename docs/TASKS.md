@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.33.0 (Sprint 8 — 阶段 P5 切片 1: 封潜伏直连, 退役 `pkg/marketdata` 直连 provider, ODR-058)
+> **Version:** 3.34.0 (Sprint 8 — 阶段 P5 切片 2: 退役运行时数据源切换门, ODR-059)
 > **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -573,12 +573,30 @@
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
-| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **6** | **0** | **11** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) + EQD-P1-2 已落地(ODR-055) + EQD-P3-1 已落地(ODR-056, **阶段 P3 3/3 关闭**) + EQD-P2-1 已落地(ODR-057, **阶段 P4 1/2**) + **阶段 P5 切片 1**已落地(ODR-058, P-A 退役 / P-B·P-C 不动 / P-D 收敛) |
-| **总计**          | **8** | **0** | **222** | **1** | **2** | **233** | (v3.33.0 Sprint 8 阶段 P5 切片 1: 封潜伏直连, 退役 pkg/marketdata 直连 provider, ODR-058) |
+| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **6** | **0** | **11** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) + EQD-P1-2 已落地(ODR-055) + EQD-P3-1 已落地(ODR-056, **阶段 P3 3/3 关闭**) + EQD-P2-1 已落地(ODR-057, **阶段 P4 1/2**) + **阶段 P5 切片 1**已落地(ODR-058, P-A 退役 / P-B·P-C 不动 / P-D 收敛) + **阶段 P5 切片 2**已落地(ODR-059, P-B 退役 / status·health 保留) |
+| **总计**          | **8** | **0** | **222** | **1** | **2** | **233** | (v3.34.0 Sprint 8 阶段 P5 切片 2: 退役运行时数据源切换门, ODR-059) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-15 (v3.34.0) — Sprint 8 阶段 P5 切片 2: 退役运行时数据源切换门（退役 `POST /api/datasource/switch`）
+
+**来源**: [ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md) — P5-1 第二刀；承 [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md) §6「P-B 须单独评估」
+
+- **评估取证（三条实证）**
+  — **(a) 生产接线下一按即崩**：`setup.go` 以 `NewDataAdapter(nil, ...)` 接线（bus = nil），`SetPrimary` 无条件 `a.bus.Publish` → 实测复现 nil pointer panic（被 `gin.Recovery()` 吞成 500）；现有测试传非 nil bus，恰未覆盖
+  — **(b) `http` 分支收任意 URL**：`NewHTTPProvider(req.URL, ...)` 无校验，可把引擎读源指向任意外部服务，冲突 ADR-022 §1「外部源不得由本服务直连取数」；且切换门默认无鉴权
+  — **(c) 驱动它的配置是死的**：全仓 `datasource.*` 配置读取点 = 0；`DataSourceConfig` / `AdapterFactory` 生产调用者 = 0
+- **裁决: 退役**（与 L0 原则语义冲突时正确动作是退役而非加固）
+  — **后端**: 删 `registerDatasourceRoutes` 的 `POST /switch` handler 与 `logger` 参数（`cmd/analysis/handlers_datasource.go`），保留只读 `GET /status` / `GET /health`；`main.go` 调用点同步改参
+  — **前端**: 删 `components/sync/DataSourceSwitch.vue`（112 行切换表单）+ `DataSync.vue` 引用 + `api/sync.ts::switchDataSource` + `types/sync.ts` 两个 interface + `stores/sync.ts::switchSource` action + 对应测试
+  — **死配置/死工厂**: 删 `config/analysis-service.yaml` 整段 `datasource:`、删 `pkg/marketdata/config.go` 整文件（`DataSourceConfig`/`AdapterFactory`/`Build*`/`DefaultDataSourceConfig` 等 137 行）
+  — **契约与文档**: `docs/openapi.yaml` 删 `/api/datasource/switch` 整段；`docs/ARCHITECTURE.md` / `AGENTS.md` / `docs/SPEC.md`（2 处）同步删该端点
+- **明确保留**: `GET /api/datasource/status`、`GET /api/datasource/health`；读源由启动期 `data_service.url` 固定
+- **未做（本切片不动）**: `Engine.SwitchDataSource` / `DataAdapter.SetPrimary` / `NewCachedProvider` 去留（生产调用者归 0 但仍有测试引用）属独立议题；`SetPrimary` 的 nil-bus panic 未修（已不可从生产到达）
+- **验证**: `go build ./...` 通过；`go test -count=1 ./pkg/marketdata/ ./pkg/backtest/ ./cmd/analysis/` 全 ok；前端 `typecheck` / `vitest`（11 files, 153 tests）/ `lint`（0 error）通过
+- **统计更新**: 总计 233 不变；**阶段 P5 切片 2 完成，P5-1 整体仍未关闭**（余「对接 L0 单一数据面 + Evidence API」）
 
 ### 2026-09-15 (v3.33.0) — Sprint 8 阶段 P5 切片 1: 封潜伏直连（退役 pkg/marketdata 直连 provider）
 
@@ -1906,9 +1924,9 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
-| **P5-1** | **工作面 2 对齐**：Vue SPA / Research Engine 存量能力对接 L0 单一数据面 + Evidence API（去除旁路取数） | `web/src/`, `cmd/analysis/`, `pkg/data/` | ⬜ | ADR-022 §1, §3 / PRODUCT §5 → [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md) |
+| **P5-1** | **工作面 2 对齐**：Vue SPA / Research Engine 存量能力对接 L0 单一数据面 + Evidence API（去除旁路取数） | `web/src/`, `cmd/analysis/`, `pkg/data/` | ⬜ | ADR-022 §1, §3 / PRODUCT §5 → [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md) + [ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md) |
 
-> **阶段 P5 进展**: **切片 1 已完成**（[ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)）—— **封潜伏直连**：旁路勘察定 4 条路径（P-A `pkg/marketdata` 第二套直连 provider / P-B `POST /api/datasource/switch` 用户可见切换门 / P-C `pkg/data/source` Registry 属 L0 / P-D `hkex` 北向 fetcher），本切片只处理**无生产调用者**的 P-A（退役 + 工厂显式拒绝）与 P-D（注释显式归 L0 摄取侧，零代码改动）；P-B（涉及用户可见行为变更）/ P-C（归属 L0 正确且 `ETLPipeline` 生产实例化点已 = 0）明确不动。验收点「生产代码中外部源直连实例化点 = 0」达成。**后续切片**：P-B 切换门的去留存废须单独评估，故 P5-1 整体仍未关闭。
+> **阶段 P5 进展**: **切片 1/2 已完成，P5-1 整体仍未关闭**（余「对接 L0 单一数据面 + Evidence API」）—— **切片 1**（[ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)）**封潜伏直连**：旁路勘察定 4 条路径（P-A `pkg/marketdata` 第二套直连 provider / P-B `POST /api/datasource/switch` 用户可见切换门 / P-C `pkg/data/source` Registry 属 L0 / P-D `hkex` 北向 fetcher），本切片只处理**无生产调用者**的 P-A（退役 + 工厂显式拒绝）与 P-D（注释显式归 L0 摄取侧，零代码改动）；P-B（涉及用户可见行为变更）/ P-C（归属 L0 正确且 `ETLPipeline` 生产实例化点已 = 0）明确不动。验收点「生产代码中外部源直连实例化点 = 0」达成。**切片 2**（[ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md)）**退役运行时数据源切换门**：P-B 评估三条实证（生产接线 `NewDataAdapter(nil, ...)` 下 `SetPrimary` 实测 panic / `http` 分支收任意 URL 冲突 ADR-022 §1 且默认无鉴权 / `datasource.*` 配置读取点 = 0）后裁决退役 `POST /api/datasource/switch`（后端 handler + 前端切换链路 6 文件 + 死配置 `datasource:` 段 + 死工厂 `pkg/marketdata/config.go` + openapi/文档清单），保留只读 `GET /status` 与 `GET /health`，读源改由启动期 `data_service.url` 固定。
 
 > **EQD-P3-2 进展**: ✅ **已完成**（[ODR-054](odr/odr-054-dr-reverification.md)）—— 对 ODR-047 已修 8 项做「文档声明 ↔ 物理事实」双向取证复核：DR-1/2/5/6/8 未回退，DR-7 由阶段 P3 的 EQD-P3-1 承接；另发现并回填 3 处残留漂移（DR-3-R1 ADR 拆分 21≠22 / DR-3-R2 Implementation 31≠30 / DR-4-R1 `ODR-001~049`）。**阶段 P1 全部关闭**。
 >

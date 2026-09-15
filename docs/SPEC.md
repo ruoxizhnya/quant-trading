@@ -1150,10 +1150,9 @@ GET  /api/walkforward/:strategy_id - Get walk-forward report for strategy
 #### Data Source Management (Phase 3 — ODR-011 multi-source)
 ```
 GET  /api/datasource/status       - Current data adapter status (primary, stopped, mode)
-POST /api/datasource/switch       - Switch primary data source
-     {"source": "tushare|akshare|local|..."}
 GET  /api/datasource/health       - Health check of all registered adapters
 ```
+> 运行时切换门 `POST /api/datasource/switch` 已于 [ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md) 退役（任意 URL 冲突 ADR-022 §1；读源由启动期 `data_service.url` 固定）。
 
 #### Factor Analysis
 ```
@@ -1303,9 +1302,9 @@ POST /api/gene-pool/archive       - Archive generation to gene pool
 #### Data Source Management
 ```
 GET  /api/datasource/status       - Get current data source status
-POST /api/datasource/switch       - Switch active data source
 GET  /api/datasource/health       - Check data source connectivity
 ```
+> 运行时切换门 `POST /api/datasource/switch` 已于 [ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md) 退役。
 
 #### Factor Analysis
 ```

@@ -322,7 +322,7 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 	registerBatchRoutes(router, deps.BatchEngine, deps.Logger)
 	registerStrategyRoutes(router, deps.StrategyDB)
 	registerCopilotRoutes(router, deps.CopilotService, deps.CopilotRunner)
-	registerDatasourceRoutes(router, deps.Engine, deps.Logger)
+	registerDatasourceRoutes(router, deps.Engine)
 	registerFactorRoutes(router, deps.FactorAttributor, deps.Logger)
 	registerPluginRoutes(router, deps.PluginLoader)
 	// S7-P0-1 (ODR-043-1): inject copilotRunner so the AI pipeline can

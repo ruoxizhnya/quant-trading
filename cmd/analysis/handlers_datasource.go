@@ -1,16 +1,21 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
-	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 )
 
-func registerDatasourceRoutes(router *gin.Engine, engine *backtest.Engine, logger zerolog.Logger) {
+// registerDatasourceRoutes exposes the read-only data-source observability
+// endpoints. The runtime-switch gate (POST /api/datasource/switch) was
+// retired in ODR-059: it accepted an arbitrary provider URL — a path that
+// could point the engine at a non-L0 service, against ADR-022 §1's
+// "external sources are ingested at the single L0 door" principle — and it
+// was non-functional in production anyway (the adapter is wired with a nil
+// EventBus, so SetPrimary panicked). The read source is fixed at startup
+// from `data_service.url`.
+func registerDatasourceRoutes(router *gin.Engine, engine *backtest.Engine) {
 	ds := router.Group("/api/datasource")
 	{
 		ds.GET("/status", func(c *gin.Context) {
@@ -27,51 +32,6 @@ func registerDatasourceRoutes(router *gin.Engine, engine *backtest.Engine, logge
 				"enabled": true,
 				"primary": adapter.Primary(),
 				"stopped": adapter.Stopped(),
-			})
-		})
-
-		ds.POST("/switch", func(c *gin.Context) {
-			var req struct {
-				Name  string `json:"name" binding:"required"`
-				Type  string `json:"type" binding:"required"`
-				URL   string `json:"url"`
-				Token string `json:"token"`
-			}
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-
-			var newProvider marketdata.Provider
-
-			switch req.Type {
-			case "http":
-				if req.URL == "" {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "url required for http type"})
-					return
-				}
-				newProvider = marketdata.NewHTTPProvider(req.URL, logger)
-			case "inmemory":
-				newProvider = marketdata.NewInMemoryProvider()
-			default:
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("unsupported runtime switch type: %q (only http/inmemory)", req.Type)})
-				return
-			}
-
-			if err := engine.SwitchDataSource(c.Request.Context(), req.Name, newProvider); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-
-			logger.Info().
-				Str("name", req.Name).
-				Str("type", req.Type).
-				Msg("Data source switched via API")
-
-			c.JSON(http.StatusOK, gin.H{
-				"message": "data source switched",
-				"name":    req.Name,
-				"type":    req.Type,
 			})
 		})
 

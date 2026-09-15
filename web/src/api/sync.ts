@@ -2,8 +2,6 @@ import api from './client'
 import type {
   DataSourceStatus,
   DataSourceHealth,
-  DataSourceSwitchRequest,
-  DataSourceSwitchResponse,
   SyncStatus,
   DataImportRequest,
   DataImportResponse,
@@ -15,12 +13,6 @@ export async function getDataSourceStatus(): Promise<DataSourceStatus> {
 
 export async function getDataSourceHealth(): Promise<DataSourceHealth> {
   return api.get<DataSourceHealth>('/api/datasource/health')
-}
-
-export async function switchDataSource(
-  request: DataSourceSwitchRequest,
-): Promise<DataSourceSwitchResponse> {
-  return api.post<DataSourceSwitchResponse>('/api/datasource/switch', request)
 }
 
 export async function getSyncStatus(): Promise<SyncStatus> {

@@ -78,7 +78,6 @@ Browser (Vue SPA :5173)
   ├──► GET /api/sync/status   ──► analysis-service → SyncJobManager → postgres
   ├──► POST /api/sync/jobs    ──► analysis-service → SyncQueue → WorkerPool
   ├──► GET /api/datasource/status ──► analysis-service → DataAdapter
-  ├──► POST /api/datasource/switch ──► analysis-service → ProviderManager
   ├──► GET /api/plugins       ──► analysis-service → PluginLoader
   │
   └──► Redis (:6379) ◄──── factor_cache, session store, sync_job_cache

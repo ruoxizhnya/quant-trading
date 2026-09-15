@@ -637,48 +637,6 @@ paths:
                     items:
                       type: string
 
-  /api/datasource/switch:
-    post:
-      tags: [Datasource]
-      summary: Switch data source
-      description: Switches the active market data provider at runtime.
-      operationId: switchDatasource
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [name, type]
-              properties:
-                name:
-                  type: string
-                type:
-                  type: string
-                  enum: [http, inmemory]
-                url:
-                  type: string
-                token:
-                  type: string
-      responses:
-        '200':
-          description: Data source switched
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                  name:
-                    type: string
-                  type:
-                    type: string
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
   /api/datasource/health:
     get:
       tags: [Datasource]

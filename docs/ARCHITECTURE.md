@@ -275,8 +275,8 @@ POST /api/copilot/save            — 保存策略代码
 
 # Data Source Management
 GET  /api/datasource/status       — 数据源状态
-POST /api/datasource/switch       — 切换数据源
 GET  /api/datasource/health       — 数据源健康检查
+# (POST /api/datasource/switch 已于 ODR-059 退役; 读源由启动期 data_service.url 固定)
 
 # Factor Analysis
 GET  /api/factor/returns/:factor  — 因子收益时间序列

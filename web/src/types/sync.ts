@@ -13,19 +13,6 @@ export interface DataSourceHealth {
   error?: string
 }
 
-export interface DataSourceSwitchRequest {
-  name: string
-  type: 'http' | 'inmemory'
-  url?: string
-  token?: string
-}
-
-export interface DataSourceSwitchResponse {
-  message: string
-  name: string
-  type: string
-}
-
 export interface SyncJob {
   id: string
   type: string

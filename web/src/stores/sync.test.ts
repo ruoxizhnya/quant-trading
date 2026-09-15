@@ -7,7 +7,6 @@ import type { DataSourceStatus, DataSourceHealth, SyncStatus, DataImportRequest 
 vi.mock('@/api/sync', () => ({
   getDataSourceStatus: vi.fn(),
   getDataSourceHealth: vi.fn(),
-  switchDataSource: vi.fn(),
   getSyncStatus: vi.fn(),
   startDataImport: vi.fn(),
 }))
@@ -115,22 +114,6 @@ describe('useSyncStore', () => {
 
     expect(store.dataSourceHealth).toEqual(mockHealth)
     expect(store.isLoading).toBe(false)
-  })
-
-  it('should switch data source', async () => {
-    const mockResponse = { message: 'switched', name: 'test', type: 'http' }
-    vi.mocked(syncApi.switchDataSource).mockResolvedValue(mockResponse)
-    vi.mocked(syncApi.getDataSourceStatus).mockResolvedValue({ enabled: true, primary: 'test' })
-
-    const store = useSyncStore()
-    const result = await store.switchSource('test', 'http', 'http://localhost:8081')
-
-    expect(result).toEqual(mockResponse)
-    expect(syncApi.switchDataSource).toHaveBeenCalledWith({
-      name: 'test',
-      type: 'http',
-      url: 'http://localhost:8081',
-    })
   })
 
   it('should fetch sync status', async () => {
