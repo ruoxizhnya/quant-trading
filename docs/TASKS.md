@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.27.0 (Sprint 8 — 阶段 P1: EQD-P0-1 契约冻结 + EQD-P0-2 抽检泛化落地，P1 仅余 EQD-P3-2)
+> **Version:** 3.28.0 (Sprint 8 — 阶段 P3 起步: EQD-P1-1 `fundamentals_detail` 表落地 + 三副本一致性校验)
 > **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -573,12 +573,29 @@
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
-| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **10** | **1** | **6** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) |
-| **总计**          | **12** | **1** | **219** | **1** | **0** | **233** | (v3.27.0 Sprint 8 阶段 P1 底座契约六项冻结 + 契约目录/抽检门禁落地) |
+| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **9** | **1** | **7** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) |
+| **总计**          | **11** | **1** | **220** | **1** | **0** | **233** | (v3.28.0 Sprint 8 阶段 P3 起步: `fundamentals_detail` 表落地 + 三副本 parity 校验) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-15 (v3.28.0) — Sprint 8 阶段 P3 起步: EQD-P1-1 `fundamentals_detail` 表落地
+
+**来源**: [ODR-053](odr/odr-053-p3-fundamentals-detail-table.md) — 计算面契约 C1 落库记录
+
+- **落地**: `EQD-P1-1` 新增 `fundamentals_detail` 表（契约 C1 / RESEARCH §3.2）
+  — 逐字段行存 + `ann_date` PIT 对齐（硬要求，缺则引入 look-ahead bias）+ `snapshot_uri` 反查 `ingest.raw.content_hash`
+  — 主键 `(ts_code, end_date, ann_date, field_code, fetched_at)` 含快照时间，支持 restatement 多版本并存
+  — `source` 前缀 `equitydeep:`（物理隔离）；`value` 为**唯一可空列**（缺失读数须与读数为 0 可区分）
+  — 仅新增表 + 索引 `idx_fund_detail_lookup`，**不改存量表**
+- **执行路径**: `pkg/storage/postgres.go` 内联 `migrate()` Migration 022；`docs/migrations/022_equitydeep_fundamentals.sql` 为文档副本
+- **补齐 ODR-052 遗留缺口**: 新增**三副本自动一致性校验**（契约副本 ↔ 文档副本 ↔ 内联执行路径）
+  — `TestFundamentalsDetailSchema_ThreeCopiesAgree`：提取三处 DDL 归一化后逐字比对（建表 + 索引分别断言）
+  — `TestFundamentalsDetailSchema_FrozenSemantics`：钉住 `ann_date` / `fetched_at` / `snapshot_uri` NOT NULL、主键 5 列、`value` 可空等冻结语义
+  — `TestFundamentalsDetailSchema_AppliedByMigrate`：活库校验 `ann_date` 实为 NOT NULL（无 Docker 时按约定 SKIP）
+- **文档同步**: [ARCHITECTURE.md](ARCHITECTURE.md) 活跃表数 38 → **39**（内联 20 → 21）；`docs/migrations/` 副本数 11 → 12
+- **统计更新**: 总计 233 不变；待处理 12 → 11, 已完成 219 → 220（Sprint 8 内 10/1/6 → 9/1/7）
 
 ### 2026-09-15 (v3.27.0) — Sprint 8 阶段 P1「底座契约」EQD-P0-1 契约冻结 + EQD-P0-2 抽检泛化落地
 
@@ -1765,7 +1782,8 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 > **迁移编号统一**: 消除历史重复编号（根目录 `012`×2、`docs/migrations` `007`×2）——
 > `migrations/012_add_gene_pool_tables.sql` → `023_add_gene_pool_tables.sql`；
 > `docs/migrations/007_add_factor_returns_table.sql` → `024_add_factor_returns_table.sql`。
-> 统一编号空间为本轮新增 `020`（L0-2）/`021`（L0-4），并预留 `022`（EQD-P1-1）、`025`（EQD-P3-1）。
+> 统一编号空间为本轮新增 `020`（L0-2）/`021`（L0-4）；`022`（EQD-P1-1）已于
+> [ODR-053](odr/odr-053-p3-fundamentals-detail-table.md) 落地；仍预留 `025`（EQD-P3-1）。
 > 实际执行路径为 `pkg/storage/postgres.go` 内联 `migrate()`，上述 SQL 文件为同源文档副本。详见 [ODR-050](odr/odr-050-p1-base-contract-landing.md)。
 
 ### 🔵 阶段 P2 — 工作面 1 跑通（接 `research` schema + 容器化 + 走 Evidence API → M1）
@@ -1781,7 +1799,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
-| EQD-P1-1 | 新增 `fundamentals_detail` 表（契约 C1，逐字段行存 + `ann_date` PIT + `snapshot_uri` 溯源） | `docs/migrations/022_equitydeep_fundamentals.sql` | ⬜ | RESEARCH §3.2 / C-1 |
+| EQD-P1-1 | 新增 `fundamentals_detail` 表（契约 C1，逐字段行存 + `ann_date` PIT + `snapshot_uri` 溯源） | `pkg/storage/postgres.go`（内联）+ `docs/migrations/022_equitydeep_fundamentals.sql` + `contracts/fundamentals_detail.schema.sql` | ✅ | RESEARCH §3.2 / C-1 |
 | EQD-P1-2 | EquityDeep 摄取命令 + 5 个纵向基本面因子（桥 B1） | `pkg/data/equitydeep/`（新包）, `pkg/data/factors/` | ⬜ | RESEARCH §3.4 / C-3, C-4 |
 | EQD-P3-1 | 修复 `fundamentals` / `stock_fundamentals` 表字段重叠（CR-47 遗留，补正式任务登记）（DR-7） | `docs/migrations/025_equitydeep_field_consolidation.sql` | ⬜ | ODR-047 DR-7 / C-8 |
 

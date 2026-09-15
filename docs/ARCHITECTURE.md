@@ -314,8 +314,8 @@ POST /screen                  — 选股筛选
 
 ## 数据模型
 
-> **状态**: 38 张活跃表 (2026-09-15 由 [ODR-050](odr/odr-050-p1-base-contract-landing.md) 复核:
-> `pkg/storage/postgres.go` 内联定义 20 张 + 根 `migrations/` 迁移新增 18 张 —
+> **状态**: 39 张活跃表 (2026-09-15 由 [ODR-053](odr/odr-053-p3-fundamentals-detail-table.md) 复核:
+> `pkg/storage/postgres.go` 内联定义 21 张 + 根 `migrations/` 迁移新增 18 张 —
 > `factor_genes`, `strategy_genes`, `sync_jobs`, `sync_schedules`,
 > `sectors`, `stock_sector_map`, `top_list`, `limit_up_pool`, `announcements`,
 > `news`, `hot_search`, `global_ohlcv`, `ohlcv_minute`, `capital_flow`,
@@ -330,13 +330,19 @@ POST /screen                  — 选股筛选
 >
 > 迁移定义的**实际执行路径**为 `pkg/storage/postgres.go` 内联 `migrate()`
 > (raw SQL 切片 + `pool.Exec`)；`migrations/` (12 个 SQL 文件) 与
-> `docs/migrations/` (11 个) 为同源文档副本。
+> `docs/migrations/` (12 个) 为同源文档副本。
 >
 > **ADR-022 新增 schema（已落地 — ODR-050 / L0-2 + L0-4）**: 统一研究平台引入
 > `ingest`（类 A 原始源响应归档, 1 张表: `ingest.raw`）与 `research`
 > （类 E 研究结构化状态投影, 3 张表: `profile` / `conclusion` / `question`）两个
 > schema, 共 +4 张表, 均**只新增、不改存量表**。
 > 分区原则与可重建性标注见 [ADR-022](adr/adr-022-unified-research-platform.md) §2。
+>
+> **ADR-022 计算面追加（已落地 — ODR-053 / EQD-P1-1）**: `fundamentals_detail`
+> 1 张表（类 C 派生, 逐字段行存 + `ann_date` PIT 对齐 + `snapshot_uri` 溯源）, 内联
+> `migrate()` 为实际执行路径, `docs/migrations/022_*` 与
+> `contracts/fundamentals_detail.schema.sql` 为同源副本（分歧时**以 `contracts/` 为准**）。
+> 活跃表数 38 → 39。
 
 ### 主表（核心 6 张）
 

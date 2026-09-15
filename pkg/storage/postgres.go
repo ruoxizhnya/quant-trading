@@ -318,6 +318,23 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_research_question_ticker ON research.question(ticker)`,
 		`CREATE INDEX IF NOT EXISTS idx_research_question_status ON research.question(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_research_profile_needs_review ON research.profile(needs_review) WHERE needs_review = TRUE`,
+		// Migration 022: docs/migrations/022_equitydeep_fundamentals.sql (契约 C1, EQD-P1-1)
+		// 逐字段行存 + ann_date PIT 对齐 + snapshot_uri 溯源。仅新增表，不改存量表。
+		`CREATE TABLE IF NOT EXISTS fundamentals_detail (
+			ts_code        VARCHAR(12)  NOT NULL,
+			end_date       DATE         NOT NULL,
+			ann_date       DATE         NOT NULL,
+			field_code     VARCHAR(64)  NOT NULL,
+			raw_field_name VARCHAR(128) NOT NULL,
+			value          NUMERIC(24,4),
+			unit           VARCHAR(16)  NOT NULL,
+			source         VARCHAR(32)  NOT NULL,
+			fetched_at     TIMESTAMPTZ  NOT NULL,
+			snapshot_uri   TEXT         NOT NULL,
+			PRIMARY KEY (ts_code, end_date, ann_date, field_code, fetched_at)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_fund_detail_lookup
+			ON fundamentals_detail (ts_code, field_code, end_date DESC)`,
 	}
 
 	for _, m := range migrations {

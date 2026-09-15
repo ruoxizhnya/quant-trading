@@ -15,7 +15,7 @@
 **Quant Lab** 底座采用 Go 后端 + Vue 3 前端 + PostgreSQL + Redis 架构。
 
 - **语言**: Go 1.21+ (后端), TypeScript + Vue 3 (前端)
-- **当前版本**: Phase 3 (Integration & Scale) → Phase 4 (AI-Native Evolution) 进行中；统一研究平台 (ADR-022) 处于 **P0 顶层定义已完成 / P1 底座契约待启动**
+- **当前版本**: Phase 3 (Integration & Scale) → Phase 4 (AI-Native Evolution) 进行中；统一研究平台 (ADR-022) 处于 **P0 顶层定义已完成 / P1 底座契约已完成（L0-1~L0-4 + EQD-P0-1/P0-2，除 EQD-P3-2 复核）/ P2 待 EquityDeep 仓 / P3 计算面起步（EQD-P1-1 已落地）**
 - **状态**: 底座（Quant Lab）核心功能已完成、AI 研究服务已上线运行；**工作面 1（EquityDeep）处于启动状态** — Python 3.11 独立实现，尚未接入共享底座（形态变更待 P2 落地）
 - **入口**: `cmd/analysis/main.go` (后端), `cmd/ai/main.go` (AI 服务), `web/src/main.ts` (前端)
 - **构建**: `go build ./...` (后端), `npm run build` (前端)
@@ -650,11 +650,11 @@ AGENTS.md 是活文档。以下情况主动更新：
 | **[PRODUCT.md](docs/PRODUCT.md)** | **顶层产品定义** — 一个产品（两对等工作面 + 共享底座）、四层架构（L0-L3）、数据归属与不重复存储机制、证据服务、飞轮闭环、执行路线 | **任何任务开始前**；判断"这属于哪个工作面/哪一层"时 |
 | [VISION.md](docs/VISION.md) | 设计原则（Accuracy First, Hot-Swap 等）、领域模型 | 开始新功能、质疑方法时 |
 | [SPEC.md](docs/SPEC.md) | 技术规格、API 定义、数据模型、Strategy 接口 | 实现端点、编写策略时 |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 服务拓扑、DB schema（38 张活跃表）、缓存设计 | 理解系统布局、调试时 |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 服务拓扑、DB schema（39 张活跃表）、缓存设计 | 理解系统布局、调试时 |
 | [RESEARCH.md](docs/RESEARCH.md) | **工作面 1（纵向深研）详案** — Product 设计 + Tech Implementation（契约 C1/C2 + 三桥 B1/B2/B3 + 改造清单 C-1~C-9）；⚠️ 部分内容待按 [ADR-022](docs/adr/adr-022-unified-research-platform.md) 修订（快照归属 / DB / Docker / 证据坐标） | 实现纵向工作面时 |
 
-> **CR-47 (ODR-012) — 已于 ODR-050 复核更新**: AGENTS.md previously said
-> "6 张表". 现行为 **38 张活跃表** = `pkg/storage/postgres.go` 内联 20 张
+> **CR-47 (ODR-012) — 已于 ODR-053 复核更新**: AGENTS.md previously said
+> "6 张表". 现行为 **39 张活跃表** = `pkg/storage/postgres.go` 内联 21 张
 > + 根 `migrations/` 迁移新增 18 张（`users` / `audit_logs` 两侧均有定义，只计一次）。
 > 迁移定义的**实际执行路径**为 `postgres.go` 内联 `migrate()`；
 > `migrations/` 与 `docs/migrations/` 为同源文档副本，
@@ -763,7 +763,7 @@ Please continue from where we left off.
 | `pkg/ai/agents/optimize.go` 不存在 | S10-1 误标 ✅; TPE/遗传算法在 `pkg/ai/search/` 但无 agent 包装层. 新代码用 MCP 工具 `walk_forward_validate` (ODR-046) |
 | **ODR-011 Multi-Source Risks** (CR-48, ODR-012) | See sub-table below |
 | `fundamentals` 与 `stock_fundamentals` 表字段重叠 | 已登记正式任务（`TASKS.md` C-8，`docs/migrations/025_equitydeep_field_consolidation.sql`）; 合并计划见 [ODR-047](docs/odr/odr-047-equitydeep-integration-audit.md) DR-7。新代码优先用 `stock_fundamentals` |
-| **基本面深度不足** (`stock_fundamentals` 仅 pe/pb/roe 三标量) | 纵向因子依赖 `fundamentals_detail`（[ADR-022](docs/adr/adr-022-unified-research-platform.md) 计算面 / 原契约 C1）; 建表前不要假设深财务字段可用 |
+| **基本面深度不足** (`stock_fundamentals` 仅 pe/pb/roe 三标量) | 纵向因子依赖 `fundamentals_detail`（[ADR-022](docs/adr/adr-022-unified-research-platform.md) 计算面 / 原契约 C1）; **表已落地**（[ODR-053](docs/odr/odr-053-p3-fundamentals-detail-table.md) — 逐字段行存 + `ann_date` PIT）, 但**摄取链路未通、表内无数据**（`EQD-P1-2` 待做）; 取数前不要假设深财务字段可用 |
 
 ### ODR-011 Multi-Source Integration Risks (CR-48, ODR-012)
 
