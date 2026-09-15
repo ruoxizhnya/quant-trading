@@ -196,7 +196,9 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 
 ## Phase 4 — AI-Native Evolution (AI Agent 量化研究平台)
 
-**Status: Phase 4 PROPOSED — Awaiting Approval**
+**Status: Phase 4 IN PROGRESS — 大部分已交付 (前端 AI UI 已弃用, 见 ODR-045; Hermes Agent 为研究主路径, 见 ODR-046)**
+
+> ⚠️ **状态修正 (2026-09-15, ODR-047 DR-5)**: 本条原标 `PROPOSED — Awaiting Approval`, 但 Phase 4 关键子系统 (expression DSL / gene_pool / search TPE+GA / evolution / drift / metrics / `pkg/tools/` 18 MCP 工具) **均已实现**。前端 9 个 AI 组件创建后已作为死代码删除 (ODR-045), 研究主路径改为 Hermes → MCP bridge (ODR-046)。"PROPOSED" 描述已过时。
 
 > **Vision**: Transform Quant Lab into an AI-native quantitative trading platform where AI acts as a senior quantitative researcher — autonomously discovering alpha factors, generating and evolving trading strategies, and validating hypotheses through the existing backtest infrastructure.
 >

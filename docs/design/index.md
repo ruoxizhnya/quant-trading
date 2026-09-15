@@ -4,6 +4,8 @@
 > **日期**: 2026-05-03
 > **状态**: Active
 > **适用范围**: Quant Lab 前端 (Vue 3 + Naive UI)
+>
+> ⚠️ **目录语义边界 (2026-09-15, ODR-047 DR-8)**: 本目录（`docs/design/`）**专指前端设计系统**。其他子项目的设计规格**不得**直接平铺在本目录根下 —— 请放入独立子目录（如 `design/equitydeep/`）。已迁出：`EquityDeep_Product_Specification.md` / `EquityDeep_Technical_Specification.md` → [`design/equitydeep/`](equitydeep/)（纵向基本面研究层，见 [ADR-021](../adr/adr-021-equitydeep-research-layer.md)）。
 
 ---
 
