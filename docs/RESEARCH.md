@@ -232,9 +232,23 @@ fields:
 | `roe_dupont_leverage` | 杜邦分解的权益乘数分量 | 总资产, 归母净资产 | 杜邦分解 |
 | `inventory_turnover_delta` | 存货周转率同比变化 | 存货, 营业成本 | 存货周转异常（疑点 Q2 同源） |
 
+**因子口径（EQD-P1-2 落地口径）**：上表只给了文字定义，实现时确定了下列数学口径。报表口径依 `contracts/field_dictionary.yaml`：利润表/现金流量表项目**年内累计**（Q1 = 3 月、Q4 = 全年，每个财年边界归零），资产负债表项目为**时点值**；累计项转 TTM 用 `TTM(Qn,Y) = YTD(Qn,Y) + YTD(Q4,Y-1) − YTD(Qn,Y-1)`（Q4 即全年，直接取本次累计）。
+
+| 因子 | 口径 |
+|---|---|
+| `gross_margin_trend` | 最近 4 期**单季**毛利率的 OLS 斜率：`margin(q) = (单季营业总收入 − 单季营业成本) / 单季营业总收入`，`factor = Slope([margin(q-3) … margin(q)])`（单位：毛利率/季）。用单季而非累计：累计口径下斜率主要在度量财年推进，而非盈利变化。 |
+| `contract_liability_ratio` | `合同负债(最新时点) / 营业总收入(TTM)`。 |
+| `ocf_to_net_profit` | `经营现金流(TTM) / 归母净利润(TTM)`。 |
+| `roe_dupont_leverage` | `总资产(最新时点) / 归母净资产(最新时点)` —— 杜邦分解的权益乘数分量。 |
+| `inventory_turnover_delta` | `存货周转率(当期) − 存货周转率(去年同期)`，其中 `存货周转率(p) = 营业成本(TTM at p) / 存货(p)`（期末余额，非两点平均 —— 契约每期仅存一个读数，两点平均需要首期没有的期初余额）。 |
+
+**不可支撑的标的跳过而非近似**：历史不足 4 期、TTM 桥接腿缺失、分母非正（单季营收 / TTM 净利润 / 归母净资产 / 存货）一律跳过该标的，不填替代值 —— 替代值会把财年语义混进因子，下游无法与真实信号区分。`factor_cache` 尾段（横截面 z-score + percentile）与既有三个横截面因子完全一致。
+
 **这是本 proposal 最实质的工程收益**：Quant Lab 的 quality 因子从"`ROE > 15%`"升级为**可解释的多维质量因子**，且每个因子都能追溯到"是哪家公司的哪份档案发现的"。
 
-**ETL 路径**：`equitydeep export --format=jsonl` → Quant Lab 摄取命令（非 HTTP，避免引入 EquityDeep 服务化）→ `fundamentals_detail` UPSERT → 现有 `FactorComputer` 批量计算 → `factor_cache`。
+**ETL 路径**：`equitydeep export --format=jsonl` → `POST /api/ingest/raw` 归档原始快照并取得 `content_hash` → `POST /api/ingest/equitydeep`（ndjson，携带该 `content_hash`）归一化 → `fundamentals_detail` UPSERT → 现有 `FactorComputer` 批量计算 → `factor_cache`。
+
+> **入口形态修正（EQD-P1-2，[ODR-055](odr/odr-055-eqd-p1-2-vertical-factors.md)）**：本节原稿写「摄取命令（非 HTTP，避免引入 EquityDeep 服务化）」，落地时经裁决改为**新增 HTTP 写入口**。要避免的是「EquityDeep 常驻服务化」，而不是 HTTP 本身：`POST /api/ingest/equitydeep` 是一道**无状态写门**，不要求上游起服务，与 L0-1 的 `POST /api/ingest/raw`（[ODR-051](odr/odr-051-l0-1-single-ingest-entry.md)）同构，EquityDeep 侧只需一个 HTTP client 即可上报，无需把 Go 二进制嵌进 Python 流程。
 
 **PIT 约束**：因子在回测日 `D` 只能使用 `ann_date <= D` 的行。这是必须在 ETL 阶段强制执行的过滤，否则回测结果虚高。
 
@@ -282,8 +296,8 @@ evals/data_quality/spot_check.py
 |---|---|---|---|
 | C-1 | 新增 `fundamentals_detail` 表 | `docs/migrations/022_equitydeep_fundamentals.sql` | 契约冻结 |
 | C-2 | 契约文件纳入版本控制 | `contracts/`（新目录） | — |
-| C-3 | EquityDeep 摄取命令 | `pkg/data/equitydeep/`（新包） | C-1 |
-| C-4 | 新增 5 个基本面因子 | `pkg/data/factors/` | C-3 |
+| C-3 | EquityDeep 摄取链（归一化纯包 + 落库/读取 + HTTP 写门） | `pkg/data/equitydeep/`（新包）+ `pkg/domain/fundamentals_detail.go` + `pkg/storage/fundamentals_detail.go` + `cmd/data/handlers_equitydeep_ingest.go` | C-1 |
+| C-4 | 新增 5 个基本面因子（桥 B1） | `pkg/data/factor_equitydeep.go` + `pkg/domain/factor.go`（枚举）+ `docs/migrations/026_widen_factor_name.sql` | C-3 |
 | C-5 | MCP 工具 `research.profile` | `pkg/tools/builtin/research_tool.go` | 契约 C2 |
 | C-6 | vault 只读挂载配置 | `docker-compose.override.yml` | C-5 |
 | C-7 | 抽检脚本泛化 | `evals/data_quality/` | — |

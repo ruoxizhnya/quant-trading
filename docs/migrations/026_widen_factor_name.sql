@@ -2,8 +2,8 @@
 -- Date: 2026-09-15
 --
 -- 定位: 桥 B1 新增 5 个纵向基本面因子（ADR-022 计算面），其中
---       contract_liability_ratio / roe_dupont_leverage / inventory_turnover_delta
---       三个名字长 23~24 字符，超出既有 VARCHAR(20)，写入会直接报错。
+--       contract_liability_ratio / inventory_turnover_delta 两个名字长 24 字符，
+--       roe_dupont_leverage 19 字符；前者超出既有 VARCHAR(20)，写入会直接报错。
 --       故在因子链路的三个表上统一放宽到 VARCHAR(32)。
 -- 影响面: factor_cache（写入）/ factor_returns（IC 分层归因）/ ic_analysis（IC 统计）
 --         三表同源同一列，必须同时放宽，否则 IC 与归因链路会在新因子名上失败。

@@ -2266,6 +2266,74 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/ingest/equitydeep:
+    post:
+      tags: [Evidence]
+      summary: Normalize archived EquityDeep snapshots into fundamentals_detail
+      description: |
+        Class-B ingest door (ADR-022 §2 / TASKS.md EQD-P1-2, C-3). Consumes an
+        ndjson stream — one `contracts/snapshot.schema.json` record per line —
+        and writes `fundamentals_detail` rows.
+
+        Provenance gate: the caller must first archive the exact snapshot file
+        through `POST /api/ingest/raw` and pass the content_hash it received. A
+        hash ingest.raw does not know is rejected, and every written row is
+        stamped with that hash as its `snapshot_uri` — no number enters
+        fundamentals_detail without a resolvable raw response behind it.
+
+        Normalization rules (pure package `pkg/data/equitydeep`, contract C1-a):
+        raw_names is an explicit whitelist; unit conversion uses `unit_scale` and
+        an absent unit falls back to the dictionary base_unit; a string value
+        carrying a self-described magnitude suffix (亿/亿元 → CNY_100m, 万/万元 →
+        CNY_10k) is converted by that suffix, with thousands separators stripped.
+        Fields outside the whitelist, and values that are not parseable numbers,
+        are dropped and reported in `dropped` rather than guessed.
+      operationId: ingestEquityDeep
+      parameters:
+        - name: content_hash
+          in: query
+          required: true
+          description: 64-char lowercase hex hash returned by POST /api/ingest/raw for the archived snapshot file
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+      requestBody:
+        required: true
+        description: ndjson — one snapshot record per line
+        content:
+          application/x-ndjson:
+            schema:
+              type: string
+      responses:
+        '201':
+          description: Snapshots normalized and written
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquityDeepIngestResponse'
+        '400':
+          description: |
+            Rejected before any write: a malformed content_hash, a hash that was
+            never ingested, a line that is not a contract snapshot, a contract
+            violation (bad ticker, missing report_period / ann_date, unknown
+            unit, unknown snapshot key), an empty body, or a body over 32 MiB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The fundamentals_detail write failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: The field dictionary was not loadable at startup, so there is no whitelist or conversion table to normalize with
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/evidence/{content_hash}:
     get:
       tags: [Evidence]
@@ -2442,6 +2510,44 @@ components:
           type: string
           format: date-time
           description: When the response was fetched
+
+    EquityDeepIngestResponse:
+      type: object
+      description: Outcome of POST /api/ingest/equitydeep
+      required: [content_hash, snapshots, rows, dropped]
+      properties:
+        content_hash:
+          type: string
+          description: The archived raw response every written row points back to (stored as each row's snapshot_uri)
+        snapshots:
+          type: integer
+          description: Number of ndjson records accepted
+        rows:
+          type: integer
+          description: Number of fundamentals_detail rows written
+        dropped:
+          type: array
+          description: |
+            Snapshot fields the normalizer refused to map. Returned rather than
+            silently swallowed: a field the contract does not know is a producer
+            bug that has to be visible.
+          items:
+            $ref: '#/components/schemas/EquityDeepDroppedField'
+
+    EquityDeepDroppedField:
+      type: object
+      description: One snapshot field dropped during normalization
+      required: [line, raw_name, reason]
+      properties:
+        line:
+          type: integer
+          description: 1-based line number of the snapshot inside the uploaded ndjson
+        raw_name:
+          type: string
+          description: Source field name as it appeared in the snapshot
+        reason:
+          type: string
+          description: Why it was dropped — outside the raw_names whitelist, or not a parseable number
 
     HealthStatus:
       type: object
