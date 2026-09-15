@@ -71,6 +71,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/Alerts.vue'),
         meta: { title: '风险告警' },
       },
+      {
+        // ADR-022 §5: L0 evidence lookup — content_hash -> ingest.raw row.
+        path: 'evidence',
+        name: 'evidence',
+        component: () => import('@/pages/Evidence.vue'),
+        meta: { title: '证据查询' },
+      },
     ],
   },
   {

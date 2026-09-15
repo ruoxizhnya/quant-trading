@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.34.0 (Sprint 8 — 阶段 P5 切片 2: 退役运行时数据源切换门, ODR-059)
+> **Version:** 3.35.0 (Sprint 8 — 阶段 P5 切片 3: Vue SPA 对接 L0 Evidence API, ODR-060)
 > **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -573,12 +573,30 @@
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
-| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **6** | **0** | **11** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) + EQD-P1-2 已落地(ODR-055) + EQD-P3-1 已落地(ODR-056, **阶段 P3 3/3 关闭**) + EQD-P2-1 已落地(ODR-057, **阶段 P4 1/2**) + **阶段 P5 切片 1**已落地(ODR-058, P-A 退役 / P-B·P-C 不动 / P-D 收敛) + **阶段 P5 切片 2**已落地(ODR-059, P-B 退役 / status·health 保留) |
-| **总计**          | **8** | **0** | **222** | **1** | **2** | **233** | (v3.34.0 Sprint 8 阶段 P5 切片 2: 退役运行时数据源切换门, ODR-059) |
+| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **6** | **0** | **11** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) + EQD-P1-2 已落地(ODR-055) + EQD-P3-1 已落地(ODR-056, **阶段 P3 3/3 关闭**) + EQD-P2-1 已落地(ODR-057, **阶段 P4 1/2**) + **阶段 P5 切片 1**已落地(ODR-058, P-A 退役 / P-B·P-C 不动 / P-D 收敛) + **阶段 P5 切片 2**已落地(ODR-059, P-B 退役 / status·health 保留) + **阶段 P5 切片 3**已落地(ODR-060, Vue SPA 对接 L0 Evidence API / 后端零改动) |
+| **总计**          | **8** | **0** | **222** | **1** | **2** | **233** | (v3.35.0 Sprint 8 阶段 P5 切片 3: Vue SPA 对接 L0 Evidence API, ODR-060) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-15 (v3.35.0) — Sprint 8 阶段 P5 切片 3: Vue SPA 对接 L0 Evidence API（工作面 2 对齐起步）
+
+**来源**: [ODR-060](odr/odr-060-p5-1-frontend-evidence-api.md) — P5-1 第三刀；承 [ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md) §未做项第 4 条「`P5-1` 描述中的『Vue SPA / Research Engine 存量能力对接 L0 单一数据面 + Evidence API』尚未开始」
+
+- **现场取证（三条事实）**
+  — **(a) L0 侧已就绪**：L0-3 `GET /api/evidence/:content_hash` handler 已实现且已注册在 analysis(:8085)；`GetRawIngest` 未命中返回 `(nil, nil)` → 映射为 **404 `{"error":"evidence not ingested"}`**，是**一等语义**而非错误
+  — **(b) 工作面 2 零消费**：切片前全目录 Grep `web/src` 的 `evidence|content_hash|citation` = **0 命中** —— `ingest.raw` 的 `content_hash` 坐标在 L3 体验面上不可达
+  — **(c) 后端零改动即可对接**：vite dev proxy 已把 `/api` → `http://localhost:8085`（analysis），Evidence API 天然可达
+- **裁决: 只做「消费既有契约」的那一格**（4 候选切片交用户裁决，采纳 A；B/C/D 明确不做）
+  — **API 客户端层**: 新增 `web/src/api/evidence.ts::getEvidence`（`api.get<RawIngest>` + `encodeURIComponent` 路径段编码防 hash 逃出路由；404 只透传不在本层吞掉）
+  — **类型层**: 新增 `web/src/types/evidence.ts::RawIngest`（逐字对应 `pkg/storage/ingest_raw.go` JSON 标签，含 `as_of` 的 `omitempty` ↔ TS `?`）
+  — **UI 入口**: 新增 `components/evidence/EvidenceLookup.vue`（hash 输入 + 空值禁用提交；三态渲染：命中 = `NDescriptions` 六字段 + `NCode` 原样 payload / **404 = 未摄取** = `NAlert type="warning"` / 其他失败 = `NAlert type="error"`）+ `pages/Evidence.vue` 页面壳 + `router/index.ts` 注册 `/evidence` + `AppSidebar.vue` 增「证据查询」导航项
+  — **测试**: `api/evidence.test.ts`（3 用例：请求路径 / hash URL 编码 / 404 透传不变）+ `components/evidence/EvidenceLookup.test.ts`（4 用例：空值禁用提交 / 命中渲染六字段 + payload / 404 → 「未摄取」/ 非 404 → 错误态且**不**显示「未摄取」）
+- **关键 UI 语义**: 404 与「查询失败」**渲染为不同形态**（warning vs error）—— 把「未摄取」立为一等答案在 L3 面上的落点
+- **明确不做（切片边界）**: 后端 `cmd/analysis` / `cmd/data` **零改动**；`api/sync.ts` 死端点（切片 B）；Research Engine 输出侧 `content_hash`（切片 C）；`/market` → `8081` 与遗留镜像路由（切片 D）
+- **验证**: `npm run typecheck`（`vue-tsc --noEmit`）EXIT=0；`npm test`（`lint:tests` + `vitest run`）**13 files / 162 tests 全通过**（新增 2 文件 / 7 用例）；`npm run build` EXIT=0；验收点 `web/src` evidence 命中 **8 文件，全部为本切片新增**；后端 0 个 `.go` 文件变更
+- **统计更新**: 总计 233 不变；**阶段 P5 切片 3 完成，P5-1 整体仍未关闭**（余 Research Engine 侧 citation 与旁路取数残留维度）
 
 ### 2026-09-15 (v3.34.0) — Sprint 8 阶段 P5 切片 2: 退役运行时数据源切换门（退役 `POST /api/datasource/switch`）
 
@@ -1924,9 +1942,9 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
-| **P5-1** | **工作面 2 对齐**：Vue SPA / Research Engine 存量能力对接 L0 单一数据面 + Evidence API（去除旁路取数） | `web/src/`, `cmd/analysis/`, `pkg/data/` | ⬜ | ADR-022 §1, §3 / PRODUCT §5 → [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md) + [ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md) |
+| **P5-1** | **工作面 2 对齐**：Vue SPA / Research Engine 存量能力对接 L0 单一数据面 + Evidence API（去除旁路取数） | `web/src/`, `cmd/analysis/`, `pkg/data/` | ⬜ | ADR-022 §1, §3 / PRODUCT §5 → [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md) + [ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md) + [ODR-060](odr/odr-060-p5-1-frontend-evidence-api.md) |
 
-> **阶段 P5 进展**: **切片 1/2 已完成，P5-1 整体仍未关闭**（余「对接 L0 单一数据面 + Evidence API」）—— **切片 1**（[ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)）**封潜伏直连**：旁路勘察定 4 条路径（P-A `pkg/marketdata` 第二套直连 provider / P-B `POST /api/datasource/switch` 用户可见切换门 / P-C `pkg/data/source` Registry 属 L0 / P-D `hkex` 北向 fetcher），本切片只处理**无生产调用者**的 P-A（退役 + 工厂显式拒绝）与 P-D（注释显式归 L0 摄取侧，零代码改动）；P-B（涉及用户可见行为变更）/ P-C（归属 L0 正确且 `ETLPipeline` 生产实例化点已 = 0）明确不动。验收点「生产代码中外部源直连实例化点 = 0」达成。**切片 2**（[ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md)）**退役运行时数据源切换门**：P-B 评估三条实证（生产接线 `NewDataAdapter(nil, ...)` 下 `SetPrimary` 实测 panic / `http` 分支收任意 URL 冲突 ADR-022 §1 且默认无鉴权 / `datasource.*` 配置读取点 = 0）后裁决退役 `POST /api/datasource/switch`（后端 handler + 前端切换链路 6 文件 + 死配置 `datasource:` 段 + 死工厂 `pkg/marketdata/config.go` + openapi/文档清单），保留只读 `GET /status` 与 `GET /health`，读源改由启动期 `data_service.url` 固定。
+> **阶段 P5 进展**: **切片 1~3 已完成，P5-1 整体仍未关闭**（余 Research Engine 侧 citation 与旁路取数残留维度）—— **切片 1**（[ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)）**封潜伏直连**：旁路勘察定 4 条路径（P-A `pkg/marketdata` 第二套直连 provider / P-B `POST /api/datasource/switch` 用户可见切换门 / P-C `pkg/data/source` Registry 属 L0 / P-D `hkex` 北向 fetcher），本切片只处理**无生产调用者**的 P-A（退役 + 工厂显式拒绝）与 P-D（注释显式归 L0 摄取侧，零代码改动）；P-B（涉及用户可见行为变更）/ P-C（归属 L0 正确且 `ETLPipeline` 生产实例化点已 = 0）明确不动。验收点「生产代码中外部源直连实例化点 = 0」达成。**切片 2**（[ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md)）**退役运行时数据源切换门**：P-B 评估三条实证（生产接线 `NewDataAdapter(nil, ...)` 下 `SetPrimary` 实测 panic / `http` 分支收任意 URL 冲突 ADR-022 §1 且默认无鉴权 / `datasource.*` 配置读取点 = 0）后裁决退役 `POST /api/datasource/switch`（后端 handler + 前端切换链路 6 文件 + 死配置 `datasource:` 段 + 死工厂 `pkg/marketdata/config.go` + openapi/文档清单），保留只读 `GET /status` 与 `GET /health`，读源改由启动期 `data_service.url` 固定。**切片 3**（[ODR-060](odr/odr-060-p5-1-frontend-evidence-api.md)）**Vue SPA 对接 L0 Evidence API（工作面 2 对齐起步）**：切片前 `web/src` 对 `evidence|content_hash|citation` **0 命中**（L0-3 API 自 ODR-050 起「已交付但未被消费」）；新增前端消费层 `api/evidence.ts::getEvidence`（`encodeURIComponent` 路径段编码 + 404 只透传）+ 类型层 `types/evidence.ts::RawIngest`（逐字对应 `pkg/storage/ingest_raw.go`）+ UI 入口 `/evidence` 页 + `EvidenceLookup.vue`（**三态渲染**：命中 / **404 = 未摄取** warning / 其他失败 error）+ 侧栏导航，**后端零改动**（vite 已代理 `/api` → 8085）；验收点 `web/src` evidence 命中 8 文件全部为本切片新增；`npm run typecheck` / `npm test`（13 files, 162 tests）/ `npm run build` 全绿。
 
 > **EQD-P3-2 进展**: ✅ **已完成**（[ODR-054](odr/odr-054-dr-reverification.md)）—— 对 ODR-047 已修 8 项做「文档声明 ↔ 物理事实」双向取证复核：DR-1/2/5/6/8 未回退，DR-7 由阶段 P3 的 EQD-P3-1 承接；另发现并回填 3 处残留漂移（DR-3-R1 ADR 拆分 21≠22 / DR-3-R2 Implementation 31≠30 / DR-4-R1 `ODR-001~049`）。**阶段 P1 全部关闭**。
 >
