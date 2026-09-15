@@ -1,10 +1,17 @@
 # Quant Trading System — Vision & Features
 
 > **Status**: Active (Canonical - Design Principles)
-> **Version:** 1.4.1 (Phase 4 — AI-Native Evolution)
-> **Last Updated:** 2026-06-10
+> **Version:** 2.0.0 (统一研究平台 — 底座 + 双工作面, ADR-022)
+> **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Related:** [SPEC.md](SPEC.md) (implementation), [ARCHITECTURE.md](ARCHITECTURE.md) (layout), [TEST.md](TEST.md) (quality)
+> **Related:** [PRODUCT.md](PRODUCT.md) (顶层产品定义 — 上游), [SPEC.md](SPEC.md) (implementation), [ARCHITECTURE.md](ARCHITECTURE.md) (layout), [TEST.md](TEST.md) (quality)
+>
+> **Changelog v2.0.0 (ADR-022 统一研究平台, 2026-09-15):**
+> - 顶层定位从"横截面量化平台"升级为 **"一个产品 + 两个对等工作面 + 一个共享底座"**（[ADR-022](adr/adr-022-unified-research-platform.md) 取代 [ADR-021](adr/adr-021-equitydeep-research-layer.md)）
+> - 原 Quant Lab 能力**降维为共享底座**（L0 数据面 + L1 计算面 + L2 编排面）；本文档 §3 起的特性清单描述的是**底座 + 工作面 2** 的能力
+> - 工作面 1（纵向深研）见 [RESEARCH.md](RESEARCH.md)；顶层定义见 [PRODUCT.md](PRODUCT.md)
+> - 数据按性质分区（A-E）实现"不重复存储"；证据服务平台化为 `GET /api/evidence/{content_hash}`
+> - 未决问题 Q-1/Q-2/Q-3 见 [PRODUCT.md §13](PRODUCT.md)
 >
 > **Changelog v1.4.1 (ODR-012 P1 follow-up, 2026-06-10):**
 > - CR-33: `[]Signal` → `[]domain.Signal` in Signal → Trade pipeline step 2
@@ -38,6 +45,36 @@
 ---
 
 ## 1. Vision Statement
+
+### 1.0 顶层定位（ADR-022）
+
+> **一个 AI 投研研究员平台**：既能在全市场横向筛选（N 股 × 1 因子，日频，出信号），也能对单只股票纵向深挖（1 股 × N 季度，季度频，出研究档案），并且两者共享同一份数据、同一套证据链、同一组质量门禁。
+
+它由**两个对等工作面**构成，共享下方的 L0-L2 三层：
+
+```
+        ┌──────────────────────┐   ┌──────────────────────
+        │  工作面 1：纵向深研    │   │  工作面 2：横截面选股  │
+        │  1 股 × N 季度        │   │  N 股 × 1 因子        │
+        │  产出：研究档案        │   │  产出：交易信号        │
+        └──────────┬───────────   └──────────┬───────────┘
+                   │      飞轮闭环 ①②↔③④      │
+                   └───────────┬───────────────
+                               ▼
+        ┌──────────────────────────────────────────────────┐
+        │  共享底座：唯一数据面 + 统一计算面 + 统一编排面      │
+        │  （原 Quant Lab 的全部能力降维为此底座）            │
+        └──────────────────────────────────────────────────┘
+```
+
+- **共享底座**：数据面（L0 唯一事实源）+ 计算面（L1 因子/回测/验证/风控执行）+ 编排面（L2 Pipeline/Engine/工具桥）。
+- **工作面 1（纵向深研）**：EquityDeep —— 本产品的**首要高层工作面**，详案见 [RESEARCH.md](RESEARCH.md)。
+- **工作面 2（横截面选股）**：原 Quant Lab 的横截面能力，与工作面 1 **对等**。
+- **飞轮闭环**是"一个产品"的判据：纵向深挖产假设 → 横截面回测验证 → 结果回流修正理解 → 异常触发深挖。护城河是积累的研究资产（档案 + 因子 + 对应关系），而非单点技术。
+
+> **本文档余下内容（§1.1 起）描述的是"共享底座 + 工作面 2"的能力与设计原则。** 顶层产品定义以 [PRODUCT.md](PRODUCT.md) 为准；四层架构与数据分区以 [ARCHITECTURE.md §统一研究平台架构](ARCHITECTURE.md) 与 [ADR-022](adr/adr-022-unified-research-platform.md) 为准。
+
+### 1.1 What is this system (底座 + 工作面 2 视角)
 
 **What is this system?**
 
@@ -604,7 +641,7 @@ The phases below define the build order. All P0 items must be fully done (not "i
 | AI | **Generate Agent** (strategy code generation) | ✅ `pkg/ai/agents/generate.go` |
 | AI | **Validate Agent** (L1-L4 validation pipeline) | ✅ `pkg/ai/agents/validate.go` |
 | AI | **Evolve Agent** (genetic algorithm + drift detection) | ✅ `pkg/ai/agents/evolve.go` |
-| AI | **Optimize Agent** (TPE + genetic search hybrid) | ✅ `pkg/ai/agents/optimize.go` |
+| AI | ~~**Optimize Agent** (TPE + genetic search hybrid)~~ | ️ **NOT IMPLEMENTED** ️ — `pkg/ai/agents/optimize.go` 从未创建 (TPE/遗传算法在 `pkg/ai/search/`, 无 agent 包装层; 见本文「AI Components (Backend)」章节) |
 | Expression | **Factor Expression DSL** (custom DSL with AST evaluation, A-share specific operators) | ✅ `pkg/ai/expression/` |
 | Gene Pool | **Factor/Strategy Gene Pool** (PostgreSQL JSONB, genealogy tracking, performance history) | ✅ `pkg/ai/gene_pool/` |
 | Search | **TPE Bayesian optimization** | ✅ `pkg/ai/search/tpe.go` |
@@ -875,21 +912,26 @@ These are the targets for strategies run through the system. They are not guaran
 
 ## Appendix: Document Relationships
 
-This document is the **single source of truth** for what the system is and where it is going. It is derived from and supersedes:
+> **ADR-022 起，顶层事实源为 [PRODUCT.md](PRODUCT.md)**（顶层产品定义：一个产品 + 两个对等工作面 + 一个共享底座）。本文档降为**设计原则与特性清单**（描述"共享底座 + 工作面 2"），位于 PRODUCT.md 之下、SPEC/ARCHITECTURE 之上。
 
+This document is the **canonical source for design principles and the feature inventory** of the base + workstation 2 (横截面). It is derived from and relates to:
+
+- [PRODUCT.md](PRODUCT.md) — 顶层产品定义（**上游，优先级更高**）
+- [ADR-022](adr/adr-022-unified-research-platform.md) — 统一研究平台架构决策
+- [RESEARCH.md](RESEARCH.md) — 工作面 1（纵向深研）详案
 - `ROADMAP.md` — tactical implementation roadmap (what to build next)
 - `ARCHITECTURE.md` — technical architecture (how it is built)
 - `SPEC.md` — detailed system specification and interfaces
 - `ADR.md` + `docs/adr/` — architectural decision records
 - `archive/NEXT_STEPS.md` — archived audit findings (read-only)
 
-When this document conflicts with any of the above, this document takes precedence. The roadmap, architecture, and spec should be updated to match this document — not the other way around.
+When this document conflicts with PRODUCT.md or ADR-022, those take precedence; VISION.md should be updated to match them. Against ROADMAP/ARCHITECTURE/SPEC, this document takes precedence — they should be updated to match this document.
 
 **Change process:** To propose a change to VISION.md, write the rationale and submit for review. Changes require understanding of both the product vision and the technical constraints. No single feature addition should contradict the Core Principles.
 
 ---
 
-_Last updated: 2026-05-06 (Phase 4 AI-Native Evolution update)_
+_Last updated: 2026-09-15 (ADR-022 统一研究平台 — 底座 + 双工作面)_
 
 ---
 

@@ -1,8 +1,8 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.19.0 (Sprint 6 P1 pickup #9 — P1-30 AI Copilot E2E + SSE 契约完成)
-> **Last Updated:** 2026-06-12
+> **Version:** 3.22.0 (Sprint 8 — EquityDeep 纵向研究层集成任务登记)
+> **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
 >
@@ -573,11 +573,41 @@
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
-| **总计**          | **2** | **0** | **213** | **1** | **0** | **216** | (v3.21.0 P2-1+P2-2 完成, ODR-027 Created) |
+| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **16** | **1** | **0** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面 |
+| **总计**          | **18** | **1** | **213** | **1** | **0** | **233** | (v3.23.0 Sprint 8 按 ADR-022 执行路线 P1~P5 重排) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-15 (v3.23.0) — Sprint 8 按 ADR-022 执行路线重排: 统一研究平台落地
+
+**来源**: [ADR-022](adr/adr-022-unified-research-platform.md)（架构决策）+ [ODR-048](odr/odr-048-top-level-product-redefinition.md)（顶层重定义记录）
+**顶层定义**: [PRODUCT.md](PRODUCT.md)（canonical）— Quant Lab 降维为共享底座（L0-L2），横截面选股升为工作面 2
+
+- **章节重排**: Sprint 8「EquityDeep 纵向研究层集成」→「统一研究平台落地」；9 项 → 17 项，按 ADR-022 执行路线分 5 阶段:
+  - **P1 底座契约**×7: EQD-P0-1 / EQD-P0-2 / EQD-P3-2 + 新增 L0-1 单一摄取入口 / L0-2 `ingest.raw` / L0-3 Evidence API / L0-4 `research` schema
+  - **P2 工作面 1 跑通**×4: EQD-P0-3（回查脚本假阳性修复）/ EQD-P2-2（容器化）+ 新增 P2-1（接 `research` schema）/ P2-2（取数改造走 Evidence API）
+  - **P3 计算面补齐**×3: EQD-P1-1 / EQD-P1-2 / EQD-P3-1
+  - **P4 飞轮打通**×2: EQD-P2-1（MCP 工具 `research.profile`）+ 新增 P4-1（飞轮闭环端到端）
+  - **P5 横截面工作面 v2**×1: 新增 P5-1（存量对齐 L0 单一数据面）
+- **定位变更**: ~~「补充非改变」~~ → ADR-022：Quant Lab 降维为共享底座，横截面升为工作面 2（与工作面 1 对等，本期纳入规划）
+- **任务去向**: EQD-* 编号保持不变（跨文档引用稳定），阶段归属以 Sprint 8 分组为准
+- **统计更新**: 总计 225 → 233（待处理 10 → 18）
+- **关联文档**: [PRODUCT.md](PRODUCT.md) / [RESEARCH.md](RESEARCH.md)（工作面 1 详案，⚠️ 待按 ADR-022 修订）/ [ADR-022](adr/adr-022-unified-research-platform.md) / [ODR-048](odr/odr-048-top-level-product-redefinition.md)
+
+### 2026-09-15 (v3.22.0) — Sprint 8 任务登记: EquityDeep 纵向研究层集成
+
+**来源**: [ODR-047](odr/odr-047-equitydeep-integration-audit.md) EquityDeep 集成审计 — 结论「**补充非改变**」
+
+- **新增 Sprint 8 章节**（9 项任务）:
+  - 🔵 P0×3（零依赖可开工）: EQD-P0-1 契约冻结 (C-2) / EQD-P0-2 抽检脚本泛化 (C-7/桥 B3) / EQD-P0-3 EquityDeep 回查脚本 P0 假阳性缺陷修复
+  - 🟠 P1×2（依赖 M1 硬门槛）: EQD-P1-1 `fundamentals_detail` 建表 (C-1) / EQD-P1-2 摄取命令 + 5 纵向因子 (C-3, C-4)
+  - 🟡 P2×2（弱依赖 M3）: EQD-P2-1 MCP 工具 `research.profile` (C-5) / EQD-P2-2 vault 只读挂载 (C-6)
+  -  P3×2（收尾）: EQD-P3-1 `fundamentals`/`stock_fundamentals` 表合并 (C-8/DR-7) / EQD-P3-2 文档漂移 8 项收口 (C-9)
+- **DR-7 正式登记**: `fundamentals` 与 `stock_fundamentals` 表重叠（原仅文档自承「未来评估合并」无任务跟踪）→ EQD-P3-1
+- **统计更新**: 总计 216 → 225（待处理 2 → 10，进行中 0 → 1）
+- **关联文档**: [ADR-021](adr/adr-021-equitydeep-research-layer.md)（架构决策）+ [RESEARCH.md](RESEARCH.md)（Product + Tech 方案）+ `docs/design/equitydeep/`（上游规格）
 
 ### 2026-06-12 (v3.21.1) — Sprint 6 P2 pickup #3: P2-1 HTML 报告导出 + P2-2 多策略对比
 
@@ -1633,6 +1663,74 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 ---
 
+## 🔵 Sprint 8 — 统一研究平台落地 (2026-09-15 ⏳ Pending, ADR-022 重排)
+
+> **来源**: [ADR-022](adr/adr-022-unified-research-platform.md)（架构决策）+ [ODR-048](odr/odr-048-top-level-product-redefinition.md)（重构记录）
+> **顶层定义**: [PRODUCT.md](PRODUCT.md)（canonical）; **工作面 1 详案**: [RESEARCH.md](RESEARCH.md)（⚠️ 待按 ADR-022 修订）
+> **执行规范**: 每个任务必须 (1) 编写测试用例 (2) 通过代码审查 (3) 采用 atomic commit 提交 — 详见 [AGENTS.md §8.3 执行规范](../AGENTS.md#83-执行规范)
+> **阶段划分**: 任务按 ADR-022 执行路线 P1~P5 编排（P0 顶层定义已完成）。`EQD-*` 为**稳定任务 ID**（保留原编号以维持跨文档引用），阶段归属以本节分组为准。
+> **定位变更**: ~~「补充非改变」—— Quant Lab 保持横截面层不变~~ → ADR-022：**Quant Lab 降维为共享底座（L0+L1+L2），横截面选股升为工作面 2**，与工作面 1（EquityDeep 纵向深研）对等。
+> **总计**: 17 项任务 (P1×7 + P2×4 + P3×3 + P4×2 + P5×1)
+
+### 阶段映射（ADR-022 执行路线）
+
+| ADR-022 阶段 | 内容 | 承接原任务 | 新增任务 |
+|---|---|---|---|
+| ✅ **P0** | 顶层定义 | — | ✔ PRODUCT.md / ADR-022 / ODR-048（已完成） |
+| **P1** | 底座契约（单一摄取入口 + `ingest.raw` + Evidence API + `contracts/` + `research` schema + 抽检泛化） | EQD-P0-1, EQD-P0-2, EQD-P3-2 | L0-1 ~ L0-4 |
+| **P2** | 工作面 1 跑通（接 `research` schema + 容器化 + 走 Evidence API + 回查脚本修复 → M1） | EQD-P0-3, EQD-P2-2 | P2-1, P2-2 |
+| **P3** | 计算面补齐（`fundamentals_detail` + 5 纵向因子 + PIT） | EQD-P1-1, EQD-P1-2, EQD-P3-1 | — |
+| **P4** | 飞轮打通（疑点 → 假设 → 因子 → 回测 → 回流档案） | EQD-P2-1 | P4-1 |
+| **P5** | 横截面工作面 v2（存量对齐新架构） | — | P5-1 |
+
+### 🔵 阶段 P1 — 底座契约（可立即开工，零外部依赖）
+
+| ID | 任务 | 文件 | 状态 | 来源 |
+|----|------|------|------|------|
+| EQD-P0-1 | 契约冻结：将 `fundamentals_detail` schema + `_profile.json` schema 纳入版本控制（C-2） | `contracts/`（新目录） | ⬜ | ODR-047 / RESEARCH §3.2-3.3 → ADR-022 P1 |
+| EQD-P0-2 | 抽检脚本泛化：通用化 EquityDeep M1 数据质量抽检（10 票 × 20 数字，错误率 < 2%）（C-7 / 桥 B3） | `evals/data_quality/` | ⬜ | ODR-047 / RESEARCH §3.6 → ADR-022 P1 |
+| EQD-P3-2 | 文档漂移修复 8 项（DR-1~DR-8 收口校验）（C-9） | `docs/ARCHITECTURE.md` 等 | 🔵 | ODR-047 D5 / C-9 → ADR-022 P1 |
+| **L0-1** | **单一摄取入口**：统一 akshare/tushare adapter 归属 L0，禁止工作面直连外部数据源 | `pkg/data/source/` | ⬜ | [ADR-022](adr/adr-022-unified-research-platform.md) §3 / PRODUCT §9 |
+| **L0-2** | **`ingest.raw` 表**：原始源响应归档（`content_hash` 唯一键；冷热分层策略见 PRODUCT.md Q-2） | `migrations/` | ⬜ | ADR-022 §2 / PRODUCT §6.1 |
+| **L0-3** | **Evidence API**：`GET /api/evidence/{content_hash}` 返回唯一原始记录（citation 内容坐标） | `cmd/analysis/handlers_evidence.go` | ⬜ | ADR-022 §5 / PRODUCT §7 |
+| **L0-4** | **`research` schema DDL**：研究结构化状态（markdown 的确定性投影，可 DROP 重建） | `migrations/` | ⬜ | ADR-022 §2 / PRODUCT §6.1 |
+
+### 🔵 阶段 P2 — 工作面 1 跑通（接 `research` schema + 容器化 + 走 Evidence API → M1）
+
+| ID | 任务 | 文件 | 状态 | 来源 |
+|----|------|------|------|------|
+| EQD-P0-3 | EquityDeep 回查脚本 P0 假阳性缺陷修复（校验对象由"文本子串"改为"citation 元组 + JSON Pointer"） | EquityDeep 仓（回查脚本） | ⬜ | ODR-047 D2 / ADR-022 §5 |
+| EQD-P2-2 | vault 只读挂载 → 升级为 `equitydeep-research` worker 容器 | `docker-compose.override.yml` | ⬜ | C-6 → ADR-022 P2 |
+| **P2-1** | **EquityDeep 接入共享 PG `research` schema**（`_profile.json` 降级为导出格式，不再作为权威存储） | EquityDeep 仓（新增 DB 层） | ⬜ | ADR-022 §4 |
+| **P2-2** | **EquityDeep 取数改造**：去除直连 akshare，改走 L0 只读证据 API；原始快照迁至 `ingest.raw`，vault 只留 `{content_hash, pointer}` | EquityDeep 仓（ingest 层） | ⬜️ | ADR-022 §4 / PRODUCT §7 → ADR-022 P2 |
+
+### 🔵 阶段 P3 — 计算面补齐（`fundamentals_detail` + 5 纵向因子 + PIT）
+
+| ID | 任务 | 文件 | 状态 | 来源 |
+|----|------|------|------|------|
+| EQD-P1-1 | 新增 `fundamentals_detail` 表（契约 C1，逐字段行存 + `ann_date` PIT + `snapshot_uri` 溯源） | `migrations/012_equitydeep_fundamentals.sql` | ⬜ | RESEARCH §3.2 / C-1 |
+| EQD-P1-2 | EquityDeep 摄取命令 + 5 个纵向基本面因子（桥 B1） | `pkg/data/equitydeep/`（新包）, `pkg/data/factors/` | ⬜ | RESEARCH §3.4 / C-3, C-4 |
+| EQD-P3-1 | 修复 `fundamentals` / `stock_fundamentals` 表字段重叠（CR-47 遗留，补正式任务登记）（DR-7） | `migrations/013_*.sql` | ⬜ | ODR-047 DR-7 / C-8 |
+
+### 🔵 阶段 P4 — 飞轮打通（疑点 → 假设 → 因子 → 回测 → 回流档案）
+
+| ID | 任务 | 文件 | 状态 | 来源 |
+|----|------|------|------|------|
+| EQD-P2-1 | 第 19 个 MCP 工具 `research.profile`（读 `research` schema 投影 / `_profile.json` 导出镜像，不解析 markdown；桥 B2） | `pkg/tools/builtin/research_tool.go` | ⬜ | RESEARCH §3.5 / C-5 → ADR-022 P4 |
+| **P4-1** | **飞轮闭环端到端**：疑点 → 假设 → 因子 → 回测 → 结果回流修正档案（成功指标：≥3 个结论完成 IC 评估） | `pkg/ai/`, EquityDeep 仓 | ⬜ | ADR-022 §6 / PRODUCT §4 |
+
+### 🔵 阶段 P5 — 横截面工作面 v2（存量对齐新架构）
+
+| ID | 任务 | 文件 | 状态 | 来源 |
+|----|------|------|------|------|
+| **P5-1** | **工作面 2 对齐**：Vue SPA / Research Engine 存量能力对接 L0 单一数据面 + Evidence API（去除旁路取数） | `web/src/`, `cmd/analysis/`, `pkg/data/` | ⬜ | ADR-022 §1, §3 / PRODUCT §5 |
+
+> **EQD-P3-2 进展**: 本次审计已完成 DR-1~DR-6 + DR-8；DR-7 由阶段 P3 的 EQD-P3-1 承接。剩余为一致性复核。
+>
+> **原 Sprint 8 任务去向**: EQD-P0-1、EQD-P0-2 → 阶段 P1；EQD-P0-3、EQD-P2-2 → 阶段 P2；EQD-P1-1、EQD-P1-2、EQD-P3-1 → 阶段 P3；EQD-P2-1 → 阶段 P4；EQD-P3-2 → 阶段 P1（🔵 进行中）。
+
+---
+
 ## 🔗 相关文档
 
 | 文档                               | 用途             |
@@ -1642,6 +1740,9 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | [archive/NEXT\_STEPS.md](archive/NEXT_STEPS.md)  | 审查发现详情         |
 | [TEST.md](TEST.md)               | 测试策略和覆盖率目标     |
 | [ODR-013](odr/odr-013-comprehensive-audit-2026-06-11.md) | Sprint 6 综合审查记录 |
+| [ODR-047](odr/odr-047-equitydeep-integration-audit.md) | Sprint 8 — EquityDeep 集成审计 |
+| [RESEARCH.md](RESEARCH.md) | EquityDeep 纵向研究层整合方案 (Product + Tech) |
+| [ADR-021](adr/adr-021-equitydeep-research-layer.md) | EquityDeep 纵向基本面研究层架构决策 |
 | [ODR-043](odr/odr-043-comprehensive-audit-2026-06-29.md) | Sprint 7 综合审计 (4 维度 40 问题点) |
 | [ADR-017](adr/adr-017-observability-and-auth.md) ~ [ADR-020](adr/adr-020-engine-decomposition.md) | Sprint 6 架构决策 |
 

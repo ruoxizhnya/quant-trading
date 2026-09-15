@@ -1,8 +1,8 @@
 # 量化交易系统架构文档
 
 > **Status**: Active (Reference)
-> **Version:** 2.1.0 (Phase 4 AI-Native Update)
-> **Last Updated:** 2026-05-05
+> **Version:** 2.3.0 (ADR-022 统一研究平台 — 底座 + 双工作面)
+> **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [VISION.md](VISION.md) (principles), [SPEC.md](SPEC.md) (API), [ROADMAP.md](ROADMAP.md) (progress)
 >
@@ -17,12 +17,14 @@ _原最后更新: 2026-04-08 (Phase 3)_
 - AI 研究服务 (port 8086): 因子发现、策略生成、优化、进化、漂移检测
 - 执行服务抽象: BacktestExecutionService 支持固定/浮动/无滑点模型
 - 模拟交易 API: 完整订单生命周期管理 + 模拟券商
-- AI 前端组件: FactorLab、StrategyWorkshop、EvolutionObs、GenealogyTree、FitnessChart
+- AI 前端组件: ~~FactorLab、StrategyWorkshop、EvolutionObs、GenealogyTree、FitnessChart~~
+  — ⚠️ **已删除**（P1-13 创建后 S7-P2-7 作为死代码删除，详见 [ODR-045](odr/odr-045-frontend-ai-component-deprecation.md)）；自主研究改由 Hermes Agent + MCP 工具 + 自然语言交互提供（[ODR-046](odr/odr-046-hermes-agent-integration-decision.md)）
 - 基因池: Factor/Strategy 基因池 + PostgreSQL 持久化
 - 指标计算: IC/RankIC、换手率计算器
 - 搜索优化: TPE 贝叶斯优化、遗传算法、滚动窗口验证
 - 漂移检测: 均值漂移、方差漂移、分布漂移检测
 - 进化算法: 种群管理 + 选择/交叉/变异算子
+- **统一研究平台 (Proposed, ADR-022)**: 原 Quant Lab 能力**降维为共享底座**（L0 数据面 + L1 计算面 + L2 编排面），其上承载两个**对等工作面** —— 工作面 1 纵向深研（EquityDeep，季度频，产出研究档案）、工作面 2 横截面选股（日频，产出交易信号）。见下文 §统一研究平台架构 / [ADR-022](adr/adr-022-unified-research-platform.md)（取代 [ADR-021](adr/adr-021-equitydeep-research-layer.md)）
 
 **Phase 3 更新:**
 - Event-Driven 数据管道 (pkg/marketdata/eventbus.go + provider 接口)
@@ -44,6 +46,8 @@ _原最后更新: 2026-04-08 (Phase 3)_
 ---
 
 ## 系统概览
+
+> 下图是**共享底座 + 工作面 2（横截面选股）** 的当前实现视图。产品的顶层视图（底座 + 双工作面 + 四层架构）见 [§统一研究平台架构 (ADR-022)](#统一研究平台架构--adr-022)。
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -112,6 +116,7 @@ _原最后更新: 2026-04-08 (Phase 3)_
 | ai-research-service | 8086 | 8086 | AI 研究服务（独立运行，非 docker-compose） | ✅ 运行中 |
 | postgres | 5432 | - | 数据库 | ✅ 运行中 |
 | redis | 6379 | - | 缓存层 | ✅ 运行中 |
+| equitydeep-research | - | - | 工作面 1 纵向研究 worker（Python 3.11，无对外端口） | 🔄 Proposed (ADR-022) |
 
 > **ODR-021 (P1-15, 2026-06-12)**: `risk-service(8083)` + `execution-service(8084)`
 > 已合并入 `analysis-service` 作为 in-process 组件（`risk.RiskManager` +
@@ -320,6 +325,10 @@ POST /screen                  — 选股筛选
 > stock_basic)。
 >
 > 完整迁移定义见 `migrations/` (12 个 SQL 文件) + `pkg/storage/postgres.go` (inline migrations)。
+>
+> **ADR-022 新增 schema (Proposed)**: 统一研究平台引入 `ingest`（类 A 原始源响应归档）与
+> `research`（类 E 研究结构化状态投影）两个 schema，均**只新增、不改存量表**。
+> 分区原则与可重建性标注见 [ADR-022](adr/adr-022-unified-research-platform.md) §2。
 
 ### 主表（核心 6 张）
 
@@ -401,7 +410,7 @@ completed_at TIMESTAMPTZ                    -- 完成时间
 Indexes: idx_bj_status, idx_bj_created_at
 ```
 
-### 辅助表（其余 26 张）
+### 辅助表（其余 27 张 + ADR-022 新增 2 张 Proposed）
 
 > 以下表用于缓存、分析、AI 研究、多数据源接入等场景，详细 schema 见
 > `migrations/` 和 `pkg/storage/postgres.go`。
@@ -411,6 +420,7 @@ Indexes: idx_bj_status, idx_bj_created_at
 | `dividends` | 分红送股数据 | symbol, ex_date, cash_div, share_div |
 | `splits` | 拆股数据 | symbol, ex_date, split_ratio |
 | `fundamentals` | 财务数据（独立接口） | ts_code, trade_date, pe, pb, roe |
+| `fundamentals_detail`  | **深财务明细快照（Proposed — ADR-022 契约 C1）** 逐字段行存 + `ann_date` PIT 对齐 + `snapshot_uri` 溯源 | ts_code, end_date, ann_date, field_code, raw_field_name, value, unit, source, fetched_at, snapshot_uri |
 | `factor_cache` | 因子计算结果缓存 | symbol, trade_date, factor_name, value |
 | `factor_returns` | 因子收益分析 | factor_name, period, return |
 | `ic_analysis` | 因子 IC 分析结果 | factor_name, trade_date, ic, rank_ic, top_ic |
@@ -434,8 +444,12 @@ Indexes: idx_bj_status, idx_bj_created_at
 | `realtime_quote` | 实时行情快照 | symbol, last_price, bid/ask, volume, ts |
 | `data_source_registry` | 数据源注册表 (ODR-011) | name, kind, base_url, enabled, health_status |
 | `data_fallback_chain` | 降级链配置 (ODR-011) | chain_id, adapter_order JSONB, is_active |
+| `ingest.raw` | **原始源响应归档（Proposed — ADR-022 §2 类 A）** 所有外部源响应按 `content_hash` 唯一归档，是全部数字的最终证据坐标 | content_hash PK, source, dataset, key, as_of, payload JSONB, fetched_at |
+| `research.*` | **研究结构化状态投影（Proposed — ADR-022 §2 类 E）** 结论/疑点字段 + citations，可由 vault markdown 确定性重建（可 DROP） | content_hash FK, conclusion, thesis, citations JSONB, evidence_pointer |
 
-> 备注: `fundamentals` 与 `stock_fundamentals` 字段重叠但使用场景不同，未来评估合并。`orders` 表 (migrations/003 定义) 当前未被代码引用，可考虑删除。
+> 备注: `fundamentals` 与 `stock_fundamentals` 字段重叠但使用场景不同 —— **已登记为正式任务 `TASKS.md` C-8（表合并，`migrations/013_*.sql`），见 [ODR-047](odr/odr-047-equitydeep-integration-audit.md) DR-7**（原先仅自承「未来评估合并」而无任务跟踪，本次补齐）。`orders` 表 (migrations/003 定义) 当前未被代码引用，可考虑删除。
+>
+> `fundamentals_detail`（契约 C1）为 **ADR-022 计算面（原 ADR-021 桥 B1）前置**：EquityDeep 侧 Stage2 派生指标经 ETL 落库后，横截面工作面（工作面 2）的 5 个纵向因子消费此表。schema 定义见 [RESEARCH.md §3.2](RESEARCH.md)，建表 SQL 见 `migrations/012_*.sql`（任务 `TASKS.md` C-1）。
 
 ---
 
@@ -824,6 +838,98 @@ Browser (:5173)                    Backend (:8085)
 
 ---
 
+## 统一研究平台架构 — ADR-022
+
+> **状态**: Proposed（方向经用户确认 2026-09-15，待实施）
+> **决策**: [ADR-022](adr/adr-022-unified-research-platform.md)（取代 [ADR-021](adr/adr-021-equitydeep-research-layer.md)）
+> **上游**: [PRODUCT.md](PRODUCT.md)（顶层产品定义） | **工作面 1 详案**: [RESEARCH.md](RESEARCH.md) | **审计**: [ODR-047](odr/odr-047-equitydeep-integration-audit.md) | **重构记录**: [ODR-048](odr/odr-048-top-level-product-redefinition.md)
+
+### 顶层定位：一个产品，两个对等工作面，一个共享底座
+
+原 Quant Lab 的 Go 后端 + PG + 微服务**降维为共享底座**（数据面 + 计算面 + 编排面），其上承载两个**对等工作面**：
+
+```
+        ┌──────────────────────┐   ┌──────────────────────
+        │  工作面 1：纵向深研    │   │  工作面 2：横截面选股  │
+        │  1 股 × N 季度        │   │  N 股 × 1 因子        │
+        │  产出：研究档案        │   │  产出：交易信号        │
+        └──────────┬───────────┘   └──────────┬───────────┘
+                   │      飞轮闭环 ①②↔③④      │
+                   └───────────┬───────────────
+                               ▼
+        ┌──────────────────────────────────────────────────┐
+        │  共享底座 = 原 Quant Lab 全部能力（降维为 L0-L2）   │
+        └──────────────────────────────────────────────────┘
+```
+
+- **工作面 1（纵向深研）**：EquityDeep —— 1 股 × N 季度，季度频，产出研究档案，是本产品的**首要高层工作面**。
+- **工作面 2（横截面选股）**：原横截面能力 —— N 股 × 1 因子，日频，产出交易信号，与工作面 1 **对等**，本期纳入规划。
+
+### 按数据性质分区（"不重复存储"的机制）
+
+**不重复存储不靠约定，靠物理归属**——每类数据只有一个权威位置：
+
+| 类别 | 内容 | 可重建？ | 唯一权威位置 | 其他侧副本 |
+|---|---|---|---|---|
+| A | 原始源响应（含中文原始字段名） | 可（重抓） | PG `ingest.raw`（`content_hash` 唯一键） | ❌ 仅持 `content_hash` |
+| B | 规范化数据（OHLCV / 财报字段 / 日历 / 公司行为） | 可（从 A 重算） | PG `market.*` | ❌ 只读证据 API |
+| C | 派生计算结果（因子 / 回测 / IC） | 可（从 B 重算） | PG `quant.*` + Redis `factor_cache` |  只读计算 API |
+| D | 研究叙事（结论 / 疑点的自然语言正文） | **不可**（人的判断） | **Vault markdown**（事实源） | — 本身即事实源 |
+| E | 研究结构化状态（结论/疑点字段 + citations） | 可（从 D 确定性投影） | PG `research.*`（**投影，非权威**） | 权威在 D；可 DROP 重建 |
+
+**判据**："重复存储" = 同一份数据有两个都可写的位置并导致口径漂移。本方案中：A/B/C 物理唯一于 PG，工作面 1 运行期按需读 API、**零本地副本**；D 物理唯一于 vault markdown；E 是 D 的**确定性投影**（`equitydeep sync`，非 LLM 生成），单一写者、可丢弃、冲突时以 markdown 为准 —— 性质等同索引 / 物化视图，存在理由仅是可做跨层 SQL join。
+
+### 四层架构与单向依赖
+
+```
+L3 体验面   Obsidian Vault（工作面1） | Vue SPA（工作面2） | Hermes Agent（编排）
+L2 编排面   Research Pipeline（纵向） | Research Engine（横截面） | MCP Tool Bridge
+L1 计算面   因子引擎 | 回测引擎 | 验证门禁 L1-L5 | 风控·执行
+L0 数据面   ingest.raw | market.* | quant.* | research.* | Evidence API   ← 唯一事实源
+```
+
+原则：**L0 唯一数据面 + 单一写者 + 单向依赖（L3→L2→L1→L0）+ 可重建性标注 + 契约优先**。
+
+### EquityDeep 形态变更（允许有 DB / Docker，但零数据副本）
+
+| 项 | ADR-021（原） | ADR-022（本决策） |
+|---|---|---|
+| DB | 无（"文件系统即数据库"） | **接入共享 PostgreSQL 的 `research` schema**（不新建实例） |
+| Docker | 无 | **`equitydeep-research` worker 容器**加入 docker-compose |
+| 取数 | 自行调用 akshare | **严格单一入口**：经 L0 只读证据 API；akshare adapter 归入 L0 |
+| 原始快照 | vault 内 `snapshots/*.json` | 迁至 PG `ingest.raw`；vault 只留 `{content_hash, pointer}` |
+| 叙事 | `_profile.md` | **不变** —— 仍是事实源，Obsidian 仍是工作面 |
+| 结构化状态 | `_profile.json` 镜像文件 | 升级为 PG `research.*` 投影（JSON 保留为导出格式） |
+| **不变** | Python 3.11 / 7-stage 固定流程 / 逐数溯源 / 三硬承诺 / 非目标红线 | **全部保留**（产品价值本体） |
+
+### 证据服务升级为平台能力
+
+Citation 从"文件路径 + 模糊字符串"升级为**不可变内容坐标**：
+
+```
+citation = { source, dataset, key, as_of, content_hash }
+GET /api/evidence/{content_hash}  →  ingest.raw 中的唯一原始记录（不可变）
+```
+
+这条同时**在架构层面消除** ODR-047 发现的 P0 缺陷：回查脚本的校验对象从"文本子串"变为"声明（citation 元组）+ JSON Pointer 精确解析"，假阳性在机制上不可能发生。
+
+### 飞轮闭环是"一个产品"的判据
+
+```
+① 纵向深挖 → 产出可检验假设
+② 横截面验证 → 假设变因子 → 全市场回测 → IC/Sharpe
+③ 结果回流 → 修正/限制原结论（证伪也是收益）
+④ 异常触发 → 横截面命中异常板块 → 触发纵向深挖 → 回到 ①
+```
+
+没有这个闭环，产品退化为两个独立工具；有了它，**护城河是积累起来的研究资产（档案 + 因子 + 对应关系）**，而非任何单点技术。
+
+**边界**：EquityDeep 不产出信号或目标价；档案是**审查材料与因子假设来源**，不是信号源。
+
+**执行路线（P0-P5）**：P0 顶层定义 → P1 底座契约 → P2 工作面 1 跑通 → P3 计算面补齐 → P4 飞轮打通 → P5 横截面工作面对齐。详见 [TASKS.md](TASKS.md) Sprint 8。
+
+---
+
 ## Tools Registry 架构 (pkg/tools/) — S7-P3-3
 
 > **设计方向**: 本服务 = 对外的 API/工具提供方；agent = 外部消费者，
@@ -840,8 +946,15 @@ pkg/tools/
 └── builtin/
     ├── backtest.go           # backtest.run → contracts.BacktestRunner
     ├── factor.go             # factor.compute / factor.evaluate → client.FactorClient
+    ├── factor_tools.go       # validate_factor / compute_factor_ic
     ├── datafetch.go          # data.ohlcv / data.stocks / data.fundamentals → data-service HTTP
-    └── strategy_registry.go  # strategy.list / strategy.get → strategy.GlobalList/Get
+    ├── strategy_registry.go  # strategy.list / strategy.get → strategy.GlobalList/Get
+    ├── gene_pool_tools.go    # list_factors / list_strategies / save_factor / save_strategy
+    ├── lineage_tool.go       # get_strategy_lineage
+    ├── walkforward_tool.go   # walk_forward_validate
+    ├── market_regime_tool.go # get_market_regime
+    ├── summarize_tool.go     # summarize_backtest
+    └── gate.go               # L1-L4 验证门禁
 ```
 
 ### 设计要点
@@ -849,7 +962,9 @@ pkg/tools/
 - **共存适配器**: BacktestTool 委托给现有 `contracts.BacktestRunner`，不破坏现有 agent
 - **factory 注入**: Registry 通过 `ServerDeps.ToolsRegistry` 注入，无全局实例
 - **builtin/ 子包隔离**: `pkg/tools/` 保持纯净（只有接口），具体实现依赖在 `builtin/`
-- **8 个 builtin tool**: backtest.run, factor.compute, factor.evaluate, data.ohlcv, data.stocks, data.fundamentals, strategy.list, strategy.get
+- **18 个 builtin tool**（ODR-046 扩展后）: backtest.run | factor.compute | factor.evaluate | validate_factor | compute_factor_ic | list_factors | list_strategies | save_factor | save_strategy | get_strategy_lineage | walk_forward_validate | get_market_regime | summarize_backtest | data.ohlcv | data.stocks | data.fundamentals | strategy.list | strategy.get
+
+> **DR-1 修复 (ODR-047)**: 本节原称「8 个 builtin tool」，与 `pkg/tools/builtin/` 实际注册的 18 个不符（已逐一核对 `Name()` 实现）。数量以本文为准，新增工具需同步更新此列表。
 
 ---
 
@@ -977,12 +1092,14 @@ var bar market.OHLCV
 | YAML Generator | `pkg/ai/yaml/` | 结构化意图 → YAML 策略配置 | ✅ 已实现 |
 | Pipeline | `pkg/ai/pipeline/` | 完整流水线：意图解析 → YAML → 代码生成 → 编译验证 → 回测 | ✅ 已实现 |
 | Research Agent | `pkg/ai/agents/research.go` | LLM 驱动因子假设生成 | ✅ 已实现 |
-| Generate Agent | `pkg/ai/agents/generate.go` | 自然语言 → 策略代码生成 | 🔄 规划中 |
-| Validate Agent | `pkg/ai/agents/validate.go` | 分层验证：L1 语法 → L2 快速回测 → L3 标准回测 → L4 Walk-Forward | 🔄 规划中 |
-| Evolve Agent | `pkg/ai/agents/evolve.go` | 遗传算法 + 概念漂移检测 | 🔄 规划中 |
-| Gene Pool | `pkg/ai/gene_pool/` | 因子/策略基因库 (PostgreSQL JSONB) | 🔄 规划中 |
+| Generate Agent | `pkg/ai/agents/generate.go` | 自然语言 → 策略代码生成 | ✅ 已实现（ODR-046 后 deprecated） |
+| Validate Agent | `pkg/ai/agents/validate.go` | 分层验证：L1 语法 → L2 快速回测 → L3 标准回测 → L4 Walk-Forward | ✅ 已实现（ODR-046 后 deprecated） |
+| Evolve Agent | `pkg/ai/agents/evolve.go` | 遗传算法 + 概念漂移检测 | ✅ 已实现（ODR-046 后 deprecated） |
+| Gene Pool | `pkg/ai/gene_pool/` | 因子/策略基因库 (PostgreSQL JSONB) | ✅ 已实现 |
 | Backtest Client | `pkg/ai/client/backtest_client.go` | HTTP 客户端调用回测 API | ✅ 已实现 |
 | Factor Client | `pkg/ai/client/factor_client.go` | HTTP 客户端调用因子计算 API | ✅ 已实现 |
+
+> **DR-2 修复 (ODR-047)**: Generate / Validate / Evolve Agent 与 Gene Pool 此前标为「🔄 规划中」，但对应文件（`pkg/ai/agents/{generate,validate,evolve}.go`、`pkg/ai/gene_pool/`）均已存在，故改标已实现；其 Go-native agent 层已在 [ODR-046](odr/odr-046-hermes-agent-integration-decision.md) 中标记 deprecated（Hermes Agent 为研究主路径，`pkg/ai/agents/` 保留向后兼容）。
 
 ### 意图解析引擎 (Intent Parser)
 
