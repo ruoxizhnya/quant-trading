@@ -148,6 +148,15 @@ func (h *ToolsHandler) respondToolError(c *gin.Context, status int, err error) {
 			"error": err.Error(),
 			"code":  "INVALID_ARGS",
 		})
+	case errors.Is(err, tools.ErrNotFound):
+		// Valid request, no such record (e.g. research.profile for a
+		// ticker that was never archived). The message names the
+		// missing entity — see research_tool.go's "no_profile".
+		status = http.StatusNotFound
+		c.JSON(status, gin.H{
+			"error": err.Error(),
+			"code":  "NOT_FOUND",
+		})
 	default:
 		// Downstream / execution error — return 500 with the message
 		// so the caller can see what went wrong (e.g. "strategy not

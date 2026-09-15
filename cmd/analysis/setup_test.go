@@ -12,6 +12,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -149,14 +150,23 @@ func (stubRegimeDetector) DetectRegime(_ context.Context, _ []domain.OHLCV) (*do
 	return &domain.MarketRegime{}, nil
 }
 
-// TestBuildToolsRegistry_RegistersAll18Tools verifies that
-// buildToolsRegistry registers all 18 tools (8 original S7-P3-3 tools +
-// 8 Hermes Phase 1 tools + 1 Hermes Phase 2.2 tool + 1 Hermes Phase 2.3 tool)
-// with the correct names. This is the wiring-level test — individual tool
-// behavior is covered in pkg/tools/builtin/*_test.go.
+// stubResearchProfile satisfies builtin.ResearchProfileClient for registry
+// construction tests. GetResearchProfile is never called — we only verify
+// tool registration, not execution.
+type stubResearchProfile struct{}
+
+func (stubResearchProfile) GetResearchProfile(_ context.Context, _ string) (*storage.ResearchProfile, error) {
+	return nil, nil
+}
+
+// TestBuildToolsRegistry_RegistersAll19Tools verifies that
+// buildToolsRegistry registers all 19 tools (8 original S7-P3-3 tools +
+// 8 Hermes Phase 1 tools + 1 Hermes Phase 2.2 tool + 1 Hermes Phase 2.3 tool
+// + 1 EQD-P2-1 tool) with the correct names. This is the wiring-level test —
+// individual tool behavior is covered in pkg/tools/builtin/*_test.go.
 //
 // Reuses stubBacktestRunner from handlers_pipeline_test.go (same package).
-func TestBuildToolsRegistry_RegistersAll18Tools(t *testing.T) {
+func TestBuildToolsRegistry_RegistersAll19Tools(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	// Minimal viper config — only the keys buildToolsRegistry reads.
@@ -167,11 +177,11 @@ func TestBuildToolsRegistry_RegistersAll18Tools(t *testing.T) {
 	factorPool := gene_pool.NewFactorPool(nil)
 	strategyPool := gene_pool.NewStrategyPool(nil)
 
-	reg := buildToolsRegistry(v, &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubRegimeDetector{}, zerolog.Nop())
+	reg := buildToolsRegistry(v, &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubRegimeDetector{}, stubResearchProfile{}, zerolog.Nop())
 	require.NotNil(t, reg)
 
 	tools := reg.List()
-	assert.Len(t, tools, 18, "registry should contain exactly 18 tools (8 original + 8 Hermes Phase 1 + 1 Phase 2.2 + 1 Phase 2.3)")
+	assert.Len(t, tools, 19, "registry should contain exactly 19 tools (8 original + 8 Hermes Phase 1 + 1 Phase 2.2 + 1 Phase 2.3 + 1 EQD-P2-1)")
 
 	// Collect names into a set for O(1) lookup.
 	names := make(map[string]bool, len(tools))
@@ -179,7 +189,7 @@ func TestBuildToolsRegistry_RegistersAll18Tools(t *testing.T) {
 		names[tool.Name] = true
 	}
 
-	// Verify all 18 expected tool names are present.
+	// Verify all 19 expected tool names are present.
 	expectedTools := []string{
 		// ── Original 8 (S7-P3-3) ──
 		"backtest.run",
@@ -201,8 +211,10 @@ func TestBuildToolsRegistry_RegistersAll18Tools(t *testing.T) {
 		"summarize_backtest",    // Phase 1.6
 		// ── Hermes Phase 2.2 additions (1) ──
 		"get_strategy_lineage", // Phase 2.2 (gene pool lineage)
-		// ── Hermes Phase 2.3 additions (1) ──
+		// ─ Hermes Phase 2.3 additions (1) ──
 		"get_market_regime", // Phase 2.3 (market regime detection)
+		// ─ EQD-P2-1 addition (1) ──
+		"research.profile", // EQD-P2-1 (bridge B2, EquityDeep research archive)
 	}
 	for _, name := range expectedTools {
 		assert.True(t, names[name], "tool %q should be registered", name)
@@ -217,7 +229,7 @@ func TestBuildToolsRegistry_NoDuplicateNames(t *testing.T) {
 	factorPool := gene_pool.NewFactorPool(nil)
 	strategyPool := gene_pool.NewStrategyPool(nil)
 
-	reg := buildToolsRegistry(v, &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubRegimeDetector{}, zerolog.Nop())
+	reg := buildToolsRegistry(v, &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubRegimeDetector{}, stubResearchProfile{}, zerolog.Nop())
 	require.NotNil(t, reg)
 
 	tools := reg.List()

@@ -18,7 +18,7 @@
 
 | # | Condition | Verification |
 |---|-----------|-------------|
-| 1 | Hermes discovers all 18 tools via `GET /api/tools` | `curl` returns `count: 18` |
+| 1 | Hermes discovers all 19 tools via `GET /api/tools` | `curl` returns `count: 19` |
 | 2 | Hermes calls `list_factors` to avoid duplicates | trajectory log shows `list_factors` call |
 | 3 | Hermes calls `get_market_regime` for market context | trajectory log shows `get_market_regime` call |
 | 4 | Hermes generates a valid DSL expression (L1 passes) | `validate_factor` returns `passed: true` |
@@ -40,7 +40,7 @@
 |-----------|------|-------------|
 | Ollama (hermes-3:8b) | :11434 | `curl http://localhost:11434/api/tags` lists `hermes-3:8b` |
 | Hermes Agent | — | `~/.hermes/` directory exists with config/skills/prompts |
-| analysis-service | :8085 | `curl http://localhost:8085/api/tools` returns `count: 18` |
+| analysis-service | :8085 | `curl http://localhost:8085/api/tools` returns `count: 19` |
 | data-service | :8081 | `curl http://localhost:8081/health` returns 200 |
 | PostgreSQL | :5432 | `psql` can connect; `gene_pool_factors` table exists |
 | Redis | :6379 | `redis-cli ping` returns `PONG` |
@@ -66,7 +66,7 @@ cp docs/hermes/tools-quant-backtest.yaml ~/.hermes/tools/quant-backtest.yaml
 
 # 3. Verify Hermes can discover tools
 # (Hermes CLI depends on the framework — see Hermes docs for invocation)
-# Expected: Hermes reports 18 tools discovered from http://localhost:8085/api/tools
+# Expected: Hermes reports 19 tools discovered from http://localhost:8085/api/tools
 ```
 
 ---
@@ -78,12 +78,12 @@ cp docs/hermes/tools-quant-backtest.yaml ~/.hermes/tools/quant-backtest.yaml
 Before running the full autonomous loop, verify the MCP bridge works:
 
 ```bash
-# Verify all 18 tools are discoverable
+# Verify all 19 tools are discoverable
 curl -s http://localhost:8085/api/tools | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 print(f'Tool count: {data[\"count\"]}')
-assert data['count'] == 18, f'Expected 18 tools, got {data[\"count\"]}'
+assert data['count'] == 19, f'Expected 19 tools, got {data["count"]}'
 for t in data['tools']:
     print(f'  - {t[\"name\"]}: {t[\"description\"][:60]}...')
 print('✅ Tool discovery OK')

@@ -272,6 +272,8 @@ POST /api/tools/research.profile
 - 标的代码归一化：`600519` ↔ `600519.SH`（复用现有 `pkg/domain` 的 ts_code 规则）
 - 输出**不含任何未经 citation 锚定的论断** —— 工具只回传档案原文，不做 LLM 二次加工
 
+> **落地状态（EQD-P2-1，[ODR-057](odr/odr-057-eqd-p2-1-research-profile-tool.md)）**：已实现，实现要点 ↔ 实际实现的差异如下 —— ①**来源为双源**：先读 PG `research.*` 投影（`pkg/storage/research.go` 新增读取层），投影无该标的数据时**回退**读 vault `_profile.json`（`source` 字段显式暴露来自哪一侧；`EQD-P2-1` EquityDeep 接 PG 落地后删除回退分支）；②vault 路径取 `v.GetString("equitydeep.vault_path")`（`EQUITYDEEP_VAULT_PATH` 经 viper `AutomaticEnv` + `.`→`_` 映射可达），**只读挂载本身是 C-6 / `EQD-P2-2`，尚未落地**；③`stale` 判定扩展为三条（`generated_at` 零值 / `source_mtime > generated_at` / 超 90 天 `DefaultProfileMaxAge`），并附 `stale_reason`；④标的归一化在工具内自实现（剥交易所后缀/`sh|sz|bj` 前缀 + 闭集后缀校验），**未复用** `pkg/domain` 的 ts_code 规则；⑤`schema_version != 1` 拒绝服务；⑥无档案返回 404 `NOT_FOUND`（而非 200 + 空对象）。
+
 ### 3.6 桥 B3 实施：数据质量门禁共享
 
 把 EquityDeep 的 M1 抽检方法泛化为**跨源通用脚本**：
@@ -298,13 +300,13 @@ evals/data_quality/spot_check.py
 | C-2 | 契约文件纳入版本控制 | `contracts/`（新目录） | — |
 | C-3 | EquityDeep 摄取链（归一化纯包 + 落库/读取 + HTTP 写门） | `pkg/data/equitydeep/`（新包）+ `pkg/domain/fundamentals_detail.go` + `pkg/storage/fundamentals_detail.go` + `cmd/data/handlers_equitydeep_ingest.go` | C-1 |
 | C-4 | 新增 5 个基本面因子（桥 B1） | `pkg/data/factor_equitydeep.go` + `pkg/domain/factor.go`（枚举）+ `docs/migrations/026_widen_factor_name.sql` | C-3 |
-| C-5 | MCP 工具 `research.profile` | `pkg/tools/builtin/research_tool.go` | 契约 C2 |
+| C-5 | MCP 工具 `research.profile` | `pkg/tools/builtin/research_tool.go` + `pkg/storage/research.go` | 契约 C2 |
 | C-6 | vault 只读挂载配置 | `docker-compose.override.yml` | C-5 |
 | C-7 | 抽检脚本泛化 | `evals/data_quality/` | — |
 | C-8 | 修复 `fundamentals` / `stock_fundamentals` 表重叠 | `docs/migrations/025_equitydeep_field_consolidation.sql` | 独立 |
 | C-9 | 文档漂移修复 8 项 | 见 [ODR-047](odr/odr-047-equitydeep-integration-audit.md) | — |
 
-> **落地状态**: C-1 / C-2 / C-7（[ODR-052](odr/odr-052-p1-contract-freeze-and-spot-check.md) + [ODR-053](odr/odr-053-p3-fundamentals-detail-table.md)）、C-3 / C-4（[ODR-055](odr/odr-055-eqd-p1-2-vertical-factors.md)）、C-9（[ODR-047](odr/odr-047-equitydeep-integration-audit.md) + [ODR-054](odr/odr-054-dr-reverification.md)）已落地；**C-8 已收口** —— `fundamentals` 存量并入 `stock_fundamentals` 后 DROP 旧表（`EQD-P3-1` / [ODR-056](odr/odr-056-fundamentals-table-consolidation.md)）。C-5 / C-6 待阶段 P4。
+> **落地状态**: C-1 / C-2 / C-7（[ODR-052](odr/odr-052-p1-contract-freeze-and-spot-check.md) + [ODR-053](odr/odr-053-p3-fundamentals-detail-table.md)）、C-3 / C-4（[ODR-055](odr/odr-055-eqd-p1-2-vertical-factors.md)）、C-9（[ODR-047](odr/odr-047-equitydeep-integration-audit.md) + [ODR-054](odr/odr-054-dr-reverification.md)）已落地；**C-8 已收口** —— `fundamentals` 存量并入 `stock_fundamentals` 后 DROP 旧表（`EQD-P3-1` / [ODR-056](odr/odr-056-fundamentals-table-consolidation.md)）；**C-5 已落地** —— `research.profile` 工具（PG 投影优先 + vault 回退 / [ODR-057](odr/odr-057-eqd-p2-1-research-profile-tool.md)）。C-6 待阶段 P4（`EQD-P2-2` vault 只读挂载，需容器化）。
 
 ### 3.8 EquityDeep 侧加固项（本审计发现）
 

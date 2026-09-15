@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
@@ -33,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 	"github.com/ruoxizhnya/quant-trading/pkg/tools/builtin"
 )
@@ -419,4 +421,104 @@ func TestIntegration_GateDecision_AllFields_Survive_HTTP(t *testing.T) {
 	assert.Equal(t, "L1", r["level"])
 	assert.Equal(t, true, r["passed"])
 	assert.Equal(t, builtin.GateReasonPassed, r["reason"])
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Test 7: dotted tool name routes through gin (research.profile)
+// ──────────────────────────────────────────────────────────────────────
+
+// httpTestResearchProfile is a minimal in-memory ResearchProfileClient.
+// Returning a nil profile with no vault path configured is the "never
+// researched" case → the tool reports ErrNotFound.
+type httpTestResearchProfile struct {
+	profile   *storage.ResearchProfile
+	gotTicker string
+}
+
+func (m *httpTestResearchProfile) GetResearchProfile(_ context.Context, ticker string) (*storage.ResearchProfile, error) {
+	m.gotTicker = ticker
+	return m.profile, nil
+}
+
+// TestIntegration_DottedToolName_RoutesThroughGin pins two things the
+// dot-namespace convention depends on:
+//
+//  1. gin's "/:name" parameter captures a name containing a dot, so
+//     POST /api/tools/research.profile reaches the tool (path params are
+//     split on "/" only). research.profile (EQD-P2-1) is the first dotted
+//     name exercised through the HTTP layer, so the behaviour is pinned
+//     here rather than assumed.
+//  2. The ErrNotFound → 404 "NOT_FOUND" mapping added for the tool's
+//     "no_profile" outcome, distinct from 400 INVALID_ARGS.
+func TestIntegration_DottedToolName_RoutesThroughGin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	newRouter := func(t *testing.T, client *httpTestResearchProfile) *gin.Engine {
+		t.Helper()
+		reg := tools.NewRegistry()
+		require.NoError(t, reg.Register(builtin.NewResearchProfileTool(client, "")))
+		return newIntegrationHandler(t, reg)
+	}
+
+	t.Run("execute reaches the tool and normalises a suffixed ticker", func(t *testing.T) {
+		client := &httpTestResearchProfile{profile: &storage.ResearchProfile{
+			Ticker:        "600519",
+			Name:          "贵州茅台",
+			SchemaVersion: 1,
+			UpdatedAt:     time.Now(),
+		}}
+		router := newRouter(t, client)
+
+		w := doToolExecute(t, router, "research.profile", map[string]interface{}{"ticker": "600519.SH"})
+		result := decodeExecuteResult(t, w)
+
+		assert.Equal(t, "600519", client.gotTicker, "the dot-suffixed ticker must reach the tool, already normalised")
+		assert.Equal(t, "600519", result["ticker"])
+		assert.Equal(t, "postgres", result["source"])
+	})
+
+	t.Run("discovery returns the dotted tool schema", func(t *testing.T) {
+		router := newRouter(t, &httpTestResearchProfile{})
+
+		w := doToolGet(t, router, "research.profile")
+		require.Equal(t, http.StatusOK, w.Code, "GET should return 200")
+
+		var toolInfo struct {
+			Name         string            `json:"name"`
+			Parameters   []tools.Parameter `json:"parameters"`
+			OutputSchema struct {
+				Type   string              `json:"type"`
+				Fields []tools.OutputField `json:"fields"`
+			} `json:"output_schema"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &toolInfo))
+		assert.Equal(t, "research.profile", toolInfo.Name)
+		require.Len(t, toolInfo.Parameters, 2, "ticker + sections")
+		assert.Equal(t, "ticker", toolInfo.Parameters[0].Name)
+		assert.True(t, toolInfo.Parameters[0].Required)
+		assert.NotEmpty(t, toolInfo.OutputSchema.Fields, "the tool advertises an output schema to Hermes")
+	})
+
+	t.Run("no_profile maps to 404 NOT_FOUND (not 400)", func(t *testing.T) {
+		router := newRouter(t, &httpTestResearchProfile{}) // nil profile, empty vault
+
+		w := doToolExecute(t, router, "research.profile", map[string]interface{}{"ticker": "600519"})
+		require.Equal(t, http.StatusNotFound, w.Code, "no archive → 404, body: %s", w.Body.String())
+
+		var body map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, "NOT_FOUND", body["code"])
+		assert.Contains(t, body["error"].(string), "no_profile")
+	})
+
+	t.Run("malformed ticker still maps to 400 INVALID_ARGS", func(t *testing.T) {
+		router := newRouter(t, &httpTestResearchProfile{})
+
+		w := doToolExecute(t, router, "research.profile", map[string]interface{}{"ticker": "600519.HK"})
+		require.Equal(t, http.StatusBadRequest, w.Code, "unknown exchange suffix → 400, body: %s", w.Body.String())
+
+		var body map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, "INVALID_ARGS", body["code"])
+	})
 }

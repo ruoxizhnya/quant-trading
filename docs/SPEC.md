@@ -737,8 +737,9 @@ SELECT create_hypertable('factor_cache', 'date');
 
 ### 内置工具
 
-> S7-P3-3 注册了原始 8 个工具；Hermes Phase 1 (S7-P3-4) 新增 8 个工具，
-> 当前共 16 个，分为 7 组。详见 `cmd/analysis/setup.go` `buildToolsRegistry()`。
+> S7-P3-3 注册了原始 8 个工具；Hermes Phase 1 (S7-P3-4) 新增 8 个工具；
+> Hermes Phase 2 新增 2 个；EQD-P2-1 (2026-09-15, ODR-057) 新增 1 个
+> （`research.profile`），当前共 19 个，分为 10 组。详见 `cmd/analysis/setup.go` `buildToolsRegistry()`。
 
 #### 原始工具 (S7-P3-3, 8 个)
 
@@ -822,6 +823,18 @@ SELECT create_hypertable('factor_cache', 'date');
 > 因子/策略必须按序通过 L1→L2→L3→L4 才能保存到基因池。
 > 详见 [Hermes Agent Integration System Design](.trae/documents/hermes-agent-integration-system-design.md) §6。
 
+#### EQD-P2-1 新增工具 (2026-09-15, 1 个)
+
+| 工具名 | 参数 | 输出 | 验证门禁 |
+|--------|------|------|---------|
+| `research.profile` | ticker (required), sections? | profileResult {ticker, name, schema_version, source, stale, stale_reason?, generated_at, last_researched, needs_review, review_reason?, conclusions[], questions[]} | — |
+
+> **ResearchProfileTool (EQD-P2-1, 桥 B2, ODR-057)**: 读取某标的的研究档案
+> （EquityDeep 侧的结论 + 疑点），实现于 `pkg/tools/builtin/research_tool.go`。
+> 来源解析为「PG `research.*` 投影优先 → vault `_profile.json` 镜像回退 →
+> 404 `NOT_FOUND`」；输出逐字对齐契约 C2（citations 原样透传，不做 LLM 二次加工），
+> 并附 `source` / `stale` 字段供调用方判断来源与可信度。
+
 #### Hermes Agent Configuration & Skill (Phase 2.4-2.5)
 
 Hermes 端的配置和工作流定义存放在 `docs/hermes/` 下，Go 后端不读取这些文件
@@ -832,7 +845,7 @@ Hermes 端的配置和工作流定义存放在 `docs/hermes/` 下，Go 后端不
 | [docs/hermes/prompts/quant-research.md](hermes/prompts/quant-research.md) | System Prompt | `~/.hermes/prompts/quant-research.md` | 研究员角色 + 能力描述 + 约束规则 |
 | [docs/hermes/skills/autonomous_factor_mining.md](hermes/skills/autonomous_factor_mining.md) | Skill 定义 | `~/.hermes/skills/autonomous_factor_mining.md` | 10 步自主挖掘循环 + 终止条件 |
 | [docs/hermes/config/hermes.yaml](hermes/config/hermes.yaml) | Agent 配置 | `~/.hermes/config/hermes.yaml` | 模型 + 内存 + 预算 + 安全护栏 |
-| [docs/hermes/tools-quant-backtest.yaml](hermes/tools-quant-backtest.yaml) | MCP 工具镜像 | `~/.hermes/tools/quant-backtest.yaml` | 18 个工具的静态 schema |
+| [docs/hermes/tools-quant-backtest.yaml](hermes/tools-quant-backtest.yaml) | MCP 工具镜像 | `~/.hermes/tools/quant-backtest.yaml` | 19 个工具的静态 schema |
 
 **autonomous_factor_mining Skill (Phase 2.4)** 定义 10 步循环：
 
@@ -876,7 +889,7 @@ max_iterations: 20}`，Hermes 在 $2 预算内自主完成 L1-L4 验证并保存
 |--------|------|---------|
 | Go 单元测试 | `pkg/tools/builtin/*_test.go` | 每个工具的 Execute 方法（含 mock 依赖） |
 | Go HTTP 集成测试 | `cmd/analysis/handlers_tools_integration_test.go` | 6 个测试：L1 门禁成功/失败 HTTP 往返、发现 schema 与执行一致性、save→list 往返、L1→save 链式、GateDecision 全字段 JSON 序列化 |
-| Go 注册测试 | `cmd/analysis/setup_test.go` | 18 个工具全部注册、无重名 |
+| Go 注册测试 | `cmd/analysis/setup_test.go` | 19 个工具全部注册、无重名 |
 | Go HTTP plumbing | `cmd/analysis/handlers_tools_test.go` | 假工具测试 HTTP 层（状态码、错误分类、JSON 结构） |
 | E2E 验收测试 | `docs/hermes/e2e-acceptance-test.md` | Hermes + Ollama + 全栈基础设施下的自主挖掘验收（手动执行） |
 

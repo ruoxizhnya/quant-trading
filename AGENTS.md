@@ -149,7 +149,7 @@ quant-trading/
 │   ├── tools/              # MCP 工具桥 (Phase 4) — Hermes Agent 调用入口
 │   │   ├── server.go       # Tool 接口 + Server
 │   │   ├── http.go         # HTTP handler (GET/POST /api/tools)
-│   │   └── builtin/        # 18 内置工具 (backtest/factor/gene_pool/gate/...)
+│   │   └── builtin/        # 19 内置工具 (backtest/factor/gene_pool/gate/research/...)
 │   ├── backtest/           # 回测引擎 (engine, job, batch, walkforward)
 │   ├── data/               # 数据管道 (sync, marketdata, factors)
 │   ├── domain/             # 领域模型 (OHLCV, Signal, Portfolio)
@@ -164,7 +164,7 @@ quant-trading/
 │   └── utils/              # 工具函数
 ├── docs/                   # 文档 (见下方导航)
 │   ├── adr/                # 架构决策记录 (ADR-001~022)
-│   ├── odr/                # 运营决策记录 (ODR-001~056)
+│   ├── odr/                # 运营决策记录 (ODR-001~057)
 │   ├── design/equitydeep/  # 工作面 1 上游规格 (EquityDeep v1.1)
 │   └── hermes/             # Hermes Agent 配置 + Skill + 验收测试 (Phase 4)
 ├── e2e/tests/              # Playwright E2E 测试
@@ -182,7 +182,7 @@ quant-trading/
 > FitnessChart.vue) **P1-13 创建后 S7-P2-7 作为死代码删除** — `web/src/components/ai/` 目录已不存在。
 >
 > **ODR-046 (2026-07-02)**: Hermes Agent 作为自主研究层替代前端 AI UI 方案。
-> 研究主路径现为: Hermes → MCP bridge (`pkg/tools/`, 18 个工具) → Go 后端。
+> 研究主路径现为: Hermes → MCP bridge (`pkg/tools/`, 19 个工具) → Go 后端。
 > `pkg/ai/agents/` Go-native agents 保留向后兼容但已弃用 (见 `doc.go`)。
 
 ---
@@ -736,7 +736,7 @@ Please continue from where we left off.
 - **Phase**: 3 (Integration & Scale) → 4 (AI-Native Evolution) 进行中
 - **测试覆盖** (2026-06-29 实测, 总体 62.9% statement-weighted): backtest 76.0% | strategy 64.4% (顶层) / plugins 83.1% (子包) | data/source 60.9% | data/sentiment 76.8% | storage 13.2% (无 DB 时 skip) | ai 28.9% (顶层) / 子包 16-95% (avg ~67%) | live 75.8% | marketdata 79.0% | risk 85.3% | compliance 91.6% | fees 100% | expression 74.5%
 - **关键服务**: Analysis ✅ | Data ✅ | **Sync ✅** | **AI Research ✅ (running)** | Strategy ⏸️ (standby per ADR-012, awaiting Phase 3 D3 activation)
-- **Hermes Agent 集成** (2026-07-02, ODR-046): Phase 1-2 完成 — 18 个 MCP 工具 (`pkg/tools/builtin/`) + L1-L4 验证门禁 + 自主挖掘 Skill + 预算控制器配置. 前端 AI UI 已弃用 (ODR-045), Hermes 自然语言交互替代. `pkg/ai/agents/` Go-native agents 保留向后兼容但已弃用.
+- **Hermes Agent 集成** (2026-07-02, ODR-046): Phase 1-2 完成 — 19 个 MCP 工具 (`pkg/tools/builtin/`, ODR-057 新增 `research.profile`) + L1-L4 验证门禁 + 自主挖掘 Skill + 预算控制器配置. 前端 AI UI 已弃用 (ODR-045), Hermes 自然语言交互替代. `pkg/ai/agents/` Go-native agents 保留向后兼容但已弃用.
 - **审计状态** (2026-06-29 ODR-043): 4 维度审计完成, 12 Critical / 18 High / 10 Medium 问题点; 5 真实 bug 已识别待修复
 - **统一研究平台** (2026-09-15, Proposed — [ADR-022](docs/adr/adr-022-unified-research-platform.md) / [ODR-048](docs/odr/odr-048-top-level-product-redefinition.md), 取代 ADR-021): 顶层重定义 — Quant Lab 降维为**共享底座** (L0 数据面 + L1 计算面 + L2 编排面), EquityDeep 升级为**工作面 1** (纵向深研), 原横截面能力升为**工作面 2** (对等, 本期规划). 不重复存储靠**按数据性质分区** (`ingest.raw` / `market.*` / `quant.*` / vault markdown / `research.*` 投影). EquityDeep **接入共享 PG `research` schema + `equitydeep-research` worker 容器** (允许 DB/Docker, 但零数据副本). 执行路线 P1~P5 见 [TASKS.md](docs/TASKS.md) Sprint 8.
 

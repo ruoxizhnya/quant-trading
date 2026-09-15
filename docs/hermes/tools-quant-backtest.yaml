@@ -1,7 +1,7 @@
 # MCP Tool Configuration — A-Share Quant Backtest Engine
 #
 # This file is the declarative MCP tool registry for the Hermes Agent.
-# It mirrors the 17 tools registered in the Go backend's Tools Registry
+# It mirrors the 19 tools registered in the Go backend's Tools Registry
 # (cmd/analysis/setup.go → buildToolsRegistry). Hermes loads this at
 # startup for static tool discovery; the live schemas are also available
 # via GET /api/tools on the analysis-service.
@@ -16,6 +16,7 @@
 # Phase 1 (Hermes Agent Integration): 16 tools across 7 groups.
 # Phase 2.2: +1 tool (get_strategy_lineage) — 17 tools across 8 groups.
 # Phase 2.3: +1 tool (get_market_regime) — 18 tools across 9 groups.
+# EQD-P2-1: +1 tool (research.profile) — 19 tools across 10 groups.
 
 # ─── Connection ──────────────────────────────────────────────────────
 base_url: "http://localhost:8085"
@@ -425,3 +426,30 @@ tools:
         description: "Symbol to analyze. Defaults to '000300.SH' (CSI 300 index). Override with any stock or index symbol."
         required: false
         default: "000300.SH"
+
+  # ══ Group 10: Research archive (EQD-P2-1, bridge B2) ═══════════════
+
+  - name: "research.profile"
+    description: >
+      Read the EquityDeep research archive for a ticker: the conclusions
+      recorded about the company (each carrying the ingest.raw citation
+      anchors that prove its numbers) and the questions still open. Use
+      this before designing fundamental/quality factors to learn what is
+      already known and what remains unverified. The archive is returned
+      verbatim — no LLM-side rewriting — along with a 'stale' verdict and
+      a 'needs_review' flag; when either is set, the conclusions must be
+      re-verified against fresh data before use. Served from the
+      research.* projection, falling back to the contract C2 mirror
+      ({EQUITYDEEP_VAULT_PATH}/{ticker}/_profile.json) when the ticker
+      was never projected. Returns 404 (code NOT_FOUND, "no_profile")
+      when the ticker has no archive at all.
+    endpoint: "/api/tools/research.profile"
+    parameters:
+      - name: ticker
+        type: string
+        description: "Stock code, bare ('600519') or with exchange suffix ('600519.SH'). Only .SH/.SZ/.BJ are accepted."
+        required: true
+      - name: sections
+        type: "[]string"
+        description: "Which sections to include: any of 'conclusions', 'questions'. Omitted or empty = both."
+        required: false

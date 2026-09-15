@@ -352,8 +352,8 @@ func initStrategyAndPlugins(v *viper.Viper, store *storage.PostgresStore, logger
 // (e.g. Hermes Agent) to discover and invoke platform capabilities
 // without reading SPEC.md.
 //
-// S7-P3-4 (Hermes Phase 1.7 + Phase 2.2-2.3): the registry now hosts 18 tools
-// across 9 groups:
+// S7-P3-4 (Hermes Phase 1.7 + Phase 2.2-2.3): the registry now hosts 19 tools
+// across 10 groups:
 //   - backtest.run          (S7-P3-3, L3 gate)
 //   - factor.compute        (S7-P3-3, L2 gate)
 //   - factor.evaluate       (S7-P3-3)
@@ -367,6 +367,7 @@ func initStrategyAndPlugins(v *viper.Viper, store *storage.PostgresStore, logger
 //   - summarize_backtest     (Hermes Phase 1.6)
 //   - get_strategy_lineage    (Hermes Phase 2.2, gene pool lineage)
 //   - get_market_regime       (Hermes Phase 2.3, market regime detection)
+//   - research.profile        (EQD-P2-1, bridge B2, EquityDeep research archive)
 //
 // Wiring notes:
 //   - BacktestTool reuses the same contracts.BacktestRunner (copilotRunner)
@@ -387,6 +388,11 @@ func initStrategyAndPlugins(v *viper.Viper, store *storage.PostgresStore, logger
 //   - GetMarketRegimeTool (Phase 2.3) takes a builtin.RegimeDetectorClient
 //     (satisfied by *risk.RiskManager) and reuses the dataClient constructed
 //     below for OHLCV fetching.
+//   - ResearchProfileTool (EQD-P2-1) takes a builtin.ResearchProfileClient
+//     (satisfied by *storage.PostgresStore) and reads the contract C2 vault
+//     mirror root from equitydeep.vault_path (env EQUITYDEEP_VAULT_PATH).
+//     An empty path is valid: it disables the mirror fallback, leaving the
+//     tool answering from the research.* projection alone.
 //   - ValidateFactor / ComputeFactorIC / SummarizeBacktest have no DI.
 func buildToolsRegistry(
 	v *viper.Viper,
@@ -395,6 +401,7 @@ func buildToolsRegistry(
 	factorPool builtin.FactorPoolClient,
 	strategyPool builtin.StrategyPoolClient,
 	regimeDetector builtin.RegimeDetectorClient,
+	researchProfile builtin.ResearchProfileClient,
 	logger zerolog.Logger,
 ) *tools.Registry {
 	reg := tools.NewRegistry()
@@ -484,9 +491,18 @@ func buildToolsRegistry(
 		logger.Fatal().Err(err).Msg("failed to register get_market_regime tool")
 	}
 
+	// ── Group 10: Research profile (EQD-P2-1, bridge B2) ───────────
+	// Reads the EquityDeep research archive, preferring the research.*
+	// projection and falling back to the contract C2 mirror under
+	// equitydeep.vault_path (env EQUITYDEEP_VAULT_PATH). The vault is
+	// mounted read-only; an empty path simply disables the fallback.
+	if err := reg.Register(builtin.NewResearchProfileTool(researchProfile, v.GetString("equitydeep.vault_path"))); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register research.profile tool")
+	}
+
 	logger.Info().
 		Int("tool_count", len(reg.List())).
-		Msg("Tools Registry initialized (S7-P3-3 + Hermes Phase 1.7 + Phase 2.2-2.3): 18 tools exposed at /api/tools/* — backtest/factor/data/strategy/gene-pool/walk-forward/summarize/lineage/regime")
+		Msg("Tools Registry initialized (S7-P3-3 + Hermes Phase 1.7 + Phase 2.2-2.3 + EQD-P2-1): 19 tools exposed at /api/tools/* — backtest/factor/data/strategy/gene-pool/walk-forward/summarize/lineage/regime/research")
 	return reg
 }
 

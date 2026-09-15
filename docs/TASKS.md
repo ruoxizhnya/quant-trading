@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.31.0 (Sprint 8 — 阶段 P3 收口: EQD-P3-1 fundamentals / stock_fundamentals 表合并, ODR-056)
+> **Version:** 3.32.0 (Sprint 8 — 阶段 P4 起步: EQD-P2-1 第 19 个 MCP 工具 `research.profile`, ODR-057)
 > **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -573,12 +573,28 @@
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
-| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **7** | **0** | **10** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) + EQD-P1-2 已落地(ODR-055) + EQD-P3-1 已落地(ODR-056, **阶段 P3 3/3 关闭**) |
-| **总计**          | **9** | **0** | **223** | **1** | **0** | **233** | (v3.31.0 Sprint 8 阶段 P3 收口: EQD-P3-1 表合并, ODR-056) |
+| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **6** | **0** | **11** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) + EQD-P1-2 已落地(ODR-055) + EQD-P3-1 已落地(ODR-056, **阶段 P3 3/3 关闭**) + EQD-P2-1 已落地(ODR-057, **阶段 P4 1/2**) |
+| **总计**          | **8** | **0** | **224** | **1** | **0** | **233** | (v3.32.0 Sprint 8 阶段 P4 起步: EQD-P2-1 `research.profile`, ODR-057) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-15 (v3.32.0) — Sprint 8 阶段 P4 起步: EQD-P2-1 第 19 个 MCP 工具 `research.profile`（C-5 / 桥 B2）
+
+**来源**: [ODR-057](odr/odr-057-eqd-p2-1-research-profile-tool.md) — 飞轮第 1 步（读回研究档案）落地记录
+
+- **落地**: `EQD-P2-1` 为 `research` schema 接上**第一个读取方**，并新增第 19 个 MCP 工具
+  — **读取层** `pkg/storage/research.go`（新建）: `ResearchProfile` / `ResearchConclusion` / `ResearchQuestion` + `GetResearchProfile`；主表无行 → `(nil, nil)`（「无档案」≠「查失败」）、子表无行 → 空切片、citations 以 `json.RawMessage` 原样透传
+  — **工具本体** `pkg/tools/builtin/research_tool.go`（新建）: `research.profile`；来源解析 = **PG `research.*` 投影优先 → vault `_profile.json` 镜像回退 → 404 `NOT_FOUND`**；窄接口 `ResearchProfileClient` 定义在 builtin 包内（`pkg/storage` 不反向依赖 `pkg/tools`）
+  — **HTTP 层**: `pkg/tools/errors.go` 新增哨兵 `ErrNotFound`；`respondToolError` 映射 404 `NOT_FOUND`（「有档案」200 vs「没档案」404，非 200 + 空对象）
+  — **注册**: `buildToolsRegistry` 7 参 → 8 参；新增 **Group 10（Research archive）**；调用方 `cmd/analysis/main.go` 传入 `store`
+- **"不猜"延续**: 未知交易所后缀（`.HK` 等）→ `ErrInvalidArgs`；`schema_version != 1` → 拒绝服务；vault 镜像 ticker 串档 → 报错；镜像解码失败 → 报错（不静默当不存在）
+- **契约 C2 口径**: `stale` 三触发（`generated_at` 零值 / `source_mtime > generated_at` / 超 90 天 `DefaultProfileMaxAge`）+ `stale_reason`；输出逐字对齐 C2，citations **不做 LLM 二次加工**
+- **已知语义缺口**: `research.profile` 表**无 `generated_at` 列**（契约 C2 有），投影路径以 `updated_at` 代理（已记入 ODR-057 负面项与风险表）
+- **文档口径裁决**: 工具数断言分两类 —— **描述性现状文档同步为 19**（ARCHITECTURE / AGENTS / SPEC / VISION / hermes config / `pkg/ai/agents/doc.go` / RESEARCH）；**历史决策记录保留原文不回写**（ODR-046、`adr-015`），理由见 ODR-057 §5
+- **统计更新**: 总计 233 不变；待处理 9 → 8，已完成 223 → 224（Sprint 8 内 7/0/10 → 6/0/11）；**阶段 P4 完成度 1/2**（余 P4-1 飞轮闭环端到端）
+- **验证**: `go build ./...` 通过；`go test ./pkg/tools/... ./pkg/storage/... ./cmd/analysis/...` 全 ok；新增 23 个 `TestXxx` + 1 个集成测试（含 `TestIntegration_DottedToolName_RoutesThroughGin` 实测含点工具名经 gin 路由）
 
 ### 2026-09-15 (v3.31.0) — Sprint 8 阶段 P3 收口: EQD-P3-1 fundamentals / stock_fundamentals 表重叠合并
 
@@ -1860,8 +1876,10 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
-| EQD-P2-1 | 第 19 个 MCP 工具 `research.profile`（读 `research` schema 投影 / `_profile.json` 导出镜像，不解析 markdown；桥 B2） | `pkg/tools/builtin/research_tool.go` | ⬜ | RESEARCH §3.5 / C-5 → ADR-022 P4 |
+| EQD-P2-1 | 第 19 个 MCP 工具 `research.profile`（读 `research` schema 投影 / `_profile.json` 导出镜像，不解析 markdown；桥 B2） | `pkg/tools/builtin/research_tool.go` + `pkg/storage/research.go` | ✅ | RESEARCH §3.5 / C-5 → ADR-022 P4 / [ODR-057](odr/odr-057-eqd-p2-1-research-profile-tool.md) |
 | **P4-1** | **飞轮闭环端到端**：疑点 → 假设 → 因子 → 回测 → 结果回流修正档案（成功指标：≥3 个结论完成 IC 评估） | `pkg/ai/`, EquityDeep 仓 | ⬜ | ADR-022 §6 / PRODUCT §4 |
+
+> **阶段 P4 进展**: **1/2** — EQD-P2-1（第 19 个 MCP 工具 `research.profile`，[ODR-057](odr/odr-057-eqd-p2-1-research-profile-tool.md)）已落地：`research` schema 接上首个读取方（PG 投影优先 + vault 回退），飞轮第 1 步「读回研究档案」打通；余 P4-1 飞轮闭环端到端（需 EquityDeep 仓配合）。
 
 ### 🔵 阶段 P5 — 横截面工作面 v2（存量对齐新架构）
 

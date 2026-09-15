@@ -415,14 +415,14 @@ type Position struct {
 > **ODR-045 (2026-07-02)**: 前端 AI 组件 (FactorLab, StrategyWorkshop, EvolutionObs, PipelineDashboard)
 > P1-13 创建后 S7-P2-7 作为死代码删除 — `web/src/components/ai/` 目录已不存在。所有 9 个计划组件弃用。
 > **ODR-046 (2026-07-02)**: Hermes Agent 作为自主研究层替代前端 UI 方案,
-> 通过 MCP bridge (18 个工具) 调用 Go 后端。Go-native agents 保留向后兼容但已弃用。
+> 通过 MCP bridge (19 个工具) 调用 Go 后端。Go-native agents 保留向后兼容但已弃用。
 
 - ~~**Factor Lab** (`FactorLab.vue`)~~ — **DEPRECATED**: 见 ODR-045
 - ~~**Strategy Workshop** (`StrategyWorkshop.vue`)~~ — **DEPRECATED**: 见 ODR-045
 - ~~**Evolution Observatory** (`EvolutionObs.vue`)~~ — **DEPRECATED**: 见 ODR-045
 - ~~**Pipeline Dashboard** (`PipelineDashboard.vue`)~~ — **DEPRECATED**: 见 ODR-045
 - **Expression Engine** (`pkg/ai/expression/`): ✅ Custom DSL for factor definitions; AST-based evaluation; A-share operators
-- **Hermes Agent Bridge** (`cmd/analysis/handlers_tools.go` + `pkg/tools/builtin/`): ✅ 18 MCP tools for autonomous research loop (Phase 2 完成)
+- **Hermes Agent Bridge** (`cmd/analysis/handlers_tools.go` + `pkg/tools/builtin/`): ✅ 19 MCP tools for autonomous research loop (Phase 2 完成; ODR-057 新增 `research.profile`)
 
 **AI Components (Backend — DEPRECATED per ODR-046, retained for backward compat):**
 - **Research Agent** (`pkg/ai/agents/research.go`): Generates factor hypotheses from research topics via LLM

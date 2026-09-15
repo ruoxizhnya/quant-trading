@@ -985,7 +985,7 @@ pkg/tools/
 - **共存适配器**: BacktestTool 委托给现有 `contracts.BacktestRunner`，不破坏现有 agent
 - **factory 注入**: Registry 通过 `ServerDeps.ToolsRegistry` 注入，无全局实例
 - **builtin/ 子包隔离**: `pkg/tools/` 保持纯净（只有接口），具体实现依赖在 `builtin/`
-- **18 个 builtin tool**（ODR-046 扩展后）: backtest.run | factor.compute | factor.evaluate | validate_factor | compute_factor_ic | list_factors | list_strategies | save_factor | save_strategy | get_strategy_lineage | walk_forward_validate | get_market_regime | summarize_backtest | data.ohlcv | data.stocks | data.fundamentals | strategy.list | strategy.get
+- **19 个 builtin tool**（ODR-046 扩展后 + ODR-057 新增 `research.profile`）: backtest.run | factor.compute | factor.evaluate | validate_factor | compute_factor_ic | list_factors | list_strategies | save_factor | save_strategy | get_strategy_lineage | walk_forward_validate | get_market_regime | summarize_backtest | data.ohlcv | data.stocks | data.fundamentals | strategy.list | strategy.get | research.profile
 
 > **DR-1 修复 (ODR-047)**: 本节原称「8 个 builtin tool」，与 `pkg/tools/builtin/` 实际注册的 18 个不符（已逐一核对 `Name()` 实现）。数量以本文为准，新增工具需同步更新此列表。
 
@@ -1213,7 +1213,7 @@ type FactorExpression struct {
 
 > 以下组件 P1-13 创建 (ODR-017) 后 S7-P2-7 作为死代码删除 (ODR-043, commit `d7c2a38`)。
 > `web/src/components/ai/` 目录已不存在。Hermes Agent 自然语言交互替代 (ODR-046)。
-> 不要重建这些组件 — 研究主路径现为 Hermes → MCP bridge (`pkg/tools/builtin/`, 18 工具) → Go 后端。
+> 不要重建这些组件 — 研究主路径现为 Hermes → MCP bridge (`pkg/tools/builtin/`, 19 工具) → Go 后端。
 
 ```
 web/src/components/ai/     # ❌ 目录已删除 (S7-P2-7)

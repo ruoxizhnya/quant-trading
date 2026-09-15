@@ -181,10 +181,12 @@ func main() {
 	//   - ListFactors/SaveFactor tools (via gene_pool.NewFactorPool(store.DB()))
 	//   - ListStrategies/SaveStrategy tools (via gene_pool.NewStrategyPool(store.DB()))
 	//   - ValidateFactor / ComputeFactorIC / SummarizeBacktest tools (no DI)
+	//   - ResearchProfileTool (EQD-P2-1) via *storage.PostgresStore (research.*
+	//     projection) + equitydeep.vault_path (contract C2 mirror fallback)
 	factorPool := gene_pool.NewFactorPool(store.DB())
 	strategyPool := gene_pool.NewStrategyPool(store.DB())
 	wfRunner := &walkForwardEngineAdapter{engine: ds.WFEngine}
-	toolsRegistry := buildToolsRegistry(v, copilotRunner, wfRunner, factorPool, strategyPool, riskManager, logger)
+	toolsRegistry := buildToolsRegistry(v, copilotRunner, wfRunner, factorPool, strategyPool, riskManager, store, logger)
 
 	deps := &ServerDeps{
 		Engine:           engine,

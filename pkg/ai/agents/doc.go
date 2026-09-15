@@ -7,7 +7,7 @@
 // the Hermes Agent autonomous research layer. The primary research workflow
 // is now:
 //
-//	Hermes Agent → MCP bridge (18 tools) → Go backend
+//	Hermes Agent → MCP bridge (19 tools) → Go backend
 //
 // The Hermes Agent provides a natural-language interaction model that replaces
 // the originally planned frontend AI UI (which was never created — see

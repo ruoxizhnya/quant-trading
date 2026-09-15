@@ -88,7 +88,7 @@ budget:
       note: "Together.ai nous-hermes-3-70b — 可选，复杂推理"
 
 # ─── MCP Tool Bridge ────────────────────────────────────────────────
-# Go 后端 (analysis-service :8085) 通过 MCP 暴露 18 个工具
+# Go 后端 (analysis-service :8085) 通过 MCP 暴露 19 个工具
 # 工具配置镜像见 docs/hermes/tools-quant-backtest.yaml
 mcp:
   base_url: "http://localhost:8085"

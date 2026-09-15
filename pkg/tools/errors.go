@@ -36,4 +36,12 @@ var (
 	// is missing a required parameter, has a wrong-typed value, or
 	// fails validation. The wrapped message should name the bad field.
 	ErrInvalidArgs = errors.New("tools: invalid arguments")
+
+	// ErrNotFound is returned by a Tool's Execute when the args were
+	// valid but the addressed entity does not exist — e.g.
+	// research.profile asked for a ticker that has no archived profile.
+	// Distinct from ErrInvalidArgs (the request was well-formed) and
+	// from a downstream failure (nothing broke, there is simply no
+	// record). ToolsHandler maps it to HTTP 404.
+	ErrNotFound = errors.New("tools: not found")
 )
