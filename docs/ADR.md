@@ -2,7 +2,7 @@
 
 > **Location:** `docs/adr/` — architectural ADR files | `docs/odr/` — operational ODR files
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Version:** 3.6.0
+> **Version:** 3.7.0
 > **Created:** 2026-03-24
 > **Updated:** 2026-09-15
 
@@ -90,6 +90,7 @@
 | [ODR-047](odr/odr-047-equitydeep-integration-audit.md) | EquityDeep 集成审计 — 项目定位复核 (横截面层 vs 纵向层, 结论: 补充非改变) + 3 结构性缺口 + EquityDeep 回查脚本 P0 假阳性缺陷 + 8 处文档漂移修复 | Accepted | Audit | 2026-09-15 |
 | [ODR-048](odr/odr-048-top-level-product-redefinition.md) | 顶层产品重定义 — Quant Lab 降维为共享底座, EquityDeep 升级为工作面 1, 新建 PRODUCT.md + ADR-022 (supersede ADR-021), 按数据性质分区消除重复存储 | Accepted | Refactor | 2026-09-15 |
 | [ODR-049](odr/odr-049-adr-022-downstream-consistency.md) | ADR-022 下游一致性收口 — 文档体系完整性审计 (12 处缺口: P0 3 / P1 8 / P2 1 组), 收口 AGENTS/TASKS/RESEARCH/SPEC/ROADMAP/PRODUCT/design-index 的 ADR-021 残留引用与陈旧标注 | Completed | Audit | 2026-09-15 |
+| [ODR-050](odr/odr-050-p1-base-contract-landing.md) | P1 底座契约落地 — L0-2 `ingest.raw` / L0-3 Evidence API (`GET /api/evidence/{content_hash}`) / L0-4 `research` schema 三项先行冻结; 统一迁移编号 (020/021 新增, 012→023, 007→024, 预留 022/025); 活跃表数 32 → 38; 仅新增不改存量表 | Completed | Implementation | 2026-09-15 |
 
 ---
 
@@ -138,7 +139,8 @@ ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical examp
 ---
 _Last updated by: AI Assistant — 2026-06-14 (P2-9~P2-12 + P2-17~P2-33 全部完成 → ODR-034~041 新建 Completed; Sprint 6 P2 累计 33 项全部 ✅)_
 _ADR 累计 22 条: 架构 17 (含 ADR-022) + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020); 其中 ADR-014/ADR-021 已 Superseded_
-_ODR 累计 49 条: Cleanup 4 (ODR-001/006/008/045) | Audit 9 (ODR-002/009/010/012/013/015/043/047/049) | Migration 7 (ODR-003/005/007/011/014/044/046) | Process 1 (ODR-004) | Implementation 26 (ODR-016~042) | Refactor 2 (ODR-022/048)_
+_ODR 累计 50 条: Cleanup 4 (ODR-001/006/008/045) | Audit 9 (ODR-002/009/010/012/013/015/043/047/049) | Migration 7 (ODR-003/005/007/011/014/044/046) | Process 1 (ODR-004) | Implementation 27 (ODR-016~042 + ODR-050) | Refactor 2 (ODR-022/048)_
+_2026-09-15 状态变更 (本次): ODR-050 新建 Completed (P1 底座契约落地 — L0-2 `ingest.raw` + L0-3 Evidence API + L0-4 `research` schema 三项先行冻结; 统一迁移编号 020/021 新增 + 012→023 + 007→024 + 预留 022/025; 活跃表数 32 → 38; 仅新增不改存量表); ADR.md index 3.6.0 → 3.7.0 (ODR 49 → 50, Implementation 26 → 27) — ODR-050_
 _2026-06-14 状态变更 (本次): ODR-034~041 新建 (P2-9 融资融券 + P2-10 可转债 + P2-11 期权 + P2-12 港股通 + P2-17 OpenAPI + P2-18~26 测试质量 + P2-27~30 基础设施 + P2-31~33 代码质量; P1-15/P1-30 状态修正 ✅; 预存测试失败修复 2 处)_
 _2026-06-13 状态变更: ODR-029 新建 (P2-7 减持规则 40 TestXxx + 5 类股东 + 3 种方式完成); ODR-028 新建 (P2-4/5/6 合规三件套 60 TestXxx 完成); Sprint 6 P2 累计 4 项全部 ✅_
 _2026-06-12 状态变更: ODR-027 新建 (P2-1 HTML 导出 + P2-2 多策略对比 17 TestXxx + 路由 + 持久化完成)_

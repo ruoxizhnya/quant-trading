@@ -103,7 +103,7 @@ L0 数据面   ingest.raw | market.* | quant.* | research.* | Evidence API   ←
 | D | 研究叙事（人的判断） | **Vault markdown**（事实源） | — |
 | E | 研究结构化状态 | PG `research.*`（D 的确定性投影，可 DROP 重建） | 权威在 D |
 
-### Evidence API（规格草案 — Proposed，未实现）
+### Evidence API（已实现 — L0-3，见 [ODR-050](odr/odr-050-p1-base-contract-landing.md)）
 
 证据坐标从"文件路径 + 模糊字符串"升级为**不可变内容坐标**：
 

@@ -314,20 +314,28 @@ POST /screen                  — 选股筛选
 
 ## 数据模型
 
-> **状态**: 32 张活跃表 (2026-06-08 同步, 由 ODR-012 综合代码审查核对:
-> 14 张在 `pkg/storage/postgres.go` 内联定义, 18 张在 `migrations/012_*` 之后
-> 通过 SQL 迁移新增 — `factor_genes`, `strategy_genes`, `sync_jobs`, `sync_schedules`,
+> **状态**: 38 张活跃表 (2026-09-15 由 [ODR-050](odr/odr-050-p1-base-contract-landing.md) 复核:
+> `pkg/storage/postgres.go` 内联定义 20 张 + 根 `migrations/` 迁移新增 18 张 —
+> `factor_genes`, `strategy_genes`, `sync_jobs`, `sync_schedules`,
 > `sectors`, `stock_sector_map`, `top_list`, `limit_up_pool`, `announcements`,
 > `news`, `hot_search`, `global_ohlcv`, `ohlcv_minute`, `capital_flow`,
-> `realtime_quote`, `data_fallback_chain`, `data_source_registry`, `orders`).
+> `realtime_quote`, `data_fallback_chain`, `data_source_registry`, `orders`)。
+> `users` / `audit_logs` 在 `migrations/019_*` 与内联中均有定义, 只计一次；
+> `migrations/0000000{1,2,3}_*/up.sql` 是 golang-migrate 封装
+> (`pkg/storage/migration_manager.go`, 全仓未被调用) 的副本, 不计入。
+> 上一版记录为 32 张 (14 + 18) —— 该数字遗漏了内联的 `users` / `audit_logs` (P1-2 引入)。
 > ODR-010 之前曾清掉 10 张废弃表 (backtest_data, new_share, stk_managers,
 > stk_rewards, stock_company, trade_calendar, daily, trade_cal, market_data,
 > stock_basic)。
 >
-> 完整迁移定义见 `migrations/` (12 个 SQL 文件) + `pkg/storage/postgres.go` (inline migrations)。
+> 迁移定义的**实际执行路径**为 `pkg/storage/postgres.go` 内联 `migrate()`
+> (raw SQL 切片 + `pool.Exec`)；`migrations/` (12 个 SQL 文件) 与
+> `docs/migrations/` (11 个) 为同源文档副本。
 >
-> **ADR-022 新增 schema (Proposed)**: 统一研究平台引入 `ingest`（类 A 原始源响应归档）与
-> `research`（类 E 研究结构化状态投影）两个 schema，均**只新增、不改存量表**。
+> **ADR-022 新增 schema（已落地 — ODR-050 / L0-2 + L0-4）**: 统一研究平台引入
+> `ingest`（类 A 原始源响应归档, 1 张表: `ingest.raw`）与 `research`
+> （类 E 研究结构化状态投影, 3 张表: `profile` / `conclusion` / `question`）两个
+> schema, 共 +4 张表, 均**只新增、不改存量表**。
 > 分区原则与可重建性标注见 [ADR-022](adr/adr-022-unified-research-platform.md) §2。
 
 ### 主表（核心 6 张）
@@ -410,7 +418,10 @@ completed_at TIMESTAMPTZ                    -- 完成时间
 Indexes: idx_bj_status, idx_bj_created_at
 ```
 
-### 辅助表（其余 27 张 + ADR-022 新增 2 张 Proposed）
+### 辅助表（其余 32 张，含 ADR-022 新增的 `ingest.raw` + `research.*`）
+
+> `users` / `audit_logs` 属其余 32 张之内，未在下表单列（内联定义见 `pkg/storage/postgres.go`）。
+> `fundamentals_detail` 为**未落地**的规划表（EQD-P1-1，预留 `migrations/022`）。
 
 > 以下表用于缓存、分析、AI 研究、多数据源接入等场景，详细 schema 见
 > `migrations/` 和 `pkg/storage/postgres.go`。
@@ -420,7 +431,7 @@ Indexes: idx_bj_status, idx_bj_created_at
 | `dividends` | 分红送股数据 | symbol, ex_date, cash_div, share_div |
 | `splits` | 拆股数据 | symbol, ex_date, split_ratio |
 | `fundamentals` | 财务数据（独立接口） | ts_code, trade_date, pe, pb, roe |
-| `fundamentals_detail`  | **深财务明细快照（Proposed — ADR-022 契约 C1）** 逐字段行存 + `ann_date` PIT 对齐 + `snapshot_uri` 溯源 | ts_code, end_date, ann_date, field_code, raw_field_name, value, unit, source, fetched_at, snapshot_uri |
+| `fundamentals_detail`  | **深财务明细快照（未落地 — ADR-022 契约 C1 / EQD-P1-1）** 逐字段行存 + `ann_date` PIT 对齐 + `snapshot_uri` 溯源 | ts_code, end_date, ann_date, field_code, raw_field_name, value, unit, source, fetched_at, snapshot_uri |
 | `factor_cache` | 因子计算结果缓存 | symbol, trade_date, factor_name, value |
 | `factor_returns` | 因子收益分析 | factor_name, period, return |
 | `ic_analysis` | 因子 IC 分析结果 | factor_name, trade_date, ic, rank_ic, top_ic |
@@ -444,12 +455,12 @@ Indexes: idx_bj_status, idx_bj_created_at
 | `realtime_quote` | 实时行情快照 | symbol, last_price, bid/ask, volume, ts |
 | `data_source_registry` | 数据源注册表 (ODR-011) | name, kind, base_url, enabled, health_status |
 | `data_fallback_chain` | 降级链配置 (ODR-011) | chain_id, adapter_order JSONB, is_active |
-| `ingest.raw` | **原始源响应归档（Proposed — ADR-022 §2 类 A）** 所有外部源响应按 `content_hash` 唯一归档，是全部数字的最终证据坐标 | content_hash PK, source, dataset, key, as_of, payload JSONB, fetched_at |
-| `research.*` | **研究结构化状态投影（Proposed — ADR-022 §2 类 E）** 结论/疑点字段 + citations，可由 vault markdown 确定性重建（可 DROP） | content_hash FK, conclusion, thesis, citations JSONB, evidence_pointer |
+| `ingest.raw` | **原始源响应归档（已落地 — ADR-022 §2 类 A / L0-2）** 所有外部源响应按 `content_hash` 唯一归档，是全部数字的最终证据坐标 | content_hash PK, source, dataset, key, as_of, payload JSONB, fetched_at |
+| `research.*` | **研究结构化状态投影（已落地 — ADR-022 §2 类 E / L0-4）** 3 张表 `profile` / `conclusion` / `question`（结论/疑点字段 + citations），可由 vault markdown 确定性重建（可 DROP） | content_hash FK, conclusion, thesis, citations JSONB, evidence_pointer |
 
-> 备注: `fundamentals` 与 `stock_fundamentals` 字段重叠但使用场景不同 —— **已登记为正式任务 `TASKS.md` C-8（表合并，`migrations/013_*.sql`），见 [ODR-047](odr/odr-047-equitydeep-integration-audit.md) DR-7**（原先仅自承「未来评估合并」而无任务跟踪，本次补齐）。`orders` 表 (migrations/003 定义) 当前未被代码引用，可考虑删除。
+> 备注: `fundamentals` 与 `stock_fundamentals` 字段重叠但使用场景不同 —— **已登记为正式任务 `TASKS.md` C-8（表合并，`docs/migrations/025_equitydeep_field_consolidation.sql`），见 [ODR-047](odr/odr-047-equitydeep-integration-audit.md) DR-7**（原先仅自承「未来评估合并」而无任务跟踪，本次补齐）。`orders` 表 (migrations/003 定义) 当前未被代码引用，可考虑删除。
 >
-> `fundamentals_detail`（契约 C1）为 **ADR-022 计算面（原 ADR-021 桥 B1）前置**：EquityDeep 侧 Stage2 派生指标经 ETL 落库后，横截面工作面（工作面 2）的 5 个纵向因子消费此表。schema 定义见 [RESEARCH.md §3.2](RESEARCH.md)，建表 SQL 见 `migrations/012_*.sql`（任务 `TASKS.md` C-1）。
+> `fundamentals_detail`（契约 C1）为 **ADR-022 计算面（原 ADR-021 桥 B1）前置**：EquityDeep 侧 Stage2 派生指标经 ETL 落库后，横截面工作面（工作面 2）的 5 个纵向因子消费此表。schema 定义见 [RESEARCH.md §3.2](RESEARCH.md)，建表 SQL 见 `docs/migrations/022_equitydeep_fundamentals.sql`（任务 `TASKS.md` C-1）。
 
 ---
 

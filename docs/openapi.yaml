@@ -61,6 +61,8 @@ tags:
     description: Risk alert history and stats
   - name: Data Proxy
     description: Proxied data-service endpoints (OHLCV, screen, calendar)
+  - name: Evidence
+    description: L0 evidence service — resolves a citation's content_hash to its archived source response
 
 paths:
   # ============================================================
@@ -2214,6 +2216,50 @@ paths:
               schema:
                 type: object
 
+  /api/evidence/{content_hash}:
+    get:
+      tags: [Evidence]
+      summary: Resolve a citation's content_hash to its archived source response
+      description: |
+        L0 evidence service (ADR-022 §5 / TASKS.md L0-3). Returns the single
+        archived record in `ingest.raw` for the given hash. `404` means the
+        hash was never ingested — that is a first-class answer, not an error.
+        Work faces read data through this endpoint instead of keeping copies.
+      operationId: getEvidence
+      parameters:
+        - name: content_hash
+          in: path
+          required: true
+          description: SHA-256 hex digest of the canonicalized source payload (64 lowercase chars)
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+      responses:
+        '200':
+          description: The archived source response for that content_hash
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RawIngest'
+        '404':
+          description: Evidence not ingested — no `ingest.raw` row for this hash
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: evidence not ingested
+                  content_hash:
+                    type: string
+        '500':
+          description: Evidence lookup failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   # ============================================================
   # Security
@@ -2279,6 +2325,36 @@ components:
           type: string
         status:
           type: string
+
+    RawIngest:
+      type: object
+      description: One archived external-source response (ADR-022 §2 class A, `ingest.raw`)
+      required: [content_hash, source, dataset, key, payload, fetched_at]
+      properties:
+        content_hash:
+          type: string
+          description: Canonical sha256 (lowercase hex, 64 chars) of the payload; primary key
+        source:
+          type: string
+          description: Data source that produced the response (e.g. akshare, tushare)
+        dataset:
+          type: string
+          description: Logical dataset name within the source
+        key:
+          type: string
+          description: Source-native key of the record (e.g. instrument + period)
+        as_of:
+          type: string
+          format: date-time
+          nullable: true
+          description: Point-in-time the data describes (PIT alignment)
+        payload:
+          type: object
+          description: The raw source response, archived verbatim
+        fetched_at:
+          type: string
+          format: date-time
+          description: When the response was fetched
 
     HealthStatus:
       type: object

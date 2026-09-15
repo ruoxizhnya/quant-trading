@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.24.0 (Sprint 8 — 统一研究平台落地; ADR-022 下游一致性收口)
+> **Version:** 3.25.0 (Sprint 8 — 阶段 P1 底座契约三项先行落地: L0-2 / L0-3 / L0-4)
 > **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -573,12 +573,32 @@
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
-| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **16** | **1** | **0** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面 |
-| **总计**          | **18** | **1** | **213** | **1** | **0** | **233** | (v3.23.0 Sprint 8 按 ADR-022 执行路线 P1~P5 重排) |
+| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **13** | **1** | **3** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-2/L0-3/L0-4 已冻结(ODR-050) |
+| **总计**          | **15** | **1** | **216** | **1** | **0** | **233** | (v3.25.0 Sprint 8 阶段 P1 底座契约三项先行落地) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-15 (v3.25.0) — Sprint 8 阶段 P1「底座契约」三项先行落地
+
+**来源**: [ODR-050](odr/odr-050-p1-base-contract-landing.md) — P1 底座契约落地记录（含迁移编号统一复核）
+
+- **落地**: `L0-2` `ingest.raw`（`pkg/storage/ingest_raw.go` + `postgres.go` 内联 DDL）
+  — 类 A 原始源响应归档, `content_hash` 唯一键, 写入幂等且不可变
+- **落地**: `L0-3` Evidence API（`cmd/analysis/handlers_evidence.go`, `GET /api/evidence/{content_hash}`）
+  — 404 = 未摄取, 为一等答案; `ServerDeps` 新增第 18 个字段 `Store`
+- **落地**: `L0-4` `research` schema（`profile` / `conclusion` / `question` 3 张表）
+  — 类 E 研究结构化状态投影, 可由 vault markdown 确定性重建
+- **统一迁移编号**: 根 `migrations/012_add_gene_pool_tables.sql` → `023_*`；
+  `docs/migrations/007_add_factor_returns_table.sql` → `024_*`；
+  新增 `020_add_ingest_raw.sql` / `021_add_research_schema.sql`；
+  预留 `022_*`（EQD-P1-1）/ `025_*`（EQD-P3-1）
+- **文档同步**: [ARCHITECTURE.md](ARCHITECTURE.md) 表数 32 → **38 张活跃表**（内联 20 + 迁移 18）；
+  [SPEC.md](SPEC.md) Evidence API 由"草案"改为"已实现"；
+  [openapi.yaml](openapi.yaml) 新增 `/api/evidence/{content_hash}` + `RawIngest` schema；
+  [AGENTS.md](../AGENTS.md) CR-47 表数复核更新
+- **统计更新**: 总计 233 不变；待处理 18 → 15, 已完成 213 → 216（Sprint 8 内 16/1/0 → 13/1/3）
 
 ### 2026-09-15 (v3.24.0) — ADR-022 下游一致性收口（文档审计）
 
@@ -1702,9 +1722,15 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | EQD-P0-2 | 抽检脚本泛化：通用化 EquityDeep M1 数据质量抽检（10 票 × 20 数字，错误率 < 2%）（C-7 / 桥 B3） | `evals/data_quality/` | ⬜ | ODR-047 / RESEARCH §3.6 → ADR-022 P1 |
 | EQD-P3-2 | 文档漂移修复 8 项（DR-1~DR-8 收口校验）（C-9） | `docs/ARCHITECTURE.md` 等 | 🔵 | ODR-047 D5 / C-9 → ADR-022 P1 |
 | **L0-1** | **单一摄取入口**：统一 akshare/tushare adapter 归属 L0，禁止工作面直连外部数据源 | `pkg/data/source/` | ⬜ | [ADR-022](adr/adr-022-unified-research-platform.md) §3 / PRODUCT §9 |
-| **L0-2** | **`ingest.raw` 表**：原始源响应归档（`content_hash` 唯一键；冷热分层策略见 PRODUCT.md Q-2） | `migrations/` | ⬜ | ADR-022 §2 / PRODUCT §6.1 |
-| **L0-3** | **Evidence API**：`GET /api/evidence/{content_hash}` 返回唯一原始记录（citation 内容坐标） | `cmd/analysis/handlers_evidence.go` | ⬜ | ADR-022 §5 / PRODUCT §7 |
-| **L0-4** | **`research` schema DDL**：研究结构化状态（markdown 的确定性投影，可 DROP 重建） | `migrations/` | ⬜ | ADR-022 §2 / PRODUCT §6.1 |
+| **L0-2** | **`ingest.raw` 表**：原始源响应归档（`content_hash` 唯一键；冷热分层策略见 PRODUCT.md Q-2） | `pkg/storage/postgres.go`（内联）+ `docs/migrations/020_add_ingest_raw.sql` | ✅ | ADR-022 §2 / PRODUCT §6.1 |
+| **L0-3** | **Evidence API**：`GET /api/evidence/{content_hash}` 返回唯一原始记录（citation 内容坐标） | `cmd/analysis/handlers_evidence.go` | ✅ | ADR-022 §5 / PRODUCT §7 |
+| **L0-4** | **`research` schema DDL**：研究结构化状态（markdown 的确定性投影，可 DROP 重建） | `pkg/storage/postgres.go`（内联）+ `docs/migrations/021_add_research_schema.sql` | ✅ | ADR-022 §2 / PRODUCT §6.1 |
+
+> **迁移编号统一**: 消除历史重复编号（根目录 `012`×2、`docs/migrations` `007`×2）——
+> `migrations/012_add_gene_pool_tables.sql` → `023_add_gene_pool_tables.sql`；
+> `docs/migrations/007_add_factor_returns_table.sql` → `024_add_factor_returns_table.sql`。
+> 统一编号空间为本轮新增 `020`（L0-2）/`021`（L0-4），并预留 `022`（EQD-P1-1）、`025`（EQD-P3-1）。
+> 实际执行路径为 `pkg/storage/postgres.go` 内联 `migrate()`，上述 SQL 文件为同源文档副本。详见 [ODR-050](odr/odr-050-p1-base-contract-landing.md)。
 
 ### 🔵 阶段 P2 — 工作面 1 跑通（接 `research` schema + 容器化 + 走 Evidence API → M1）
 
@@ -1719,9 +1745,9 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
-| EQD-P1-1 | 新增 `fundamentals_detail` 表（契约 C1，逐字段行存 + `ann_date` PIT + `snapshot_uri` 溯源） | `migrations/012_equitydeep_fundamentals.sql` | ⬜ | RESEARCH §3.2 / C-1 |
+| EQD-P1-1 | 新增 `fundamentals_detail` 表（契约 C1，逐字段行存 + `ann_date` PIT + `snapshot_uri` 溯源） | `docs/migrations/022_equitydeep_fundamentals.sql` | ⬜ | RESEARCH §3.2 / C-1 |
 | EQD-P1-2 | EquityDeep 摄取命令 + 5 个纵向基本面因子（桥 B1） | `pkg/data/equitydeep/`（新包）, `pkg/data/factors/` | ⬜ | RESEARCH §3.4 / C-3, C-4 |
-| EQD-P3-1 | 修复 `fundamentals` / `stock_fundamentals` 表字段重叠（CR-47 遗留，补正式任务登记）（DR-7） | `migrations/013_*.sql` | ⬜ | ODR-047 DR-7 / C-8 |
+| EQD-P3-1 | 修复 `fundamentals` / `stock_fundamentals` 表字段重叠（CR-47 遗留，补正式任务登记）（DR-7） | `docs/migrations/025_equitydeep_field_consolidation.sql` | ⬜ | ODR-047 DR-7 / C-8 |
 
 ### 🔵 阶段 P4 — 飞轮打通（疑点 → 假设 → 因子 → 回测 → 回流档案）
 
