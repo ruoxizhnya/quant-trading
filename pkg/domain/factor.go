@@ -11,6 +11,14 @@ const (
 	FactorSize       FactorType = "size"
 	FactorVolatility FactorType = "volatility"
 	FactorGrowth     FactorType = "growth"
+
+	// 桥 B1 纵向基本面因子（ADR-022 计算面，EQD-P1-2）。
+	// 名字逐字对齐 docs/RESEARCH.md §3.4，最长 24 字符（见迁移 026 的列宽放宽）。
+	FactorGrossMarginTrend       FactorType = "gross_margin_trend"
+	FactorContractLiabilityRatio FactorType = "contract_liability_ratio"
+	FactorOCFToNetProfit         FactorType = "ocf_to_net_profit"
+	FactorROEDuPontLeverage      FactorType = "roe_dupont_leverage"
+	FactorInventoryTurnoverDelta FactorType = "inventory_turnover_delta"
 )
 
 func ParseFactorType(s string) (FactorType, bool) {
@@ -27,6 +35,16 @@ func ParseFactorType(s string) (FactorType, bool) {
 		return FactorVolatility, true
 	case string(FactorGrowth):
 		return FactorGrowth, true
+	case string(FactorGrossMarginTrend):
+		return FactorGrossMarginTrend, true
+	case string(FactorContractLiabilityRatio):
+		return FactorContractLiabilityRatio, true
+	case string(FactorOCFToNetProfit):
+		return FactorOCFToNetProfit, true
+	case string(FactorROEDuPontLeverage):
+		return FactorROEDuPontLeverage, true
+	case string(FactorInventoryTurnoverDelta):
+		return FactorInventoryTurnoverDelta, true
 	default:
 		return "", false
 	}

@@ -77,6 +77,16 @@ func syncFactorHandler(fc *data.FactorComputer) gin.HandlerFunc {
 			computeErr = fc.ComputeValueFactor(ctx, date)
 		case domain.FactorQuality:
 			computeErr = fc.ComputeQualityFactor(ctx, date)
+		case domain.FactorGrossMarginTrend:
+			computeErr = fc.ComputeGrossMarginTrendFactor(ctx, date)
+		case domain.FactorContractLiabilityRatio:
+			computeErr = fc.ComputeContractLiabilityRatioFactor(ctx, date)
+		case domain.FactorOCFToNetProfit:
+			computeErr = fc.ComputeOCFToNetProfitFactor(ctx, date)
+		case domain.FactorROEDuPontLeverage:
+			computeErr = fc.ComputeROEDuPontLeverageFactor(ctx, date)
+		case domain.FactorInventoryTurnoverDelta:
+			computeErr = fc.ComputeInventoryTurnoverDeltaFactor(ctx, date)
 		default:
 			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported factor: " + factorName})
 			return

@@ -196,6 +196,13 @@ func registerFactorRoutes(router *gin.Engine, factorAttributor *data.FactorAttri
 				string(domain.FactorVolatility),
 				string(domain.FactorSize),
 				string(domain.FactorGrowth),
+				// 桥 B1 纵向基本面因子 (EQD-P1-2)：与 ParseFactorType 保持同步，
+				// 否则本接口会漏报已可查询的因子。
+				string(domain.FactorGrossMarginTrend),
+				string(domain.FactorContractLiabilityRatio),
+				string(domain.FactorOCFToNetProfit),
+				string(domain.FactorROEDuPontLeverage),
+				string(domain.FactorInventoryTurnoverDelta),
 			}
 			c.JSON(http.StatusOK, gin.H{
 				"total":   len(factors),

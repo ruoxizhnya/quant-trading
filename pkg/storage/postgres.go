@@ -335,6 +335,12 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_fund_detail_lookup
 			ON fundamentals_detail (ts_code, field_code, end_date DESC)`,
+		// Migration 026: docs/migrations/026_widen_factor_name.sql (EQD-P1-2 / 桥 B1)
+		// 桥 B1 的 5 个纵向基本面因子名最长 24 字符，超出既有 VARCHAR(20)。
+		// 因子链路的三个表同源同一列，须同时放宽；加宽 varchar 为 metadata-only，不改写表。
+		`ALTER TABLE factor_cache ALTER COLUMN factor_name TYPE VARCHAR(32)`,
+		`ALTER TABLE factor_returns ALTER COLUMN factor_name TYPE VARCHAR(32)`,
+		`ALTER TABLE ic_analysis ALTER COLUMN factor_name TYPE VARCHAR(32)`,
 	}
 
 	for _, m := range migrations {

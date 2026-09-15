@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
+	"github.com/ruoxizhnya/quant-trading/pkg/data/equitydeep"
 	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 )
@@ -46,6 +47,9 @@ func loadConfig() error {
 	viper.SetDefault("logging.format", "json")
 	viper.SetDefault("database.sslmode", "disable")
 	viper.SetDefault("tushare.max_retries", 3)
+	// Empty means "auto-discover contracts/field_dictionary.yaml next to the
+	// config dir". Override with an absolute path (or EQUITYDEEP_FIELD_DICTIONARY).
+	viper.SetDefault("equitydeep.field_dictionary", "")
 
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -154,6 +158,46 @@ func buildTushareClient(store *storage.PostgresStore, cache storage.Cache, logge
 		store,
 		cache,
 	)
+}
+
+// buildEquityDeepDictionary loads contracts/field_dictionary.yaml, the
+// whitelist and unit-conversion table that the equitydeep ingest door needs to
+// normalize anything. There is deliberately no fallback mapping: without the
+// dictionary the endpoint answers 503 rather than guessing, because a guessed
+// raw_name → field_code mapping or unit scale would silently corrupt the
+// numbers it produced.
+//
+// The contracts directory is not embedded in the binary, so the path is either
+// configured explicitly or discovered relative to the working directory using
+// the same search order loadConfig uses for config/.
+func buildEquityDeepDictionary(logger zerolog.Logger) *equitydeep.Dictionary {
+	configured := viper.GetString("equitydeep.field_dictionary")
+	candidates := []string{
+		"./contracts/field_dictionary.yaml",
+		"../contracts/field_dictionary.yaml",
+		"../../contracts/field_dictionary.yaml",
+	}
+	if configured != "" {
+		candidates = []string{configured}
+	}
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		dict, err := equitydeep.LoadDictionary(path)
+		if err != nil {
+			logger.Error().Err(err).Str("path", path).Msg("Failed to load field dictionary")
+			return nil
+		}
+		logger.Info().Str("path", path).Msg("Field dictionary loaded")
+		return dict
+	}
+
+	logger.Warn().
+		Str("searched", strings.Join(candidates, ", ")).
+		Msg("Field dictionary not found; POST /api/ingest/equitydeep will answer 503")
+	return nil
 }
 
 // buildRouter creates the gin router with recovery, CORS, rate-limiting,

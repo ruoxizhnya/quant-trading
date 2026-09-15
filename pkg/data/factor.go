@@ -17,6 +17,11 @@ import (
 type FactorStore interface {
 	GetOHLCVForDateRange(ctx context.Context, startDate, endDate time.Time) ([]domain.OHLCV, error)
 	GetFundamentalsSnapshot(ctx context.Context, cutoffDate time.Time) ([]domain.FundamentalData, error)
+	// GetFundamentalsDetailAsOf serves the 桥 B1 vertical factors
+	// (factor_equitydeep.go). Its ann_date filter is the contract's PIT rule and
+	// is not optional: a factor computed from a report the market had not yet
+	// seen is a look-ahead bug, not a data-quality issue.
+	GetFundamentalsDetailAsOf(ctx context.Context, fieldCodes []string, asOf time.Time) ([]domain.FundamentalsDetailRow, error)
 	GetTradingDays(ctx context.Context, startDate, endDate time.Time) ([]time.Time, error)
 	SaveFactorCacheBatch(ctx context.Context, entries []*domain.FactorCacheEntry) error
 }
@@ -262,50 +267,51 @@ func (f *FactorComputer) ComputeQualityFactor(ctx context.Context, date time.Tim
 	return nil
 }
 
-// ComputeAllFactors runs all factor computations for a single date.
-// When parallel=true, the three factors are computed concurrently using goroutines.
+// ComputeAllFactors runs all factor computations for a single date: the three
+// cross-sectional factors (momentum / value / quality) plus the five 桥 B1
+// vertical fundamentals factors (factor_equitydeep.go).
+//
+// When parallel=true they are computed concurrently using goroutines. The list
+// is built once and walked by both branches so that adding a factor cannot make
+// the two paths disagree.
 func (f *FactorComputer) ComputeAllFactors(ctx context.Context, date time.Time, momentumLookback int, parallel bool) error {
+	computations := []struct {
+		name string
+		run  func() error
+	}{
+		{"momentum", func() error { return f.ComputeMomentumFactor(ctx, date, momentumLookback) }},
+		{"value", func() error { return f.ComputeValueFactor(ctx, date) }},
+		{"quality", func() error { return f.ComputeQualityFactor(ctx, date) }},
+		{"gross_margin_trend", func() error { return f.ComputeGrossMarginTrendFactor(ctx, date) }},
+		{"contract_liability_ratio", func() error { return f.ComputeContractLiabilityRatioFactor(ctx, date) }},
+		{"ocf_to_net_profit", func() error { return f.ComputeOCFToNetProfitFactor(ctx, date) }},
+		{"roe_dupont_leverage", func() error { return f.ComputeROEDuPontLeverageFactor(ctx, date) }},
+		{"inventory_turnover_delta", func() error { return f.ComputeInventoryTurnoverDeltaFactor(ctx, date) }},
+	}
+
 	if !parallel {
-		// Sequential execution (original behavior)
-		if err := f.ComputeMomentumFactor(ctx, date, momentumLookback); err != nil {
-			return fmt.Errorf("momentum: %w", err)
-		}
-		if err := f.ComputeValueFactor(ctx, date); err != nil {
-			return fmt.Errorf("value: %w", err)
-		}
-		if err := f.ComputeQualityFactor(ctx, date); err != nil {
-			return fmt.Errorf("quality: %w", err)
+		for _, c := range computations {
+			if err := c.run(); err != nil {
+				return fmt.Errorf("%s: %w", c.name, err)
+			}
 		}
 		return nil
 	}
 
-	// Parallel execution: compute all three factors concurrently
+	// Parallel execution: compute every factor concurrently. The channel is
+	// buffered to len(computations) so no goroutine can block after wg.Wait
+	// returns; only the first error is reported, matching the sequential path.
 	var wg sync.WaitGroup
-	errCh := make(chan error, 3)
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := f.ComputeMomentumFactor(ctx, date, momentumLookback); err != nil {
-			errCh <- fmt.Errorf("momentum: %w", err)
-		}
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := f.ComputeValueFactor(ctx, date); err != nil {
-			errCh <- fmt.Errorf("value: %w", err)
-		}
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := f.ComputeQualityFactor(ctx, date); err != nil {
-			errCh <- fmt.Errorf("quality: %w", err)
-		}
-	}()
+	errCh := make(chan error, len(computations))
+	for _, c := range computations {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := c.run(); err != nil {
+				errCh <- fmt.Errorf("%s: %w", c.name, err)
+			}
+		}()
+	}
 
 	wg.Wait()
 	close(errCh)

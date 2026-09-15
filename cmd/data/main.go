@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
+	"github.com/ruoxizhnya/quant-trading/pkg/data/equitydeep"
 	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 )
@@ -50,7 +51,7 @@ func main() {
 	dataSourceRegistry := buildDataSourceRegistry(tushareClient, logger)
 
 	router := buildRouter()
-	registerRoutes(router, store, cache, tushareClient, dataCache)
+	registerRoutes(router, store, cache, tushareClient, dataCache, buildEquityDeepDictionary(logger))
 	registerRegistryRoutes(router, newRegistryHandler(dataSourceRegistry))
 
 	srv := startHTTPServer(router, logger)
@@ -68,8 +69,9 @@ func main() {
 //   - handlers_fundamentals.go — fundamental/fundamentals READ handlers
 //   - handlers_sync.go        — sync stocks/OHLCV/fundamentals/calendar/dividends/splits
 //   - handlers_factor.go      — factor + attribution + IC
+//   - handlers_equitydeep_ingest.go — C-3 equitydeep snapshot ingest door
 //   - sync_handlers.go        — SyncHandler (async job queue + worker pool)
-func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache storage.Cache, tc *data.TushareClient, dc *data.DataCache) {
+func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache storage.Cache, tc *data.TushareClient, dc *data.DataCache, equityDeepDict *equitydeep.Dictionary) {
 	// Health check
 	r.GET("/health", healthHandler(store, cache))
 
@@ -78,6 +80,13 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache storage.C
 	// hence the only way an external producer (the akshare side) can make
 	// its data citable through the Evidence API.
 	r.POST("/api/ingest/raw", ingestRawHandler(store))
+
+	// C-3 equitydeep ingest door (TASKS.md EQD-P1-2).
+	// Normalizes archived EquityDeep snapshots into fundamentals_detail.
+	// The caller quotes the content_hash of the raw response it already
+	// archived through the door above; rows are stamped with that hash, so
+	// every stored number stays resolvable to the response it came from.
+	r.POST("/api/ingest/equitydeep", equityDeepIngestHandler(store, equityDeepDict))
 
 	// Stock endpoints
 	r.GET("/stocks", listStocksHandler(store, cache))
