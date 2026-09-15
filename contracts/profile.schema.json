@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantlab.local/contracts/profile.schema.json",
+  "title": "EquityDeep 档案镜像 _profile.json（契约 C2）",
+  "description": "冻结于 2026-09-15 / version 1。来源 docs/RESEARCH.md §3.3（契约 C2）。\n\nmd 是叙事事实源，本 JSON 是**派生镜像**：vault 内的 _profile.md 由人机共写，本文件由确定性脚本从 md 生成，**不得由 LLM 直接产出**。消费方（如 MCP 工具 research.profile）只解析本 JSON，不解析 markdown（Go 侧解析用户可任意编辑的 md 极其脆弱）。\n\n冻结语义：\n  1. schema_version 恒为 1。未来结构变更须新建文件（profile.v2.schema.json），不得就地改写本文件；消费方遇 schema_version != 1 应拒绝并降级。\n  2. 过期检测为消费方**必做**动作：source_mtime > generated_at 或 generated_at 超龄 → 降级使用并标注 stale。\n  3. citations[] 冻结为 ADR-022 形式（content_hash + JSON Pointer）。v1.0 的 'snapshots/<file>.json#/data/<字段>' 文件路径形式已被 ADR-022 §5 取代（原始响应归档于 ingest.raw，经 GET /api/evidence/{content_hash} 取回）。\n  4. 输出不得包含任何未经 citation 锚定的论断；工具只回传档案原文，不做 LLM 二次加工。\n  5. 兼容性：新增可选属性 = 兼容（递增 version 并新建 schema 文件）；修改既有属性语义 / 收紧类型 = 破坏性（双侧同步 PR）。",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "ticker",
+    "generated_at",
+    "source_file",
+    "source_mtime",
+    "needs_review",
+    "conclusions",
+    "questions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "本契约版本，恒为 1。"
+    },
+    "ticker": {
+      "type": "string",
+      "pattern": "^[0-9]{6}$",
+      "description": "6 位标的代码，不带交易所后缀。"
+    },
+    "name": {
+      "type": "string",
+      "description": "标的简称，来自 md front-matter。"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "本 JSON 的生成时刻。与 source_mtime 共同构成过期判据。"
+    },
+    "source_file": {
+      "type": "string",
+      "description": "生成来源，恒为 _profile.md。"
+    },
+    "source_mtime": {
+      "type": "string",
+      "format": "date-time",
+      "description": "源 md 的最后修改时刻。source_mtime > generated_at 即表示镜像已过期（用户在 Obsidian 里改过 md）。"
+    },
+    "last_researched": {
+      "type": ["string", "null"],
+      "description": "上次研究日期（YYYY-MM-DD）；从未研究过为 null。"
+    },
+    "needs_review": {
+      "type": "boolean",
+      "description": "失效机制：财报/重大公告后置为 true。消费方见到 true 时必须标注「以下结论需用新数据重验」。"
+    },
+    "review_reason": {
+      "type": "string",
+      "description": "触发复核的原因；needs_review 为 false 时为空串。"
+    },
+    "conclusions": {
+      "type": "array",
+      "description": "结论列表，与 md「## 结论」段一一对应。",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "body", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^C[0-9]+$",
+            "description": "结论编号，如 C1。"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string",
+            "description": "结论正文（md 引文块）。"
+          },
+          "as_of": {
+            "type": ["string", "null"],
+            "description": "结论所依据的数据期间，如 2025Q3。"
+          },
+          "confidence": {
+            "type": ["string", "null"],
+            "enum": ["高", "中", "低", null],
+            "description": "置信度，与 md 的「置信」字段一致。"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "superseded"],
+            "description": "active = 有效；superseded = 已被后续结论取代（md 中以删除线标记并注明取代者）。"
+          },
+          "citations": {
+            "type": "array",
+            "description": "依据锚点（ADR-022 形式），供 Quant Lab 做假设到数据的可追溯。",
+            "items": {
+              "type": "object",
+              "required": ["content_hash", "pointer"],
+              "additionalProperties": false,
+              "properties": {
+                "content_hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "源响应内容坐标，经 GET /api/evidence/{content_hash} 取回唯一原始记录；404 表示未摄取。"
+                },
+                "pointer": {
+                  "type": "string",
+                  "pattern": "^/",
+                  "description": "RFC 6901 JSON Pointer，指向 payload 内的字段，如 /data/营业总收入。路径不存在即回查失败（不再靠字符串碰运气）。"
+                },
+                "source": {
+                  "type": "string",
+                  "description": "人类可读坐标，如 akshare。"
+                },
+                "dataset": {
+                  "type": "string",
+                  "description": "人类可读坐标，如 stock_financial_abstract_ths。"
+                },
+                "key": {
+                  "type": "string",
+                  "description": "人类可读坐标，如 600519。"
+                },
+                "as_of": {
+                  "type": ["string", "null"],
+                  "description": "源报告期/抓取时点。"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "description": "疑点列表，与 md「## 疑点」段一一对应。",
+      "items": {
+        "type": "object",
+        "required": ["id", "text", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^Q[0-9]+$",
+            "description": "疑点编号，如 Q1。"
+          },
+          "text": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["open", "closed"],
+            "description": "open = 未解决（md 中 [ ]）；closed = 已解决（md 中 [x]）。"
+          },
+          "raised_at": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9]{4}(-[0-9]{2})?$",
+            "description": "提出时间，YYYY-MM 或 YYYY-MM-DD。"
+          }
+        }
+      }
+    },
+    "updated_at_log": {
+      "type": "array",
+      "description": "档案变更历史（Stage7 每次 merge 追加一条）。",
+      "items": {
+        "type": "object",
+        "required": ["at", "summary"],
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date"
+          },
+          "summary": {
+            "type": "string",
+            "description": "本次变更摘要，如「新增 C3，推翻 C2，解决 Q2」。"
+          }
+        }
+      }
+    }
+  }
+}

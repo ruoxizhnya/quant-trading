@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.26.0 (Sprint 8 — 阶段 P1: L0-1 单一摄取入口落地，P1 四项底座契约全部冻结)
+> **Version:** 3.27.0 (Sprint 8 — 阶段 P1: EQD-P0-1 契约冻结 + EQD-P0-2 抽检泛化落地，P1 仅余 EQD-P3-2)
 > **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -573,12 +573,31 @@
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
-| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **12** | **1** | **4** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) |
-| **总计**          | **14** | **1** | **217** | **1** | **0** | **233** | (v3.26.0 Sprint 8 阶段 P1 底座契约四项全部冻结) |
+| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **10** | **1** | **6** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) |
+| **总计**          | **12** | **1** | **219** | **1** | **0** | **233** | (v3.27.0 Sprint 8 阶段 P1 底座契约六项冻结 + 契约目录/抽检门禁落地) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-15 (v3.27.0) — Sprint 8 阶段 P1「底座契约」EQD-P0-1 契约冻结 + EQD-P0-2 抽检泛化落地
+
+**来源**: [ODR-052](odr/odr-052-p1-contract-freeze-and-spot-check.md) — P1 收尾记录（契约目录冻结 + 抽检脚本泛化）
+
+- **落地**: `EQD-P0-1` 新建 `contracts/` 契约目录（此前不存在），冻结四项契约工件
+  — `field_dictionary.yaml`（契约 C1-a）：20 个 `field_code` 显式白名单 + `raw_names`（含全角/半角括号变体）+ `base_unit: CNY` + 5 档 `unit_scale` + 10 票 `spot_check_defaults`
+  — `fundamentals_detail.schema.sql`（契约 C1-b）：§3.2 DDL 一并冻结，声明「三处同源以本文件为准」
+  — `snapshot.schema.json`：快照结构冻结，`ann_date` 为 required（缺此项 = 不合规快照，会引入 look-ahead bias）
+  — `profile.schema.json`（契约 C2）：`_profile.json` 派生镜像冻结，`citations[].content_hash` 对应 Evidence API 内容坐标
+  — 全部带 `version` / `frozen_at` / 兼容性矩阵；契约只读语义写入 header（不可重命名/删除、白名单外字段丢弃记 warn 不得猜测）
+- **落地**: `EQD-P0-2` 新建 `evals/data_quality/spot_check.py`（本仓首个 Python 工件）
+  — 把 EquityDeep M1 抽检（10 票 × 20 数字，错误率 < 2%）泛化为跨源通用脚本：`--source {akshare,tushare} --tickers --fields`
+  — 三项检查：白名单校验 / 显式单位换算 / 双源比对；四退出码 `0` PASS / `1` FAIL / `3` INCONCLUSIVE / `4` ERROR
+  — **刻意不直连 tushare/akshare**：消费「读数转储」JSONL（路径 / http(s) / `-` stdin），取数唯一入口归 L0（ADR-022 §4）
+  — 内置 `--self-test` 同时构造 PASS 与 FAIL 场景；零外部依赖（yaml 按需 import）
+  — 加固：`--tickers` 6 位数字格式校验（PowerShell 会把逗号列表解析为数组并截断前导零，静默缩小抽检范围）
+- **契约收紧**: `snapshot.schema.json` / `profile.schema.json` 均 `additionalProperties: false`，结构性防漂移
+- **统计更新**: 总计 233 不变；待处理 14 → 12, 已完成 217 → 219（Sprint 8 内 12/1/4 → 10/1/6）
 
 ### 2026-09-15 (v3.26.0) — Sprint 8 阶段 P1「底座契约」L0-1 单一摄取入口落地
 
@@ -1735,8 +1754,8 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
-| EQD-P0-1 | 契约冻结：将 `fundamentals_detail` schema + `_profile.json` schema 纳入版本控制（C-2） | `contracts/`（新目录） | ⬜ | ODR-047 / RESEARCH §3.2-3.3 → ADR-022 P1 |
-| EQD-P0-2 | 抽检脚本泛化：通用化 EquityDeep M1 数据质量抽检（10 票 × 20 数字，错误率 < 2%）（C-7 / 桥 B3） | `evals/data_quality/` | ⬜ | ODR-047 / RESEARCH §3.6 → ADR-022 P1 |
+| EQD-P0-1 | 契约冻结：将 `fundamentals_detail` schema + `_profile.json` schema 纳入版本控制（C-2） | `contracts/`（新目录） | ✅ | ODR-047 / RESEARCH §3.2-3.3 → ADR-022 P1 |
+| EQD-P0-2 | 抽检脚本泛化：通用化 EquityDeep M1 数据质量抽检（10 票 × 20 数字，错误率 < 2%）（C-7 / 桥 B3） | `evals/data_quality/` | ✅ | ODR-047 / RESEARCH §3.6 → ADR-022 P1 |
 | EQD-P3-2 | 文档漂移修复 8 项（DR-1~DR-8 收口校验）（C-9） | `docs/ARCHITECTURE.md` 等 | 🔵 | ODR-047 D5 / C-9 → ADR-022 P1 |
 | **L0-1** | **单一摄取入口**：统一 akshare/tushare adapter 归属 L0，禁止工作面直连外部数据源 | `pkg/data/tushare_raw.go` + `cmd/data/handlers_ingest.go` | ✅ | [ADR-022](adr/adr-022-unified-research-platform.md) §3 / PRODUCT §9 |
 | **L0-2** | **`ingest.raw` 表**：原始源响应归档（`content_hash` 唯一键；冷热分层策略见 PRODUCT.md Q-2） | `pkg/storage/postgres.go`（内联）+ `docs/migrations/020_add_ingest_raw.sql` | ✅ | ADR-022 §2 / PRODUCT §6.1 |

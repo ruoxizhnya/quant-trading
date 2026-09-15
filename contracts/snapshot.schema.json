@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quantlab.local/contracts/snapshot.schema.json",
+  "title": "EquityDeep 财务快照（契约 C1 上游：原始响应 → L0）",
+  "description": "冻结于 2026-09-15 / version 1。来源 docs/RESEARCH.md §3.2（契约 C1）与 docs/design/equitydeep/EquityDeep_Technical_Specification.md §2.2。\n\n该结构描述的是**归档进 ingest.raw 的那一份原始响应**（payload）的约定形态。冻结语义：\n  1. 键名不改写：data 的键必须是原始字段名（保留源语义），回查时按 JSON Pointer 精确定位（ADR-022 §5）；\n  2. data 的键必须在 contracts/field_dictionary.yaml 的 raw_names 白名单内，白名单之外的值应丢弃并记 warn，不得猜测映射；\n  3. ann_date 为 PIT 硬要求（RESEARCH §3.2 ⚠️ / §3.8 加固项 #6）；缺失 ann_date 的快照在消费者侧视为不合规，不得转入 fundamentals_detail；\n  4. 同一 (dataset, key, as_of) 重复拉取，content_hash 相同则天然去重，不同则两条并存（restatement 可对比）；\n  5. 兼容性：新增可选属性 = 兼容；新增必填属性 / 收紧类型 / 改键名 = 破坏性（双侧同步 PR + 递增 version）。",
+  "type": "object",
+  "required": ["ticker", "report_period", "ann_date", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "ticker": {
+      "type": "string",
+      "pattern": "^[0-9]{6}$",
+      "description": "6 位标的代码，不带交易所后缀（与 ts_code 的换算由消费方归一化）。"
+    },
+    "report_period": {
+      "type": "string",
+      "format": "date",
+      "description": "报告期，形如 2025-09-30。"
+    },
+    "ann_date": {
+      "type": "string",
+      "format": "date",
+      "description": "公告日。缺此项 = 不合规快照（会引入 look-ahead bias）。"
+    },
+    "source": {
+      "type": "string",
+      "description": "数据源名，应与 ingest.raw.source 一致，如 akshare。"
+    },
+    "dataset": {
+      "type": "string",
+      "description": "数据集名，应与 ingest.raw.dataset 一致，如 stock_financial_abstract_ths。"
+    },
+    "fetched_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "抓取时点；缺失时以 ingest.raw.fetched_at 为准。"
+    },
+    "unit": {
+      "type": "string",
+      "enum": ["CNY", "CNY_thousand", "CNY_10k", "CNY_million", "CNY_100m"],
+      "description": "data 中全部数值的单位（键取自 field_dictionary.yaml 的 unit_scale）。缺省视为 CNY。禁止由消费方按数值大小猜测单位。"
+    },
+    "data": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "原始字段名 → 值。键名逐字保留源语义，不翻译、不改写；白名单见 field_dictionary.yaml。",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": ["number", "string", "null"],
+        "description": "数值或源侧原样字符串（如 '1,278.54亿'）；null 表示源侧缺失。字符串形式的数值必须由消费方按显式换算表解析，不得启发式猜测。"
+      }
+    }
+  }
+}

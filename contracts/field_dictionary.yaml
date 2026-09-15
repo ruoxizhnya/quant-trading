@@ -1,0 +1,149 @@
+# 契约 C1-a — 字段字典（EquityDeep ⇄ Quant Lab 两仓共用）
+#
+# Status:  frozen
+# Version: 1
+# Frozen:  2026-09-15
+# Owner:   待定（见 docs/RESEARCH.md §6 Q-2：owner 与变更流程）
+# Source:  docs/RESEARCH.md §3.2（契约 C1）; docs/design/equitydeep/EquityDeep_Product_Specification.md「附录：核心数据字段定义」
+#
+# 冻结语义（改动前必读）:
+#   1. field_code 是跨仓唯一规范字段码。一旦发布，重命名/删除即为破坏性变更，
+#      会打断历史上已写入 fundamentals_detail 的行与已落盘的 citation。
+#   2. raw_names 是**显式白名单**。只允许 原始字段名 ∈ raw_names 的映射；
+#      禁止任何启发式、模糊匹配或 LLM 翻译（RESEARCH §3.2「显式白名单，禁止启发式翻译」）。
+#   3. 命中白名单之外的原始字段名：丢弃该字段并记 warn，**不得猜测**；
+#      确需纳入时先在此文件追加 raw_names，再按兼容性规则递增版本。
+#   4. 兼容性矩阵:
+#        新增 field_code / 向已有 raw_names 追加别名 / 新增 unit_scale 项 = 兼容（递增 version）
+#        修改或删除 field_code / 删除 raw_names 成员 / 改变字段语义 = 破坏性（双侧同步 PR + 迁移脚本）
+#   5. 本文件由 Go 侧（EQD-P3-1 摄取）与 Python 侧（evals/data_quality/spot_check.py）共同消费，
+#      两侧实现必须对本文件的语义保持一致。
+
+version: 1
+status: frozen
+frozen_at: "2026-09-15"
+
+# 基准单位：所有字段的比对基准为人民币元。
+base_unit: CNY
+
+# 单位换算表 —— 显式换算，禁止 variants() 式字符串穷举（RESEARCH §3.8 加固项 #2）。
+# 换算公式：base_value = value × unit_scale[unit]
+unit_scale:
+  CNY: 1
+  CNY_thousand: 1000
+  CNY_10k: 10000
+  CNY_million: 1000000
+  CNY_100m: 100000000
+
+# M1 数据质量硬门槛的默认抽检集：10 票 × 20 数字（RESEARCH §4 阶段 P1）。
+# tickers 为跨行业大盘股，可用 --tickers 覆盖；fields 默认取本文件 fields 段的全部 field_code。
+spot_check_defaults:
+  tickers: ["600519", "000858", "000651", "000333", "601318", "600036", "002415", "600276", "601899", "600887"]
+
+# fields 段的条目数即为默认抽检字段数（20）；statement ∈ income|balance|cashflow。
+fields:
+  - field_code: total_revenue
+    raw_names: ["营业总收入", "营业总收入(元)", "营业总收入（元）"]
+    unit: CNY
+    statement: income
+    note: 报告期累计
+
+  - field_code: operating_cost
+    raw_names: ["营业成本", "营业成本(元)", "营业成本（元）"]
+    unit: CNY
+    statement: income
+    note: 不含期间费用，勿与「营业总成本」混用
+
+  - field_code: operating_profit
+    raw_names: ["营业利润", "营业利润(元)", "营业利润（元）"]
+    unit: CNY
+    statement: income
+
+  - field_code: net_profit_attr
+    raw_names: ["归属于母公司所有者的净利润", "归属于母公司股东的净利润", "归母净利润"]
+    unit: CNY
+    statement: income
+    note: 归母口径；勿与「净利润」（含少数股东）混用
+
+  - field_code: net_profit_deducted
+    raw_names: ["扣除非经常性损益后的净利润", "扣非净利润"]
+    unit: CNY
+    statement: income
+
+  - field_code: selling_expense
+    raw_names: ["销售费用", "销售费用(元)", "销售费用（元）"]
+    unit: CNY
+    statement: income
+
+  - field_code: rd_expense
+    raw_names: ["研发费用", "研发费用(元)", "研发费用（元）"]
+    unit: CNY
+    statement: income
+
+  - field_code: total_assets
+    raw_names: ["资产总计", "资产合计"]
+    unit: CNY
+    statement: balance
+
+  - field_code: total_liab
+    raw_names: ["负债合计"]
+    unit: CNY
+    statement: balance
+
+  - field_code: equity_attr
+    raw_names: ["归属于母公司所有者权益合计", "归属于母公司股东权益合计", "归属于母公司股东的权益"]
+    unit: CNY
+    statement: balance
+    note: 杜邦分解的权益乘数分母
+
+  - field_code: contract_liability
+    raw_names: ["合同负债", "预收款项"]
+    unit: CNY
+    statement: balance
+    note: 渠道话语权指标（对应 EquityDeep 疑点 Q1 同源）
+
+  - field_code: accounts_receivable
+    raw_names: ["应收账款", "应收账款(元)", "应收账款（元）"]
+    unit: CNY
+    statement: balance
+
+  - field_code: inventory
+    raw_names: ["存货"]
+    unit: CNY
+    statement: balance
+    note: 存货周转异常（对应 EquityDeep 疑点 Q2 同源）
+
+  - field_code: monetary_funds
+    raw_names: ["货币资金"]
+    unit: CNY
+    statement: balance
+
+  - field_code: fixed_assets
+    raw_names: ["固定资产"]
+    unit: CNY
+    statement: balance
+
+  - field_code: ocf_net
+    raw_names: ["经营活动产生的现金流量净额", "经营活动现金流量净额"]
+    unit: CNY
+    statement: cashflow
+
+  - field_code: investing_cf_net
+    raw_names: ["投资活动产生的现金流量净额", "投资活动现金流量净额"]
+    unit: CNY
+    statement: cashflow
+
+  - field_code: financing_cf_net
+    raw_names: ["筹资活动产生的现金流量净额", "筹资活动现金流量净额"]
+    unit: CNY
+    statement: cashflow
+
+  - field_code: capex
+    raw_names: ["购建固定资产、无形资产和其他长期资产支付的现金", "购建固定资产、无形资产和其他长期资产所支付的现金"]
+    unit: CNY
+    statement: cashflow
+
+  - field_code: cash_net_increase
+    raw_names: ["现金及现金等价物净增加额"]
+    unit: CNY
+    statement: cashflow
