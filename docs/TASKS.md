@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.28.0 (Sprint 8 — 阶段 P3 起步: EQD-P1-1 `fundamentals_detail` 表落地 + 三副本一致性校验)
+> **Version:** 3.29.0 (Sprint 8 — 阶段 P1 全部关闭: EQD-P3-2 文档漂移 8 项 DR-1~DR-8 一致性复核)
 > **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -573,12 +573,31 @@
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
-| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **9** | **1** | **7** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) |
-| **总计**          | **11** | **1** | **220** | **1** | **0** | **233** | (v3.28.0 Sprint 8 阶段 P3 起步: `fundamentals_detail` 表落地 + 三副本 parity 校验) |
+| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **9** | **0** | **8** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) |
+| **总计**          | **11** | **0** | **221** | **1** | **0** | **233** | (v3.29.0 Sprint 8 阶段 P1 全部关闭: DR-1~DR-8 复核 + 3 处残留漂移回填) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-15 (v3.29.0) — Sprint 8 阶段 P1 全部关闭: EQD-P3-2 文档漂移 8 项一致性复核
+
+**来源**: [ODR-054](odr/odr-054-dr-reverification.md) — P1 收口记录（对 [ODR-047](odr/odr-047-equitydeep-integration-audit.md) 已修 8 项做收口校验）
+
+- **复核完成**: `EQD-P3-2` 对 ODR-047 已修 8 项执行「文档声明 ↔ 物理事实」双向取证（非重新修复，而是校验"当初修好了"是否"现在还一致"）
+  — DR-1 builtin tool 实测 18 个 ↔ ARCHITECTURE.md L982 清单逐一对应 → ✅ 未回退
+  — DR-2 `pkg/ai/agents/{generate,validate,evolve}.go` + `pkg/ai/gene_pool/` 均存在 → ✅ 未回退
+  — DR-3 `docs/adr/` 22 文件 / `docs/odr/` 53 文件实测 → ⚠️ 发现 2 处残留漂移（见下）
+  — DR-4 `AGENTS.md` 计数实测 → ⚠️ 发现 1 处残留漂移（见下）
+  — DR-5 ROADMAP Phase 4 `IN PROGRESS` 修正注保留 → ✅ 未回退；DR-6 VISION `optimize.go` 两处均标 NOT IMPLEMENTED → ✅ 未回退
+  — DR-7 由 `EQD-P3-1` 承接（阶段 P3）；DR-8 `docs/design/equitydeep/` 迁移 + 7 处引用一致 → ✅ 未回退
+- **回填 3 处残留漂移**（由后续新增记录引起，非 ODR-047 修复失效）:
+  — DR-3-R1: `docs/ADR.md` 尾注 ADR 拆分 21 ≠ 22（ADR-021 未落入任何一类）→ 补「研究层 1 (ADR-021)」
+  — DR-3-R2: `docs/ADR.md` 尾注 Implementation 31 ≠ 30（ODR-022 已被索引表归入 Refactor，属"分类计数"与"区间枚举"口径混用）→ 改为显式枚举 `ODR-016~021 + ODR-023~042 + ODR-050~053`
+  — DR-4-R1: `AGENTS.md` 目录树 `odr/ # (ODR-001~049)` → `(ODR-001~054)`
+- **改进**: 尾注拆分改写为**可验算形式**（各分类之和 = 声明总数），使下一轮漏改立即暴露为「和 ≠ 总数」
+- **文档同步**: [ADR.md](ADR.md) index 3.10.0 → 3.10.1（ODR 53 → 54, Audit 9 → 10）；[AGENTS.md](../AGENTS.md) §1 版本行「P1 底座契约已全部关闭」
+- **统计更新**: 总计 233 不变；待处理 11 → 10, 已完成 220 → 221（Sprint 8 内 9/1/7 → 9/0/8）；**阶段 P1 完成度 4/4**
 
 ### 2026-09-15 (v3.28.0) — Sprint 8 阶段 P3 起步: EQD-P1-1 `fundamentals_detail` 表落地
 
@@ -688,7 +707,7 @@
   - 🔵 P0×3（零依赖可开工）: EQD-P0-1 契约冻结 (C-2) / EQD-P0-2 抽检脚本泛化 (C-7/桥 B3) / EQD-P0-3 EquityDeep 回查脚本 P0 假阳性缺陷修复
   - 🟠 P1×2（依赖 M1 硬门槛）: EQD-P1-1 `fundamentals_detail` 建表 (C-1) / EQD-P1-2 摄取命令 + 5 纵向因子 (C-3, C-4)
   - 🟡 P2×2（弱依赖 M3）: EQD-P2-1 MCP 工具 `research.profile` (C-5) / EQD-P2-2 vault 只读挂载 (C-6)
-  -  P3×2（收尾）: EQD-P3-1 `fundamentals`/`stock_fundamentals` 表合并 (C-8/DR-7) / EQD-P3-2 文档漂移 8 项收口 (C-9)
+  -  P3×2（收尾）: EQD-P3-1 `fundamentals`/`stock_fundamentals` 表合并 (C-8/DR-7, 待办) / ~~EQD-P3-2 文档漂移 8 项收口 (C-9)~~ ✅ 已收口 (ODR-054)
 - **DR-7 正式登记**: `fundamentals` 与 `stock_fundamentals` 表重叠（原仅文档自承「未来评估合并」无任务跟踪）→ EQD-P3-1
 - **统计更新**: 总计 216 → 225（待处理 2 → 10，进行中 0 → 1）
 - **关联文档**: [ADR-021](adr/adr-021-equitydeep-research-layer.md)（架构决策，后由 [ADR-022](adr/adr-022-unified-research-platform.md) 取代）+ [RESEARCH.md](RESEARCH.md)（Product + Tech 方案）+ `docs/design/equitydeep/`（上游规格）
@@ -1767,13 +1786,13 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | **P4** | 飞轮打通（疑点 → 假设 → 因子 → 回测 → 回流档案） | EQD-P2-1 | P4-1 |
 | **P5** | 横截面工作面 v2（存量对齐新架构） | — | P5-1 |
 
-### 🔵 阶段 P1 — 底座契约（可立即开工，零外部依赖）
+### ✅ 阶段 P1 — 底座契约（已全部关闭，零外部依赖）
 
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
 | EQD-P0-1 | 契约冻结：将 `fundamentals_detail` schema + `_profile.json` schema 纳入版本控制（C-2） | `contracts/`（新目录） | ✅ | ODR-047 / RESEARCH §3.2-3.3 → ADR-022 P1 |
 | EQD-P0-2 | 抽检脚本泛化：通用化 EquityDeep M1 数据质量抽检（10 票 × 20 数字，错误率 < 2%）（C-7 / 桥 B3） | `evals/data_quality/` | ✅ | ODR-047 / RESEARCH §3.6 → ADR-022 P1 |
-| EQD-P3-2 | 文档漂移修复 8 项（DR-1~DR-8 收口校验）（C-9） | `docs/ARCHITECTURE.md` 等 | 🔵 | ODR-047 D5 / C-9 → ADR-022 P1 |
+| EQD-P3-2 | 文档漂移修复 8 项（DR-1~DR-8 收口校验）（C-9） | `docs/odr/odr-054-dr-reverification.md`（新）+ `docs/ADR.md` / `AGENTS.md` | ✅ | ODR-047 D5 / C-9 → ADR-022 P1 |
 | **L0-1** | **单一摄取入口**：统一 akshare/tushare adapter 归属 L0，禁止工作面直连外部数据源 | `pkg/data/tushare_raw.go` + `cmd/data/handlers_ingest.go` | ✅ | [ADR-022](adr/adr-022-unified-research-platform.md) §3 / PRODUCT §9 |
 | **L0-2** | **`ingest.raw` 表**：原始源响应归档（`content_hash` 唯一键；冷热分层策略见 PRODUCT.md Q-2） | `pkg/storage/postgres.go`（内联）+ `docs/migrations/020_add_ingest_raw.sql` | ✅ | ADR-022 §2 / PRODUCT §6.1 |
 | **L0-3** | **Evidence API**：`GET /api/evidence/{content_hash}` 返回唯一原始记录（citation 内容坐标） | `cmd/analysis/handlers_evidence.go` | ✅ | ADR-022 §5 / PRODUCT §7 |
@@ -1816,9 +1835,9 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 |----|------|------|------|------|
 | **P5-1** | **工作面 2 对齐**：Vue SPA / Research Engine 存量能力对接 L0 单一数据面 + Evidence API（去除旁路取数） | `web/src/`, `cmd/analysis/`, `pkg/data/` | ⬜ | ADR-022 §1, §3 / PRODUCT §5 |
 
-> **EQD-P3-2 进展**: 本次审计已完成 DR-1~DR-6 + DR-8；DR-7 由阶段 P3 的 EQD-P3-1 承接。剩余为一致性复核。
+> **EQD-P3-2 进展**: ✅ **已完成**（[ODR-054](odr/odr-054-dr-reverification.md)）—— 对 ODR-047 已修 8 项做「文档声明 ↔ 物理事实」双向取证复核：DR-1/2/5/6/8 未回退，DR-7 由阶段 P3 的 EQD-P3-1 承接；另发现并回填 3 处残留漂移（DR-3-R1 ADR 拆分 21≠22 / DR-3-R2 Implementation 31≠30 / DR-4-R1 `ODR-001~049`）。**阶段 P1 全部关闭**。
 >
-> **原 Sprint 8 任务去向**: EQD-P0-1、EQD-P0-2 → 阶段 P1；EQD-P0-3、EQD-P2-2 → 阶段 P2；EQD-P1-1、EQD-P1-2、EQD-P3-1 → 阶段 P3；EQD-P2-1 → 阶段 P4；EQD-P3-2 → 阶段 P1（🔵 进行中）。
+> **原 Sprint 8 任务去向**: EQD-P0-1、EQD-P0-2、EQD-P3-2 → 阶段 P1（✅ 全部关闭）；EQD-P0-3、EQD-P2-2 → 阶段 P2；EQD-P1-1、EQD-P1-2、EQD-P3-1 → 阶段 P3；EQD-P2-1 → 阶段 P4。
 
 ---
 

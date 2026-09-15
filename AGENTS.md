@@ -15,7 +15,7 @@
 **Quant Lab** 底座采用 Go 后端 + Vue 3 前端 + PostgreSQL + Redis 架构。
 
 - **语言**: Go 1.21+ (后端), TypeScript + Vue 3 (前端)
-- **当前版本**: Phase 3 (Integration & Scale) → Phase 4 (AI-Native Evolution) 进行中；统一研究平台 (ADR-022) 处于 **P0 顶层定义已完成 / P1 底座契约已完成（L0-1~L0-4 + EQD-P0-1/P0-2，除 EQD-P3-2 复核）/ P2 待 EquityDeep 仓 / P3 计算面起步（EQD-P1-1 已落地）**
+- **当前版本**: Phase 3 (Integration & Scale) → Phase 4 (AI-Native Evolution) 进行中；统一研究平台 (ADR-022) 处于 **P0 顶层定义已完成 / P1 底座契约已全部关闭（L0-1~L0-4 + EQD-P0-1/P0-2 + EQD-P3-2 复核）/ P2 待 EquityDeep 仓 / P3 计算面起步（EQD-P1-1 已落地）**
 - **状态**: 底座（Quant Lab）核心功能已完成、AI 研究服务已上线运行；**工作面 1（EquityDeep）处于启动状态** — Python 3.11 独立实现，尚未接入共享底座（形态变更待 P2 落地）
 - **入口**: `cmd/analysis/main.go` (后端), `cmd/ai/main.go` (AI 服务), `web/src/main.ts` (前端)
 - **构建**: `go build ./...` (后端), `npm run build` (前端)
@@ -164,7 +164,7 @@ quant-trading/
 │   └── utils/              # 工具函数
 ├── docs/                   # 文档 (见下方导航)
 │   ├── adr/                # 架构决策记录 (ADR-001~022)
-│   ├── odr/                # 运营决策记录 (ODR-001~049)
+│   ├── odr/                # 运营决策记录 (ODR-001~054)
 │   ├── design/equitydeep/  # 工作面 1 上游规格 (EquityDeep v1.1)
 │   └── hermes/             # Hermes Agent 配置 + Skill + 验收测试 (Phase 4)
 ├── e2e/tests/              # Playwright E2E 测试

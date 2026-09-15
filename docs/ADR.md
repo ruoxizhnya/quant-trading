@@ -2,7 +2,7 @@
 
 > **Location:** `docs/adr/` — architectural ADR files | `docs/odr/` — operational ODR files
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Version:** 3.10.0
+> **Version:** 3.10.1
 > **Created:** 2026-03-24
 > **Updated:** 2026-09-15
 
@@ -94,6 +94,7 @@
 | [ODR-051](odr/odr-051-l0-1-single-ingest-entry.md) | P1 底座契约落地 — L0-1 单一摄取入口; 归档挂真实咽喉点 `TushareClient.call()` (归原始 body 而非规范化行) + 新写入口 `POST /api/ingest/raw` 供外部生产者上报; 实证 `source.Registry`/`ETLPipeline` 不在真实数据路径上 (仅诊断/测试调用); `TushareStore` 接口加 `SaveRawIngest` 编译期强制; 零 DDL / 零存量表改动 | Completed | Implementation | 2026-09-15 |
 | [ODR-052](odr/odr-052-p1-contract-freeze-and-spot-check.md) | P1 底座契约收尾 — EQD-P0-1 契约冻结 (`contracts/` 4 文件: field_dictionary.yaml / fundamentals_detail.schema.sql / snapshot.schema.json / profile.schema.json) + EQD-P0-2 抽检泛化 (`evals/data_quality/spot_check.py` — 白名单/单位换算/双源比对三检查 + 四退出码 + `--self-test` + 6 位标的校验; 消费读数转储 JSONL 不直连数据源); 零 Go 改动 / 零 DDL | Completed | Implementation | 2026-09-15 |
 | [ODR-053](odr/odr-053-p3-fundamentals-detail-table.md) | P3 计算面起步 — EQD-P1-1 `fundamentals_detail` 表落地 (契约 C1: 逐字段行存 + `ann_date` PIT + `snapshot_uri` 溯源 + 主键含 `fetched_at` 支持 restatement; 内联 `migrate()` Migration 022 + `docs/migrations/022_*.sql` 副本) + 三副本自动一致性校验 (补齐 ODR-052 遗留缺口: `ThreeCopiesAgree` / `FrozenSemantics` / `AppliedByMigrate`); 活跃表数 38 → 39; 仅新增不改存量表 | Completed | Implementation | 2026-09-15 |
+| [ODR-054](odr/odr-054-dr-reverification.md) | P1 收口 — EQD-P3-2 文档漂移 8 项 (DR-1~DR-8) 一致性复核: 逐项「文档声明 ↔ 物理事实」双向取证 (builtin 工具实测 18 个 / `pkg/ai/agents` + `gene_pool` 存在 / `docs/odr` 53 文件 / `docs/adr` 22 文件 / `design/equitydeep/` 迁移引用一致); 结论 DR-1/2/5/6/8 未回退, DR-7 由 `EQD-P3-1` 承接; 回填 3 处残留漂移 (ADR.md 尾注 ADR 拆分缺 ADR-021 = 21≠22 / Implementation 区间含已归 Refactor 的 ODR-022 = 31≠30 / AGENTS.md 目录树 `ODR-001~049`) | Completed | Audit | 2026-09-15 |
 
 ---
 
@@ -141,8 +142,9 @@ ODR template: see `docs/odr/odr-001-document-cleanup.md` for the canonical examp
 
 ---
 _Last updated by: AI Assistant — 2026-06-14 (P2-9~P2-12 + P2-17~P2-33 全部完成 → ODR-034~041 新建 Completed; Sprint 6 P2 累计 33 项全部 ✅)_
-_ADR 累计 22 条: 架构 17 (含 ADR-022) + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020); 其中 ADR-014/ADR-021 已 Superseded_
-_ODR 累计 53 条: Cleanup 4 (ODR-001/006/008/045) | Audit 9 (ODR-002/009/010/012/013/015/043/047/049) | Migration 7 (ODR-003/005/007/011/014/044/046) | Process 1 (ODR-004) | Implementation 30 (ODR-016~042 + ODR-050~053) | Refactor 2 (ODR-022/048)_
+_ADR 累计 22 条: 架构 17 (ADR-001~016 + ADR-022) + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020) + 研究层 1 (ADR-021); 其中 ADR-014 由 ADR-020 §6 取代、ADR-021 由 ADR-022 取代_
+_ODR 累计 54 条: Cleanup 4 (ODR-001/006/008/045) | Audit 10 (ODR-002/009/010/012/013/015/043/047/049/054) | Migration 7 (ODR-003/005/007/011/014/044/046) | Process 1 (ODR-004) | Implementation 30 (ODR-016~021 + ODR-023~042 + ODR-050~053) | Refactor 2 (ODR-022/048)_
+_2026-09-15 状态变更 (本次): ODR-054 新建 Completed (P1 收口 — EQD-P3-2 文档漂移 8 项 DR-1~DR-8 一致性复核: DR-1/2/5/6/8 未回退, DR-7 由 EQD-P3-1 承接; 回填 3 处残留漂移 DR-3-R1/DR-3-R2/DR-4-R1; 阶段 P1 全部关闭); ADR.md index 3.10.0 → 3.10.1 (ODR 53 → 54, Audit 9 → 10; 尾注 ADR/ODR 拆分改为枚举可验算形式) — ODR-054_
 _2026-09-15 状态变更 (本次): ODR-053 新建 Completed (P3 计算面起步 — EQD-P1-1 `fundamentals_detail` 表落地: 内联 `migrate()` Migration 022 + `docs/migrations/022_*.sql` 副本 + 三副本自动一致性校验补齐 ODR-052 遗留缺口; 活跃表数 38 → 39); ADR.md index 3.9.0 → 3.10.0 (ODR 52 → 53, Implementation 29 → 30) — ODR-053_
 _2026-09-15 状态变更 (本次): ODR-052 新建 Completed (P1 底座契约收尾 — EQD-P0-1 `contracts/` 契约冻结 4 文件 + EQD-P0-2 `spot_check.py` 抽检泛化; 三项检查 + 四退出码 + `--self-test`; 零 Go 改动 / 零 DDL); ADR.md index 3.8.0 → 3.9.0 (ODR 51 → 52, Implementation 28 → 29) — ODR-052_
 _2026-09-15 状态变更 (本次): ODR-051 新建 Completed (P1 底座契约 L0-1 单一摄取入口 — 归档挂 `TushareClient.call()` 咽喉点 + 新增 `POST /api/ingest/raw` 写入口; TushareStore 接口加 SaveRawIngest 编译期强制; 零 DDL); ADR.md index 3.7.0 → 3.8.0 (ODR 50 → 51, Implementation 27 → 28) — ODR-051_
