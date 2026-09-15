@@ -73,6 +73,12 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache storage.C
 	// Health check
 	r.GET("/health", healthHandler(store, cache))
 
+	// L0 ingest write door (ADR-022 §2/§3, TASKS.md L0-1).
+	// The only door through which raw source responses enter ingest.raw,
+	// hence the only way an external producer (the akshare side) can make
+	// its data citable through the Evidence API.
+	r.POST("/api/ingest/raw", ingestRawHandler(store))
+
 	// Stock endpoints
 	r.GET("/stocks", listStocksHandler(store, cache))
 	r.GET("/stocks/:symbol", getStockHandler(store, cache))

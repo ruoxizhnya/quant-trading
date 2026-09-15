@@ -111,12 +111,16 @@ L0 数据面   ingest.raw | market.* | quant.* | research.* | Evidence API   ←
 citation = { source, dataset, key, as_of, content_hash }
 ```
 
+**摄取入口**（已实现 — L0-1，见 [ODR-051](odr/odr-051-l0-1-single-ingest-entry.md)）：
+
 | Method | Path | 说明 |
 |---|---|---|
+| POST | `/api/ingest/raw` | 外部生产者（akshare 侧 / 同步 executor）上报原始响应，落 `ingest.raw`；同 `content_hash` 幂等 |
 | GET | `/api/evidence/{content_hash}` | 返回该哈希对应的**唯一原始记录**（类 A），404 表示未摄取 |
 
 约束：
 - `content_hash` 由 L0 摄取时计算并作为 `ingest.raw` 唯一键，全平台跨工作面共享；
+- `POST /api/ingest/raw` 是类 A 数据的**唯一写入口**，`source`/`dataset`/`key` 三者构成人类可读坐标，`content_hash` 为机器坐标；
 - 工作面 1 不得自建数据副本，运行期经本 API 只读取数；
 - 该设计在架构层面消除 ODR-047 记录的 P0 假阳性缺陷（校验对象由"文本"变为"citation 元组 + JSON Pointer"）。
 

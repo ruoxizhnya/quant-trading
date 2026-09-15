@@ -2216,6 +2216,56 @@ paths:
               schema:
                 type: object
 
+  /api/ingest/raw:
+    post:
+      tags: [Evidence]
+      summary: Archive a raw external-source response into ingest.raw
+      description: |
+        L0 ingest write door (ADR-022 §2/§3 / TASKS.md L0-1). The platform's
+        single write door into `ingest.raw` (class A). The data service writes
+        here in-process at the tushare request choke point; external producers
+        — in practice the akshare side of work face 1 — post here so their data
+        becomes citable via GET /api/evidence/{content_hash} instead of being
+        copied into a second store.
+
+        The door is deliberately narrow: it archives a verbatim payload and
+        returns the content_hash that citations must carry. It does not
+        normalise, interpret, or validate domain content — normalisation is a
+        separate, reproducible step that reads these rows back.
+
+        Idempotent: content_hash is the primary key and the insert is
+        ON CONFLICT DO NOTHING, so re-posting the same response is a no-op and
+        never rewrites the original attribution.
+      operationId: ingestRaw
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RawIngestWrite'
+      responses:
+        '201':
+          description: Archived, or already present. Returns the stored record carrying the authoritative content_hash.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RawIngest'
+        '400':
+          description: |
+            Rejected before any write: missing source/dataset/key/payload,
+            malformed body, a content_hash that does not match the payload, or
+            an as_of that is neither `YYYY-MM-DD` nor RFC3339.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The archive write failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/evidence/{content_hash}:
     get:
       tags: [Evidence]
@@ -2325,6 +2375,43 @@ components:
           type: string
         status:
           type: string
+
+    RawIngestWrite:
+      type: object
+      description: |
+        Wire format of POST /api/ingest/raw. The payload is archived verbatim;
+        content_hash is computed by the server from the payload, never trusted
+        from the caller.
+      required: [source, dataset, key, payload]
+      properties:
+        source:
+          type: string
+          description: Data source that produced the response
+          example: akshare
+        dataset:
+          type: string
+          description: Logical dataset name within the source
+          example: akshare.stock_financial_abstract
+        key:
+          type: string
+          description: Source-native key of the record
+          example: 600519.SH/2024Q1
+        payload:
+          type: object
+          description: The raw source response, archived verbatim
+        as_of:
+          type: string
+          nullable: true
+          description: |
+            Observation date the payload describes (`YYYY-MM-DD` or RFC3339) —
+            not the fetch time. Omit when the payload has no single date.
+          example: '2024-09-30'
+        content_hash:
+          type: string
+          description: |
+            Optional. When supplied it is verified against the payload, letting
+            a caller confirm it is re-sending the response it cited; a mismatch
+            is rejected instead of poisoning the evidence index.
 
     RawIngest:
       type: object

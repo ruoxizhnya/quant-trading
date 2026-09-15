@@ -30,6 +30,10 @@ type TushareStore interface {
 	GetIndexConstituents(ctx context.Context, indexCode string) ([]domain.IndexConstituent, error)
 	SaveDividendBatch(ctx context.Context, records []*domain.Dividend) error
 	SaveSplitBatch(ctx context.Context, records []*domain.Split) error
+	// SaveRawIngest archives a class-A raw source response (ADR-022 §2,
+	// ingest.raw). Declared here so the archive contract is enforced at
+	// compile time rather than discovered at runtime.
+	SaveRawIngest(ctx context.Context, record *storage.RawIngest) error
 }
 
 // TushareClient wraps the tushare.pro HTTP API.
@@ -167,6 +171,12 @@ func (c *TushareClient) call(ctx context.Context, apiName string, params map[str
 	if tushareResp.Code != 0 {
 		return nil, fmt.Errorf("tushare API error %d: %s", tushareResp.Code, tushareResp.Msg)
 	}
+
+	// Archive the raw source response before any caller normalises it, so
+	// ingest.raw stays the single evidence coordinate for this request
+	// (ADR-022 §2 class A). Only successful responses are archived — an error
+	// envelope is not data anyone can cite.
+	c.archiveRaw(ctx, apiName, params, resp.Body)
 
 	c.logger.Debug().Interface("data_fields", tushareResp.Data.Fields).Int("items_count", len(tushareResp.Data.Items)).Msg("tushare response received")
 

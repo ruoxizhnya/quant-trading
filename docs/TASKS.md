@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.25.0 (Sprint 8 — 阶段 P1 底座契约三项先行落地: L0-2 / L0-3 / L0-4)
+> **Version:** 3.26.0 (Sprint 8 — 阶段 P1: L0-1 单一摄取入口落地，P1 四项底座契约全部冻结)
 > **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -573,12 +573,29 @@
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
-| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **13** | **1** | **3** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-2/L0-3/L0-4 已冻结(ODR-050) |
-| **总计**          | **15** | **1** | **216** | **1** | **0** | **233** | (v3.25.0 Sprint 8 阶段 P1 底座契约三项先行落地) |
+| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **12** | **1** | **4** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) |
+| **总计**          | **14** | **1** | **217** | **1** | **0** | **233** | (v3.26.0 Sprint 8 阶段 P1 底座契约四项全部冻结) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-15 (v3.26.0) — Sprint 8 阶段 P1「底座契约」L0-1 单一摄取入口落地
+
+**来源**: [ODR-051](odr/odr-051-l0-1-single-ingest-entry.md) — L0-1 落地记录（归档接入真实路径 + 写入口 API）
+
+- **落地**: `L0-1` 归档接入真实取数路径（`pkg/data/tushare_raw.go` + `pkg/data/tushare.go`）
+  — `TushareClient.call()` 为全仓 tushare 响应的唯一咽喉点；成功响应在**任何调用方规范化之前**归档原始 HTTP body
+  — 归档为 best-effort：失败只记 warn，不影响 fetch 结果；`as_of` 故意留 NULL（单响应可跨数千交易日）
+- **落地**: `L0-1` 写入口 `POST /api/ingest/raw`（`cmd/data/handlers_ingest.go`）
+  — 平台写入 `ingest.raw` 的唯一 HTTP 门；外部生产者（工作面 1 的 akshare 侧）经此上报原始响应
+  — 门很窄：逐字归档 payload 并返回 `content_hash`，不做规范化/解释/领域校验；幂等（`ON CONFLICT DO NOTHING`）
+- **契约收紧**: `TushareStore` 接口新增 `SaveRawIngest`（L32）— 归档契约在**编译期**强制，而非运行时才发现
+- **勘察结论（重要）**: 声明的「单一摄取入口」（`source.Registry` + `ETLPipeline`）**不在真实数据路径上**
+  — `Registry` 仅被 `registry_handlers.go` 的 health/list 诊断端点消费；`ETLPipeline.Process` 全仓仅测试调用
+  — 据此本轮把归档挂到真实咽喉点，**不做**完整 Registry 重接（属多 Sprint 工程，见 ODR-051「未做项」）
+- **文档同步**: [openapi.yaml](openapi.yaml) 新增 `POST /api/ingest/raw` + `RawIngestWrite` schema
+- **统计更新**: 总计 233 不变；待处理 15 → 14, 已完成 216 → 217（Sprint 8 内 13/1/3 → 12/1/4）
 
 ### 2026-09-15 (v3.25.0) — Sprint 8 阶段 P1「底座契约」三项先行落地
 
@@ -1721,7 +1738,7 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | EQD-P0-1 | 契约冻结：将 `fundamentals_detail` schema + `_profile.json` schema 纳入版本控制（C-2） | `contracts/`（新目录） | ⬜ | ODR-047 / RESEARCH §3.2-3.3 → ADR-022 P1 |
 | EQD-P0-2 | 抽检脚本泛化：通用化 EquityDeep M1 数据质量抽检（10 票 × 20 数字，错误率 < 2%）（C-7 / 桥 B3） | `evals/data_quality/` | ⬜ | ODR-047 / RESEARCH §3.6 → ADR-022 P1 |
 | EQD-P3-2 | 文档漂移修复 8 项（DR-1~DR-8 收口校验）（C-9） | `docs/ARCHITECTURE.md` 等 | 🔵 | ODR-047 D5 / C-9 → ADR-022 P1 |
-| **L0-1** | **单一摄取入口**：统一 akshare/tushare adapter 归属 L0，禁止工作面直连外部数据源 | `pkg/data/source/` | ⬜ | [ADR-022](adr/adr-022-unified-research-platform.md) §3 / PRODUCT §9 |
+| **L0-1** | **单一摄取入口**：统一 akshare/tushare adapter 归属 L0，禁止工作面直连外部数据源 | `pkg/data/tushare_raw.go` + `cmd/data/handlers_ingest.go` | ✅ | [ADR-022](adr/adr-022-unified-research-platform.md) §3 / PRODUCT §9 |
 | **L0-2** | **`ingest.raw` 表**：原始源响应归档（`content_hash` 唯一键；冷热分层策略见 PRODUCT.md Q-2） | `pkg/storage/postgres.go`（内联）+ `docs/migrations/020_add_ingest_raw.sql` | ✅ | ADR-022 §2 / PRODUCT §6.1 |
 | **L0-3** | **Evidence API**：`GET /api/evidence/{content_hash}` 返回唯一原始记录（citation 内容坐标） | `cmd/analysis/handlers_evidence.go` | ✅ | ADR-022 §5 / PRODUCT §7 |
 | **L0-4** | **`research` schema DDL**：研究结构化状态（markdown 的确定性投影，可 DROP 重建） | `pkg/storage/postgres.go`（内联）+ `docs/migrations/021_add_research_schema.sql` | ✅ | ADR-022 §2 / PRODUCT §6.1 |

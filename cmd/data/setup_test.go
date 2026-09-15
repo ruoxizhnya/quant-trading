@@ -145,6 +145,7 @@ func TestSplit_NoDuplicateHandlerDeclarations(t *testing.T) {
 		"handlers_fundamentals.go",
 		"handlers_sync.go",
 		"handlers_factor.go",
+		"handlers_ingest.go",
 	}
 
 	_, testFile, _, ok := runtime.Caller(0)
