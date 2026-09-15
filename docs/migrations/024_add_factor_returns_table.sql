@@ -1,4 +1,4 @@
--- Migration 007: Factor Returns table for quintile portfolio attribution
+-- Migration 024: Factor Returns table for quintile portfolio attribution
 CREATE TABLE IF NOT EXISTS factor_returns (
     id SERIAL PRIMARY KEY,
     factor_name VARCHAR(20) NOT NULL,

@@ -240,8 +240,8 @@ CREATE TABLE strategy_genes (
 
 | 验收项 | 状态 | 证据 |
 |-------|-----|------|
-| `factor_genes` 表 | ✅ | `migrations/012_add_gene_pool_tables.sql` + `pkg/ai/gene_pool/factor_pool.go` |
-| `strategy_genes` 表 | ✅ | `migrations/012_add_gene_pool_tables.sql` + `pkg/ai/gene_pool/strategy_pool.go` |
+| `factor_genes` 表 | ✅ | `migrations/023_add_gene_pool_tables.sql` + `pkg/ai/gene_pool/factor_pool.go` |
+| `strategy_genes` 表 | ✅ | `migrations/023_add_gene_pool_tables.sql` + `pkg/ai/gene_pool/strategy_pool.go` |
 | 系谱追踪 (genealogy JSONB) | ✅ | `pkg/ai/gene_pool/genealogy.go` |
 | 状态机 (pending → validated → archived) | ✅ | `pkg/ai/gene_pool/*_pool.go` |
 

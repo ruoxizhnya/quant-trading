@@ -134,7 +134,7 @@ EquityDeep 自身的用户故事（US-1~US-4）见其产品规格，本层不重
 
 ### 3.2 契约 C1：深财务快照 → Quant Lab
 
-**表设计**（新增迁移 `migrations/012_equitydeep_fundamentals.sql`）：
+**表设计**（新增迁移 `docs/migrations/022_equitydeep_fundamentals.sql`）：
 
 ```sql
 CREATE TABLE IF NOT EXISTS fundamentals_detail (
@@ -280,14 +280,14 @@ evals/data_quality/spot_check.py
 
 | # | 改造项 | 文件/位置 | 依赖 |
 |---|---|---|---|
-| C-1 | 新增 `fundamentals_detail` 表 | `migrations/012_equitydeep_fundamentals.sql` | 契约冻结 |
+| C-1 | 新增 `fundamentals_detail` 表 | `docs/migrations/022_equitydeep_fundamentals.sql` | 契约冻结 |
 | C-2 | 契约文件纳入版本控制 | `contracts/`（新目录） | — |
 | C-3 | EquityDeep 摄取命令 | `pkg/data/equitydeep/`（新包） | C-1 |
 | C-4 | 新增 5 个基本面因子 | `pkg/data/factors/` | C-3 |
 | C-5 | MCP 工具 `research.profile` | `pkg/tools/builtin/research_tool.go` | 契约 C2 |
 | C-6 | vault 只读挂载配置 | `docker-compose.override.yml` | C-5 |
 | C-7 | 抽检脚本泛化 | `evals/data_quality/` | — |
-| C-8 | 修复 `fundamentals` / `stock_fundamentals` 表重叠 | `migrations/013_*.sql` | 独立 |
+| C-8 | 修复 `fundamentals` / `stock_fundamentals` 表重叠 | `docs/migrations/025_equitydeep_field_consolidation.sql` | 独立 |
 | C-9 | 文档漂移修复 8 项 | 见 [ODR-047](odr/odr-047-equitydeep-integration-audit.md) | — |
 
 ### 3.8 EquityDeep 侧加固项（本审计发现）

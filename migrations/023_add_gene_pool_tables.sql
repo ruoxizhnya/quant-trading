@@ -1,4 +1,4 @@
--- Migration 012: Add gene pool tables for AI factor and strategy evolution
+-- Migration 023: Add gene pool tables for AI factor and strategy evolution
 -- Date: 2026-05-05
 
 -- Factor genes table
