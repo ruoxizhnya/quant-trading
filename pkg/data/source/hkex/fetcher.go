@@ -59,6 +59,10 @@ type EastmoneyNorthboundFetcher struct {
 
 // NewEastmoneyNorthboundFetcher constructs a fetcher with sensible
 // defaults. Pass an httptest.Server.URL as baseURL in tests.
+//
+// L0 摄取侧专用（ADR-022 §1）：该 fetcher 直连外部源（Eastmoney push2），
+// 只能由 L0 摄取所有者 cmd/data 驱动，且抓取结果必须先归档进 ingest.raw 再被消费。
+// 分析 / 回测 / 工作流侧不得实例化它直连取数——只能读 L0 数据面。
 func NewEastmoneyNorthboundFetcher(baseURL string) *EastmoneyNorthboundFetcher {
 	if baseURL == "" {
 		baseURL = defaultEastmoneyBaseURL

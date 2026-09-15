@@ -121,6 +121,10 @@ logging:
   format: "json"
 
 # Data Source Adapter Configuration (Phase 3)
+#
+# ADR-022 §1: 外部数据源不得由本服务直连取数。tushare / akshare 直连 provider
+# 已退役（工厂对这两个 type 显式拒绝），外部数据统一经 L0 单一摄取入口
+# POST /api/ingest/raw 归档进 ingest.raw，本服务只经 http / postgres 读 L0。
 datasource:
   primary: "http"
   fallback: ""
@@ -135,15 +139,7 @@ datasource:
     http:
       type: "http"
       url: "http://data-service:8081"
-    tushare:
-      type: "tushare"
-      url: "http://tushare.pro"
-      token: "${TUSHARE_TOKEN}"
     postgres:
       type: "postgres"           # requires PostgresStore injection at init
-    akshare:
-      type: "akshare"
-      python_path: "python3"
-      script_dir: "./scripts"
     inmemory:
       type: "inmemory"           # for testing only

@@ -574,10 +574,10 @@ type Provider interface {
 | Provider | Source | Use Case | File |
 |----------|--------|----------|------|
 | `PostgresProvider` | Local PostgreSQL/TimescaleDB | Primary data source (zero latency) | `pkg/marketdata/postgres_provider.go` |
-| `TushareProvider` | tushare.pro API | External API (200 req/min) | `pkg/marketdata/tushare_provider.go` |
-| `AkShareProvider` | AkShare (Python) | Free alternative to Tushare | `pkg/marketdata/akshare_provider.go` |
-| `HttpProvider` | Generic HTTP | Generic REST API adapter | `pkg/marketdata/http_provider.go` |
+| `HttpProvider` | Generic HTTP | Generic REST API adapter (e.g., L0 data service) | `pkg/marketdata/http_provider.go` |
 | `InMemoryProvider` | In-memory | Testing and caching | `pkg/marketdata/inmemory_provider.go` |
+
+> **External-source direct providers retired** ([ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)): the former `TushareProvider` / `AkShareProvider` (which called tushare.pro / AkShare directly) have been removed. Per [ADR-022](adr/adr-022-unified-research-platform.md) §1, external data may only enter through the L0 single ingest door (`POST /api/ingest/raw` → `ingest.raw`); read-only consumers go through `http` / `postgres`. The adapter factory now rejects `type: tushare` / `type: akshare` explicitly.
 
 ### DataAdapter (Three-Layer Architecture)
 
@@ -586,13 +586,13 @@ The `DataAdapter` implements a primary/fallback pattern with health checking:
 ```go
 type DataAdapter struct {
     primary  Provider    // e.g., PostgresProvider
-    fallback Provider    // e.g., TushareProvider
+    fallback Provider    // e.g., HttpProvider (L0 data service)
     logger   zerolog.Logger
 }
 ```
 
 - **Primary**: Local PostgreSQL for fast, reliable data
-- **Fallback**: External API (Tushare/AkShare) when local data is missing
+- **Fallback**: A read-only L0-facing provider (e.g., `HttpProvider` → data service) when local data is missing
 - **Auto-switching**: Health checks on every request, automatic fallback on failure
 
 ### CachedProvider (Redis Cache Decorator)

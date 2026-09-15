@@ -28,7 +28,7 @@ _原最后更新: 2026-04-08 (Phase 3)_
 
 **Phase 3 更新:**
 - Event-Driven 数据管道 (pkg/marketdata/eventbus.go + provider 接口)
-- 多数据源适配器: Tushare / AkShare / Postgres / HTTP / Cached (Redis)
+- 多数据源适配器: Postgres / HTTP / InMemory / Cached (Redis)（原 `pkg/marketdata` 的 Tushare / AkShare **直连** provider 已于 ADR-022 §1 退役，外部源统一经 L0 单一摄取入口，见 [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)）
 - 因子缓存预热: Engine 自动从 factor_cache 表加载 z-score，注入 FactorZScoreReader
 - 限价单支持: strategy.Signal 增加 OrderType/LimitPrice，Tracker 按日内高低价判断成交
 - 股息/送股处理: Tracker.ProcessDividend + ProcessSplit，Engine 日循环自动处理
@@ -726,8 +726,6 @@ quant-trading/
 │   ├── marketdata/     — Event-Driven 数据管道
 │   │   ├── eventbus.go  — DataEventBus (pub/sub)
 │   │   ├── provider.go  — Provider 接口
-│   │   ├── tushare_provider.go
-│   │   ├── akshare_provider.go
 │   │   ├── postgres_provider.go
 │   │   ├── http_provider.go
 │   │   └── cached_provider.go — Redis 缓存装饰器

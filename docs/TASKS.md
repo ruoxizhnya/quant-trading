@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.32.0 (Sprint 8 — 阶段 P4 起步: EQD-P2-1 第 19 个 MCP 工具 `research.profile`, ODR-057)
+> **Version:** 3.33.0 (Sprint 8 — 阶段 P5 切片 1: 封潜伏直连, 退役 `pkg/marketdata` 直连 provider, ODR-058)
 > **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -169,9 +169,9 @@
 | ----- | ---------------------------------------------------------- | ------------------------------------- | -- | ---- |
 | D1-1  | 实现 DataEventBus (pub/sub)                                  | `pkg/marketdata/eventbus.go`          | ✅  | 0.5d |
 | D1-2  | 增强 Provider 接口 (Name/CheckConnectivity/GetTradingCalendar) | `pkg/marketdata/provider.go`          | ✅  | 0.5d |
-| D1-3  | TushareProvider 重构                                         | `pkg/marketdata/tushare_provider.go`  | ✅  | 0.5d |
+| D1-3  | TushareProvider 重构（**已退役** — 直连外部源违反 ADR-022 §1，见 [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)）   | ~~`pkg/marketdata/tushare_provider.go`~~ | ⚫  | 0.5d |
 | D1-4  | PostgresProvider 新增 (零网络延迟)                                | `pkg/marketdata/postgres_provider.go` | ✅  | 1d   |
-| D1-5  | AkShareProvider 新增 (免费备选)                                  | `pkg/marketdata/akshare_provider.go`  | ✅  | 0.5d |
+| D1-5  | AkShareProvider 新增 (免费备选)（**已退役** — 同 D1-3，见 [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)）             | ~~`pkg/marketdata/akshare_provider.go`~~ | ⚫  | 0.5d |
 | D1-6  | HttpProvider 新增 (通用 HTTP 适配)                               | `pkg/marketdata/http_provider.go`     | ✅  | 0.5d |
 | D1-7  | CachedProvider 装饰器 (Redis 缓存)                              | `pkg/marketdata/cached_provider.go`   | ✅  | 0.5d |
 | D1-8  | DataAdapter 实现 (整合三层)                                      | `pkg/marketdata/adapter.go`           | ✅  | 1d   |
@@ -569,16 +569,35 @@
 | P1              | 0      | 0     | 21     | 0     | 0     | 21     |
 | P2              | 0      | 0     | 19     | 0     | 0     | 19     |
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
-| Phase 3 (D1-D7) | 0      | 0     | 53     | 0     | 0     | 53     |
+| Phase 3 (D1-D7) | 0      | 0     | 51     | 0     | 2     | 53     | D1-3/D1-5 已退役转 ⚫ (ODR-058) |
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
-| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **6** | **0** | **11** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) + EQD-P1-2 已落地(ODR-055) + EQD-P3-1 已落地(ODR-056, **阶段 P3 3/3 关闭**) + EQD-P2-1 已落地(ODR-057, **阶段 P4 1/2**) |
-| **总计**          | **8** | **0** | **224** | **1** | **0** | **233** | (v3.32.0 Sprint 8 阶段 P4 起步: EQD-P2-1 `research.profile`, ODR-057) |
+| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **6** | **0** | **11** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) + EQD-P1-2 已落地(ODR-055) + EQD-P3-1 已落地(ODR-056, **阶段 P3 3/3 关闭**) + EQD-P2-1 已落地(ODR-057, **阶段 P4 1/2**) + **阶段 P5 切片 1**已落地(ODR-058, P-A 退役 / P-B·P-C 不动 / P-D 收敛) |
+| **总计**          | **8** | **0** | **222** | **1** | **2** | **233** | (v3.33.0 Sprint 8 阶段 P5 切片 1: 封潜伏直连, 退役 pkg/marketdata 直连 provider, ODR-058) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-15 (v3.33.0) — Sprint 8 阶段 P5 切片 1: 封潜伏直连（退役 pkg/marketdata 直连 provider）
+
+**来源**: [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md) — P5-1「两个工作面共享 L0-L2, 无平行数据路径」的第一刀
+
+- **旁路勘察（4 条平行/旁路取数路径）**
+  — **P-A** `pkg/marketdata` 第二套 Provider 抽象（akshare/tushare，**已实现未实例化**，全仓 0 生产调用者）
+  — **P-B** `cmd/analysis` 运行时切换门 `POST /api/datasource/switch`（任意 URL，**用户可见能力**）
+  — **P-C** `pkg/data/source` 9 适配器 + `Registry` + `ETLPipeline`（归属 L0 `cmd/data` 正确；`ETLPipeline` 生产实例化点 = 0）
+  — **P-D** `pkg/data/source/hkex` 北向 fetcher（潜伏，0 生产实例化点）
+- **裁决: 只封潜伏直连**
+  — **P-A 退役**: 删 `pkg/marketdata/tushare_provider.go` / `akshare_provider.go`；工厂 `buildProvider` 新增合并分支 `case "tushare", "akshare"` **显式拒绝**，并给出 L0 入口指引（`POST /api/ingest/raw` → 读 `ingest.raw`）；`SourceConfig` 删无主字段、`FactoryDeps` 收敛为 `{PostgresStore}`
+  — **P-D 收敛**: `pkg/data/source/hkex` 包注释 + `NewEastmoneyNorthboundFetcher` 构造器注释显式标注「L0 摄取侧专用（ADR-022 §1）」（`NorthboundFactor` 只依赖 `NorthboundFetcher` 接口，纯计算不发网络）
+  — **不动 P-B**: 切换门属用户可见能力，去留存废须单独评估
+  — **不动 P-C**: `pkg/data/source` 归属 L0 正确，`ETLPipeline` 零实例化属独立议题
+- **配置面清理**: `config/analysis-service.yaml` `datasource.sources` 删 `tushare`/`akshare` 两段，上方补 ADR-022 §1 注释
+- **验收点达成**: 全仓 `Grep NewAkShareProvider | NewTushareProvider | NewEastmoneyNorthboundFetcher | NewNorthboundFactor` → **仅命中构造器自身定义**，即生产代码中「外部源直连实例化点 = 0」
+- **统计更新**: 总计 233 不变；Phase 3 D1-3/D1-5 由 ✅ 转 ⚫（已退役，51/0/2/53）；总计已完成 224 → 222、已取消 0 → 2；**阶段 P5 切片 1 完成，P5-1 整体仍未关闭**（待 P-B 评估）
+- **验证**: `go build ./...` 通过；`go test ./pkg/marketdata/... ./pkg/data/...` 全 ok
 
 ### 2026-09-15 (v3.32.0) — Sprint 8 阶段 P4 起步: EQD-P2-1 第 19 个 MCP 工具 `research.profile`（C-5 / 桥 B2）
 
@@ -1844,6 +1863,8 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | **L0-3** | **Evidence API**：`GET /api/evidence/{content_hash}` 返回唯一原始记录（citation 内容坐标） | `cmd/analysis/handlers_evidence.go` | ✅ | ADR-022 §5 / PRODUCT §7 |
 | **L0-4** | **`research` schema DDL**：研究结构化状态（markdown 的确定性投影，可 DROP 重建） | `pkg/storage/postgres.go`（内联）+ `docs/migrations/021_add_research_schema.sql` | ✅ | ADR-022 §2 / PRODUCT §6.1 |
 
+> **L0-1 存量代码面收口（阶段 P5 切片 1）**: L0-1 落地时冻结的是**规范**（外部源归 L0、禁工作面直连）。阶段 P5 切片 1 进一步清点存量代码，退役了 `pkg/marketdata` 侧**第二套外部源直连实现**（`akshare_provider.go` / `tushare_provider.go`，全仓 0 生产调用者）+ 工厂对 `tushare`/`akshare` type 显式拒绝 + `hkex` 北向 fetcher 显式归 L0 摄取侧；验收点「生产代码中外部源直连实例化点 = 0」达成。见 [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)。
+
 > **迁移编号统一**: 消除历史重复编号（根目录 `012`×2、`docs/migrations` `007`×2）——
 > `migrations/012_add_gene_pool_tables.sql` → `023_add_gene_pool_tables.sql`；
 > `docs/migrations/007_add_factor_returns_table.sql` → `024_add_factor_returns_table.sql`。
@@ -1885,7 +1906,9 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
-| **P5-1** | **工作面 2 对齐**：Vue SPA / Research Engine 存量能力对接 L0 单一数据面 + Evidence API（去除旁路取数） | `web/src/`, `cmd/analysis/`, `pkg/data/` | ⬜ | ADR-022 §1, §3 / PRODUCT §5 |
+| **P5-1** | **工作面 2 对齐**：Vue SPA / Research Engine 存量能力对接 L0 单一数据面 + Evidence API（去除旁路取数） | `web/src/`, `cmd/analysis/`, `pkg/data/` | ⬜ | ADR-022 §1, §3 / PRODUCT §5 → [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md) |
+
+> **阶段 P5 进展**: **切片 1 已完成**（[ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)）—— **封潜伏直连**：旁路勘察定 4 条路径（P-A `pkg/marketdata` 第二套直连 provider / P-B `POST /api/datasource/switch` 用户可见切换门 / P-C `pkg/data/source` Registry 属 L0 / P-D `hkex` 北向 fetcher），本切片只处理**无生产调用者**的 P-A（退役 + 工厂显式拒绝）与 P-D（注释显式归 L0 摄取侧，零代码改动）；P-B（涉及用户可见行为变更）/ P-C（归属 L0 正确且 `ETLPipeline` 生产实例化点已 = 0）明确不动。验收点「生产代码中外部源直连实例化点 = 0」达成。**后续切片**：P-B 切换门的去留存废须单独评估，故 P5-1 整体仍未关闭。
 
 > **EQD-P3-2 进展**: ✅ **已完成**（[ODR-054](odr/odr-054-dr-reverification.md)）—— 对 ODR-047 已修 8 项做「文档声明 ↔ 物理事实」双向取证复核：DR-1/2/5/6/8 未回退，DR-7 由阶段 P3 的 EQD-P3-1 承接；另发现并回填 3 处残留漂移（DR-3-R1 ADR 拆分 21≠22 / DR-3-R2 Implementation 31≠30 / DR-4-R1 `ODR-001~049`）。**阶段 P1 全部关闭**。
 >

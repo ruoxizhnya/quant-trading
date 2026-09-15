@@ -24,6 +24,15 @@
 //   - Logging uses github.com/rs/zerolog, matching the rest of the repo.
 //   - Struct fields carry snake_case JSON tags so the same types can be
 //     serialized to the API layer without an intermediate DTO.
+//
+// ADR-022 §1 分层归属（显式归 L0 摄取侧）:
+//   - EastmoneyNorthboundFetcher 属于 L0 摄取侧的外部源适配器：外部数据的唯一
+//     合法入口是归档进 ingest.raw（POST /api/ingest/raw），因此该 fetcher 只能由
+//     L0 摄取所有者（cmd/data）驱动，抓取结果必须先归档再被消费。
+//   - 分析 / 回测 / 工作流侧（cmd/analysis、pkg/backtest、pkg/workflow 等）不得实例化
+//     具体 fetcher 直连取数，只能读 L0 数据面；NorthboundFactor 只依赖 NorthboundFetcher
+//     接口，纯计算、不发起网络请求。
+//   - 本包当前无生产实例化点（外部源直连实例化点 = 0，见 ODR-058）。
 package hkex
 
 import (

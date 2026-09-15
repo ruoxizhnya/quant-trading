@@ -18,19 +18,15 @@ type DataSourceConfig struct {
 }
 
 type SourceConfig struct {
-	Type       string            `mapstructure:"type" json:"type"`
-	URL        string            `mapstructure:"url" json:"url,omitempty"`
-	Token      string            `mapstructure:"token" json:"token,omitempty"`
-	DBURL      string            `mapstructure:"db_url" json:"db_url,omitempty"`
-	RedisURL   string            `mapstructure:"redis_url" json:"redis_url,omitempty"`
-	PythonPath string            `mapstructure:"python_path" json:"python_path,omitempty"`
-	ScriptDir  string            `mapstructure:"script_dir" json:"script_dir,omitempty"`
-	Options    map[string]string `mapstructure:"options" json:"options,omitempty"`
+	Type     string            `mapstructure:"type" json:"type"`
+	URL      string            `mapstructure:"url" json:"url,omitempty"`
+	DBURL    string            `mapstructure:"db_url" json:"db_url,omitempty"`
+	RedisURL string            `mapstructure:"redis_url" json:"redis_url,omitempty"`
+	Options  map[string]string `mapstructure:"options" json:"options,omitempty"`
 }
 
 type FactoryDeps struct {
 	PostgresStore *storage.PostgresStore
-	TushareStore  OHLCVStore
 }
 
 type AdapterFactory struct {
@@ -108,27 +104,18 @@ func (f *AdapterFactory) buildProvider(name string) (Provider, error) {
 			return nil, fmt.Errorf("source %q (http): url required", name)
 		}
 		return NewHTTPProvider(src.URL, f.logger), nil
-	case "tushare":
-		if src.Token == "" {
-			return nil, fmt.Errorf("source %q (tushare): token required", name)
-		}
-		baseURL := src.URL
-		if baseURL == "" {
-			baseURL = "http://tushare.pro"
-		}
-		if f.deps.TushareStore == nil {
-			return nil, fmt.Errorf("source %q (tushare): TushareStore (OHLCVStore) not injected via FactoryDeps", name)
-		}
-		return NewTushareProvider(src.Token, baseURL, f.deps.TushareStore, f.logger), nil
 	case "postgres":
 		if f.deps.PostgresStore == nil {
 			return nil, fmt.Errorf("source %q (postgres): PostgresStore not injected via FactoryDeps", name)
 		}
 		return NewPostgresProvider(f.deps.PostgresStore, f.logger), nil
-	case "akshare":
-		return NewAkShareProvider(src.PythonPath, src.ScriptDir, f.logger), nil
 	case "inmemory":
 		return NewInMemoryProvider(), nil
+	case "tushare", "akshare":
+		// ADR-022 §1: 外部数据源只能经由 L0 单一摄取入口（POST /api/ingest/raw）
+		// 归档进 ingest.raw，再由各工作面读 L0 数据面。此处显式拒绝，避免出现
+		// 绕过 L0 的平行直连取数路径。
+		return nil, fmt.Errorf("source %q (%s): external-source direct provider retired per ADR-022; ingest at the L0 door POST /api/ingest/raw and read ingest.raw instead", name, src.Type)
 	default:
 		return nil, fmt.Errorf("unknown provider type %q for source %q", src.Type, name)
 	}
