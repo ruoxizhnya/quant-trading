@@ -319,7 +319,7 @@ adr/adr-022-unified-research-platform.md   ← 架构决策（本方案的"为�
 adr/adr-021-equitydeep-research-layer.md   ← Superseded by ADR-022（保留历史）
 odr/odr-048-top-level-product-redefinition.md ← 本次重构的操作记录
 odr/odr-047-equitydeep-integration-audit.md   ← 审计发现（仍有约束力：加固项 1-6）
-docs/design/equitydeep/                     ← 上游规格（待按 ADR-022 修订）
+docs/design/equitydeep/                     ← 上游规格（已按 ADR-022 修订至 v1.1）
 ```
 
 阅读顺序建议：**PRODUCT.md → VISION.md → ADR-022 → ARCHITECTURE.md → SPEC.md**。

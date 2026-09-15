@@ -171,7 +171,7 @@ GET /api/evidence/{content_hash}  →  ingest.raw 中的唯一原始记录（不
 | [ODR-047](../odr/odr-047-equitydeep-integration-audit.md) | 审计发现（加固项 1-6 仍有效，修法受本 ADR 影响） |
 | [ODR-048](../odr/odr-048-top-level-product-redefinition.md) | 本次顶层重定义的操作记录 |
 | [ADR-021](adr-021-equitydeep-research-layer.md) | Superseded by 本 ADR |
-| [docs/design/equitydeep/](../design/equitydeep/) | EquityDeep 上游规格（待按本 ADR 修订） |
+| [docs/design/equitydeep/](../design/equitydeep/) | EquityDeep 上游规格（已按本 ADR 修订至 v1.1） |
 
 ---
 

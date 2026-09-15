@@ -1,10 +1,10 @@
 # Quant Trading System - System Specification
 
 > **Status**: Active (Canonical)
-> **Version:** 1.4.2 (Phase 4 AI-Native + Documentation Sync)
-> **Last Updated:** 2026-06-10
+> **Version:** 1.5.0 (Unified Research Platform — ADR-022)
+> **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Related:** [VISION.md](VISION.md) (design), [ARCHITECTURE.md](ARCHITECTURE.md) (layout), [TEST.md](TEST.md) (quality)
+> **Related:** [PRODUCT.md](PRODUCT.md) (top-level), [VISION.md](VISION.md) (design), [ARCHITECTURE.md](ARCHITECTURE.md) (layout), [TEST.md](TEST.md) (quality)
 >
 > **Changelog v1.3 (Migration):**
 > - 添加标准元数据头部（Status, Owner, Related）
@@ -25,6 +25,12 @@
 >   (Batch Backtest, Walk-Forward, Data Source Management, Factor Analysis)
 >   and the `/api`-prefixed Data Proxy variants
 > - CR-33 (2026-06-10): `Signal` → `domain.Signal` consistency in Vision/SPEC
+>
+> **Changelog v1.5.0 (Unified Research Platform, ADR-022, 2026-09-15):**
+> - 新增 §Unified Research Platform：四层架构（L0-L3）、双对等工作面、数据归属（A-E 分区）
+> - 新增 Evidence API 规格草案（`GET /api/evidence/{content_hash}`，Proposed 未实现）
+> - 顶层定位变更：Quant Lab 降维为共享底座，EquityDeep 升级为工作面 1 — 见 [PRODUCT.md](PRODUCT.md)
+> - 关联文档新增 [PRODUCT.md](PRODUCT.md)（顶层 canonical，优先级高于本文件）
 
 ---
 
@@ -58,6 +64,61 @@ A production-grade quantitative trading system targeting A-share markets with ma
 2. **A-Share Specifics**: Data layer and some configurations are A-share specific (tushare.pro, Chinese market conventions)
 3. **Declarative Strategies**: Strategies are defined via YAML configuration, loaded dynamically at runtime
 4. **Hot-Swap Capability**: Strategies can be loaded, replaced, and unloaded without service restart
+
+---
+
+## Unified Research Platform (ADR-022, Proposed)
+
+> **Status**: Proposed — 顶层定义已落盘，实现待执行（阶段 P1~P5）。
+> **Canonical 定义**: [PRODUCT.md](PRODUCT.md)（顶层产品）→ [ADR-022](adr/adr-022-unified-research-platform.md)（架构决策）。
+> 本节仅摘录对 API/数据模型有约束力的部分；冲突时以 PRODUCT.md / ADR-022 为准。
+
+### 四层架构（L0-L3，单向依赖）
+
+```
+L3 体验面   Obsidian Vault（工作面1） | Vue SPA（工作面2） | Hermes Agent（编排）
+L2 编排面   Research Pipeline（纵向） | Research Engine（横截面） | MCP Tool Bridge
+L1 计算面   因子引擎 | 回测引擎 | 验证门禁 L1-L5 | 风控·执行
+L0 数据面   ingest.raw | market.* | quant.* | research.* | Evidence API   ← 唯一事实源
+```
+
+原则：L0 唯一数据面 + 单一写者 + 单向依赖（L3→L2→L1→L0）+ 可重建性标注 + 契约优先。
+
+### 双对等工作面
+
+| 工作面 | 形态 | 频次 | 产出 |
+|---|---|---|---|
+| 工作面 1 纵向深研（EquityDeep） | 1 股 × N 季度 | 季度 | 研究档案（vault markdown） |
+| 工作面 2 横截面选股（原 Quant Lab 能力） | N 股 × 1 因子 | 日 | 交易信号 |
+
+二者通过**飞轮闭环**互联：纵向深挖产假设 → 横截面回测验证 → 结果回流修正理解 → 异常触发深挖。
+
+### 数据归属（A-E 分区，不重复存储）
+
+| 类别 | 内容 | 唯一权威位置 | 其他侧副本 |
+|---|---|---|---|
+| A | 原始源响应 | PG `ingest.raw`（`content_hash` 唯一键） | ❌ 仅持 `content_hash` |
+| B | 规范化数据（OHLCV / 财报 / 日历 / 公司行为） | PG `market.*` | ❌ 只读证据 API |
+| C | 派生计算结果（因子 / 回测 / IC） | PG `quant.*` + Redis `factor_cache` | ❌ 只读计算 API |
+| D | 研究叙事（人的判断） | **Vault markdown**（事实源） | — |
+| E | 研究结构化状态 | PG `research.*`（D 的确定性投影，可 DROP 重建） | 权威在 D |
+
+### Evidence API（规格草案 — Proposed，未实现）
+
+证据坐标从"文件路径 + 模糊字符串"升级为**不可变内容坐标**：
+
+```
+citation = { source, dataset, key, as_of, content_hash }
+```
+
+| Method | Path | 说明 |
+|---|---|---|
+| GET | `/api/evidence/{content_hash}` | 返回该哈希对应的**唯一原始记录**（类 A），404 表示未摄取 |
+
+约束：
+- `content_hash` 由 L0 摄取时计算并作为 `ingest.raw` 唯一键，全平台跨工作面共享；
+- 工作面 1 不得自建数据副本，运行期经本 API 只读取数；
+- 该设计在架构层面消除 ODR-047 记录的 P0 假阳性缺陷（校验对象由"文本"变为"citation 元组 + JSON Pointer"）。
 
 ---
 

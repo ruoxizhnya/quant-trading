@@ -325,7 +325,7 @@ def check_citation(c: Citation, vault_root: Path) -> bool:
 
 配套改动：Stage5 必须**结构化输出**数字与 citation 的绑定（而非事后正则从 markdown 抽取）。这样 Stage6 是对**声明**做验证，而不是对**文本**做猜测。
 
-> 附带收益：citation 元组 `(文件, 指针)` 天然满足 [ADR-021 §2](adr/adr-021-equitydeep-research-layer.md) 的契约原则 —— 引用的是可机器解析的定位符，不是模糊字符串。
+> 附带收益：citation 元组 `(文件, 指针)` 天然满足 [ADR-022 §5](adr/adr-022-unified-research-platform.md) 的证据服务原则 —— 引用的是可机器解析的内容坐标，不是模糊字符串。（原引用的 ADR-021 §2 已被 ADR-022 §5 取代）
 
 #### 🟠 #2 单位换算不得依赖 `variants()` 启发式（P1）
 
@@ -369,7 +369,7 @@ def check_citation(c: Citation, vault_root: Path) -> bool:
 | 产物 | 路径 | 文档类型 |
 |---|---|---|
 | 本设计方案（Product + Tech） | `docs/RESEARCH.md` | 设计文档（与 VISION/SPEC/ARCHITECTURE 并列） |
-| 架构决策 | `docs/adr/adr-021-equitydeep-research-layer.md` | ADR |
+| 架构决策 | `docs/adr/adr-022-unified-research-platform.md` | ADR（取代 ADR-021） |
 | 审计记录与文档漂移清单 | `docs/odr/odr-047-equitydeep-integration-audit.md` | ODR |
 | EquityDeep 上游规格（迁移） | `docs/design/equitydeep/` | 子项目规格（原位于 `docs/design/` 根，与"前端设计系统"目录语义冲突） |
 | 索引更新 | `docs/ADR.md` | ADR/ODR 索引 |

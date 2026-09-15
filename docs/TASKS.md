@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.22.0 (Sprint 8 — EquityDeep 纵向研究层集成任务登记)
+> **Version:** 3.24.0 (Sprint 8 — 统一研究平台落地; ADR-022 下游一致性收口)
 > **Last Updated:** 2026-09-15
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -580,6 +580,17 @@
 
 ## 📝 任务变更日志
 
+### 2026-09-15 (v3.24.0) — ADR-022 下游一致性收口（文档审计）
+
+**来源**: [ODR-049](odr/odr-049-adr-022-downstream-consistency.md) — 文档体系完整性审计
+
+- **修复**: 头部版本号 3.22.0 → 3.24.0（原与正文 v3.23.0 自相矛盾）
+- **修复**: 关联文档引用 ADR-021 → ADR-022（Sprint 8 章节 + 文末文档表）
+- **同步**: [ROADMAP.md](ROADMAP.md) Sprint 8 列 → 统一研究平台落地（原 "AI Factor Discovery" 含已废弃的 Factor Lab UI）
+- **同步**: [AGENTS.md](../AGENTS.md) / [RESEARCH.md](RESEARCH.md) / [design/index.md](design/index.md) ADR-021 引用收口
+- **同步**: [SPEC.md](SPEC.md) 补 ADR-022 四层模型 + Evidence API（v1.4.2 → v1.5.0）
+- **无任务增减**（统计不变：233 项）
+
 ### 2026-09-15 (v3.23.0) — Sprint 8 按 ADR-022 执行路线重排: 统一研究平台落地
 
 **来源**: [ADR-022](adr/adr-022-unified-research-platform.md)（架构决策）+ [ODR-048](odr/odr-048-top-level-product-redefinition.md)（顶层重定义记录）
@@ -607,7 +618,7 @@
   -  P3×2（收尾）: EQD-P3-1 `fundamentals`/`stock_fundamentals` 表合并 (C-8/DR-7) / EQD-P3-2 文档漂移 8 项收口 (C-9)
 - **DR-7 正式登记**: `fundamentals` 与 `stock_fundamentals` 表重叠（原仅文档自承「未来评估合并」无任务跟踪）→ EQD-P3-1
 - **统计更新**: 总计 216 → 225（待处理 2 → 10，进行中 0 → 1）
-- **关联文档**: [ADR-021](adr/adr-021-equitydeep-research-layer.md)（架构决策）+ [RESEARCH.md](RESEARCH.md)（Product + Tech 方案）+ `docs/design/equitydeep/`（上游规格）
+- **关联文档**: [ADR-021](adr/adr-021-equitydeep-research-layer.md)（架构决策，后由 [ADR-022](adr/adr-022-unified-research-platform.md) 取代）+ [RESEARCH.md](RESEARCH.md)（Product + Tech 方案）+ `docs/design/equitydeep/`（上游规格）
 
 ### 2026-06-12 (v3.21.1) — Sprint 6 P2 pickup #3: P2-1 HTML 报告导出 + P2-2 多策略对比
 
@@ -1741,8 +1752,9 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 | [TEST.md](TEST.md)               | 测试策略和覆盖率目标     |
 | [ODR-013](odr/odr-013-comprehensive-audit-2026-06-11.md) | Sprint 6 综合审查记录 |
 | [ODR-047](odr/odr-047-equitydeep-integration-audit.md) | Sprint 8 — EquityDeep 集成审计 |
-| [RESEARCH.md](RESEARCH.md) | EquityDeep 纵向研究层整合方案 (Product + Tech) |
-| [ADR-021](adr/adr-021-equitydeep-research-layer.md) | EquityDeep 纵向基本面研究层架构决策 |
+| [PRODUCT.md](PRODUCT.md) | 顶层产品定义（一个产品 / 双对等工作面 / 共享底座） |
+| [RESEARCH.md](RESEARCH.md) | 工作面 1（纵向深研）详案 (Product + Tech) |
+| [ADR-022](adr/adr-022-unified-research-platform.md) | 统一研究平台架构决策（取代 [ADR-021](adr/adr-021-equitydeep-research-layer.md)，后者保留历史） |
 | [ODR-043](odr/odr-043-comprehensive-audit-2026-06-29.md) | Sprint 7 综合审计 (4 维度 40 问题点) |
 | [ADR-017](adr/adr-017-observability-and-auth.md) ~ [ADR-020](adr/adr-020-engine-decomposition.md) | Sprint 6 架构决策 |
 

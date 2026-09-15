@@ -253,7 +253,7 @@ This roadmap covers all sprints for **Phase 1** (Foundation & Accuracy), **Phase
 | Sprint | Focus | Duration | Key Deliverables | Dependencies |
 |--------|-------|----------|-----------------|-------------|
 | **Sprint 7** | AI Infrastructure | 2 weeks | Expression Engine, Backtest Client, Research Agent MVP | Phase 3 ✅ |
-| **Sprint 8** | AI Factor Discovery | 2 weeks | 10+ factors with IC > 0.03, Gene Pool schema, Factor Lab UI | Sprint 7 |
+| **Sprint 8** | 统一研究平台落地 (ADR-022) | — | L0 单一数据面 + 工作面 1（EquityDeep）跑通 + 飞轮闭环 —— 阶段 P1~P5, 详见 [TASKS.md](TASKS.md) Sprint 8 | Sprint 7 |
 | **Sprint 9** | Strategy Generation | 2 weeks | Strategy templates, Code generation pipeline, Strategy Workshop UI | Sprint 8 |
 | **Sprint 10** | Optimization & Evolution | 2 weeks | AutoML parameter tuning, Genetic algorithm, Drift detection | Sprint 9 |
 | **Sprint 11** | Live Trading & Integration | 2 weeks | ExecutionService abstraction, Paper trading, Live Engine | Sprint 7 |
