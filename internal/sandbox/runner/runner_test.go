@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -59,8 +60,10 @@ func TestRun_BinaryNotFound(t *testing.T) {
 
 func TestRun_Dir(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Options.Dir 的断言依赖 POSIX 路径语义（/tmp 与 pwd 输出格式），Windows 下跳过")
+	}
 	r := New()
-	// /tmp exists on all platforms we test on. If it doesn't, skip.
 	stdout, _, err := r.Run(context.Background(), "pwd", nil, Options{Dir: "/tmp"})
 	require.NoError(t, err)
 	// pwd prints with a trailing newline; on macOS this is /private/tmp.

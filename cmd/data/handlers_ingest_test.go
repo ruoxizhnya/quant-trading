@@ -131,7 +131,9 @@ func TestIngestRawHandler_ArchivesAndIsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, stored)
 	assert.Equal(t, "akshare", stored.Source)
-	assert.Equal(t, payload, string(stored.Payload))
+	// 用 JSONEq 而非字符串相等：归档时会重新 marshal（键序按字典序、带空格），
+	// 逐字节比较会因格式差异误报，但语义完全一致。
+	assert.JSONEq(t, payload, string(stored.Payload))
 
 	// Re-posting the identical response is a no-op on an immutable table.
 	assert.Equal(t, http.StatusCreated, postIngestRaw(t, router, body).Code)

@@ -35,8 +35,11 @@ func TestPluginLoader_SetWatchDir(t *testing.T) {
 	assert.Equal(t, tmpDir, loader.watchDir)
 
 	// Error: non-existent directory
-	err = loader.SetWatchDir("/nonexistent/path")
-	assert.Error(t, err)
+	// 注意：不要写死 POSIX 路径（如 /nonexistent/path）—— 在 Windows 上经 MSYS
+	// 路径转换后可能指向真实位置，导致断言失效。用 TempDir 拼一个确定不存在的子路径。
+	missing := filepath.Join(t.TempDir(), "definitely-does-not-exist")
+	err = loader.SetWatchDir(missing)
+	require.Error(t, err) // 用 require 而非 assert：断言失败时避免对 nil err 取 .Error() 而 panic
 	assert.Contains(t, err.Error(), "watch directory does not exist")
 
 	// Error: file instead of directory
