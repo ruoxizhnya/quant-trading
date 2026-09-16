@@ -78,6 +78,14 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/Evidence.vue'),
         meta: { title: '证据查询' },
       },
+      {
+        // TASKS.md P5-3: factor_cache row -> its evidence coordinates, with
+        // one-click hand-off to /evidence?content_hash=...
+        path: 'factors',
+        name: 'factors',
+        component: () => import('@/pages/FactorCitation.vue'),
+        meta: { title: '因子证据' },
+      },
     ],
   },
   {

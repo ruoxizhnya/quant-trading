@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   NCard,
   NSpace,
@@ -19,7 +19,9 @@ import type { RawIngest } from '@/types/evidence'
 
 // ADR-022 §5: the L0 evidence lookup. One content_hash in, exactly one
 // archived source response out (or an explicit "not ingested").
-const contentHash = ref('')
+const props = withDefaults(defineProps<{ initialHash?: string }>(), { initialHash: '' })
+
+const contentHash = ref(props.initialHash)
 const record = ref<RawIngest | null>(null)
 const notIngested = ref(false)
 const errorMessage = ref<string | null>(null)
@@ -51,6 +53,21 @@ async function handleLookup() {
     loading.value = false
   }
 }
+
+// TASKS.md P5-3: a hand-off from a citation tuple arrives as a prefilled hash
+// (/evidence?content_hash=...) and resolves immediately — "one click back to
+// the source". Navigating again with a different hash re-resolves in place.
+onMounted(() => {
+  if (props.initialHash) handleLookup()
+})
+
+watch(
+  () => props.initialHash,
+  (hash) => {
+    contentHash.value = hash
+    if (hash) handleLookup()
+  },
+)
 </script>
 
 <template>

@@ -51,6 +51,7 @@ import {
   ConstructOutline,
   CashOutline,
   DocumentTextOutline,
+  StatsChartOutline,
 } from '@vicons/ionicons5'
 import { NSpace, NIcon } from 'naive-ui'
 
@@ -74,6 +75,7 @@ const navItems = [
   { path: '/paper-trading', label: '模拟交易', icon: markRaw(CashOutline) },
   { path: '/data-sync', label: '数据同步', icon: markRaw(CloudDownloadOutline) },
   { path: '/evidence', label: '证据查询', icon: markRaw(DocumentTextOutline) },
+  { path: '/factors', label: '因子证据', icon: markRaw(StatsChartOutline) },
   { path: '/alerts', label: '风险告警', icon: markRaw(NotificationsOutline) },
 ]
 </script>

@@ -105,6 +105,30 @@ func registerProxyRoutes(router *gin.Engine, httpClient *http.Client, v *viper.V
 		proxyRequest(c, http.MethodGet, dataServiceURL+"/market/index", nil)
 	})
 
+	// TASKS.md P5-3: the citation-coordinate read. GET /api/factors/:name is
+	// the factor_cache read whose rows carry the ADR-022 §5 five-tuple
+	// {source, dataset, key, as_of, content_hash} (cmd/data/handlers_factor.go).
+	// The L0 route has no /api prefix (/factors/:factor_name, cmd/data/main.go),
+	// so this facade both supplies the prefix the SPA uses and forwards
+	// symbol/date verbatim. Status is passed through unchanged because 404 is
+	// the first-class "no such factor_cache row" answer, and a hash-only
+	// citation (response never archived) must reach the SPA intact rather than
+	// being rewritten into an error here.
+	router.GET("/api/factors/:factor_name", func(c *gin.Context) {
+		query := url.Values{}
+		if symbol := c.Query("symbol"); symbol != "" {
+			query.Set("symbol", symbol)
+		}
+		if date := c.Query("date"); date != "" {
+			query.Set("date", date)
+		}
+		dataURL := fmt.Sprintf("%s/factors/%s", dataServiceURL, url.PathEscape(c.Param("factor_name")))
+		if encoded := query.Encode(); encoded != "" {
+			dataURL += "?" + encoded
+		}
+		proxyRequest(c, http.MethodGet, dataURL, nil)
+	})
+
 	// ODR-062 (S-C): removed as dead code (zero consumers across web/src,
 	// e2e, static pages and Go internals — Go side reaches L0 directly):
 	//   POST /api/sync/calendar, POST /sync/calendar (mirror),

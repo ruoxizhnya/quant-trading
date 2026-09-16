@@ -82,4 +82,30 @@ describe('EvidenceLookup', () => {
     expect(wrapper.text()).toContain('服务器内部错误')
     expect(wrapper.text()).not.toContain('未摄取')
   })
+
+  // TASKS.md P5-3: the citation tuple's 回溯证据 action arrives as a
+  // prefilled hash, so the walk back completes without retyping.
+  it('resolves a hash handed over by a citation tuple without typing', async () => {
+    vi.spyOn(evidenceApi, 'getEvidence').mockResolvedValue(mockRecord)
+
+    const wrapper = mount(EvidenceLookup, {
+      props: { initialHash: mockRecord.content_hash },
+    })
+    await flushPromises()
+
+    expect(evidenceApi.getEvidence).toHaveBeenCalledWith(mockRecord.content_hash)
+    expect(wrapper.text()).toContain('tushare')
+  })
+
+  it('re-resolves when a different coordinate is handed over in place', async () => {
+    const spy = vi.spyOn(evidenceApi, 'getEvidence').mockResolvedValue(mockRecord)
+
+    const wrapper = mount(EvidenceLookup, { props: { initialHash: 'b'.repeat(64) } })
+    await flushPromises()
+    expect(spy).toHaveBeenLastCalledWith('b'.repeat(64))
+
+    await wrapper.setProps({ initialHash: 'c'.repeat(64) })
+    await flushPromises()
+    expect(spy).toHaveBeenLastCalledWith('c'.repeat(64))
+  })
 })
