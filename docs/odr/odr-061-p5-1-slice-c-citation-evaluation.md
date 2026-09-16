@@ -1,6 +1,6 @@
 # ODR-061: 阶段 P5 切片 C 评估 — Research Engine 输出携 citation 元组（收窄为 C2：`factor_cache` 因子链）
 
-> **Status**: Accepted（评估已完成 + 裁决已定；**实施尚未启动**）
+> **Status**: Completed（评估 + 裁决 + **C2 实施落地并验证**，2026-09-16）
 > **Date**: 2026-09-16
 > **Category**: Audit
 > **Related ADRs**: [ADR-022](../adr/adr-022-unified-research-platform.md)（§2 五分区 / §3 四层架构 / §5 证据服务）
@@ -211,46 +211,46 @@ POST /api/ingest/equitydeep ────┘ 溯源门校验 content_hash
 
 ## Artifacts
 
-### 待实施（本记录**未产出代码**，下列为 C2 冻结的改动面）
+### 已实施（2026-09-16，C2 落地；迁移编号实况 = **迁移 027**）
 
 | 文件 | 变更 |
 |---|---|
-| `docs/migrations/027_factor_cache_citation.sql` | **新建** —— 迁移 027 文档副本 |
-| `pkg/storage/postgres.go` | 内联 `migrate()` 增 `ALTER TABLE factor_cache ADD COLUMN IF NOT EXISTS citation ...`（实际执行路径） |
-| `pkg/domain/factor.go` | `FactorCacheEntry` 增 `Citation json.RawMessage` |
-| `pkg/storage/cache.go` | `SaveFactorCacheBatch`（`:29` INSERT）/ `GetFactorCache`（`:59` SELECT）/ `GetFactorCacheRange`（`:79` SELECT）加列 |
-| `pkg/data/factor_equitydeep.go` | `loadStatementBook` 保留 `SnapshotURI` + `statementField` 增 provenance + `saveVerticalFactor` 写入 citation |
-| `cmd/data/handlers_factor.go` | `getFactorHandler` 输出前展开 hash → 5 元组（未命中只出 hash） |
+| `docs/migrations/027_factor_cache_citation.sql` | **新建** —— 迁移 027 文档副本（头注照 026 格式） |
+| `pkg/storage/postgres.go` | 内联 `migrate()` 在 Migration 026 之后追加 `ALTER TABLE factor_cache ADD COLUMN IF NOT EXISTS citation JSONB NOT NULL DEFAULT '[]'::jsonb`（实际执行路径） |
+| `pkg/domain/factor.go` | `FactorCacheEntry` 增 `Citation json.RawMessage`（`json:"citation,omitempty"`） |
+| `pkg/storage/cache.go` | `SaveFactorCacheBatch`（INSERT + `ON CONFLICT DO UPDATE` 均带 citation；空值归一为 `'[]'`）/ `GetFactorCache` / `GetFactorCacheRange` SELECT + Scan 加列 |
+| `pkg/data/factor_equitydeep.go` | `loadStatementBook` 保留 `SnapshotURI`（剥 `ingest.raw:` 前缀，不匹配者跳过；重述胜者同构记录 provenance）+ `statementField` 增 provenance + `statementBook` 结构化（fields + 每标的去重排序 hash 集合）+ `saveVerticalFactor` 加来源入参写 `entry.Citation`（空集合 marshal 为 `[]`） |
+| `cmd/data/handlers_factor.go` | `getFactorHandler` 输出前经 `expandCitation` 展开 hash → 5 元组（未命中只出 `content_hash`；解析失败透传原样不 5xx；`factor_cache` 未命中仍 404） |
+| `pkg/data/factor_equitydeep_test.go` | citation 断言与 fixture 适配（`statementBook` 结构化访问）+ 新增 `TestContentHashOfSnapshot` / `TestLoadStatementBookCitation`（排序/去重/非归档重述丢弃批次）/ `TestComputeVerticalFactorCitation`（hash-only 存储 + 空标记语义） |
+| `pkg/backtest/state/persistence_test.go` | **顺手修复（与本切片无关的平台缺陷）**：`TestDiskStateStore_ConcurrentSaveLoad` 以 `rune('0'+i)` 生成 ID，扫到 NTFS 非法字符 `: < > ?` 在 Windows 恒失败；改 `fmt.Sprintf("bt-concurrent-%02d", i)` |
 
 ### 文档
 
 | 文件 | 变更 |
 |---|---|
-| `docs/odr/odr-061-p5-1-slice-c-citation-evaluation.md` | **新建**（本记录） |
-| `docs/TASKS.md` | 头部版本 3.35.0 → 3.36.0；`P5-1` 行补切片 C 评估；阶段 P5 进展注补切片 C 裁决与边界；变更日志新增本条目 |
-| `docs/ADR.md` | ODR 索引新增 ODR-061；尾注 ODR 60 → 61；index 3.16.0 → 3.17.0 |
-
-> 实施落地后须**补写**当时的 `Metrics / 验证` 结果与迁移编号实况；本记录 Status 相应由 `Accepted` 转 `Completed`。
+| `docs/odr/odr-061-p5-1-slice-c-citation-evaluation.md` | **新建**（本记录）+ 实施后回写 Status / Artifacts / Metrics |
+| `docs/TASKS.md` | 头部版本 3.36.0 → 3.37.0；阶段 P5 进展注补 C2 实施实况；变更日志新增本条目 |
+| `docs/ADR.md` | ODR 索引 ODR-061 状态改 Completed；尾注 ODR 61 → 61（不变）；index 3.17.0 → 3.18.0 |
 
 ---
 
-## Metrics / 验证
+## Metrics / 验证（2026-09-16 实施取证）
 
-本记录为**评估**，无代码验证项。C2 实施的验收判据（待实施时取证）：
-
-| 项 | 判据 |
-|---|---|
-| 构建 | `go build ./...` EXIT=0 |
-| 测试 | `go test -count=1 ./pkg/storage/ ./pkg/data/ ./cmd/data/ ./pkg/backtest/...` 全 ok |
-| **主验收点** | `GET /factors/gross_margin_trend?symbol=600519.SH&date=<YYYYMMDD>` 的 `citation[0].content_hash` 命中 `GET /api/evidence/{hash}` → **200**（非 404） |
-| 空语义 | momentum 因子同一端点 `citation` = `[]`（**不是** null、不是忘记写） |
-| 前缀防御 | `snapshot_uri` 非 `ingest.raw:` 的行 → citation 不含该来源，且不报错 |
+| 项 | 判据 | 实测 |
+|---|---|---|
+| 构建 | `go build ./...` EXIT=0 | ✅ EXIT=0 |
+| 测试 | `go test -count=1 ./pkg/storage/ ./pkg/data/ ./pkg/domain/ ./cmd/data/ ./pkg/backtest/...` 全 ok | ✅ 17 包全 ok（含新增 citation 用例） |
+| **citation 写入（离线取证）** | 纵向因子行 citation 为 hash-only 数组、排序确定 | ✅ `TestComputeVerticalFactorCitation/persisted_entries_cite_the_batches...`（`[{aa..}]` 排序 + 不含五元组字段） |
+| **空语义** | 无归档来源的行 citation = `[]`（非 null / 非缺席） | ✅ `TestComputeVerticalFactorCitation/readings_without_an_archived_snapshot...` |
+| **前缀防御** | `snapshot_uri` 非 `ingest.raw:` → 不入 citation、不报错；非归档重述**丢弃**被覆盖批次 | ✅ `TestContentHashOfSnapshot` + `TestLoadStatementBookCitation/a_non-archived_restatement...` |
+| **主验收点（运行时）** | `GET /factors/gross_margin_trend?...` 的 `citation[0].content_hash` 命中 `GET /api/evidence/{hash}` → 200 | ⚠️ **待运行时取证** —— 需运行 PG + 完整 ingest 流；离线侧由 `expandCitation`（`GetRawIngest` 命中 → 五元组，`(nil,nil)` → 仅 hash）单元逻辑覆盖，handler 无既有单测框架（gin + 真库），不在本切片补建 |
+| 全仓回归 | `go test ./...` | `pkg/storage / pkg/data / pkg/domain / cmd/data / pkg/backtest/...` 全 ok；存量环境性失败与本切片无关：`internal/sandbox/runner`（POSIX-only，`exec: "pwd" not found in %PATH%`）与 `pkg/live::TestOrderManager_GetOrders_Snapshot`（时序 flake）—— 二者在未改动基线上同样失败 |
 
 ---
 
 ## 未做项（明确排除）
 
-1. **`P5-1` 是否关闭** —— 本切片只是**评估 + 裁决**；C2 实施未启动，且 `P5-1` 描述中的「Research Engine 存量能力对接 L0 单一数据面」半句与旁路取数残留维度（`/market` → `8081` L3 直连、`handlers_proxy.go` 遗留镜像路由、`api/sync.ts` 死端点）均未动 ⇒ `P5-1` **整体仍未关闭**。
+1. **`P5-1` 是否关闭** —— C2 已落地（本记录 Status: Completed），但 `P5-1` 描述中的「Research Engine 存量能力对接 L0 单一数据面」半句与旁路取数残留维度（`/market` → `8081` L3 直连、`handlers_proxy.go` 遗留镜像路由、`api/sync.ts` 死端点）均未动 ⇒ `P5-1` **整体仍未关闭**。
 2. **报告面（用户裁决「推迟」）** —— `backtest_jobs.result` 内嵌 citation、`walk_forward_reports` 加列；**待 A→B 链落地**（`Warm` 硬编码的 `{Momentum, Value, Quality}` 三因子须先能拿到 hash）。
 3. **PRODUCT §6.4「100%」达标** —— 覆盖面为 5/11 个因子；momentum 完全无链，value / quality 无链。本切片**不宣称**达标。
 4. **C1（A→B 全链路）** —— `archiveRaw` 签名改造、`ohlcv_daily_qfq` / `stock_fundamentals` 加 `source` / `content_hash` 列。是切片 2 与 §6.4 达标的前置条件。
@@ -270,4 +270,4 @@ POST /api/ingest/equitydeep ────┘ 溯源门校验 content_hash
 
 ---
 
-_Last updated by: AI Assistant — 2026-09-16 (P5-1 切片 C 评估：裁决收窄为 C2，实施未启动)_
+_Last updated by: AI Assistant — 2026-09-16 (C2 实施落地：迁移 027 + 注入链 + 输出面展开，Status → Completed)_

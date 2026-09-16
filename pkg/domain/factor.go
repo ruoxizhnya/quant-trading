@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type FactorType string
 
@@ -58,6 +61,13 @@ type FactorCacheEntry struct {
 	RawValue   float64    `json:"raw_value"`
 	ZScore     float64    `json:"z_score"`
 	Percentile float64    `json:"percentile"`
+	// Citation is the stored provenance of this row's source batches, of the
+	// form [{"content_hash":"<64hex>"}]. It is deliberately json.RawMessage:
+	// the stored (hash-only) shape and the output shape (ADR-022 §5 five-tuple,
+	// expanded by the handler) differ, and the stored form must stay losslessly
+	// upgradable. Empty citation is '[]' — "no A→B chain established yet",
+	// never null (ODR-061).
+	Citation json.RawMessage `json:"citation,omitempty"`
 }
 
 type FactorReturn struct {

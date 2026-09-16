@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -600,10 +601,10 @@ func TestLoadStatementBook(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(book) != 1 {
-			t.Fatalf("symbols = %d, want 1", len(book))
+		if len(book.fields) != 1 {
+			t.Fatalf("symbols = %d, want 1", len(book.fields))
 		}
-		field := book[eqdFixtureSymbol][equitydeep.FieldTotalRevenue]
+		field := book.fields[eqdFixtureSymbol][equitydeep.FieldTotalRevenue]
 		got, ok := field.valueAt(eqdPeriod(2024, 4))
 		if !ok {
 			t.Fatal("valueAt(2024Q4) ok = false, want true")
@@ -633,7 +634,7 @@ func TestLoadStatementBook(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		got, ok := book[eqdFixtureSymbol][equitydeep.FieldTotalRevenue].valueAt(eqdPeriod(2024, 4))
+		got, ok := book.fields[eqdFixtureSymbol][equitydeep.FieldTotalRevenue].valueAt(eqdPeriod(2024, 4))
 		if !ok {
 			t.Fatal("valueAt(2024Q4) ok = false, want true")
 		}
@@ -650,7 +651,7 @@ func TestLoadStatementBook(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if _, ok := book[symbol][equitydeep.FieldTotalRevenue].valueAt(eqdPeriod(2024, 4)); ok {
+		if _, ok := book.fields[symbol][equitydeep.FieldTotalRevenue].valueAt(eqdPeriod(2024, 4)); ok {
 			t.Error("a row with a nil value produced a reading; nil must not be read as 0")
 		}
 	})
@@ -665,8 +666,8 @@ func TestLoadStatementBook(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(book[symbol]) != 0 {
-			t.Errorf("a non-quarter-end row was kept: %+v", book[symbol])
+		if len(book.fields[symbol]) != 0 {
+			t.Errorf("a non-quarter-end row was kept: %+v", book.fields[symbol])
 		}
 	})
 
@@ -676,6 +677,142 @@ func TestLoadStatementBook(t *testing.T) {
 		fc := NewFactorComputer(store)
 		if _, err := fc.loadStatementBook(ctx, eqdAsOf, equitydeep.FieldTotalRevenue); !errors.Is(err, boom) {
 			t.Errorf("err = %v, want wrapped %v", err, boom)
+		}
+	})
+}
+
+// citation provenance (ODR-061 切片 C2) --------------------------------------
+
+// Two 64-hex constants chosen so lexicographic order differs from insertion
+// order, pinning the sorted output.
+const (
+	eqdHashLate  = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+	eqdHashEarly = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+)
+
+// eqdRowWithSnapshot overrides a fixture row's snapshot_uri so provenance can
+// be exercised independently of the default non-archived fixture URI.
+func eqdRowWithSnapshot(tsCode string, p reportPeriod, fieldCode string, value float64, snapshotURI string) domain.FundamentalsDetailRow {
+	row := eqdRow(tsCode, p, fieldCode, value)
+	row.SnapshotURI = snapshotURI
+	return row
+}
+
+func TestContentHashOfSnapshot(t *testing.T) {
+	if got, ok := contentHashOfSnapshot(snapshotURIPrefix + eqdHashEarly); !ok || got != eqdHashEarly {
+		t.Errorf("got (%q, %v), want the hash itself", got, ok)
+	}
+	for _, uri := range []string{"file:///fixtures/snapshot.json", snapshotURIPrefix, "", "x" + snapshotURIPrefix + "abc"} {
+		if _, ok := contentHashOfSnapshot(uri); ok {
+			t.Errorf("contentHashOfSnapshot(%q) ok = true, want false (prefix is never guessed around)", uri)
+		}
+	}
+}
+
+func TestLoadStatementBookCitation(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("collects the batches of surviving readings, sorted and deduped", func(t *testing.T) {
+		// Two revenue periods from two different archived batches, one
+		// balance-sheet reading from the first batch again (deduped), and one
+		// row whose snapshot is not archived (contributes nothing).
+		rows := []domain.FundamentalsDetailRow{
+			eqdRowWithSnapshot(eqdFixtureSymbol, eqdPeriod(2023, 4), equitydeep.FieldTotalRevenue, 520, snapshotURIPrefix+eqdHashLate),
+			eqdRowWithSnapshot(eqdFixtureSymbol, eqdPeriod(2024, 4), equitydeep.FieldTotalRevenue, 750, snapshotURIPrefix+eqdHashEarly),
+			eqdRowWithSnapshot(eqdFixtureSymbol, eqdPeriod(2024, 4), equitydeep.FieldContractLiability, 75, snapshotURIPrefix+eqdHashLate),
+			eqdRow(eqdFixtureSymbol, eqdPeriod(2024, 4), equitydeep.FieldTotalAssets, 1000),
+		}
+		store := &eqdMockStore{rows: rows}
+		fc := NewFactorComputer(store)
+		book, err := fc.loadStatementBook(ctx, eqdAsOf,
+			equitydeep.FieldTotalRevenue, equitydeep.FieldContractLiability, equitydeep.FieldTotalAssets)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		got := book.hashes[eqdFixtureSymbol]
+		want := []string{eqdHashEarly, eqdHashLate}
+		if len(got) != len(want) {
+			t.Fatalf("hashes = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("hashes[%d] = %s, want %s", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("a non-archived restatement drops the superseded batch", func(t *testing.T) {
+		// 2024Q4 revenue is first archived in a batch, then restated from a
+		// non-archived source: the surviving reading has no provenance, and
+		// citing the earlier batch would name one whose value is no longer in
+		// use.
+		rows := []domain.FundamentalsDetailRow{
+			eqdRowWithSnapshot(eqdFixtureSymbol, eqdPeriod(2024, 4), equitydeep.FieldTotalRevenue, 750, snapshotURIPrefix+eqdHashEarly),
+			eqdRowAnnounced(eqdFixtureSymbol, eqdPeriod(2024, 4), equitydeep.FieldTotalRevenue, 9999,
+				eqdQuarterEnd(2024, 4).AddDate(0, 0, 60)),
+		}
+		store := &eqdMockStore{rows: rows}
+		fc := NewFactorComputer(store)
+		book, err := fc.loadStatementBook(ctx, eqdAsOf, equitydeep.FieldTotalRevenue)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(book.hashes[eqdFixtureSymbol]) != 0 {
+			t.Errorf("hashes = %v, want none: the superseded batch must not be cited", book.hashes[eqdFixtureSymbol])
+		}
+	})
+}
+
+func TestComputeVerticalFactorCitation(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("persisted entries cite the batches their readings came from", func(t *testing.T) {
+		rows := []domain.FundamentalsDetailRow{
+			eqdRowWithSnapshot(eqdFixtureSymbol, eqdPeriod(2024, 4), equitydeep.FieldContractLiability, 75, snapshotURIPrefix+eqdHashLate),
+			eqdRowWithSnapshot(eqdFixtureSymbol, eqdPeriod(2024, 4), equitydeep.FieldTotalRevenue, 750, snapshotURIPrefix+eqdHashEarly),
+		}
+		store := &eqdMockStore{rows: rows}
+		fc := NewFactorComputer(store)
+		if err := fc.ComputeContractLiabilityRatioFactor(ctx, eqdAsOf); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		entries := store.entriesBySymbol(domain.FactorContractLiabilityRatio)
+		e := entries[eqdFixtureSymbol]
+		if e == nil {
+			t.Fatalf("no entry for %s", eqdFixtureSymbol)
+		}
+		var refs []struct {
+			ContentHash string `json:"content_hash"`
+		}
+		if err := json.Unmarshal(e.Citation, &refs); err != nil {
+			t.Fatalf("citation is not the hash-array form: %v (%s)", err, e.Citation)
+		}
+		if len(refs) != 2 {
+			t.Fatalf("citation = %s, want two hashes", e.Citation)
+		}
+		if refs[0].ContentHash != eqdHashEarly || refs[1].ContentHash != eqdHashLate {
+			t.Errorf("citation = %s, want [%s %s] sorted", e.Citation, eqdHashEarly, eqdHashLate)
+		}
+		// Only content_hash is stored; the five-tuple expansion is the output
+		// face's job (cmd/data getFactorHandler).
+		if strings.Contains(string(e.Citation), "source") {
+			t.Errorf("stored citation must be hash-only, got %s", e.Citation)
+		}
+	})
+
+	t.Run("readings without an archived snapshot cite the empty marker", func(t *testing.T) {
+		store := &eqdMockStore{rows: eqdFixtureRows()}
+		fc := NewFactorComputer(store)
+		if err := fc.ComputeGrossMarginTrendFactor(ctx, eqdAsOf); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		entries := store.entriesBySymbol(domain.FactorGrossMarginTrend)
+		e := entries[eqdFixtureSymbol]
+		if e == nil {
+			t.Fatalf("no entry for %s", eqdFixtureSymbol)
+		}
+		if string(e.Citation) != "[]" {
+			t.Errorf("citation = %s, want [] (chain not established — explicit marker, never null)", e.Citation)
 		}
 	})
 }

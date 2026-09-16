@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -300,12 +301,13 @@ func TestDiskStateStore_ConcurrentSaveLoad(t *testing.T) {
 	const n = 20
 	var wg sync.WaitGroup
 
-	// Concurrent saves.
+	// Concurrent saves. IDs are zero-padded numbers: single-rune IDs would
+	// sweep in ':', '<', '>', '?' — filename characters NTFS forbids.
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			id := "bt-concurrent-" + string(rune('0'+i))
+			id := fmt.Sprintf("bt-concurrent-%02d", i)
 			err := store.Save(ctx, sampleSnapshot(id))
 			assert.NoError(t, err)
 		}(i)
@@ -317,7 +319,7 @@ func TestDiskStateStore_ConcurrentSaveLoad(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			id := "bt-concurrent-" + string(rune('0'+i))
+			id := fmt.Sprintf("bt-concurrent-%02d", i)
 			_, err := store.Load(ctx, id)
 			assert.NoError(t, err)
 		}(i)

@@ -26,14 +26,21 @@ func (s *PostgresStore) SaveFactorCacheBatch(ctx context.Context, entries []*dom
 
 	batch := &pgx.Batch{}
 	for _, e := range entries {
+		// Empty citation is stored as '[]' — the explicit "no A→B chain
+		// established" marker (ODR-061), never NULL.
+		citation := e.Citation
+		if len(citation) == 0 {
+			citation = json.RawMessage("[]")
+		}
 		batch.Queue(`
-			INSERT INTO factor_cache (symbol, trade_date, factor_name, raw_value, z_score, percentile)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO factor_cache (symbol, trade_date, factor_name, raw_value, z_score, percentile, citation)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (symbol, trade_date, factor_name) DO UPDATE SET
 				raw_value = EXCLUDED.raw_value,
 				z_score = EXCLUDED.z_score,
-				percentile = EXCLUDED.percentile
-		`, e.Symbol, e.TradeDate, e.FactorName, e.RawValue, e.ZScore, e.Percentile)
+				percentile = EXCLUDED.percentile,
+				citation = EXCLUDED.citation
+		`, e.Symbol, e.TradeDate, e.FactorName, e.RawValue, e.ZScore, e.Percentile, citation)
 	}
 
 	results := tx.SendBatch(ctx, batch)
@@ -56,13 +63,13 @@ func (s *PostgresStore) SaveFactorCacheBatch(ctx context.Context, entries []*dom
 // GetFactorCache retrieves a single factor cache entry.
 func (s *PostgresStore) GetFactorCache(ctx context.Context, symbol string, date time.Time, factor domain.FactorType) (*domain.FactorCacheEntry, error) {
 	query := `
-		SELECT id, symbol, trade_date, factor_name, raw_value, z_score, percentile
+		SELECT id, symbol, trade_date, factor_name, raw_value, z_score, percentile, citation
 		FROM factor_cache
 		WHERE symbol = $1 AND trade_date = $2 AND factor_name = $3
 	`
 	var e domain.FactorCacheEntry
 	err := s.pool.QueryRow(ctx, query, symbol, date, factor).Scan(
-		&e.ID, &e.Symbol, &e.TradeDate, &e.FactorName, &e.RawValue, &e.ZScore, &e.Percentile,
+		&e.ID, &e.Symbol, &e.TradeDate, &e.FactorName, &e.RawValue, &e.ZScore, &e.Percentile, &e.Citation,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -76,7 +83,7 @@ func (s *PostgresStore) GetFactorCache(ctx context.Context, symbol string, date 
 // GetFactorCacheRange retrieves factor cache entries for a factor within a date range.
 func (s *PostgresStore) GetFactorCacheRange(ctx context.Context, factor domain.FactorType, startDate, endDate time.Time) ([]*domain.FactorCacheEntry, error) {
 	query := `
-		SELECT id, symbol, trade_date, factor_name, raw_value, z_score, percentile
+		SELECT id, symbol, trade_date, factor_name, raw_value, z_score, percentile, citation
 		FROM factor_cache
 		WHERE factor_name = $1 AND trade_date >= $2 AND trade_date <= $3
 		ORDER BY trade_date ASC, symbol ASC
@@ -90,7 +97,7 @@ func (s *PostgresStore) GetFactorCacheRange(ctx context.Context, factor domain.F
 	var results []*domain.FactorCacheEntry
 	for rows.Next() {
 		var e domain.FactorCacheEntry
-		if err := rows.Scan(&e.ID, &e.Symbol, &e.TradeDate, &e.FactorName, &e.RawValue, &e.ZScore, &e.Percentile); err != nil {
+		if err := rows.Scan(&e.ID, &e.Symbol, &e.TradeDate, &e.FactorName, &e.RawValue, &e.ZScore, &e.Percentile, &e.Citation); err != nil {
 			return nil, fmt.Errorf("failed to scan factor cache row: %w", err)
 		}
 		results = append(results, &e)

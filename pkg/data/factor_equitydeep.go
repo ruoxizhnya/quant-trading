@@ -2,7 +2,10 @@ package data
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/data/equitydeep"
@@ -85,9 +88,15 @@ func shiftQuarters(p reportPeriod, delta int) reportPeriod {
 // been restated, the later announcement is the one the market saw, and it is
 // still PIT-safe as long as it is <= the evaluation date (enforced by the
 // storage query, not by this type).
+//
+// provenance records, for each surviving period, the ingest.raw batch
+// (content hash) the reading came from, following the same winner rule as
+// annDate. It is the per-period coordinate the JSON Pointer layer refines to
+// later; the per-symbol batch set written into factor_cache is its union.
 type statementField struct {
-	values  map[reportPeriod]float64
-	annDate map[reportPeriod]time.Time
+	values     map[reportPeriod]float64
+	annDate    map[reportPeriod]time.Time
+	provenance map[reportPeriod]string
 }
 
 func (f statementField) valueAt(p reportPeriod) (float64, bool) {
@@ -174,8 +183,52 @@ func latestTTM(field statementField) (float64, bool) {
 }
 
 // statementBook indexes PIT-filtered readings by symbol, then by field code:
-// book["600519.SH"][equitydeep.FieldEquityAttr].
-type statementBook map[string]map[string]statementField
+// book.fields["600519.SH"][equitydeep.FieldEquityAttr]. book.hashes carries,
+// per symbol, the deduplicated content hashes of the ingest.raw batches that
+// supplied the symbol's surviving readings — the batch coordinates written
+// into factor_cache.citation (ODR-061 切片 C2).
+type statementBook struct {
+	fields map[string]map[string]statementField
+	hashes map[string][]string
+}
+
+// snapshotURIPrefix marks a fundamentals_detail row whose snapshot is archived
+// in ingest.raw; the remainder of the URI is the batch's content hash.
+const snapshotURIPrefix = "ingest.raw:"
+
+// contentHashOfSnapshot extracts the ingest.raw content hash from a
+// snapshot_uri of the form "ingest.raw:<64hex>". ok=false for any other URI
+// form: such a row simply carries no provenance — the prefix is never guessed
+// around, and no coordinate is invented.
+func contentHashOfSnapshot(uri string) (string, bool) {
+	hash, ok := strings.CutPrefix(uri, snapshotURIPrefix)
+	if !ok || hash == "" {
+		return "", false
+	}
+	return hash, true
+}
+
+// citationJSON marshals content hashes into the stored citation form,
+// [{"content_hash":"<64hex>"}...], sorted for determinism. An empty set
+// marshals as [] — the explicit "chain not established" marker, never null.
+func citationJSON(hashes []string) json.RawMessage {
+	if len(hashes) == 0 {
+		return json.RawMessage("[]")
+	}
+	refs := make([]struct {
+		ContentHash string `json:"content_hash"`
+	}, len(hashes))
+	for i, hash := range hashes {
+		refs[i].ContentHash = hash
+	}
+	b, err := json.Marshal(refs)
+	if err != nil {
+		// Unreachable for a slice of string-only structs; degrade to the
+		// explicit empty marker rather than emitting a malformed citation.
+		return json.RawMessage("[]")
+	}
+	return json.RawMessage(b)
+}
 
 // loadStatementBook reads the given field codes as of asOf and indexes them.
 //
@@ -184,12 +237,21 @@ type statementBook map[string]map[string]statementField
 // keeps the row with the greater ann_date. Rows without a value are dropped: a
 // source-side missing reading must not be read as zero, since every factor
 // below divides or differences its inputs.
+//
+// Provenance follows the same winner rule: a surviving reading carries its
+// batch hash only when its snapshot_uri points at ingest.raw. A restatement
+// from a non-archived source supersedes the earlier batch — the reading's hash
+// is dropped rather than kept, so the citation never names a batch whose value
+// is no longer in use.
 func (f *FactorComputer) loadStatementBook(ctx context.Context, asOf time.Time, fieldCodes ...string) (statementBook, error) {
 	rows, err := f.store.GetFundamentalsDetailAsOf(ctx, fieldCodes, asOf)
 	if err != nil {
-		return nil, fmt.Errorf("load fundamentals_detail: %w", err)
+		return statementBook{}, fmt.Errorf("load fundamentals_detail: %w", err)
 	}
-	book := make(statementBook, len(rows))
+	book := statementBook{
+		fields: make(map[string]map[string]statementField, len(rows)),
+		hashes: make(map[string][]string),
+	}
 	for _, r := range rows {
 		if r.Value == nil {
 			continue
@@ -198,22 +260,47 @@ func (f *FactorComputer) loadStatementBook(ctx context.Context, asOf time.Time, 
 		if !ok {
 			continue
 		}
-		fields := book[r.TsCode]
+		fields := book.fields[r.TsCode]
 		if fields == nil {
 			fields = make(map[string]statementField)
-			book[r.TsCode] = fields
+			book.fields[r.TsCode] = fields
 		}
 		field := fields[r.FieldCode]
 		if field.values == nil {
 			field.values = make(map[reportPeriod]float64)
 			field.annDate = make(map[reportPeriod]time.Time)
+			field.provenance = make(map[reportPeriod]string)
 		}
 		if prev, seen := field.annDate[period]; seen && !r.AnnDate.After(prev) {
 			continue
 		}
 		field.values[period] = *r.Value
 		field.annDate[period] = r.AnnDate
+		if hash, ok := contentHashOfSnapshot(r.SnapshotURI); ok {
+			field.provenance[period] = hash
+		} else {
+			delete(field.provenance, period)
+		}
 		fields[r.FieldCode] = field
+	}
+	// Union the surviving readings' batch hashes per symbol, deduplicated and
+	// sorted: wider than the minimal set (not every surviving period is
+	// consumed by a formula), but no coordinate is invented (ODR-061 §5).
+	for symbol, fields := range book.fields {
+		seen := make(map[string]bool)
+		var hashes []string
+		for _, field := range fields {
+			for _, hash := range field.provenance {
+				if !seen[hash] {
+					seen[hash] = true
+					hashes = append(hashes, hash)
+				}
+			}
+		}
+		if len(hashes) > 0 {
+			sort.Strings(hashes)
+			book.hashes[symbol] = hashes
+		}
 	}
 	return book, nil
 }
@@ -222,7 +309,11 @@ func (f *FactorComputer) loadStatementBook(ctx context.Context, asOf time.Time, 
 // values and persists them. The pipeline tail is identical for all five factors
 // and identical in behaviour to the three cross-sectional factors in factor.go,
 // so it is kept in one place rather than copied five times.
-func (f *FactorComputer) saveVerticalFactor(ctx context.Context, date time.Time, factor domain.FactorType, rawValues map[string]float64) error {
+//
+// sourceHashes maps symbol → the ingest.raw batches its readings came from and
+// is the only provenance this pipeline writes (ODR-061 切片 C2); symbols
+// without a hash set cite '[]'.
+func (f *FactorComputer) saveVerticalFactor(ctx context.Context, date time.Time, factor domain.FactorType, sourceHashes map[string][]string, rawValues map[string]float64) error {
 	if len(rawValues) == 0 {
 		f.logger.Warn().
 			Time("date", date).
@@ -241,6 +332,7 @@ func (f *FactorComputer) saveVerticalFactor(ctx context.Context, date time.Time,
 			RawValue:   raw,
 			ZScore:     zScores[symbol],
 			Percentile: percentiles[symbol],
+			Citation:   citationJSON(sourceHashes[symbol]),
 		})
 	}
 	if err := f.store.SaveFactorCacheBatch(ctx, entries); err != nil {
@@ -274,7 +366,7 @@ func (f *FactorComputer) ComputeGrossMarginTrendFactor(ctx context.Context, date
 		return fmt.Errorf("load fundamentals_detail for gross margin trend: %w", err)
 	}
 	rawValues := make(map[string]float64)
-	for symbol, fields := range book {
+	for symbol, fields := range book.fields {
 		margins, ok := grossMarginQuarters(
 			fields[equitydeep.FieldTotalRevenue],
 			fields[equitydeep.FieldOperatingCost],
@@ -285,7 +377,7 @@ func (f *FactorComputer) ComputeGrossMarginTrendFactor(ctx context.Context, date
 		}
 		rawValues[symbol] = statistics.Slope(margins)
 	}
-	return f.saveVerticalFactor(ctx, date, domain.FactorGrossMarginTrend, rawValues)
+	return f.saveVerticalFactor(ctx, date, domain.FactorGrossMarginTrend, book.hashes, rawValues)
 }
 
 // grossMarginQuarters returns the single-quarter gross margins of the n
@@ -336,7 +428,7 @@ func (f *FactorComputer) ComputeContractLiabilityRatioFactor(ctx context.Context
 		return fmt.Errorf("load fundamentals_detail for contract liability ratio: %w", err)
 	}
 	rawValues := make(map[string]float64)
-	for symbol, fields := range book {
+	for symbol, fields := range book.fields {
 		liability, ok := latestValue(fields[equitydeep.FieldContractLiability])
 		if !ok {
 			continue
@@ -347,7 +439,7 @@ func (f *FactorComputer) ComputeContractLiabilityRatioFactor(ctx context.Context
 		}
 		rawValues[symbol] = liability / revenue
 	}
-	return f.saveVerticalFactor(ctx, date, domain.FactorContractLiabilityRatio, rawValues)
+	return f.saveVerticalFactor(ctx, date, domain.FactorContractLiabilityRatio, book.hashes, rawValues)
 }
 
 // ComputeOCFToNetProfitFactor computes 经营现金流(TTM) / 归母净利润(TTM) per stock —
@@ -364,7 +456,7 @@ func (f *FactorComputer) ComputeOCFToNetProfitFactor(ctx context.Context, date t
 		return fmt.Errorf("load fundamentals_detail for ocf to net profit: %w", err)
 	}
 	rawValues := make(map[string]float64)
-	for symbol, fields := range book {
+	for symbol, fields := range book.fields {
 		ocf, ok := latestTTM(fields[equitydeep.FieldOCFNet])
 		if !ok {
 			continue
@@ -375,7 +467,7 @@ func (f *FactorComputer) ComputeOCFToNetProfitFactor(ctx context.Context, date t
 		}
 		rawValues[symbol] = ocf / netProfit
 	}
-	return f.saveVerticalFactor(ctx, date, domain.FactorOCFToNetProfit, rawValues)
+	return f.saveVerticalFactor(ctx, date, domain.FactorOCFToNetProfit, book.hashes, rawValues)
 }
 
 // ComputeROEDuPontLeverageFactor computes the equity multiplier of the DuPont
@@ -392,7 +484,7 @@ func (f *FactorComputer) ComputeROEDuPontLeverageFactor(ctx context.Context, dat
 		return fmt.Errorf("load fundamentals_detail for roe dupont leverage: %w", err)
 	}
 	rawValues := make(map[string]float64)
-	for symbol, fields := range book {
+	for symbol, fields := range book.fields {
 		totalAssets, ok := latestValue(fields[equitydeep.FieldTotalAssets])
 		if !ok {
 			continue
@@ -403,7 +495,7 @@ func (f *FactorComputer) ComputeROEDuPontLeverageFactor(ctx context.Context, dat
 		}
 		rawValues[symbol] = totalAssets / equity
 	}
-	return f.saveVerticalFactor(ctx, date, domain.FactorROEDuPontLeverage, rawValues)
+	return f.saveVerticalFactor(ctx, date, domain.FactorROEDuPontLeverage, book.hashes, rawValues)
 }
 
 // ComputeInventoryTurnoverDeltaFactor computes the year-over-year change in
@@ -427,7 +519,7 @@ func (f *FactorComputer) ComputeInventoryTurnoverDeltaFactor(ctx context.Context
 		return fmt.Errorf("load fundamentals_detail for inventory turnover delta: %w", err)
 	}
 	rawValues := make(map[string]float64)
-	for symbol, fields := range book {
+	for symbol, fields := range book.fields {
 		inventory, cost := fields[equitydeep.FieldInventory], fields[equitydeep.FieldOperatingCost]
 		current, ok := inventoryTurnover(inventory, cost, 0)
 		if !ok {
@@ -439,7 +531,7 @@ func (f *FactorComputer) ComputeInventoryTurnoverDeltaFactor(ctx context.Context
 		}
 		rawValues[symbol] = current - yearAgo
 	}
-	return f.saveVerticalFactor(ctx, date, domain.FactorInventoryTurnoverDelta, rawValues)
+	return f.saveVerticalFactor(ctx, date, domain.FactorInventoryTurnoverDelta, book.hashes, rawValues)
 }
 
 // inventoryTurnover returns the inventory turnover of one period, `offset`

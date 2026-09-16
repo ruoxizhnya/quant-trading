@@ -323,6 +323,11 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`ALTER TABLE factor_cache ALTER COLUMN factor_name TYPE VARCHAR(32)`,
 		`ALTER TABLE factor_returns ALTER COLUMN factor_name TYPE VARCHAR(32)`,
 		`ALTER TABLE ic_analysis ALTER COLUMN factor_name TYPE VARCHAR(32)`,
+		// Migration 027: docs/migrations/027_factor_cache_citation.sql (ODR-061 / P5-1 切片 C2)
+		// factor_cache 因子行携带来源批次坐标 [{"content_hash":"<64hex>"}]，输出面展开为
+		// ADR-022 §5 五元组。'[]' = 该数字的 A→B 链尚未建立（momentum/value/quality 及
+		// 历史行），与 NULL 相对。带默认值加列为 metadata-only；幂等，重复启动等价 no-op。
+		`ALTER TABLE factor_cache ADD COLUMN IF NOT EXISTS citation JSONB NOT NULL DEFAULT '[]'::jsonb`,
 		// Migration 025: docs/migrations/025_equitydeep_field_consolidation.sql (EQD-P3-1 / C-8)
 		// fundamentals 与 stock_fundamentals 的 12 个指标列同名同义，两条写入路径同源于
 		// tushare fina_indicator 且都把 trade_date 取成 end_date，故存量按 symbol→ts_code

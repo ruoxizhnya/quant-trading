@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -10,6 +12,60 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/logging"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 )
+
+// citationTuple is the ADR-022 §5 evidence coordinate
+// {source, dataset, key, as_of, content_hash}. A hash with no ingest.raw
+// record keeps only content_hash: the absence of the other four fields is the
+// "response not archived" signal — never padded with invented values — the
+// same first-class semantics as GET /api/evidence/{hash}'s 404 (ODR-061 §4).
+type citationTuple struct {
+	Source      string     `json:"source,omitempty"`
+	Dataset     string     `json:"dataset,omitempty"`
+	Key         string     `json:"key,omitempty"`
+	AsOf        *time.Time `json:"as_of,omitempty"`
+	ContentHash string     `json:"content_hash"`
+}
+
+// factorCacheResponse is the wire form of a factor_cache read: the entry with
+// its stored citation (hash-only) replaced by the expanded five-tuples. The
+// outer Citation field shadows the embedded entry's raw form.
+type factorCacheResponse struct {
+	domain.FactorCacheEntry
+	Citation []citationTuple `json:"citation"`
+}
+
+// expandCitation resolves a stored citation ([{"content_hash":...}]) into
+// ADR-022 §5 five-tuples by looking each hash up in ingest.raw. ok=false means
+// the stored citation is not parseable as the hash-array form; the caller must
+// degrade instead of failing the request — a citation defect must never turn a
+// factor read into a 5xx (ODR-061 §4).
+func expandCitation(ctx context.Context, store *storage.PostgresStore, citation json.RawMessage) ([]citationTuple, bool) {
+	var refs []struct {
+		ContentHash string `json:"content_hash"`
+	}
+	if err := json.Unmarshal(citation, &refs); err != nil {
+		return nil, false
+	}
+	tuples := make([]citationTuple, 0, len(refs))
+	for _, ref := range refs {
+		tuple := citationTuple{ContentHash: ref.ContentHash}
+		raw, err := store.GetRawIngest(ctx, ref.ContentHash)
+		if err != nil {
+			// Enrichment is best-effort: the hash coordinate itself remains
+			// truthful, so degrade to hash-only instead of failing the read.
+			logging.Logger.Warn().Err(err).
+				Str("content_hash", ref.ContentHash).
+				Msg("citation expansion failed; emitting hash-only tuple")
+		} else if raw != nil {
+			tuple.Source = raw.Source
+			tuple.Dataset = raw.Dataset
+			tuple.Key = raw.Key
+			tuple.AsOf = raw.AsOf
+		}
+		tuples = append(tuples, tuple)
+	}
+	return tuples, true
+}
 
 func getFactorHandler(store *storage.PostgresStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -43,7 +99,14 @@ func getFactorHandler(store *storage.PostgresStore) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, entry)
+		tuples, ok := expandCitation(ctx, store, entry.Citation)
+		if !ok {
+			// Stored citation exists but is not the hash-array form: pass the
+			// entry through unchanged rather than failing the read.
+			c.JSON(http.StatusOK, entry)
+			return
+		}
+		c.JSON(http.StatusOK, factorCacheResponse{FactorCacheEntry: *entry, Citation: tuples})
 	}
 }
 
