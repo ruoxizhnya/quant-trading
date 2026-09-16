@@ -89,3 +89,6 @@ FRONTEND_*.md
 # ── AI Session State (gitignored, per-session) ─────
 .session/
 .session/*
+# AI 助手的会话/项目记忆（本机状态，随会话演进，不进版本库）。
+# 注意：不删除该目录，只是不跟踪。
+.workbuddy-ai/
