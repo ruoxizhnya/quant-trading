@@ -2,7 +2,9 @@
 
 > **Phase**: 2.6 (Hermes Agent Integration)
 > **Status**: Acceptance test procedure (requires live infrastructure)
-> **Related**: [System Design §11](../../.trae/documents/hermes-agent-integration-system-design.md) Phase 2 acceptance criteria
+> **Related**: System Design §11 Phase 2 acceptance criteria
+> ⚠️ 该设计文档原位于 `.trae/documents/`，已随目录删除而遗失（2026-09-16 CI 文档校验发现）。
+> 验收标准以下文为准；补回设计文档见 TASKS P2-11。
 > **Prerequisite**: Phase 2.7 Go integration tests passing (`handlers_tools_integration_test.go`)
 
 ---

@@ -1,8 +1,27 @@
+---
+status: active
+last-verified: 2026-09-16
+verified-by: 代码审查（2026-09-16）
+---
+
 # Live Trading Interface Specification
 
+> ⚠️ **实现状态警告（2026-09-16）——本文档描述的是目标接口，不是已实现功能**
+>
+> | 组件 | 实际状态 |
+> |---|---|
+> | `LiveTrader` 接口 | 仅接口定义，无真实实现 |
+> | `MockTrader` | ✅ 已实现（A 股规则、T+1、印花税、涨跌停） |
+> | `AdvancedTrader` | 仅接口定义 |
+> | `OrderStore` | ✅ 已实现（PostgreSQL） |
+> | **XTP 券商适配** | ❌ **桩** — `pkg/live/broker/xtp/xtp.go:315,378,410,479` 四处 `TODO: When SDK is linked`，真实下单为空操作 |
+>
+> **实盘不在当前路线图内**（见 [ROADMAP.md](ROADMAP.md)「明确不做」）。本文档保留作接口参考，**不代表已实现**。
+> 后续若启用：代码侧只预留扩展接口，不实现 XTP 适配。
+
 > **版本**: v1.0
-> **最后更新**: 2026-05-05
-> **状态**: Phase 3 已完成 (MockTrader 实现就绪，真实券商接口预留)
+> **原文更新**: 2026-05-05 | **状态标注**: 2026-09-16
+> **原状态声明**: ~~Phase 3 已完成（MockTrader 实现就绪，真实券商接口预留）~~ — **此声明不准确**，见上方警告。
 
 ## 1. 概述
 

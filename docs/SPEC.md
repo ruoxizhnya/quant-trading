@@ -70,7 +70,7 @@ A production-grade quantitative trading system targeting A-share markets with ma
 ## Unified Research Platform (ADR-022, Proposed)
 
 > **Status**: Proposed — 顶层定义已落盘，实现待执行（阶段 P1~P5）。
-> **Canonical 定义**: [PRODUCT.md](PRODUCT.md)（顶层产品）→ [ADR-022](adr/adr-022-unified-research-platform.md)（架构决策）。
+> **Canonical 定义**: [PRODUCT.md](PRODUCT.md)（顶层产品）→ [ADR-022](archive/superseded-adr/adr-022-unified-research-platform.md)（架构决策）。
 > 本节仅摘录对 API/数据模型有约束力的部分；冲突时以 PRODUCT.md / ADR-022 为准。
 
 ### 四层架构（L0-L3，单向依赖）
@@ -103,7 +103,7 @@ L0 数据面   ingest.raw | market.* | quant.* | research.* | Evidence API   ←
 | D | 研究叙事（人的判断） | **Vault markdown**（事实源） | — |
 | E | 研究结构化状态 | PG `research.*`（D 的确定性投影，可 DROP 重建） | 权威在 D |
 
-### Evidence API（已实现 — L0-3，见 [ODR-050](odr/odr-050-p1-base-contract-landing.md)）
+### Evidence API（已实现 — L0-3，见 [ODR-050](archive/odr/odr-050-p1-base-contract-landing.md)）
 
 证据坐标从"文件路径 + 模糊字符串"升级为**不可变内容坐标**：
 
@@ -111,12 +111,12 @@ L0 数据面   ingest.raw | market.* | quant.* | research.* | Evidence API   ←
 citation = { source, dataset, key, as_of, content_hash }
 ```
 
-**摄取入口**（已实现 — L0-1，见 [ODR-051](odr/odr-051-l0-1-single-ingest-entry.md)）：
+**摄取入口**（已实现 — L0-1，见 [ODR-051](archive/odr/odr-051-l0-1-single-ingest-entry.md)）：
 
 | Method | Path | 说明 |
 |---|---|---|
 | POST | `/api/ingest/raw` | 外部生产者（akshare 侧 / 同步 executor）上报原始响应，落 `ingest.raw`；同 `content_hash` 幂等 |
-| POST | `/api/ingest/equitydeep` | 归一化已归档的 EquityDeep 快照（ndjson，每行一条 `contracts/snapshot.schema.json` 记录）→ `fundamentals_detail`（类 B）；须先经 `/api/ingest/raw` 归档并携带其 `content_hash`（见 [ODR-055](odr/odr-055-eqd-p1-2-vertical-factors.md)） |
+| POST | `/api/ingest/equitydeep` | 归一化已归档的 EquityDeep 快照（ndjson，每行一条 `contracts/snapshot.schema.json` 记录）→ `fundamentals_detail`（类 B）；须先经 `/api/ingest/raw` 归档并携带其 `content_hash`（见 [ODR-055](archive/odr/odr-055-eqd-p1-2-vertical-factors.md)） |
 | GET | `/api/evidence/{content_hash}` | 返回该哈希对应的**唯一原始记录**（类 A），404 表示未摄取 |
 
 约束：
@@ -577,7 +577,7 @@ type Provider interface {
 | `HttpProvider` | Generic HTTP | Generic REST API adapter (e.g., L0 data service) | `pkg/marketdata/http_provider.go` |
 | `InMemoryProvider` | In-memory | Testing and caching | `pkg/marketdata/inmemory_provider.go` |
 
-> **External-source direct providers retired** ([ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)): the former `TushareProvider` / `AkShareProvider` (which called tushare.pro / AkShare directly) have been removed. Per [ADR-022](adr/adr-022-unified-research-platform.md) §1, external data may only enter through the L0 single ingest door (`POST /api/ingest/raw` → `ingest.raw`); read-only consumers go through `http` / `postgres`. The adapter factory now rejects `type: tushare` / `type: akshare` explicitly.
+> **External-source direct providers retired** ([ODR-058](archive/odr/odr-058-p5-1-retire-direct-providers.md)): the former `TushareProvider` / `AkShareProvider` (which called tushare.pro / AkShare directly) have been removed. Per [ADR-022](archive/superseded-adr/adr-022-unified-research-platform.md) §1, external data may only enter through the L0 single ingest door (`POST /api/ingest/raw` → `ingest.raw`); read-only consumers go through `http` / `postgres`. The adapter factory now rejects `type: tushare` / `type: akshare` explicitly.
 
 ### DataAdapter (Three-Layer Architecture)
 
@@ -821,7 +821,9 @@ SELECT create_hypertable('factor_cache', 'date');
 > `GateL4MinOOSSharpe=0.30`）。L4 的 `passed` 可能与引擎的 `overall_pass`
 > 不同——前者使用更严格的门禁阈值，是 Hermes 决定是否保存到基因池的权威依据。
 > 因子/策略必须按序通过 L1→L2→L3→L4 才能保存到基因池。
-> 详见 [Hermes Agent Integration System Design](.trae/documents/hermes-agent-integration-system-design.md) §6。
+> 详见 Hermes Agent Integration System Design §6。
+> ⚠️ 该设计文档原位于 `.trae/documents/`，已随目录删除而遗失（2026-09-16 CI 文档校验发现）。
+> 现行行为以 `docs/hermes/` 下的配置与 prompts 为准；如需补回该设计文档，见 TASKS P2-11。
 
 #### EQD-P2-1 新增工具 (2026-09-15, 1 个)
 
@@ -1152,7 +1154,7 @@ GET  /api/walkforward/:strategy_id - Get walk-forward report for strategy
 GET  /api/datasource/status       - Current data adapter status (primary, stopped, mode)
 GET  /api/datasource/health       - Health check of all registered adapters
 ```
-> 运行时切换门 `POST /api/datasource/switch` 已于 [ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md) 退役（任意 URL 冲突 ADR-022 §1；读源由启动期 `data_service.url` 固定）。
+> 运行时切换门 `POST /api/datasource/switch` 已于 [ODR-059](archive/odr/odr-059-p5-1-retire-datasource-switch.md) 退役（任意 URL 冲突 ADR-022 §1；读源由启动期 `data_service.url` 固定）。
 
 #### Factor Analysis
 ```
@@ -1304,7 +1306,7 @@ POST /api/gene-pool/archive       - Archive generation to gene pool
 GET  /api/datasource/status       - Get current data source status
 GET  /api/datasource/health       - Check data source connectivity
 ```
-> 运行时切换门 `POST /api/datasource/switch` 已于 [ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md) 退役。
+> 运行时切换门 `POST /api/datasource/switch` 已于 [ODR-059](archive/odr/odr-059-p5-1-retire-datasource-switch.md) 退役。
 
 #### Factor Analysis
 ```

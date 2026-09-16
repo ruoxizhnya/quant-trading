@@ -1,34 +1,36 @@
-# 量化交易系统架构文档
+---
+status: evergreen
+type: reference
+last-verified: 2026-09-16
+verified-by: 代码审查（2026-09-16）
+---
 
-> **Status**: Active (Reference)
-> **Version:** 2.3.0 (ADR-022 统一研究平台 — 底座 + 双工作面)
-> **Last Updated:** 2026-09-15
-> **Owner:** 龙少 (Longshao) — AI Assistant
-> **Related:** [VISION.md](VISION.md) (principles), [SPEC.md](SPEC.md) (API), [ROADMAP.md](ROADMAP.md) (progress)
+# 架构参考（Reference）
+
+> **本文是 Reference 类文档**：干、全、与代码严格对应，用于**查阅**（端口 / API / 表结构 / 缓存 / 引擎细节）。
 >
-> **Changelog v2.0 (Migration):**
-> - 添加标准元数据头部（Status, Owner, Related）
-> - 统一文档格式与 AGENTS Template v2.0 对齐
-> - 添加前端架构章节（Vue SPA + Legacy HTML 双轨制）
+> **不适合入门**：先读 [README.md](README.md) 导航 → [PRODUCT.md](PRODUCT.md)（是什么）→ 本文顶部「架构总览」（怎么搭）。
+>
+> 设计原则见 [VISION.md](VISION.md) · API 契约见 [SPEC.md](SPEC.md) · 待办见 [TASKS.md](TASKS.md)。
 
-_原最后更新: 2026-04-08 (Phase 3)_
+_原文截至 2026-04-08 (Phase 3)，2026-09-16 补充架构总览与现状对比。_
 
 **Phase 4 更新 (AI-Native Evolution):**
 - AI 研究服务 (port 8086): 因子发现、策略生成、优化、进化、漂移检测
 - 执行服务抽象: BacktestExecutionService 支持固定/浮动/无滑点模型
 - 模拟交易 API: 完整订单生命周期管理 + 模拟券商
 - AI 前端组件: ~~FactorLab、StrategyWorkshop、EvolutionObs、GenealogyTree、FitnessChart~~
-  — ⚠️ **已删除**（P1-13 创建后 S7-P2-7 作为死代码删除，详见 [ODR-045](odr/odr-045-frontend-ai-component-deprecation.md)）；自主研究改由 Hermes Agent + MCP 工具 + 自然语言交互提供（[ODR-046](odr/odr-046-hermes-agent-integration-decision.md)）
+  — ⚠️ **已删除**（P1-13 创建后 S7-P2-7 作为死代码删除，详见 [ODR-045](archive/odr/odr-045-frontend-ai-component-deprecation.md)）；自主研究改由 Hermes Agent + MCP 工具 + 自然语言交互提供（[ODR-046](archive/odr/odr-046-hermes-agent-integration-decision.md)）
 - 基因池: Factor/Strategy 基因池 + PostgreSQL 持久化
 - 指标计算: IC/RankIC、换手率计算器
 - 搜索优化: TPE 贝叶斯优化、遗传算法、滚动窗口验证
 - 漂移检测: 均值漂移、方差漂移、分布漂移检测
 - 进化算法: 种群管理 + 选择/交叉/变异算子
-- **统一研究平台 (Proposed, ADR-022)**: 原 Quant Lab 能力**降维为共享底座**（L0 数据面 + L1 计算面 + L2 编排面），其上承载两个**对等工作面** —— 工作面 1 纵向深研（EquityDeep，季度频，产出研究档案）、工作面 2 横截面选股（日频，产出交易信号）。见下文 §统一研究平台架构 / [ADR-022](adr/adr-022-unified-research-platform.md)（取代 [ADR-021](adr/adr-021-equitydeep-research-layer.md)）
+- **统一研究平台 (Proposed, ADR-022)**: 原 Quant Lab 能力**降维为共享底座**（L0 数据面 + L1 计算面 + L2 编排面），其上承载两个**对等工作面** —— 工作面 1 纵向深研（EquityDeep，季度频，产出研究档案）、工作面 2 横截面选股（日频，产出交易信号）。见下文 §统一研究平台架构 / [ADR-022](archive/superseded-adr/adr-022-unified-research-platform.md)（取代 [ADR-021](archive/superseded-adr/adr-021-equitydeep-research-layer.md)）
 
 **Phase 3 更新:**
 - Event-Driven 数据管道 (pkg/marketdata/eventbus.go + provider 接口)
-- 多数据源适配器: Postgres / HTTP / InMemory / Cached (Redis)（原 `pkg/marketdata` 的 Tushare / AkShare **直连** provider 已于 ADR-022 §1 退役，外部源统一经 L0 单一摄取入口，见 [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)）
+- 多数据源适配器: Postgres / HTTP / InMemory / Cached (Redis)（原 `pkg/marketdata` 的 Tushare / AkShare **直连** provider 已于 ADR-022 §1 退役，外部源统一经 L0 单一摄取入口，见 [ODR-058](archive/odr/odr-058-p5-1-retire-direct-providers.md)）
 - 因子缓存预热: Engine 自动从 factor_cache 表加载 z-score，注入 FactorZScoreReader
 - 限价单支持: strategy.Signal 增加 OrderType/LimitPrice，Tracker 按日内高低价判断成交
 - 股息/送股处理: Tracker.ProcessDividend + ProcessSplit，Engine 日循环自动处理
@@ -45,9 +47,49 @@ _原最后更新: 2026-04-08 (Phase 3)_
 
 ---
 
+## 架构总览（三层模型）
+
+> **这是目标形态。** 当前实现尚未完全对齐，差距见本节末尾的对照表。
+
+```
+L3  AI 编排层    AI 实验员（唯一编排者，会循环） · 因果审查（被调用，不循环）
+                 ↓ 经 MCP 工具桥调用    ↑ 返回结果
+L2  能力层       [MCP Tool Bridge] → 因子计算 | 回测 | 产业链查询 | 证据查询 | 验证器链×5
+                 ↓ 读取事实            ↑ 写入产物
+L1  数据层       行情 | 财务 | 产业链图谱 | 研究洞察 | 实验日志
+                                                      ↑ 由 L3 产生、经 L2 写入
+```
+
+| 层 | 职责 | 关键约束 |
+|---|---|---|
+| **L1 数据层** | 事实 + 执行产物，只增不改 | PIT 正确性、质量门禁、单一摄取入口 |
+| **L2 能力层** | **确定性**、可组合（可写执行产物）。含 5 个验证器（统计/经济/稳健/偏差/冗余） | **禁止 AI 直接摸数据**——本层存在的意义就是拦住 AI 直接读库 / 读文件 |
+| **L3 AI 编排层** | 试错、搜索、**因果审查** | **唯一需要人在环的一层**；会自主循环的只有实验员 |
+
+**分界线是"能否无人值守"，不是"静态 vs 动态"，也不是"有无状态"**：L1/L2 给定输入必有确定输出，可自动测试、可复现；L3 会失败，必须可监督。
+注意 L2 **可以有副作用**（回测写 `backtest_jobs`、因子写 `factor_cache`）——确定性指的是**行为可复现**，不是无状态。
+
+**三个必须记住的位置**：
+
+- **MCP 工具桥属于 L2**，是 AI 调用能力层的唯一通道（AI 不得绕过它直连能力实现）。现状 19 个工具已暴露于 `/api/tools`，但**尚无 agent driver 循环调用**（见 TASKS P1-2）。
+- **实验日志落在 L1**：由 L3 产生、经 L2 写入，被验证器与审阅台共同读取。它是过拟合检测、路径回放、复盘的**共同数据源**——不是附属功能，是循环的必要产物。
+- **验证器不是第二个 agent**：它**被调用**、不自主循环。六个检验维度中五个（统计 / 经济 / 稳健 / 偏差 / 冗余）是纯计算，落在 **L2**；只有"因果"需语义理解，落在 **L3**。见 [ADR-023 §4](adr/adr-023-ai-experimenter-lab.md)。
+
+### 现状 vs 目标（2026-09-16）
+
+| 层 | 现状 | 目标 |
+|---|---|---|
+| **L3** | `cmd/ai` 仅 2 个端点，主链路仍是已废弃的 `pkg/ai/agents`；pipeline 真跑 `go build` 但产物从未加载，回测必然 `strategy not found` | 实验员循环控制器 + 验证器链（含因果审查）+ 干预接口 |
+| **L2** | 19 个 MCP 工具已暴露于 `/api/tools`，但**无 agent driver 循环调用**；产业链查询、证据查询未接通 | 被 AI 循环调用；产业链 / 证据能力补全 |
+| **L1** | `ingest.raw`（content_hash 主键）与 `research` schema 已建，但 DDL 硬编码在 `pkg/storage/postgres.go`，`migrations/` 无版本管理；`market` / `quant` schema 未建 | schema 收口 + 版本管理 + PIT 修正 + 宏观/跨境与产业链接入 |
+
+> ⚠️ **下文各章节是"当前实现的 Reference 细节"**，可能领先或落后于目标形态。**以代码为准**；若发现本文与代码不符，改代码或改本文，不要两边都留着。
+
+---
+
 ## 系统概览
 
-> 下图是**共享底座 + 工作面 2（横截面选股）** 的当前实现视图。产品的顶层视图（底座 + 双工作面 + 四层架构）见 [§统一研究平台架构 (ADR-022)](#统一研究平台架构--adr-022)。
+> 下图是**当前实现视图**（服务拓扑）。目标形态见上文 §架构总览。
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -314,8 +356,8 @@ POST /screen                  — 选股筛选
 
 ## 数据模型
 
-> **状态**: 38 张活跃表 (2026-09-15 由 [ODR-056](odr/odr-056-fundamentals-table-consolidation.md) 更新:
-> `fundamentals` 已并入 `stock_fundamentals` 并 DROP, 原 39 张由 [ODR-053](odr/odr-053-p3-fundamentals-detail-table.md) 复核:
+> **状态**: 38 张活跃表 (2026-09-15 由 [ODR-056](archive/odr/odr-056-fundamentals-table-consolidation.md) 更新:
+> `fundamentals` 已并入 `stock_fundamentals` 并 DROP, 原 39 张由 [ODR-053](archive/odr/odr-053-p3-fundamentals-detail-table.md) 复核:
 > `pkg/storage/postgres.go` 内联定义 20 张 + 根 `migrations/` 迁移新增 18 张 —
 > `factor_genes`, `strategy_genes`, `sync_jobs`, `sync_schedules`,
 > `sectors`, `stock_sector_map`, `top_list`, `limit_up_pool`, `announcements`,
@@ -337,7 +379,7 @@ POST /screen                  — 选股筛选
 > `ingest`（类 A 原始源响应归档, 1 张表: `ingest.raw`）与 `research`
 > （类 E 研究结构化状态投影, 3 张表: `profile` / `conclusion` / `question`）两个
 > schema, 共 +4 张表, 均**只新增、不改存量表**。
-> 分区原则与可重建性标注见 [ADR-022](adr/adr-022-unified-research-platform.md) §2。
+> 分区原则与可重建性标注见 [ADR-022](archive/superseded-adr/adr-022-unified-research-platform.md) §2。
 >
 > **ADR-022 计算面追加（已落地 — ODR-053 / EQD-P1-1）**: `fundamentals_detail`
 > 1 张表（类 C 派生, 逐字段行存 + `ann_date` PIT 对齐 + `snapshot_uri` 溯源）, 内联
@@ -470,9 +512,9 @@ Indexes: idx_bj_status, idx_bj_created_at
 | `ingest.raw` | **原始源响应归档（已落地 — ADR-022 §2 类 A / L0-2）** 所有外部源响应按 `content_hash` 唯一归档，是全部数字的最终证据坐标 | content_hash PK, source, dataset, key, as_of, payload JSONB, fetched_at |
 | `research.*` | **研究结构化状态投影（已落地 — ADR-022 §2 类 E / L0-4）** 3 张表 `profile` / `conclusion` / `question`（结论/疑点字段 + citations），可由 vault markdown 确定性重建（可 DROP） | content_hash FK, conclusion, thesis, citations JSONB, evidence_pointer |
 
-> 备注: `fundamentals` 与 `stock_fundamentals` 的字段重叠**已收口** —— 原先登记为 `TASKS.md` C-8（[ODR-047](odr/odr-047-equitydeep-integration-audit.md) DR-7），已于 `EQD-P3-1` 落地（[ODR-056](odr/odr-056-fundamentals-table-consolidation.md)：迁移 `025` 存量并入 `stock_fundamentals` 后 `DROP TABLE fundamentals`）。**基本面数据一律读写 `stock_fundamentals`。** `orders` 表 (migrations/003 定义) 当前未被代码引用，可考虑删除。
+> 备注: `fundamentals` 与 `stock_fundamentals` 的字段重叠**已收口** —— 原先登记为 `TASKS.md` C-8（[ODR-047](archive/odr/odr-047-equitydeep-integration-audit.md) DR-7），已于 `EQD-P3-1` 落地（[ODR-056](archive/odr/odr-056-fundamentals-table-consolidation.md)：迁移 `025` 存量并入 `stock_fundamentals` 后 `DROP TABLE fundamentals`）。**基本面数据一律读写 `stock_fundamentals`。** `orders` 表 (migrations/003 定义) 当前未被代码引用，可考虑删除。
 >
-> `fundamentals_detail`（契约 C1）为 **ADR-022 计算面（原 ADR-021 桥 B1）前置**：EquityDeep 侧 Stage2 派生指标经 ETL 落库后，横截面工作面（工作面 2）的 5 个纵向因子消费此表。schema 定义见 [RESEARCH.md §3.2](RESEARCH.md)，建表 SQL 见 `docs/migrations/022_equitydeep_fundamentals.sql`（任务 `TASKS.md` C-1）。
+> `fundamentals_detail`（契约 C1）为 **ADR-022 计算面（原 ADR-021 桥 B1）前置**：EquityDeep 侧 Stage2 派生指标经 ETL 落库后，横截面工作面（工作面 2）的 5 个纵向因子消费此表。schema 定义见 [archive/RESEARCH-equitydeep-legacy.md §3.2](archive/RESEARCH-equitydeep-legacy.md)，建表 SQL 见 `docs/migrations/022_equitydeep_fundamentals.sql`（任务 `TASKS.md` C-1）。
 
 ---
 
@@ -859,11 +901,14 @@ Browser (:5173)                    Backend (:8085)
 
 ---
 
-## 统一研究平台架构 — ADR-022
+## ~~统一研究平台架构~~ — ADR-022（已废弃，仅供溯源）
 
-> **状态**: Proposed（方向经用户确认 2026-09-15，待实施）
-> **决策**: [ADR-022](adr/adr-022-unified-research-platform.md)（取代 [ADR-021](adr/adr-021-equitydeep-research-layer.md)）
-> **上游**: [PRODUCT.md](PRODUCT.md)（顶层产品定义） | **工作面 1 详案**: [RESEARCH.md](RESEARCH.md) | **审计**: [ODR-047](odr/odr-047-equitydeep-integration-audit.md) | **重构记录**: [ODR-048](odr/odr-048-top-level-product-redefinition.md)
+> ⚠️ **本节描述的是 2026-09-15 的定位（"两个对等工作面 + 飞轮闭环"），已于 2026-09-16 被取代。**
+>
+> **新定位**：AI 实验员 + 人类监督者实验室——三层模型（AI 编排 / 能力 / 数据），EquityDeep 从"独立工作面"降为数据底座（产业链图谱 + 研究洞察库）。
+> 见本文 §架构总览（三层模型）与 [PRODUCT.md](PRODUCT.md)。
+>
+> 保留本节仅供溯源。**现行决策以 [adr/](adr/) 中未废弃的条目为准。**
 
 ### 顶层定位：一个产品，两个对等工作面，一个共享底座
 
@@ -991,7 +1036,7 @@ pkg/tools/
 
 ## Domain Market 软分层架构 (pkg/domain/market/) — S7-P3-4
 
-> **设计来源**: [ODR-043](odr/odr-043-comprehensive-audit-2026-06-29.md) D3 决策 —
+> **设计来源**: [ODR-043](archive/odr/odr-043-comprehensive-audit-2026-06-29.md) D3 决策 —
 > "不做 big-bang schema 重构，采用'软分层 + view 过渡'，新增 `pkg/domain/market/` 子包"
 > **目标**: 将市场数据类型从扁平的 `pkg/domain/types.go` 迁移到专用子包，
 > 同时通过 Go type alias 保持 199 个消费者文件零修改。
@@ -1120,7 +1165,7 @@ var bar market.OHLCV
 | Backtest Client | `pkg/ai/client/backtest_client.go` | HTTP 客户端调用回测 API | ✅ 已实现 |
 | Factor Client | `pkg/ai/client/factor_client.go` | HTTP 客户端调用因子计算 API | ✅ 已实现 |
 
-> **DR-2 修复 (ODR-047)**: Generate / Validate / Evolve Agent 与 Gene Pool 此前标为「🔄 规划中」，但对应文件（`pkg/ai/agents/{generate,validate,evolve}.go`、`pkg/ai/gene_pool/`）均已存在，故改标已实现；其 Go-native agent 层已在 [ODR-046](odr/odr-046-hermes-agent-integration-decision.md) 中标记 deprecated（Hermes Agent 为研究主路径，`pkg/ai/agents/` 保留向后兼容）。
+> **DR-2 修复 (ODR-047)**: Generate / Validate / Evolve Agent 与 Gene Pool 此前标为「🔄 规划中」，但对应文件（`pkg/ai/agents/{generate,validate,evolve}.go`、`pkg/ai/gene_pool/`）均已存在，故改标已实现；其 Go-native agent 层已在 [ODR-046](archive/odr/odr-046-hermes-agent-integration-decision.md) 中标记 deprecated（Hermes Agent 为研究主路径，`pkg/ai/agents/` 保留向后兼容）。
 
 ### 意图解析引擎 (Intent Parser)
 

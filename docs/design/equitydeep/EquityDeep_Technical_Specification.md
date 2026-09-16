@@ -2,7 +2,10 @@
 
 **对应 PRD**: EquityDeep v1.1（按 ADR-022 修订）
 **版本**: v1.1（可实现版，按 ADR-022 修订）
-**归属**: EquityDeep 是本统一研究平台的**工作面 1（纵向深研）** —— 见 [ADR-022](../../adr/adr-022-unified-research-platform.md)（取代 [ADR-021](../../adr/adr-021-equitydeep-research-layer.md)）；顶层产品定义见 [PRODUCT.md](../../PRODUCT.md)；工作面 1 详案见 [RESEARCH.md](../../RESEARCH.md)；本规格的历史待改进项（含原 §3.1 回查脚本 P0 缺陷）见 [ODR-047](../../odr/odr-047-equitydeep-integration-audit.md)
+> ⚠️ **定位已变更（2026-09-16）**：EquityDeep 不再是"工作面 1"，已降为**数据底座**——拆为 ① 产业链图谱（可计算，进 L1 数据层）② 研究洞察库（供 AI 检索的假设来源）。原始快照的唯一权威位置改为 PG `ingest.raw`，vault 只留 `content_hash` 坐标。见 [ADR-023](../../adr/adr-023-ai-experimenter-lab.md)。
+> 本规格中"工作面 1""文件系统即数据库"等表述均已过时，**阅读时请以此 banner 为准**；7-stage 中的确定性抽取部分仍然有效。
+
+**归属**（历史表述，已被上方 banner 取代）: EquityDeep 是本统一研究平台的**工作面 1（纵向深研）** —— 见 [ADR-022](../../archive/superseded-adr/adr-022-unified-research-platform.md)（取代 [ADR-021](../../archive/superseded-adr/adr-021-equitydeep-research-layer.md)）；顶层产品定义见 [PRODUCT.md](../../PRODUCT.md)；工作面 1 详案见 [archive/RESEARCH-equitydeep-legacy.md](../../archive/RESEARCH-equitydeep-legacy.md)；本规格的历史待改进项（含原 §3.1 回查脚本 P0 缺陷）见 [ODR-047](../../archive/odr/odr-047-equitydeep-integration-audit.md)
 
 > **ADR-022 修订说明**（v1.0 → v1.1）
 >
@@ -169,7 +172,7 @@ fetched_at    TIMESTAMPTZ NOT NULL
 [^fn2]: 由 C2 同期 `citation{…}` 计算，见 `research.derived/growth.json`
 ```
 
-> **溯源机制（ADR-022）**：脚注绑定 `content_hash`（内容坐标），读者可经 `GET /api/evidence/{content_hash}` 取回**唯一**原始记录，并可用 JSON Pointer（`/data/营业总收入`）精确定位字段——取代 v1.0 的"grep 文本子串"，从架构上消除 [ODR-047](../../odr/odr-047-equitydeep-integration-audit.md) 的 P0 假阳性缺陷。
+> **溯源机制（ADR-022）**：脚注绑定 `content_hash`（内容坐标），读者可经 `GET /api/evidence/{content_hash}` 取回**唯一**原始记录，并可用 JSON Pointer（`/data/营业总收入`）精确定位字段——取代 v1.0 的"grep 文本子串"，从架构上消除 [ODR-047](../../archive/odr/odr-047-equitydeep-integration-audit.md) 的 P0 假阳性缺陷。
 
 ---
 
@@ -177,7 +180,7 @@ fetched_at    TIMESTAMPTZ NOT NULL
 
 ### 3.1 数字回查（质量护城河，ADR-022 修订）
 
-> **v1.0 原实现**把报告文本与快照 JSON **归一化成字符串后做子串匹配**（`repr_num in snapshot_text`）——这是 [ODR-047](../../odr/odr-047-equitydeep-integration-audit.md) 的 **P0 缺陷**：任何恰好出现的数字子串都会"通过"，即便它不是该字段的值（假阳性）。
+> **v1.0 原实现**把报告文本与快照 JSON **归一化成字符串后做子串匹配**（`repr_num in snapshot_text`）——这是 [ODR-047](../../archive/odr/odr-047-equitydeep-integration-audit.md) 的 **P0 缺陷**：任何恰好出现的数字子串都会"通过"，即便它不是该字段的值（假阳性）。
 >
 > **ADR-022 修订**：校验对象从"文本子串"升级为 **`citation` 元组 + JSON Pointer**。报告中的每个数字必须携带结构化引用，回查即按引用**精确取值比对**。
 
@@ -268,7 +271,7 @@ vault/inbox/*.pdf
 | 存储 | **叙事=vault markdown（git）；结构化状态=PG `research.*`（投影，可重建）；原始证据=PG `ingest.raw`** | 见 §1.2；不重复存储 |
 | 交互 | CLI（rich 库美化）+ Obsidian | 无 Web |
 | 追踪 | 简版：每次研究一个 `runs/{ts}/trace.jsonl` | P1 再接 LangFuse 自部署 |
-| 部署 | 本机 CLI（`pip install -e .`）**+ `equitydeep-research` worker 容器**（共享平台 PG，无对外端口） | 见 [ADR-022](../../adr/adr-022-unified-research-platform.md) §4 |
+| 部署 | 本机 CLI（`pip install -e .`）**+ `equitydeep-research` worker 容器**（共享平台 PG，无对外端口） | 见 [ADR-022](../../archive/superseded-adr/adr-022-unified-research-platform.md) §4 |
 
 ---
 

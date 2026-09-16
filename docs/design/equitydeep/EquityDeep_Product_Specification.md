@@ -4,7 +4,10 @@
 **状态**: 开发依据
 **交付物**: 一个 Python CLI + 一个 Obsidian Vault + 一个 `equitydeep-research` worker 容器（共享平台 PostgreSQL）
 **范围**: A股个股深度研究 Agent MVP
-**归属**: EquityDeep 是本产品的**工作面 1（纵向深研）** —— 顶层定位见 [PRODUCT.md](../../PRODUCT.md)；架构决策见 [ADR-022](../../adr/adr-022-unified-research-platform.md)（取代 [ADR-021](../../adr/adr-021-equitydeep-research-layer.md)）；整合方案见 [RESEARCH.md](../../RESEARCH.md)；本规格的待改进项见 [ODR-047](../../odr/odr-047-equitydeep-integration-audit.md)
+> ⚠️ **定位已变更（2026-09-16）**：EquityDeep 不再是"工作面 1"，已降为**数据底座**——拆为 ① 产业链图谱（可计算，进 L1 数据层）② 研究洞察库（供 AI 检索的假设来源）。纵向深研从"研究前置步骤"变为"被异常触发的按需动作"。见 [ADR-023](../../adr/adr-023-ai-experimenter-lab.md)。
+> 本规格中"工作面 1""研究档案为首要产出"等表述均已过时，**阅读时请以此 banner 为准**；三个硬承诺与逐数溯源仍然有效。
+
+**归属**（历史表述，已被上方 banner 取代）: EquityDeep 是本产品的**工作面 1（纵向深研）** —— 顶层定位见 [PRODUCT.md](../../PRODUCT.md)；架构决策见 [ADR-022](../../archive/superseded-adr/adr-022-unified-research-platform.md)（取代 [ADR-021](../../archive/superseded-adr/adr-021-equitydeep-research-layer.md)）；整合方案见 [archive/RESEARCH-equitydeep-legacy.md](../../archive/RESEARCH-equitydeep-legacy.md)；本规格的待改进项见 [ODR-047](../../archive/odr/odr-047-equitydeep-integration-audit.md)
 
 > **ADR-022 修订说明（2026-09-15）**：本文档 v1.0 假设 EquityDeep "无 DB / 无 Docker / 自抓 akshare / 快照落本地文件"。ADR-022 起，EquityDeep 作为**工作面 1** 接入共享平台底座，以下四点变更（**产品价值本体——三个硬承诺、7-stage 固定流程、非目标红线——全部不变**）：
 >
