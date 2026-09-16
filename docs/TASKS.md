@@ -1,8 +1,8 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.35.0 (Sprint 8 — 阶段 P5 切片 3: Vue SPA 对接 L0 Evidence API, ODR-060)
-> **Last Updated:** 2026-09-15
+> **Version:** 3.36.0 (Sprint 8 — 阶段 P5 切片 C 评估: Research Engine 输出携 citation 元组, 裁决收窄为 C2, ODR-061)
+> **Last Updated:** 2026-09-16
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
 >
@@ -573,12 +573,38 @@
 | MS (Sprint 1-4 + 验证) | 0  | 0     | 25     | 0     | 0     | 25     |
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
-| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **6** | **0** | **11** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) + EQD-P1-2 已落地(ODR-055) + EQD-P3-1 已落地(ODR-056, **阶段 P3 3/3 关闭**) + EQD-P2-1 已落地(ODR-057, **阶段 P4 1/2**) + **阶段 P5 切片 1**已落地(ODR-058, P-A 退役 / P-B·P-C 不动 / P-D 收敛) + **阶段 P5 切片 2**已落地(ODR-059, P-B 退役 / status·health 保留) + **阶段 P5 切片 3**已落地(ODR-060, Vue SPA 对接 L0 Evidence API / 后端零改动) |
-| **总计**          | **8** | **0** | **222** | **1** | **2** | **233** | (v3.35.0 Sprint 8 阶段 P5 切片 3: Vue SPA 对接 L0 Evidence API, ODR-060) |
+| **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **6** | **0** | **11** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) + EQD-P1-2 已落地(ODR-055) + EQD-P3-1 已落地(ODR-056, **阶段 P3 3/3 关闭**) + EQD-P2-1 已落地(ODR-057, **阶段 P4 1/2**) + **阶段 P5 切片 1**已落地(ODR-058, P-A 退役 / P-B·P-C 不动 / P-D 收敛) + **阶段 P5 切片 2**已落地(ODR-059, P-B 退役 / status·health 保留) + **阶段 P5 切片 3**已落地(ODR-060, Vue SPA 对接 L0 Evidence API / 后端零改动) + **阶段 P5 切片 C**已完成评估(ODR-061, 裁决收窄为 C2 / 实施未启动) |
+| **总计**          | **8** | **0** | **222** | **1** | **2** | **233** | (v3.36.0 Sprint 8 阶段 P5 切片 C 评估: Research Engine 输出携 citation 元组, ODR-061) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-16 (v3.36.0) — Sprint 8 阶段 P5 切片 C **评估**: Research Engine 输出携 citation 元组（裁决收窄为 C2）
+
+**来源**: [ODR-061](odr/odr-061-p5-1-slice-c-citation-evaluation.md) — P5-1 第四刀；承 [ODR-060](odr/odr-060-p5-1-frontend-evidence-api.md) §未做项第 3 条「Research Engine 输出携带 `content_hash`（切片 C）—— 跨 schema 全链路，高风险」
+
+- **本切片仅评估与裁决，未产出代码**（Category: **Audit**；统计总计 233 不变）
+- **名词澄清**: 全仓 Grep `ResearchEngine|research_engine` = **0 命中** —— 它是 ADR-022 §3 L2 横截面工作面的**概念名**，代码对应为 `pkg/data`（`FactorComputer` / `FactorAttributor`）+ `cmd/data` 的 factor handler；本切片实际触及 L1 因子引擎 → `quant.*` 段
+- **契约要求（切片成立依据）**: ADR-022 §2 C 类「其他侧副本」= ❌ 禁的是**数据副本**，citation 是**坐标**（hash + pointer）非副本；PRODUCT §6.3「因子定义可用同一坐标引用同一数字」+ §6.4「**100%** 数字可用 `content_hash` 回溯」直接要求
+- **现场取证（四条事实）**
+  — **(a) 全链路只有一段通**：见下链路表
+  — **(b) `archiveRaw` 算了 hash 又丢弃**：`pkg/data/tushare_raw.go` 内 `hash, err := storage.ContentHashOf(body)` → 写 `RawIngest` → **函数无返回值**；A 类归档已挂真实咽喉点（ODR-051）但 hash **未回传给调用方**
+  — **(c) `quant.*` 表零 hash 列**：`factor_cache` / `factor_returns` / `ic_analysis` 无 citation 列；`ohlcv_daily_qfq` / `stock_fundamentals` **连 `source` 列都没有**
+  — **(d) 纵向面是唯一已有 hash 的链**：`fundamentals_detail.snapshot_uri`（值形如 `ingest.raw:<hash>`）是唯一已落库的 hash 出参
+- **链路现状（核心发现）**: **A→B**（OHLCV / 基本面）❌ 断 / **A→B**（equitydeep 纵向）✅ 已建 / **B→C**（因子计算）❌ 断（`loadStatementBook` **读了行却丢弃 `SnapshotURI`**）/ **C→输出** ❌ 断
+- **裁决: C2 收窄**（3 候选 C1 全链路 ⛔ / **C2 ✅** / C3 零 schema ⛔）
+  — **存储层**: 迁移 027 `ALTER TABLE factor_cache ADD COLUMN IF NOT EXISTS citation JSONB NOT NULL DEFAULT '[]'::jsonb`（默认 `'[]'` 非 NULL；`IF NOT EXISTS` 幂等；PG metadata-only；**不改写 Migration 006 的 `CREATE TABLE` 原文**，同迁移 026 口径）+ `docs/migrations/027_factor_cache_citation.sql` 文档副本
+  — **类型层**: `pkg/domain/factor.go::FactorCacheEntry` 增 `Citation json.RawMessage`（JSON `citation,omitempty`）——用 `RawMessage` 是刻意的：列内形态（今日 hash-only）与输出形态（5 元组）**不同**且前者须可无损升级
+  — **注入链（唯一新增信息流）**: `loadStatementBook` **保留** `SnapshotURI`（剥 `ingest.raw:`，**前缀不匹配者跳过，不猜不造**）→ `statementField` 增 provenance → `saveVerticalFactor`（**5 个纵向因子的唯一收口点**）写 `entry.Citation`
+  — **输出面**: `cmd/data/handlers_factor.go::getFactorHandler`（`GET /factors/:factor_name`，注册于 `cmd/data/main.go:159`）解码后逐个 `GetRawIngest` → 命中输出 5 元组 `{source, dataset, key, as_of, content_hash}`；**未命中只出 `{"content_hash": ...}`**（其余四字段缺席**即是**「未响应未归档」信号，与 Evidence API 404 一等语义同源，**不得凭空补字段**）；`factor_cache` 未命中仍 404，citation 解析失败**不得**转 5xx
+  — **接口零变更**: `pkg/data.FactorStore` / `pkg/backtest/cache.FactorStore` 均不变（citation 随 `FactorCacheEntry` 走）⇒ 生产调用方与 mock 零改动
+  — **粒度语义**: `archiveRaw` 的 `as_of` 刻意留 NULL ⇒ citation 落点是**请求批次坐标**；同一标的多 period 可能来自不同批次 ⇒ **citation 是集合**（列内用数组之因）；取并集**略宽于**最小集，精确到「哪个数字 ← 哪一批次」由 JSON Pointer 层负责（ADR-022 §5 声明 / 精确两层分工）
+- **报告面推迟（用户裁决）**: `pkg/backtest/cache/factor_cache.go::Warm` **硬编码** `{Momentum, Value, Quality}` —— 三者在 C2 里**全部不可覆盖**（源自 `ohlcv_daily_qfq` / `stock_fundamentals`，两表零 hash 列）⇒ 原「回测内嵌 + 走查加列」方案只能产出**恒空 citation（幽灵字段）**，故 `backtest_jobs.result` 与 `walk_forward_reports` 本切片**整体不动**，标注「待 A→B 链落地」
+- **明确不做（切片边界）**: `factor_returns` / `ic_analysis` 携 citation（须独立评估）；C1（`archiveRaw` 签名改造 + OHLCV / `stock_fundamentals` 加 hash 列）；C3；切片 B（`api/sync.ts` 死端点）/ 切片 D（旁路残留）；ODR-060 原文回写（历史决策记录保留原文，本仓既有口径）
+- **未达标项（如实记录）**: PRODUCT §6.4「证据完整性 100%」**未达标** —— 覆盖面仅 **5/11** 个因子，momentum 完全无链、value / quality 无链；本切片**不宣称**达标
+- **验收判据（待 C2 实施时取证）**: `go build ./...` EXIT=0；`go test -count=1 ./pkg/storage/ ./pkg/data/ ./cmd/data/ ./pkg/backtest/...` 全 ok；**主验收点** = `GET /factors/gross_margin_trend?symbol=600519.SH&date=<YYYYMMDD>` 的 `citation[0].content_hash` 命中 `GET /api/evidence/{hash}` → **200**（非 404）；momentum 同一端点 `citation` = `[]`（非 null）；`snapshot_uri` 非 `ingest.raw:` 的行 citation 不含该来源且不报错
+- **统计更新**: 总计 233 不变（评估类，无任务增减）；**阶段 P5 切片 C 评估完成，实施未启动，P5-1 整体仍未关闭**
 
 ### 2026-09-15 (v3.35.0) — Sprint 8 阶段 P5 切片 3: Vue SPA 对接 L0 Evidence API（工作面 2 对齐起步）
 
@@ -1942,9 +1968,9 @@ edit docs/TASKS.md  # 修正路径/依赖声明
 
 | ID | 任务 | 文件 | 状态 | 来源 |
 |----|------|------|------|------|
-| **P5-1** | **工作面 2 对齐**：Vue SPA / Research Engine 存量能力对接 L0 单一数据面 + Evidence API（去除旁路取数） | `web/src/`, `cmd/analysis/`, `pkg/data/` | ⬜ | ADR-022 §1, §3 / PRODUCT §5 → [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md) + [ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md) + [ODR-060](odr/odr-060-p5-1-frontend-evidence-api.md) |
+| **P5-1** | **工作面 2 对齐**：Vue SPA / Research Engine 存量能力对接 L0 单一数据面 + Evidence API（去除旁路取数） | `web/src/`, `cmd/analysis/`, `pkg/data/` | ⬜ | ADR-022 §1, §3 / PRODUCT §5 → [ODR-058](odr/odr-058-p5-1-retire-direct-providers.md) + [ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md) + [ODR-060](odr/odr-060-p5-1-frontend-evidence-api.md) + [ODR-061](odr/odr-061-p5-1-slice-c-citation-evaluation.md) |
 
-> **阶段 P5 进展**: **切片 1~3 已完成，P5-1 整体仍未关闭**（余 Research Engine 侧 citation 与旁路取数残留维度）—— **切片 1**（[ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)）**封潜伏直连**：旁路勘察定 4 条路径（P-A `pkg/marketdata` 第二套直连 provider / P-B `POST /api/datasource/switch` 用户可见切换门 / P-C `pkg/data/source` Registry 属 L0 / P-D `hkex` 北向 fetcher），本切片只处理**无生产调用者**的 P-A（退役 + 工厂显式拒绝）与 P-D（注释显式归 L0 摄取侧，零代码改动）；P-B（涉及用户可见行为变更）/ P-C（归属 L0 正确且 `ETLPipeline` 生产实例化点已 = 0）明确不动。验收点「生产代码中外部源直连实例化点 = 0」达成。**切片 2**（[ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md)）**退役运行时数据源切换门**：P-B 评估三条实证（生产接线 `NewDataAdapter(nil, ...)` 下 `SetPrimary` 实测 panic / `http` 分支收任意 URL 冲突 ADR-022 §1 且默认无鉴权 / `datasource.*` 配置读取点 = 0）后裁决退役 `POST /api/datasource/switch`（后端 handler + 前端切换链路 6 文件 + 死配置 `datasource:` 段 + 死工厂 `pkg/marketdata/config.go` + openapi/文档清单），保留只读 `GET /status` 与 `GET /health`，读源改由启动期 `data_service.url` 固定。**切片 3**（[ODR-060](odr/odr-060-p5-1-frontend-evidence-api.md)）**Vue SPA 对接 L0 Evidence API（工作面 2 对齐起步）**：切片前 `web/src` 对 `evidence|content_hash|citation` **0 命中**（L0-3 API 自 ODR-050 起「已交付但未被消费」）；新增前端消费层 `api/evidence.ts::getEvidence`（`encodeURIComponent` 路径段编码 + 404 只透传）+ 类型层 `types/evidence.ts::RawIngest`（逐字对应 `pkg/storage/ingest_raw.go`）+ UI 入口 `/evidence` 页 + `EvidenceLookup.vue`（**三态渲染**：命中 / **404 = 未摄取** warning / 其他失败 error）+ 侧栏导航，**后端零改动**（vite 已代理 `/api` → 8085）；验收点 `web/src` evidence 命中 8 文件全部为本切片新增；`npm run typecheck` / `npm test`（13 files, 162 tests）/ `npm run build` 全绿。
+> **阶段 P5 进展**: **切片 1~3 已完成 + 切片 C 评估完成（实施未启动），P5-1 整体仍未关闭**（余 Research Engine 侧 citation 与旁路取数残留维度）—— **切片 1**（[ODR-058](odr/odr-058-p5-1-retire-direct-providers.md)）**封潜伏直连**：旁路勘察定 4 条路径（P-A `pkg/marketdata` 第二套直连 provider / P-B `POST /api/datasource/switch` 用户可见切换门 / P-C `pkg/data/source` Registry 属 L0 / P-D `hkex` 北向 fetcher），本切片只处理**无生产调用者**的 P-A（退役 + 工厂显式拒绝）与 P-D（注释显式归 L0 摄取侧，零代码改动）；P-B（涉及用户可见行为变更）/ P-C（归属 L0 正确且 `ETLPipeline` 生产实例化点已 = 0）明确不动。验收点「生产代码中外部源直连实例化点 = 0」达成。**切片 2**（[ODR-059](odr/odr-059-p5-1-retire-datasource-switch.md)）**退役运行时数据源切换门**：P-B 评估三条实证（生产接线 `NewDataAdapter(nil, ...)` 下 `SetPrimary` 实测 panic / `http` 分支收任意 URL 冲突 ADR-022 §1 且默认无鉴权 / `datasource.*` 配置读取点 = 0）后裁决退役 `POST /api/datasource/switch`（后端 handler + 前端切换链路 6 文件 + 死配置 `datasource:` 段 + 死工厂 `pkg/marketdata/config.go` + openapi/文档清单），保留只读 `GET /status` 与 `GET /health`，读源改由启动期 `data_service.url` 固定。**切片 3**（[ODR-060](odr/odr-060-p5-1-frontend-evidence-api.md)）**Vue SPA 对接 L0 Evidence API（工作面 2 对齐起步）**：切片前 `web/src` 对 `evidence|content_hash|citation` **0 命中**（L0-3 API 自 ODR-050 起「已交付但未被消费」）；新增前端消费层 `api/evidence.ts::getEvidence`（`encodeURIComponent` 路径段编码 + 404 只透传）+ 类型层 `types/evidence.ts::RawIngest`（逐字对应 `pkg/storage/ingest_raw.go`）+ UI 入口 `/evidence` 页 + `EvidenceLookup.vue`（**三态渲染**：命中 / **404 = 未摄取** warning / 其他失败 error）+ 侧栏导航，**后端零改动**（vite 已代理 `/api` → 8085）；验收点 `web/src` evidence 命中 8 文件全部为本切片新增；`npm run typecheck` / `npm test`（13 files, 162 tests）/ `npm run build` 全绿。**切片 C 评估**（[ODR-061](odr/odr-061-p5-1-slice-c-citation-evaluation.md)，**Audit / 实施未启动**）**Research Engine 输出携 citation 元组**：名词澄清（`ResearchEngine` 全仓 0 命中，实际对象为 L1 因子引擎 → `quant.*` 段）；取证四条（全链路仅「A→B equitydeep 纵向」一段通 / `archiveRaw` **算了 hash 又丢弃**（无返回值）/ `quant.*` 表**零 hash 列** / `fundamentals_detail.snapshot_uri` 是唯一已落库 hash 出参）；链路表 A→B（OHLCV·基本面）❌ / A→B（equitydeep 纵向）✅ / B→C ❌ / C→输出 ❌；**裁决收窄为 C2**（只做已有 hash 出参的 5 个纵向基本面因子链，`factor_cache` 加 `citation JSONB` + `loadStatementBook` **不再丢弃** `SnapshotURI` + `getFactorHandler` 输出面展开 5 元组，未命中只出 hash；`FactorStore` 接口不变）；C1（A→B 全链路）⛔ / C3（零 schema）⛔；**报告面推迟**（`Warm` 硬编码 `{Momentum, Value, Quality}`，三者在 C2 全部不可覆盖 ⇒ 原「回测内嵌 + 走查加列」方案只能产出**恒空 citation 幽灵字段**）；**覆盖面 5/11 因子，PRODUCT §6.4「100%」如实记为未达标**。**注：本切片仅评估与裁决，未产出代码**（Artifacts 6 文件待实施）。
 
 > **EQD-P3-2 进展**: ✅ **已完成**（[ODR-054](odr/odr-054-dr-reverification.md)）—— 对 ODR-047 已修 8 项做「文档声明 ↔ 物理事实」双向取证复核：DR-1/2/5/6/8 未回退，DR-7 由阶段 P3 的 EQD-P3-1 承接；另发现并回填 3 处残留漂移（DR-3-R1 ADR 拆分 21≠22 / DR-3-R2 Implementation 31≠30 / DR-4-R1 `ODR-001~049`）。**阶段 P1 全部关闭**。
 >
