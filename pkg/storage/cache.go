@@ -44,12 +44,19 @@ func (s *PostgresStore) SaveFactorCacheBatch(ctx context.Context, entries []*dom
 	}
 
 	results := tx.SendBatch(ctx, batch)
-	defer results.Close()
 
 	for i := 0; i < len(entries); i++ {
 		if _, err := results.Exec(); err != nil {
+			results.Close()
 			return fmt.Errorf("batch factor_cache insert failed at index %d: %w", i, err)
 		}
+	}
+
+	// pgx v5: the batch results must be closed before the transaction can be
+	// committed — Commit on a connection with an open batch fails with
+	// "conn busy" (found by the ODR-061 runtime acceptance, 2026-09-16).
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("failed to close batch results: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -133,12 +140,16 @@ func (s *PostgresStore) SaveFactorReturnBatch(ctx context.Context, records []*do
 	}
 
 	results := tx.SendBatch(ctx, batch)
-	defer results.Close()
 
 	for i := 0; i < len(records); i++ {
 		if _, err := results.Exec(); err != nil {
+			results.Close()
 			return fmt.Errorf("batch factor_returns insert failed at index %d: %w", i, err)
 		}
+	}
+
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("failed to close batch results: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -202,12 +213,16 @@ func (s *PostgresStore) SaveICEntryBatch(ctx context.Context, records []*domain.
 	}
 
 	results := tx.SendBatch(ctx, batch)
-	defer results.Close()
 
 	for i := 0; i < len(records); i++ {
 		if _, err := results.Exec(); err != nil {
+			results.Close()
 			return fmt.Errorf("batch ic_analysis insert failed at index %d: %w", i, err)
 		}
+	}
+
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("failed to close batch results: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -274,12 +289,16 @@ func (s *PostgresStore) SaveDividendBatch(ctx context.Context, records []*domain
 	}
 
 	results := tx.SendBatch(ctx, batch)
-	defer results.Close()
 
 	for i := 0; i < len(records); i++ {
 		if _, err := results.Exec(); err != nil {
+			results.Close()
 			return fmt.Errorf("batch dividend insert failed at index %d: %w", i, err)
 		}
+	}
+
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("failed to close batch results: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -467,12 +486,16 @@ func (s *PostgresStore) SaveSplitBatch(ctx context.Context, records []*domain.Sp
 	}
 
 	results := tx.SendBatch(ctx, batch)
-	defer results.Close()
 
 	for i := 0; i < len(records); i++ {
 		if _, err := results.Exec(); err != nil {
+			results.Close()
 			return fmt.Errorf("batch split insert failed at index %d: %w", i, err)
 		}
+	}
+
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("failed to close batch results: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

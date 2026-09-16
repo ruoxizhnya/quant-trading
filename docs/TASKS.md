@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.37.0 (Sprint 8 — 阶段 P5 切片 C 实施: factor_cache 因子链携 citation 坐标, C2 落地, ODR-061)
+> **Version:** 3.38.0 (Sprint 8 — 阶段 P5 切片 C 主验收点运行时取证通过 + pgx v5 批次 conn busy 潜伏缺陷修复 ×7, ODR-061)
 > **Last Updated:** 2026-09-16
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -574,11 +574,22 @@
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
 | **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **6** | **0** | **11** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) + EQD-P1-2 已落地(ODR-055) + EQD-P3-1 已落地(ODR-056, **阶段 P3 3/3 关闭**) + EQD-P2-1 已落地(ODR-057, **阶段 P4 1/2**) + **阶段 P5 切片 1**已落地(ODR-058, P-A 退役 / P-B·P-C 不动 / P-D 收敛) + **阶段 P5 切片 2**已落地(ODR-059, P-B 退役 / status·health 保留) + **阶段 P5 切片 3**已落地(ODR-060, Vue SPA 对接 L0 Evidence API / 后端零改动) + **阶段 P5 切片 C**已实施(ODR-061, C2 落地: factor_cache citation JSONB + 注入链 + 输出面展开五元组) |
-| **总计**          | **8** | **0** | **222** | **1** | **2** | **233** | (v3.37.0 Sprint 8 阶段 P5 切片 C 实施: factor_cache 携 citation 坐标, ODR-061) |
+| **总计**          | **8** | **0** | **222** | **1** | **2** | **233** | (v3.38.0 Sprint 8 阶段 P5 切片 C 运行时取证 + pgx 批次缺陷修复, ODR-061) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-16 (v3.38.0) — Sprint 8 阶段 P5 切片 C **主验收点运行时取证通过** + pgx v5 批次 `conn busy` 潜伏缺陷修复 ×7
+
+**来源**: [ODR-061](odr/odr-061-p5-1-slice-c-citation-evaluation.md) §Metrics — 承 v3.37.0 遗留的「主验收点待运行时取证」；**ODR-061 Status 不变（Completed），Metrics 补实测**
+
+- **运行时取证环境**: Docker Desktop + `timescale/timescaledb:latest-pg16`（:5434）+ `redis:7-alpine`（:6380）一次性容器；`cmd/data`(:8081) + `cmd/analysis`(:8085) 本地起服；迁移在 `NewPostgresStore` 自动执行（含 027，直查确认 `citation jsonb NOT NULL DEFAULT '[]'::jsonb` 已生效）
+- **全链路实测（6 步全过）**: ① `POST /api/ingest/raw` 归档 → hash `f6afca77…4823`；② `POST /api/ingest/equitydeep?content_hash=`（4 季度快照 ndjson，`营业总收入`/`营业成本` 白名单字段）→ **201**（4 snapshots / 8 rows / 0 dropped）；③ `POST /sync/factors/gross_margin_trend` → 计算落库；④ `GET /factors/gross_margin_trend?symbol=600999.SH&date=20260915` → citation 已展开为 `{source:"equitydeep", dataset:"income", key:"600999.SH", content_hash}`（`as_of` 因 NULL 正确缺席，ADR-022 §5 权威形态）；⑤ `GET /api/evidence/{hash}` → **200** + 原始记录；⑥ 未归档 hash → **404** 一等语义
+- **列存形态直查**: `factor_cache.citation` = `[{"content_hash": "f6afca77…"}]`（hash-only，无五元组字段）—— 声明先行、精确后置的分层与设计一致；斜率实测 −0.00416 与种子数据 OLS 精确一致
+- **顺手修复（运行时取证暴露的预存在潜伏缺陷，×7）**: `tx.SendBatch` + `defer results.Close()` + `tx.Commit` 的顺序在 pgx v5 下**必然 `conn busy`**（批次未关闭连接即提交；离线单测覆盖不到真实 PG，且 `SaveIndexConstituents` / `bulk_insert.go` 早已是正确的显式 Close 写法，属遗漏而非惯例）。修复 `pkg/storage/cache.go` ×5（`SaveFactorCacheBatch` / factor_returns / ic_analysis / dividends / splits）+ `pkg/storage/fundamentals_detail.go` ×1（equitydeep 摄取门**此前对真实 PG 从未成功落库**），统一为：Exec 循环（错误路径显式 `results.Close()`）→ 显式 `results.Close()` → `tx.Commit`。pool 版 4 处（calendar / stocks / fundamentals ×2）无事务提交语义，`defer` 安全，不动
+- **验证**: 修复后全链路一次通过；`go test -count=1 ./pkg/storage/ ./pkg/data/ ./cmd/data/ ./cmd/analysis/` 全 ok
+- **统计更新**: 总计 233 不变（缺陷修复 + 取证，无任务增减）；P5-1 整体仍未关闭（余旁路取数残留维度不变）
 
 ### 2026-09-16 (v3.37.0) — Sprint 8 阶段 P5 切片 C **实施**: `factor_cache` 因子链携 citation 坐标（C2 落地）
 

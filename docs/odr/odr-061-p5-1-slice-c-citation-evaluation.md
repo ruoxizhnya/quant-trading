@@ -243,7 +243,8 @@ POST /api/ingest/equitydeep ────┘ 溯源门校验 content_hash
 | **citation 写入（离线取证）** | 纵向因子行 citation 为 hash-only 数组、排序确定 | ✅ `TestComputeVerticalFactorCitation/persisted_entries_cite_the_batches...`（`[{aa..}]` 排序 + 不含五元组字段） |
 | **空语义** | 无归档来源的行 citation = `[]`（非 null / 非缺席） | ✅ `TestComputeVerticalFactorCitation/readings_without_an_archived_snapshot...` |
 | **前缀防御** | `snapshot_uri` 非 `ingest.raw:` → 不入 citation、不报错；非归档重述**丢弃**被覆盖批次 | ✅ `TestContentHashOfSnapshot` + `TestLoadStatementBookCitation/a_non-archived_restatement...` |
-| **主验收点（运行时）** | `GET /factors/gross_margin_trend?...` 的 `citation[0].content_hash` 命中 `GET /api/evidence/{hash}` → 200 | ⚠️ **待运行时取证** —— 需运行 PG + 完整 ingest 流；离线侧由 `expandCitation`（`GetRawIngest` 命中 → 五元组，`(nil,nil)` → 仅 hash）单元逻辑覆盖，handler 无既有单测框架（gin + 真库），不在本切片补建 |
+| **主验收点（运行时）** | `GET /factors/gross_margin_trend?...` 的 `citation[0].content_hash` 命中 `GET /api/evidence/{hash}` → 200 | ✅ **运行时取证通过（同日，TimescaleDB pg16 + Redis 容器 + 全链 HTTP）** —— ① `POST /api/ingest/raw` 归档 → hash `f6afca77…4823`；② `POST /api/ingest/equitydeep?content_hash=` 4 快照 → 8 行 / 0 dropped；③ `POST /sync/factors/gross_margin_trend` → 201；④ `GET /factors/gross_margin_trend?symbol=600999.SH&date=20260915` → citation 展开为 `{source,dataset,key,content_hash}`（`as_of` 因 NULL 正确缺席）；⑤ `GET /api/evidence/{hash}` → **200** + 原始记录；⑥ 未归档 hash → **404**（一等语义）；⑦ 列存直查确认 hash-only 形态。斜率实测 −0.00416 与种子数据 OLS 精确一致 |
+| **顺手修复（运行时发现）** | — | ✅ **pgx v5 批次缺陷**：7 处 `tx.SendBatch` 用 `defer results.Close()` 后再 `Commit`，批次未关闭 → `conn busy`，落库必败（离线测试覆盖不到真实 PG，属预存在潜伏缺陷，非本切片引入；`SaveIndexConstituents`/`bulk_insert.go` 早已是正确写法）。修复 `cache.go` ×5（factor_cache / factor_returns / ic_analysis / dividends / splits）+ `fundamentals_detail.go` ×1，统一为显式 `Close()` before `Commit()`；pool 版 4 处（calendar / stocks / fundamentals ×2）无事务提交语义，`defer` 安全不动。修复后全链路一次通过 |
 | 全仓回归 | `go test ./...` | `pkg/storage / pkg/data / pkg/domain / cmd/data / pkg/backtest/...` 全 ok；存量环境性失败与本切片无关：`internal/sandbox/runner`（POSIX-only，`exec: "pwd" not found in %PATH%`）与 `pkg/live::TestOrderManager_GetOrders_Snapshot`（时序 flake）—— 二者在未改动基线上同样失败 |
 
 ---
@@ -270,4 +271,4 @@ POST /api/ingest/equitydeep ────┘ 溯源门校验 content_hash
 
 ---
 
-_Last updated by: AI Assistant — 2026-09-16 (C2 实施落地：迁移 027 + 注入链 + 输出面展开，Status → Completed)_
+_Last updated by: AI Assistant — 2026-09-16 (C2 实施落地：迁移 027 + 注入链 + 输出面展开，Status → Completed；同日主验收点运行时取证通过，顺带修复 pgx v5 批次 conn busy 潜伏缺陷 ×7)_

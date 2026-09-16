@@ -57,12 +57,19 @@ func (s *PostgresStore) SaveFundamentalsDetailBatch(ctx context.Context, rows []
 	}
 
 	results := tx.SendBatch(ctx, batch)
-	defer results.Close()
 
 	for i := range rows {
 		if _, err := results.Exec(); err != nil {
+			results.Close()
 			return fmt.Errorf("batch fundamentals_detail insert failed at index %d: %w", i, err)
 		}
+	}
+
+	// pgx v5: the batch results must be closed before the transaction can be
+	// committed — Commit on a connection with an open batch fails with
+	// "conn busy" (found by the ODR-061 runtime acceptance, 2026-09-16).
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("failed to close batch results: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
