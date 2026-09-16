@@ -200,6 +200,17 @@ func buildEquityDeepDictionary(logger zerolog.Logger) *equitydeep.Dictionary {
 	return nil
 }
 
+// rateLimitPerMinute returns the gateway rate limit (requests per
+// ClientIP per minute window) from rate_limit.per_minute, defaulting
+// to 100. Env-overridable via RATE_LIMIT_PER_MINUTE through viper
+// AutomaticEnv, mirroring the AI_RATE_LIMIT_PER_MIN pattern (ODR-013).
+func rateLimitPerMinute() int {
+	if n := viper.GetInt("rate_limit.per_minute"); n > 0 {
+		return n
+	}
+	return 100
+}
+
 // buildRouter creates the gin router with recovery, CORS, rate-limiting,
 // and request-logging middleware. Sets ReleaseMode unless logging.level
 // is "debug".
@@ -211,7 +222,7 @@ func buildRouter() *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
-	router.Use(newRateLimiter(100, time.Minute).middleware())
+	router.Use(newRateLimiter(rateLimitPerMinute(), time.Minute).middleware())
 	router.Use(requestLogger())
 	return router
 }

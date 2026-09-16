@@ -4,10 +4,24 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 )
+
+// jsonTypeName maps a decoded JSON value onto the Parameter.Type vocabulary
+// ("int", "float", "string", "bool"). JSON numbers decode to float64.
+func jsonTypeName(v any) string {
+	switch v.(type) {
+	case float64:
+		return "float"
+	case bool:
+		return "bool"
+	default:
+		return "string"
+	}
+}
 
 // StrategyDB provides database-backed strategy configuration management.
 type StrategyDB struct {
@@ -79,8 +93,30 @@ func (db *StrategyDB) ListWithDB(ctx context.Context) ([]StrategyInfo, error) {
 			// parameters and no signal. Now surface the error so a
 			// corrupt params blob fails loudly instead of producing a
 			// silently misconfigured strategy.
-			if err := json.Unmarshal([]byte(cfg.Params), &params); err != nil {
+			//
+			// e2e runtime forensics: every writer of the params column
+			// (SeedStrategies, StrategyDB.Create) stores a runtime
+			// param-value OBJECT, but this reader used to unmarshal a
+			// []Parameter descriptor array — the seeded built-ins
+			// (momentum/value/quality) therefore 500'd the listing.
+			// Parse the object shape and project each entry onto the
+			// StrategyInfo.Parameters descriptor contract (keys sorted
+			// for deterministic output; value type inferred).
+			var values map[string]any
+			if err := json.Unmarshal([]byte(cfg.Params), &values); err != nil {
 				return nil, fmt.Errorf("parse strategy %q params: %w", cfg.StrategyID, err)
+			}
+			keys := make([]string, 0, len(values))
+			for k := range values {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				params = append(params, Parameter{
+					Name:    k,
+					Type:    jsonTypeName(values[k]),
+					Default: values[k],
+				})
 			}
 		}
 		result = append(result, StrategyInfo{

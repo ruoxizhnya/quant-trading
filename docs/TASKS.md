@@ -1,7 +1,7 @@
 # Quant Lab — 统一任务追踪
 
 > **Status**: Active (Long-Live Task Tracker)
-> **Version:** 3.39.0 (Sprint 8 — 阶段 P5 旁路取数残留全量收口（方案甲: SPA sync 面对齐 jobs 契约 + analysis 网关代理/SSE 透传 + 死路由/死代理清理）→ **P5-1 关闭**, ODR-062)
+> **Version:** 3.40.0 (Sprint 8 — e2e 运行时全套件取证（Playwright 167 用例 ×3 轮）: worker 饥饿 + strategies params 形状双缺陷修复 + P1-18 关闭, ODR-063)
 > **Last Updated:** 2026-09-16
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [ROADMAP.md](ROADMAP.md) (sprint progress), [archive/NEXT_STEPS.md](archive/NEXT_STEPS.md) (audit archive)
@@ -58,7 +58,19 @@
 | P1-4 | 编写 `performance_test.go` — 绩效指标测试 | 新增测试文件       | ✅  | CODE\_REVIEW\_REPORT |
 | P1-5 | 编写 `tracker_test.go` — 交易执行测试     | 新增测试文件       | ✅  | CODE\_REVIEW\_REPORT |
 | P1-6 | 补充 9 项关键缺失 E2E 测试 (T-01\~T-09)    | e2e/tests/   | ✅  | NEXT\_STEPS          |
-| P1-18 | 补齐 `pkg/sync/worker_test.go` 缺失的 `newMockJobStore` mock 定义（`*_test.go` 疑因 gitignore 从未入库，`go test ./...` 全仓门禁被其阻断） | `pkg/sync/`（mock 需实现 `JobStore` 接口） | ⬜ | ODR-062 |
+| P1-18 | 补齐 `pkg/sync/worker_test.go` 缺失的 `newMockJobStore` mock 定义（`*_test.go` 疑因 gitignore 从未入库，`go test ./...` 全仓门禁被其阻断） | `pkg/sync/`（mock 需实现 `JobStore` 接口） | ✅ | ODR-062 → 完成 (ODR-063) |
+
+### 运行时取证遗留（2026-09-16, [ODR-063](odr/odr-063-e2e-runtime-forensics.md)）
+
+| ID | 任务 | 文件 | 状态 | 来源 |
+| --- | --- | --- | --- | --- |
+| P1-25 | backtest 入口校验缺失 — 缺 `stock_pool`/非法 body 返 500 应 400 fail-fast | `cmd/analysis/handlers_backtest.go:67` | ⬜ | ODR-063 D-1 |
+| P1-26 | `BacktestResponse` 指标字段 `omitempty` — 零值指标从 `job.Result` 持久化与 report 响应消失（零交易回测 report 缺 `total_return` 等 8 项） | `pkg/backtest/contracts/contracts.go:68` | ⬜ | ODR-063 D-2 |
+| P1-27 | 零交易回测 `sortino_ratio` 输出 `MaxFloat64` 哨兵（1.797e308）— 除零防护/指标归一缺失 | `pkg/backtest/engine.go` | ⬜ | ODR-063 D-3 |
+| P1-28 | `FetchDailyOHLCV` 依赖 premium 接口 `stk_factor_pro`（token 40203 无权限）→ `daily` + `adj_factor` 组合回退 | `pkg/backtest/tushare.go` | ⬜ | ODR-063 D-4 |
+| P1-29 | 限流滑动窗口整窗重置（窗口边界突发 2×）— 已产品化缓解（配置驱动），算法替换（令牌桶/滑动日志）另立 | `cmd/*/setup.go` rate limiter | ⬜ | ODR-063 D-5 |
+| P1-30 | `TestPluginLoader_SetWatchDir` Windows 失败 — `/nonexistent/path` 期望 error 实得 nil（平台性预存） | `pkg/strategy/loader_test.go:39` | ⬜ | ODR-063 D-6 |
+| P1-31 | e2e 期望侧对齐 — SPA 类名/导航断言 ×21 + data-sync 契约 shape ×4 + 期望集 ×3 + PnL 容差 ×1 + 视觉基线策略 ×6 | `e2e/tests/*` | ⬜ | ODR-063 D-7 |
 
 ### 代码质量
 
@@ -567,7 +579,7 @@
 | 优先级             | 待处理    | 进行中   | 已完成    | 已阻塞   | 已取消   | 总计     |
 | --------------- | ------ | ----- | ------ | ----- | ----- | ------ |
 | P0              | 0      | 0     | 8      | 0     | 0     | 8      |
-| P1              | 1      | 0     | 21     | 0     | 0     | 22     | P1-18 新增 (pkg/sync mock 缺文件, ODR-062) |
+| P1              | 8      | 0     | 22     | 0     | 0     | 30     | P1-18 完成 + P1-25~31 新增 (e2e 运行时取证, ODR-063) |
 | P2              | 0      | 0     | 19     | 0     | 0     | 19     |
 | P3              | 0      | 0     | 19     | 1     | 0     | 19     |
 | Phase 3 (D1-D7) | 0      | 0     | 51     | 0     | 2     | 53     | D1-3/D1-5 已退役转 ⚫ (ODR-058) |
@@ -575,11 +587,24 @@
 | **CR (Sprint 5 — 综合审查 + 新发现)** | **0** | **0** | **56** | **0** | **0** | **56** | (含 F1/F2-new, 全部完成) |
 | **P2 (P2-1 ~ P2-3: alert/emergency/export/compare)** | **0** | **0** | **3** | **0** | **0** | **3** | P2-1 + P2-2 完成 (ODR-027) |
 | **Sprint 8 (统一研究平台落地 — 阶段 P1~P5)** | **5** | **0** | **12** | **0** | **0** | **17** | ADR-022 / ODR-048; Quant Lab 降维为共享底座(L0-L2) + 双工作面; L0-1~L0-4 已冻结(ODR-050/051) + EQD-P0-1/P0-2 已落地(ODR-052) + EQD-P1-1 已落地(ODR-053) + **P1 全部关闭**(EQD-P3-2 复核, ODR-054) + EQD-P1-2 已落地(ODR-055) + EQD-P3-1 已落地(ODR-056, **阶段 P3 3/3 关闭**) + EQD-P2-1 已落地(ODR-057, **阶段 P4 1/2**) + **阶段 P5 切片 1**已落地(ODR-058, P-A 退役 / P-B·P-C 不动 / P-D 收敛) + **阶段 P5 切片 2**已落地(ODR-059, P-B 退役 / status·health 保留) + **阶段 P5 切片 3**已落地(ODR-060, Vue SPA 对接 L0 Evidence API / 后端零改动) + **阶段 P5 切片 C**已实施(ODR-061, C2 落地: factor_cache citation JSONB + 注入链 + 输出面展开五元组) + **阶段 P5 切片 B+D**已落地(ODR-062, 方案甲: SPA sync 面对齐 jobs 契约 + analysis 网关代理 SSE 透传 + 死路由/死代理清理 → **阶段 P5 1/1 关闭**, **P5-1 ✅**) |
-| **总计**          | **8** | **0** | **223** | **1** | **2** | **234** | (v3.39.0 Sprint 8 阶段 P5 旁路残留收口 + P5-1 关闭 + P1-18 新增, ODR-062) |
+| **总计**          | **15** | **0** | **224** | **1** | **2** | **241** | (v3.40.0 Sprint 8 e2e 运行时取证 + P1-18 关闭 + P1-25~31 新增, ODR-063) |
 
 ***
 
 ## 📝 任务变更日志
+
+### 2026-09-16 (v3.40.0) — Sprint 8 **e2e 运行时全套件取证**（Playwright 167 用例 ×3 轮）: worker 饥饿 + strategies params 形状双缺陷修复 + P1-18 关闭
+
+**来源**: [ODR-063](odr/odr-063-e2e-runtime-forensics.md) — 承 ODR-062 交棒「运行时全套件需 tushare token 待跑」；token 仅会话进程环境注入（不落盘不提交）
+
+- **三轮运行**: ① 全套件 167: 86 passed / 81 failed (29.2m)，主导因素 = 429 限流风暴（阈值硬编码自伤）+ worker 饥饿 + `/api/strategies` 500 + 数据面未就绪；② `--last-failed` 81: 19/62 (33.8m)，限流配置驱动修复后 429 归零；③ `--last-failed` 62: 24/38 (14.1m)，双缺陷修复后 167 用例通过数 86 → **129**（77.2%）
+- **缺陷修复 1 — worker 饥饿（产品级）**: `JobService.CreateJob/RetryJob` 直写 DB 从不 notify，`WorkerPool.Start()` 先启动（队列空）→ worker 永久阻塞 `WaitForJob` channel select → 作业永不消费；时间线取证（worker 启动 14:34:13 本地 vs DB 最老 pending 13:01:23 UTC = 15:01:23 本地）推翻「启动时已有 pending」误判。修复: `Queue.NotifyJobAvailable()` 导出 + `JobService.SetPendingNotifier` + `NewSyncHandler` 接线（一次覆盖全部 14 个调用点）+ 回归测试 ×2；活体: stocks 作业 6s completed / 5564 行真实落库
+- **缺陷修复 2 — `/api/strategies` 500（产品级）**: `params` 列双消费者形状冲突（`SeedStrategies`/`Create` 写参数值 object，`ListWithDB` 误按 `[]Parameter` 描述符数组解析）→ 内置策略全 500。修复: object 解析 + keys 排序投影为 `Parameter` 描述符（`pkg/strategy/db.go`），解析失败仍 fail-loudly
+- **P1-18 关闭**: `newMockJobStore`（内存 JobStore + Clone + `created_at DESC` 镜像）+ `TestWorkerPool_WakesOnJobServiceCreate/Retry` 回归测试 → `pkg/sync` 11/11 PASS，全仓 `go test ./...` 门禁解锁
+- **工程化**: 限流阈值配置驱动 `RATE_LIMIT_PER_MINUTE` / `AI_RATE_LIMIT_PER_MIN`（4 文件）；`.gitignore` 补 visual 快照与 `/build/`
+- **数据面就绪**: calendar 969 交易日 / stocks 5564 行真实 tushare / ohlcv 权限墙（`stk_factor_pro` 40203）SQL 合成兜底 / momentum 回测 200·92ms·1 trade
+- **剩余 38 条根因分类**（ODR-063 §分类表）: 视觉基线漂移 6 / SPA 结构脱节 21 / data-sync 契约脱节 4 / 期望集不符 3 / 产品缺陷 3（`omitempty` 指标消失 P1-26 + 空 `stock_pool` 500 P1-25 + `sortino` MaxFloat64 P1-27）/ 测试假设过强 1 → 登记 **P1-25~31**
+- **统计更新**: P1-18 ⬜→✅；新增 P1-25~31 ×7；总计 234 → **241**（待处理 8 → 15，已完成 223 → 224）
 
 ### 2026-09-16 (v3.39.0) — Sprint 8 阶段 P5 **旁路取数残留全量收口**（方案甲: 切片 B + 切片 D）→ **P5-1 关闭**
 

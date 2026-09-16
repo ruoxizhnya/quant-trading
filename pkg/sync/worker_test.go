@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -281,4 +282,142 @@ func TestWorkerPool_ProgressReporting(t *testing.T) {
 	stored, _ := store.GetSyncJob(ctx, "job-1")
 	require.NotNil(t, stored)
 	assert.Equal(t, JobStatusCompleted, stored.Status)
+}
+
+// ---- Test doubles (P1-18: newMockJobStore was referenced but never defined) ----
+
+// mockJobStore is an in-memory JobStore for tests, mirroring the Postgres
+// store's ordering (newest first) and nil-not-found semantics.
+type mockJobStore struct {
+	mu   sync.Mutex
+	jobs map[string]*Job
+}
+
+func newMockJobStore() *mockJobStore {
+	return &mockJobStore{jobs: make(map[string]*Job)}
+}
+
+func (m *mockJobStore) CreateSyncJob(_ context.Context, job *Job) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.jobs[job.ID] = job.Clone()
+	return nil
+}
+
+func (m *mockJobStore) GetSyncJob(_ context.Context, jobID string) (*Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if job, ok := m.jobs[jobID]; ok {
+		return job.Clone(), nil
+	}
+	return nil, nil
+}
+
+func (m *mockJobStore) UpdateSyncJob(_ context.Context, job *Job) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.jobs[job.ID]; !ok {
+		return fmt.Errorf("sync job not found: %s", job.ID)
+	}
+	m.jobs[job.ID] = job.Clone()
+	return nil
+}
+
+func (m *mockJobStore) ListSyncJobs(_ context.Context, status JobStatus, limit int) ([]*Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.filterLocked(func(j *Job) bool { return status == "" || j.Status == status }, limit), nil
+}
+
+func (m *mockJobStore) ListSyncJobsByType(_ context.Context, jobType JobType, limit int) ([]*Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.filterLocked(func(j *Job) bool { return j.JobType == jobType }, limit), nil
+}
+
+func (m *mockJobStore) DeleteSyncJob(_ context.Context, jobID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.jobs[jobID]; !ok {
+		return fmt.Errorf("sync job not found: %s", jobID)
+	}
+	delete(m.jobs, jobID)
+	return nil
+}
+
+// filterLocked must be called with m.mu held.
+func (m *mockJobStore) filterLocked(match func(*Job) bool, limit int) []*Job {
+	out := make([]*Job, 0, len(m.jobs))
+	for _, job := range m.jobs {
+		if match(job) {
+			out = append(out, job.Clone())
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+// ---- Regression tests for the worker starvation fix ----
+
+// TestWorkerPool_WakesOnJobServiceCreate reproduces the e2e runtime
+// starvation defect: the worker pool starts while the queue is empty (so
+// workers block in WaitForJob), then a job is created via JobService
+// (which writes to the store directly, bypassing Queue.Enqueue). Without
+// the pending notifier wiring, the worker never wakes and the job stays
+// pending forever.
+func TestWorkerPool_WakesOnJobServiceCreate(t *testing.T) {
+	store := newMockJobStore()
+	queue := NewQueue(store)
+	jobService := NewJobService(store)
+	jobService.SetPendingNotifier(queue.NotifyJobAvailable)
+
+	pool := NewWorkerPool(queue, 1)
+	pool.RegisterExecutor(&mockExecutor{jobType: JobTypeStocks})
+	pool.Start() // queue is empty — workers enter WaitForJob's blocked state
+	defer pool.Stop()
+
+	time.Sleep(100 * time.Millisecond) // let the worker reach the blocked select
+
+	job, err := jobService.CreateJob(context.Background(), JobTypeStocks, StocksSyncParams{ListStatus: "L"})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		stored, _ := store.GetSyncJob(context.Background(), job.ID)
+		return stored != nil && stored.Status == JobStatusCompleted
+	}, 5*time.Second, 10*time.Millisecond, "worker must wake up and complete a job created via JobService")
+}
+
+// TestWorkerPool_WakesOnJobServiceRetry covers the retry path of the same
+// defect: RetryJob flips a failed job back to pending without Enqueue.
+func TestWorkerPool_WakesOnJobServiceRetry(t *testing.T) {
+	store := newMockJobStore()
+	queue := NewQueue(store)
+	jobService := NewJobService(store)
+	jobService.SetPendingNotifier(queue.NotifyJobAvailable)
+
+	// Seed a failed job that is eligible for retry.
+	seed := &Job{
+		ID: "job-retry", JobType: JobTypeStocks, Status: JobStatusFailed,
+		MaxRetries: 3, CreatedAt: time.Now(),
+	}
+	require.NoError(t, store.CreateSyncJob(context.Background(), seed))
+
+	pool := NewWorkerPool(queue, 1)
+	pool.RegisterExecutor(&mockExecutor{jobType: JobTypeStocks})
+	pool.Start()
+	defer pool.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+
+	retried, err := jobService.RetryJob(context.Background(), "job-retry")
+	require.NoError(t, err)
+	require.Equal(t, JobStatusPending, retried.Status)
+
+	require.Eventually(t, func() bool {
+		stored, _ := store.GetSyncJob(context.Background(), "job-retry")
+		return stored != nil && stored.Status == JobStatusCompleted
+	}, 5*time.Second, 10*time.Millisecond, "worker must wake up and complete a job requeued via RetryJob")
 }

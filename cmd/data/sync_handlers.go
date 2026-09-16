@@ -32,6 +32,10 @@ type SyncHandler struct {
 func NewSyncHandler(store *storage.PostgresStore, tc *data.TushareClient, dc *data.DataCache) *SyncHandler {
 	queue := sync.NewQueue(store)
 	jobService := sync.NewJobService(store)
+	// Wake idle workers when a job becomes pending outside Queue.Enqueue
+	// (CreateJob / RetryJob write to the store directly). Without this,
+	// workers blocked in WaitForJob never dequeue HTTP-created jobs.
+	jobService.SetPendingNotifier(queue.NotifyJobAvailable)
 	workerPool := sync.NewWorkerPool(queue, 3)
 	scheduler := sync.NewScheduler(store, queue)
 

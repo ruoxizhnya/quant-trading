@@ -506,6 +506,18 @@ func buildToolsRegistry(
 	return reg
 }
 
+// rateLimitPerMinute returns the gateway rate limit (requests per
+// ClientIP per minute window) from rate_limit.per_minute, defaulting
+// to 100. Env-overridable via RATE_LIMIT_PER_MINUTE through viper
+// AutomaticEnv, mirroring the AI_RATE_LIMIT_PER_MIN pattern (ODR-013):
+// e2e/load scenarios crank it up, incident response drops it down.
+func rateLimitPerMinute(v *viper.Viper) int {
+	if n := v.GetInt("rate_limit.per_minute"); n > 0 {
+		return n
+	}
+	return 100
+}
+
 // buildRouter creates the gin router with recovery, CORS, rate-limiting,
 // request logging, and auth middleware (when enabled).
 func buildRouter(authSvc *auth.Service, v *viper.Viper, logger zerolog.Logger) *gin.Engine {
@@ -515,7 +527,7 @@ func buildRouter(authSvc *auth.Service, v *viper.Viper, logger zerolog.Logger) *
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
-	router.Use(newRateLimiter(100, time.Minute).middleware())
+	router.Use(newRateLimiter(rateLimitPerMinute(v), time.Minute).middleware())
 	router.Use(requestLogger(logger))
 	// P1-2: JWT auth middleware (no-op when auth is disabled) + audit
 	// log middleware. Both run before route registration so the

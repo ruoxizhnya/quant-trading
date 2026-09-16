@@ -31,6 +31,8 @@ Thumbs.db
 *.out
 /bin/
 /dist/
+# Scratch dir for locally built service binaries used by runtime forensics.
+/build/
 
 # Root-level Go build outputs (cmd/analysis, cmd/ai, etc. — `go build` produces
 # binary named after the package at CWD root if no -o flag is given).
@@ -66,6 +68,9 @@ e2e/node_modules/
 e2e/test-results/
 e2e/e2e-report/
 e2e/playwright-report/
+# Visual baselines are environment-dependent (fonts/rendering) and were never
+# tracked; each machine regenerates them on first run (ODR-063).
+e2e/tests/visual-regression.spec.ts-snapshots/
 
 # ── Python / AI ────────────────────────────────
 __pycache__/

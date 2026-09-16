@@ -68,8 +68,9 @@ type JobStore interface {
 
 // JobService handles sync job lifecycle management.
 type JobService struct {
-	store  JobStore
-	logger zerolog.Logger
+	store     JobStore
+	logger    zerolog.Logger
+	onPending func() // optional; invoked when a job transitions to pending
 }
 
 // NewJobService creates a new JobService.
@@ -77,6 +78,22 @@ func NewJobService(store JobStore) *JobService {
 	return &JobService{
 		store:  store,
 		logger: logging.WithContext(map[string]any{"component": "sync_job_service"}),
+	}
+}
+
+// SetPendingNotifier registers a callback invoked after a job transitions
+// to pending (CreateJob / RetryJob). The in-process Queue uses this to wake
+// idle workers blocked in WaitForJob — without it, workers that went idle
+// before the job was created never observe the new pending row.
+// The callback must be set once during wiring, before concurrent use.
+func (s *JobService) SetPendingNotifier(fn func()) {
+	s.onPending = fn
+}
+
+// notifyPending invokes the pending notifier if one is registered.
+func (s *JobService) notifyPending() {
+	if s.onPending != nil {
+		s.onPending()
 	}
 }
 
@@ -104,6 +121,7 @@ func (s *JobService) CreateJob(ctx context.Context, jobType JobType, params any)
 		Str("job_id", job.ID).
 		Str("job_type", string(jobType)).
 		Msg("Sync job created")
+	s.notifyPending()
 
 	return job, nil
 }
@@ -187,6 +205,7 @@ func (s *JobService) RetryJob(ctx context.Context, jobID string) (*Job, error) {
 		Str("job_id", jobID).
 		Int("retry_count", job.RetryCount).
 		Msg("Sync job queued for retry")
+	s.notifyPending()
 
 	return job, nil
 }

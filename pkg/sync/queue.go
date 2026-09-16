@@ -224,6 +224,18 @@ func (q *Queue) notify() {
 	}
 }
 
+// NotifyJobAvailable wakes idle workers blocked in WaitForJob.
+//
+// Any code path that transitions a job to pending WITHOUT going through
+// Queue.Enqueue must call this — otherwise workers that went idle before
+// the job existed sleep forever (e2e runtime forensics: JobService.CreateJob
+// wrote pending rows to PostgreSQL while all three workers were blocked in
+// WaitForJob, so jobs created over HTTP were never dequeued). JobService
+// invokes this through the notifier registered via SetPendingNotifier.
+func (q *Queue) NotifyJobAvailable() {
+	q.notify()
+}
+
 // WaitForJob blocks until a new job is available or the context is cancelled.
 // Returns true if a job may be available, false if the context was cancelled.
 func (q *Queue) WaitForJob(ctx context.Context) bool {
