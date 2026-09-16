@@ -1,196 +1,181 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { setActivePinia, createPinia } from 'pinia'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import { useSyncStore } from './sync'
-import * as syncApi from '@/api/sync'
-import type { DataSourceStatus, DataSourceHealth, SyncStatus, DataImportRequest } from '@/types/sync'
+import type { SyncJob } from '@/types/sync'
 
 vi.mock('@/api/sync', () => ({
   getDataSourceStatus: vi.fn(),
   getDataSourceHealth: vi.fn(),
-  getSyncStatus: vi.fn(),
-  startDataImport: vi.fn(),
+  createSyncJob: vi.fn(),
+  listSyncJobs: vi.fn(),
+  getSyncJob: vi.fn(),
+  cancelSyncJob: vi.fn(),
+  retrySyncJob: vi.fn(),
+  syncJobProgressStreamPath: vi.fn((id: string) => `/api/sync/jobs/${id}/progress`),
 }))
 
-describe('useSyncStore', () => {
+import {
+  createSyncJob,
+  getDataSourceHealth,
+  getDataSourceStatus,
+  listSyncJobs,
+} from '@/api/sync'
+
+const mockedGetDataSourceStatus = vi.mocked(getDataSourceStatus)
+const mockedGetDataSourceHealth = vi.mocked(getDataSourceHealth)
+const mockedCreateSyncJob = vi.mocked(createSyncJob)
+const mockedListSyncJobs = vi.mocked(listSyncJobs)
+
+function makeJob(overrides: Partial<SyncJob> = {}): SyncJob {
+  return {
+    id: 'job-1',
+    job_type: 'stocks',
+    status: 'pending',
+    progress_percent: 0,
+    total_items: 0,
+    processed_items: 0,
+    failed_items: 0,
+    created_at: '2026-09-16T00:00:00Z',
+    retry_count: 0,
+    max_retries: 3,
+    ...overrides,
+  }
+}
+
+describe('sync store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
   })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('should have correct initial state', () => {
+  it('has a clean initial state', () => {
     const store = useSyncStore()
-    expect(store.dataSourceStatus).toBeNull()
-    expect(store.dataSourceHealth).toBeNull()
-    expect(store.syncStatus).toBeNull()
-    expect(store.isLoading).toBe(false)
-    expect(store.error).toBeNull()
-    expect(store.sseConnected).toBe(false)
-  })
-
-  it('should compute isDataSourceEnabled correctly', () => {
-    const store = useSyncStore()
-    expect(store.isDataSourceEnabled).toBe(false)
-
-    store.dataSourceStatus = { enabled: true, primary: 'test' }
-    expect(store.isDataSourceEnabled).toBe(true)
-  })
-
-  it('should compute primaryDataSource correctly', () => {
-    const store = useSyncStore()
-    expect(store.primaryDataSource).toBe('unknown')
-
-    store.dataSourceStatus = { enabled: true, primary: 'postgres' }
-    expect(store.primaryDataSource).toBe('postgres')
-  })
-
-  it('should compute isSyncRunning correctly', () => {
-    const store = useSyncStore()
+    expect(store.jobs).toEqual([])
+    expect(store.activeJob).toBeNull()
     expect(store.isSyncRunning).toBe(false)
-
-    store.syncStatus = { is_running: true, queue_length: 0 }
-    expect(store.isSyncRunning).toBe(true)
-  })
-
-  it('should compute queueLength correctly', () => {
-    const store = useSyncStore()
-    expect(store.queueLength).toBe(0)
-
-    store.syncStatus = { is_running: false, queue_length: 5 }
-    expect(store.queueLength).toBe(5)
-  })
-
-  it('should compute progressPercent correctly', () => {
-    const store = useSyncStore()
     expect(store.progressPercent).toBe(0)
-
-    store.syncStatus = {
-      is_running: true,
-      queue_length: 0,
-      current_job: {
-        id: '1',
-        type: 'import',
-        status: 'running',
-        progress: 50,
-        total: 100,
-        created_at: '2024-01-01T00:00:00Z',
-      },
-    }
-    expect(store.progressPercent).toBe(50)
+    expect(store.isDataSourceEnabled).toBe(false)
+    expect(store.primaryDataSource).toBe('unknown')
   })
 
-  it('should fetch data source status', async () => {
-    const mockStatus: DataSourceStatus = { enabled: true, primary: 'postgres' }
-    vi.mocked(syncApi.getDataSourceStatus).mockResolvedValue(mockStatus)
-
+  it('fetches data source status', async () => {
     const store = useSyncStore()
+    mockedGetDataSourceStatus.mockResolvedValue({
+      enabled: true,
+      primary: 'tushare',
+    })
     await store.fetchDataSourceStatus()
-
-    expect(store.dataSourceStatus).toEqual(mockStatus)
-    expect(store.isLoading).toBe(false)
-    expect(store.error).toBeNull()
+    expect(store.isDataSourceEnabled).toBe(true)
+    expect(store.primaryDataSource).toBe('tushare')
   })
 
-  it('should handle fetch data source status error', async () => {
-    vi.mocked(syncApi.getDataSourceStatus).mockRejectedValue(new Error('Network error'))
-
+  it('surfaces data source status errors', async () => {
     const store = useSyncStore()
-    await expect(store.fetchDataSourceStatus()).rejects.toThrow('Network error')
-
-    expect(store.dataSourceStatus).toBeNull()
-    expect(store.isLoading).toBe(false)
-    expect(store.error).toBe('Network error')
+    mockedGetDataSourceStatus.mockRejectedValue(new Error('boom'))
+    await expect(store.fetchDataSourceStatus()).rejects.toThrow('boom')
+    expect(store.error).toBe('boom')
   })
 
-  it('should fetch data source health', async () => {
-    const mockHealth: DataSourceHealth = { status: 'healthy', primary: 'postgres' }
-    vi.mocked(syncApi.getDataSourceHealth).mockResolvedValue(mockHealth)
-
+  it('fetches data source health', async () => {
     const store = useSyncStore()
+    mockedGetDataSourceHealth.mockResolvedValue({ status: 'ok' })
     await store.fetchDataSourceHealth()
-
-    expect(store.dataSourceHealth).toEqual(mockHealth)
-    expect(store.isLoading).toBe(false)
+    expect(store.dataSourceHealth).toEqual({ status: 'ok' })
   })
 
-  it('should fetch sync status', async () => {
-    const mockStatus: SyncStatus = { is_running: false, queue_length: 0 }
-    vi.mocked(syncApi.getSyncStatus).mockResolvedValue(mockStatus)
-
+  it('fetches sync jobs', async () => {
     const store = useSyncStore()
-    await store.fetchSyncStatus()
-
-    expect(store.syncStatus).toEqual(mockStatus)
-    expect(store.isLoading).toBe(false)
+    mockedListSyncJobs.mockResolvedValue({ jobs: [makeJob()], count: 1 })
+    await store.fetchSyncJobs()
+    expect(store.jobs).toHaveLength(1)
+    expect(store.jobs[0].id).toBe('job-1')
   })
 
-  it('should import data', async () => {
-    const mockResponse = { job_id: '123', message: 'started', tasks: [] }
-    vi.mocked(syncApi.startDataImport).mockResolvedValue(mockResponse)
-    vi.mocked(syncApi.getSyncStatus).mockResolvedValue({ is_running: true, queue_length: 1 })
-
+  it('applies job updates as upsert', () => {
     const store = useSyncStore()
-    const request: DataImportRequest = {
-      symbols: ['AAPL'],
+    store.applyJobUpdate(makeJob({ id: 'a', status: 'running' }))
+    expect(store.jobs).toHaveLength(1)
+    store.applyJobUpdate(makeJob({ id: 'a', status: 'completed', progress_percent: 100 }))
+    expect(store.jobs).toHaveLength(1)
+    expect(store.jobs[0].status).toBe('completed')
+    store.applyJobUpdate(makeJob({ id: 'b' }))
+    expect(store.jobs).toHaveLength(2)
+  })
+
+  it('prefers an active job over a terminal one', () => {
+    const store = useSyncStore()
+    store.applyJobUpdate(makeJob({ id: 'done', status: 'completed', progress_percent: 100 }))
+    store.applyJobUpdate(makeJob({ id: 'active', status: 'running', progress_percent: 40 }))
+    expect(store.activeJob?.id).toBe('active')
+    expect(store.isSyncRunning).toBe(true)
+    expect(store.progressPercent).toBe(40)
+  })
+
+  it('creates a job and refreshes the list', async () => {
+    const store = useSyncStore()
+    mockedCreateSyncJob.mockResolvedValue({
+      message: 'stocks sync job created',
+      job_id: 'job-9',
+      status: 'pending',
+    })
+    mockedListSyncJobs.mockResolvedValue({ jobs: [makeJob({ id: 'job-9' })], count: 1 })
+    const id = await store.createJob({ type: 'stocks' })
+    expect(id).toBe('job-9')
+    expect(mockedCreateSyncJob).toHaveBeenCalledWith({ type: 'stocks' })
+    expect(mockedListSyncJobs).toHaveBeenCalled()
+    expect(store.jobs[0].id).toBe('job-9')
+  })
+
+  it('maps the import form onto L0 job types', async () => {
+    const store = useSyncStore()
+    mockedCreateSyncJob.mockResolvedValue({
+      message: 'ok',
+      job_id: 'job-x',
+      status: 'pending',
+    })
+    mockedListSyncJobs.mockResolvedValue({ jobs: [], count: 0 })
+
+    await store.importData({
+      symbols: ['600519'],
       start_date: '2024-01-01',
-      end_date: '2024-01-31',
+      end_date: '',
       data_type: 'ohlcv',
-    }
-    const result = await store.importData(request)
+    })
+    expect(mockedCreateSyncJob).toHaveBeenCalledWith({
+      type: 'ohlcv',
+      params: { symbols: ['600519'], start_date: '2024-01-01' },
+    })
 
-    expect(result).toEqual(mockResponse)
-    expect(syncApi.startDataImport).toHaveBeenCalledWith(request)
+    mockedCreateSyncJob.mockClear()
+    await store.importData({
+      symbols: ['600519'],
+      start_date: '',
+      end_date: '',
+      data_type: 'fundamental',
+    })
+    expect(mockedCreateSyncJob).toHaveBeenCalledWith({
+      type: 'fundamentals',
+      params: { symbols: ['600519'] },
+    })
+
+    mockedCreateSyncJob.mockClear()
+    await store.importData({
+      symbols: [],
+      start_date: '',
+      end_date: '',
+      data_type: 'all',
+    })
+    expect(mockedCreateSyncJob).toHaveBeenCalledTimes(2)
+    expect(mockedCreateSyncJob.mock.calls[0][0].type).toBe('ohlcv')
+    expect(mockedCreateSyncJob.mock.calls[1][0].type).toBe('fundamentals')
   })
 
-  it('should clear error', () => {
+  it('clears errors', async () => {
     const store = useSyncStore()
-    store.error = 'Some error'
+    mockedGetDataSourceStatus.mockRejectedValue(new Error('boom'))
+    await expect(store.fetchDataSourceStatus()).rejects.toThrow()
+    expect(store.error).toBe('boom')
     store.clearError()
     expect(store.error).toBeNull()
-  })
-
-  it('should update sync status from job', () => {
-    const store = useSyncStore()
-    const job = {
-      id: '1',
-      type: 'import',
-      status: 'running' as const,
-      progress: 30,
-      total: 100,
-      created_at: '2024-01-01T00:00:00Z',
-    }
-
-    store.updateSyncStatusFromJob(job)
-
-    expect(store.syncStatus).toEqual({
-      is_running: true,
-      current_job: job,
-      queue_length: 0,
-    })
-  })
-
-  it('should update existing sync status from job', () => {
-    const store = useSyncStore()
-    store.syncStatus = { is_running: false, queue_length: 2 }
-
-    const job = {
-      id: '1',
-      type: 'import',
-      status: 'completed' as const,
-      progress: 100,
-      total: 100,
-      created_at: '2024-01-01T00:00:00Z',
-    }
-
-    store.updateSyncStatusFromJob(job)
-
-    expect(store.syncStatus).toEqual({
-      is_running: false,
-      current_job: job,
-      queue_length: 2,
-    })
   })
 })

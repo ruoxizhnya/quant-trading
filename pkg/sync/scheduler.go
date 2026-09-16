@@ -3,6 +3,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -64,6 +65,10 @@ func (s *Scheduler) Stop() {
 	s.logger.Info().Msg("Sync scheduler stopped")
 }
 
+// ErrInvalidCron is returned when a schedule's cron expression cannot be
+// parsed. Callers should map it to 400 (client error), not 500 (ODR-062).
+var ErrInvalidCron = errors.New("invalid cron expression")
+
 // CreateSchedule creates a new sync schedule and adds it to the cron.
 func (s *Scheduler) CreateSchedule(ctx context.Context, schedule *Schedule) error {
 	// Validate cron expression (supports both 5-field and 6-field formats)
@@ -71,7 +76,7 @@ func (s *Scheduler) CreateSchedule(ctx context.Context, schedule *Schedule) erro
 		// Try with seconds if standard parsing fails
 		parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 		if _, err := parser.Parse(schedule.CronExpression); err != nil {
-			return fmt.Errorf("invalid cron expression: %w", err)
+			return fmt.Errorf("%w: %v", ErrInvalidCron, err)
 		}
 	}
 
@@ -109,7 +114,7 @@ func (s *Scheduler) UpdateSchedule(ctx context.Context, schedule *Schedule) erro
 			// Try with seconds if standard parsing fails
 			parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 			if _, err := parser.Parse(schedule.CronExpression); err != nil {
-				return fmt.Errorf("invalid cron expression: %w", err)
+				return fmt.Errorf("%w: %v", ErrInvalidCron, err)
 			}
 		}
 	}

@@ -316,7 +316,7 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 	// /api/openapi.yaml; the Swagger UI is served at /api/docs.
 	registerOpenAPIRoutes(router)
 
-	registerProxyRoutes(router, httpClient, deps.Logger)
+	registerProxyRoutes(router, httpClient, deps.Viper, deps.Logger)
 	registerBacktestRoutes(router, deps.Engine, deps.JobService, deps.Logger)
 	registerWalkForwardRoutes(router, deps.WFEngine, deps.Logger)
 	registerBatchRoutes(router, deps.BatchEngine, deps.Logger)

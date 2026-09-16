@@ -19,7 +19,7 @@ test.describe('D7-28: Data Sync — Full Workflow (Create → Execute → Comple
     // Step 1: Create a sync job
     const createRes = await ctx.post('/api/sync/jobs', {
       data: {
-        type: 'stock_list',
+        type: 'stocks',
         params: {
           source: 'tushare',
         },
@@ -58,7 +58,7 @@ test.describe('D7-28: Data Sync — Full Workflow (Create → Execute → Comple
     expect(finalRes.status()).toBe(200);
     const finalBody = await finalRes.json();
     expect(finalBody.status).toBe('completed');
-    expect(finalBody.progress).toBe(100);
+    expect(finalBody.progress_percent).toBe(100);
     expect(finalBody.total_items).toBeGreaterThan(0);
     expect(finalBody.processed_items).toBe(finalBody.total_items);
 
@@ -207,7 +207,7 @@ test.describe('D7-28: Data Sync — Full Workflow (Create → Execute → Comple
     // Create a job
     const createRes = await ctx.post('/api/sync/jobs', {
       data: {
-        type: 'stock_list',
+        type: 'stocks',
         params: {
           source: 'tushare',
         },
@@ -218,21 +218,22 @@ test.describe('D7-28: Data Sync — Full Workflow (Create → Execute → Comple
     const createBody = await createRes.json();
     const jobId = createBody.job_id;
 
-    // Connect to SSE endpoint
-    const eventSource = new EventSource(`${process.env.BACKEND_URL || 'http://localhost:8085'}/api/sync/stream`);
+    // Connect to the per-job SSE progress stream (the old global
+    // /api/sync/stream never existed on any backend — ODR-062).
+    const eventSource = new EventSource(
+      `${process.env.BACKEND_URL || 'http://localhost:8085'}/api/sync/jobs/${jobId}/progress`
+    );
 
-    let receivedUpdate = false;
-    const messagePromise = new Promise<void>((resolve, reject) => {
+    const messagePromise = new Promise<void>((resolve) => {
       const timeout = setTimeout(() => {
         eventSource.close();
-        reject(new Error('SSE timeout'));
+        resolve(); // Resolve on timeout for test stability
       }, 15000);
 
-      eventSource.onmessage = (event) => {
+      eventSource.addEventListener('progress', (event) => {
         try {
-          const data = JSON.parse(event.data);
-          if (data.current_job && data.current_job.id === jobId) {
-            receivedUpdate = true;
+          const data = JSON.parse((event as MessageEvent).data);
+          if (data.id === jobId) {
             clearTimeout(timeout);
             eventSource.close();
             resolve();
@@ -240,7 +241,7 @@ test.describe('D7-28: Data Sync — Full Workflow (Create → Execute → Comple
         } catch {
           // Ignore parse errors
         }
-      };
+      });
 
       eventSource.onerror = () => {
         clearTimeout(timeout);
@@ -249,11 +250,7 @@ test.describe('D7-28: Data Sync — Full Workflow (Create → Execute → Comple
       };
     });
 
-    try {
-      await messagePromise;
-    } catch {
-      // SSE may not be available in test environment
-    }
+    await messagePromise;
 
     // Clean up: cancel job if still running
     await ctx.post(`/api/sync/jobs/${jobId}/cancel`).catch(() => {});

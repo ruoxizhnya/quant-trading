@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -377,6 +378,188 @@ func (h *SyncHandler) getWorkerStatsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
+// createJobHandler creates a sync job of any registered type — the typed
+// door behind POST /api/sync/jobs (SPEC.md:1323, ODR-062 S-B). Unlike the
+// legacy /sync/* endpoints above it, params are validated at the door so a
+// mistyped body surfaces as 400 instead of an async job that can only fail
+// later. One deliberate exception: an explicitly empty symbol list is
+// accepted and no-ops (or fails) during execution, matching the legacy
+// semantics.
+func (h *SyncHandler) createJobHandler(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req struct {
+		Type   string          `json:"type"`
+		Params json.RawMessage `json:"params"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Type == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "type is required"})
+		return
+	}
+	// params may be absent — treat as an empty object.
+	if len(req.Params) == 0 || string(req.Params) == "null" {
+		req.Params = json.RawMessage("{}")
+	}
+
+	var job *sync.Job
+	var err error
+
+	switch sync.JobType(req.Type) {
+	case sync.JobTypeStocks:
+		var params sync.StocksSyncParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if params.ListStatus == "" {
+			params.ListStatus = "L"
+		}
+		job, err = h.jobService.CreateJob(ctx, sync.JobTypeStocks, params)
+
+	case sync.JobTypeOHLCV:
+		var params sync.OHLCVSyncParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// The typed door requires an explicit symbol list (possibly empty —
+		// it then no-ops during execution); whole-market sync has its own
+		// job type (ohlcv_all). A missing key (vs an empty array) is
+		// rejected so a mistyped body fails fast.
+		if !jsonHasKey(req.Params, "symbols") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": `params.symbols is required (use type "ohlcv_all" for whole-market sync)`})
+			return
+		}
+		if !validDateRange(params.StartDate, params.EndDate) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "params.start_date/end_date must be YYYYMMDD or YYYY-MM-DD"})
+			return
+		}
+		job, err = h.jobService.CreateJob(ctx, sync.JobTypeOHLCV, params)
+
+	case sync.JobTypeOHLCVAll:
+		var params sync.OHLCVSyncParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if params.BatchSize <= 0 {
+			params.BatchSize = 10
+		}
+		if params.EndDate == "" {
+			params.EndDate = time.Now().Format("20060102")
+		}
+		if params.StartDate == "" {
+			params.StartDate = time.Now().AddDate(-1, 0, 0).Format("20060102")
+		}
+		if !validDateRange(params.StartDate, params.EndDate) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "params.start_date/end_date must be YYYYMMDD or YYYY-MM-DD"})
+			return
+		}
+		job, err = h.jobService.CreateJob(ctx, sync.JobTypeOHLCVAll, params)
+
+	case sync.JobTypeFundamentals:
+		var params sync.FundamentalSyncParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if !jsonHasKey(req.Params, "symbols") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "params.symbols is required"})
+			return
+		}
+		job, err = h.jobService.CreateJob(ctx, sync.JobTypeFundamentals, params)
+
+	case sync.JobTypeCalendar:
+		var params sync.CalendarSyncParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if params.Exchange == "" {
+			params.Exchange = "both"
+		}
+		if params.StartDate == "" {
+			params.StartDate = time.Now().AddDate(-1, 0, 0).Format("20060102")
+		}
+		if params.EndDate == "" {
+			params.EndDate = time.Now().Format("20060102")
+		}
+		if !validDateRange(params.StartDate, params.EndDate) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "params.start_date/end_date must be YYYYMMDD or YYYY-MM-DD"})
+			return
+		}
+		job, err = h.jobService.CreateJob(ctx, sync.JobTypeCalendar, params)
+
+	case sync.JobTypeDividends, sync.JobTypeSplits:
+		var params struct {
+			Symbols []string `json:"symbols"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if !jsonHasKey(req.Params, "symbols") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "params.symbols is required"})
+			return
+		}
+		job, err = h.jobService.CreateJob(ctx, sync.JobType(req.Type), sync.FundamentalSyncParams{Symbols: params.Symbols})
+
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("unknown job type %q; supported: stocks, ohlcv, ohlcv_all, fundamentals, calendar, dividends, splits", req.Type),
+		})
+		return
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"message": req.Type + " sync job created",
+		"job_id":  job.ID,
+		"status":  job.Status,
+	})
+}
+
+// jsonHasKey reports whether the raw JSON object contains the key. Used to
+// distinguish "field absent" (reject) from "field present but empty"
+// (accept; no-op during execution).
+func jsonHasKey(raw json.RawMessage, key string) bool {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return false
+	}
+	_, ok := m[key]
+	return ok
+}
+
+// validDateRange validates an optional (start, end) date pair. Both formats
+// in use across the repo are accepted: YYYYMMDD (tushare native) and
+// YYYY-MM-DD (normalized by pkg/data.formatDate). Empty means "not provided".
+func validDateRange(start, end string) bool {
+	return validDate(start) && validDate(end)
+}
+
+func validDate(s string) bool {
+	if s == "" {
+		return true
+	}
+	if len(s) == 8 {
+		_, err := time.Parse("20060102", s)
+		return err == nil
+	}
+	if len(s) == 10 && s[4] == '-' && s[7] == '-' {
+		_, err := time.Parse("2006-01-02", s)
+		return err == nil
+	}
+	return false
+}
+
 // ---- Schedule API Endpoints ----
 
 // createScheduleHandler creates a new sync schedule.
@@ -394,6 +577,10 @@ func (h *SyncHandler) createScheduleHandler(c *gin.Context) {
 	}
 
 	if err := h.scheduler.CreateSchedule(ctx, &req); err != nil {
+		if errors.Is(err, sync.ErrInvalidCron) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -456,6 +643,10 @@ func (h *SyncHandler) updateScheduleHandler(c *gin.Context) {
 	req.ID = id
 
 	if err := h.scheduler.UpdateSchedule(ctx, &req); err != nil {
+		if errors.Is(err, sync.ErrInvalidCron) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

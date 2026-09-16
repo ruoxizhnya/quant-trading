@@ -177,7 +177,7 @@ test.describe('D7-30: Data Sync — Failure Retry & Error Handling', () => {
     // Create a job that should succeed
     const createRes = await ctx.post('/api/sync/jobs', {
       data: {
-        type: 'stock_list',
+        type: 'stocks',
         params: {},
       },
     });
@@ -240,7 +240,7 @@ test.describe('D7-30: Data Sync — Failure Retry & Error Handling', () => {
       promises.push(
         ctx.post('/api/sync/jobs', {
           data: {
-            type: 'stock_list',
+            type: 'stocks',
             params: { index: i },
           },
         })

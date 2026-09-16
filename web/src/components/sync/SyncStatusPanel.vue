@@ -1,174 +1,146 @@
-<script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
-import { useSyncStore } from '@/stores/sync'
-import {
-  NCard,
-  NSpace,
-  NButton,
-  NTag,
-  NSpin,
-  NAlert,
-  NProgress,
-  NDescriptions,
-  NDescriptionsItem,
-  NEmpty,
-  NTime,
-} from 'naive-ui'
-import {
-  SyncOutline,
-  RefreshOutline,
-  ListOutline,
-  RadioOutline,
-  RadioButtonOffOutline,
-} from '@vicons/ionicons5'
-
-const store = useSyncStore()
-
-let pollInterval: number | null = null
-
-const statusType = computed(() => {
-  if (!store.syncStatus) return 'default'
-  return store.syncStatus.is_running ? 'warning' : 'success'
-})
-
-const statusText = computed(() => {
-  if (!store.syncStatus) return '未知'
-  return store.syncStatus.is_running ? '同步中' : '空闲'
-})
-
-const progressPercent = computed(() => {
-  if (!store.syncStatus?.current_job) return 0
-  const job = store.syncStatus.current_job
-  if (job.total === 0) return 0
-  return Math.round((job.progress / job.total) * 100)
-})
-
-onMounted(() => {
-  store.fetchSyncStatus()
-  // Connect SSE for real-time updates
-  store.connectSSE()
-  // Fallback polling every 5 seconds if SSE is not connected
-  pollInterval = window.setInterval(() => {
-    if (!store.sseConnected) {
-      store.fetchSyncStatus()
-    }
-  }, 5000)
-})
-
-onUnmounted(() => {
-  store.disconnectSSE()
-  if (pollInterval) {
-    clearInterval(pollInterval)
-  }
-})
-
-async function handleRefresh() {
-  await store.fetchSyncStatus()
-}
-
-function toggleSSE() {
-  if (store.sseConnected) {
-    store.disconnectSSE()
-  } else {
-    store.connectSSE()
-  }
-}
-</script>
-
 <template>
-  <NCard title="同步状态" embedded>
+  <NCard title="同步状态" class="mb-4">
     <template #header-extra>
-      <NSpace align="center">
-        <NTag
-          :type="store.sseConnected ? 'success' : 'default'"
-          size="small"
-          round
-        >
-          <template #icon>
-            <RadioOutline v-if="store.sseConnected" />
-            <RadioButtonOffOutline v-else />
-          </template>
-          {{ store.sseConnected ? '实时' : '轮询' }}
-        </NTag>
-        <NButton
-          quaternary
-          circle
-          size="small"
-          @click="handleRefresh"
-          :loading="store.isLoading"
-        >
-          <template #icon>
-            <RefreshOutline />
-          </template>
+      <NSpace>
+        <NTag v-if="store.sseConnected" type="success" size="small">实时连接</NTag>
+        <NButton size="small" @click="refresh">刷新</NButton>
+        <NButton v-if="store.watchedJobId" size="small" quaternary @click="store.unwatchJob">
+          断开实时
         </NButton>
       </NSpace>
     </template>
 
-    <NSpin :show="store.isLoading">
-      <NSpace vertical>
-        <NAlert
-          v-if="store.error"
-          type="error"
-          closable
-          @close="store.clearError"
-        >
-          {{ store.error }}
-        </NAlert>
+    <NAlert v-if="store.error" type="error" class="mb-3" closable @close="store.clearError">
+      {{ store.error }}
+    </NAlert>
 
-        <NSpace align="center">
-          <NTag :type="statusType" size="large">
-            <template #icon>
-              <SyncOutline />
-            </template>
-            {{ statusText }}
-          </NTag>
-          <NTag v-if="store.queueLength > 0" type="info" size="large">
-            <template #icon>
-              <ListOutline />
-            </template>
-            队列: {{ store.queueLength }}
-          </NTag>
-        </NSpace>
+    <NEmpty v-if="!store.activeJob" description="暂无同步任务">
+      <template #extra>
+        <NButton size="small" @click="refresh">加载任务列表</NButton>
+      </template>
+    </NEmpty>
 
-        <div v-if="store.syncStatus?.current_job">
-          <NProgress
-            type="line"
-            :percentage="progressPercent"
-            :indicator-placement="'inside'"
-            :status="store.syncStatus.is_running ? 'warning' : 'success'"
-          />
-          <NDescriptions
-            label-placement="left"
-            :column="1"
-            size="small"
-            bordered
-          >
-            <NDescriptionsItem label="任务 ID">
-              {{ store.syncStatus.current_job.id }}
-            </NDescriptionsItem>
-            <NDescriptionsItem label="类型">
-              {{ store.syncStatus.current_job.type }}
-            </NDescriptionsItem>
-            <NDescriptionsItem label="进度">
-              {{ store.syncStatus.current_job.progress }} / {{ store.syncStatus.current_job.total }}
-            </NDescriptionsItem>
-            <NDescriptionsItem
-              v-if="store.syncStatus.current_job.message"
-              label="消息"
-            >
-              {{ store.syncStatus.current_job.message }}
-            </NDescriptionsItem>
-            <NDescriptionsItem label="创建时间">
-              <NTime :time="new Date(store.syncStatus.current_job.created_at)" />
-            </NDescriptionsItem>
-          </NDescriptions>
+    <template v-else>
+      <div class="mb-4">
+        <div class="mb-2 flex items-center gap-2">
+          <NTag :type="statusType" size="small">{{ statusText }}</NTag>
+          <NTag size="small" :bordered="false">{{ store.activeJob.job_type }}</NTag>
+          <span class="text-xs text-gray-500">{{ store.activeJob.id }}</span>
         </div>
-
-        <NEmpty
-          v-else-if="!store.syncStatus?.is_running"
-          description="暂无同步任务"
+        <NProgress
+          type="line"
+          :percentage="store.activeJob.progress_percent"
+          :status="store.isSyncRunning ? 'default' : store.activeJob.status === 'failed' ? 'error' : 'success'"
+          indicator-placement="inside"
+          processing
         />
-      </NSpace>
-    </NSpin>
+        <p class="mt-2 text-xs text-gray-500">
+          {{ store.activeJob.processed_items }}/{{ store.activeJob.total_items }} 项
+          <template v-if="store.activeJob.failed_items > 0">
+            · <span class="text-red-500">失败 {{ store.activeJob.failed_items }} 项</span>
+          </template>
+        </p>
+        <p v-if="store.activeJob.error_message" class="mt-1 text-xs text-red-500">
+          {{ store.activeJob.error_message }}
+        </p>
+      </div>
+
+      <NDescriptions v-if="store.jobs.length > 1" :column="1" size="small" label-placement="left" bordered>
+        <NDescriptionsItem label="近期任务">
+          <NSpace size="small">
+            <NTag
+              v-for="job in recentJobs"
+              :key="job.id"
+              size="small"
+              :type="jobTagType(job.status)"
+              :title="job.error_message || job.id"
+            >
+              {{ job.job_type }} · {{ jobStatusText(job.status) }}
+            </NTag>
+          </NSpace>
+        </NDescriptionsItem>
+      </NDescriptions>
+    </template>
   </NCard>
 </template>
+
+<script setup lang="ts">
+import { computed, onMounted } from 'vue'
+import {
+  NAlert,
+  NButton,
+  NCard,
+  NDescriptions,
+  NDescriptionsItem,
+  NEmpty,
+  NProgress,
+  NSpace,
+  NTag,
+} from 'naive-ui'
+import { useSyncStore } from '@/stores/sync'
+import type { SyncJobStatus } from '@/types/sync'
+
+const store = useSyncStore()
+
+const recentJobs = computed(() => store.jobs.slice(0, 5))
+
+const statusText = computed(() => {
+  const job = store.activeJob
+  if (!job) return '空闲'
+  return jobStatusText(job.status)
+})
+
+const statusType = computed(() => {
+  const job = store.activeJob
+  if (!job) return 'default' as const
+  return jobTagType(job.status)
+})
+
+function jobStatusText(status: SyncJobStatus): string {
+  switch (status) {
+    case 'pending':
+      return '排队中'
+    case 'running':
+      return '同步中'
+    case 'retrying':
+      return '重试中'
+    case 'completed':
+      return '已完成'
+    case 'failed':
+      return '失败'
+    case 'cancelled':
+      return '已取消'
+  }
+}
+
+function jobTagType(status: SyncJobStatus): 'default' | 'success' | 'warning' | 'error' {
+  switch (status) {
+    case 'pending':
+    case 'running':
+    case 'retrying':
+      return 'warning'
+    case 'completed':
+      return 'success'
+    case 'failed':
+    case 'cancelled':
+      return 'error'
+  }
+}
+
+async function refresh() {
+  try {
+    await store.fetchSyncJobs()
+    if (store.activeJob && isJobActiveStatus(store.activeJob.status)) {
+      store.watchJob(store.activeJob.id)
+    }
+  } catch {
+    // error state is rendered by the panel itself
+  }
+}
+
+function isJobActiveStatus(status: SyncJobStatus): boolean {
+  return status === 'pending' || status === 'running' || status === 'retrying'
+}
+
+onMounted(refresh)
+</script>

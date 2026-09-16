@@ -1,119 +1,93 @@
+<template>
+  <NCard title="数据导入" class="mb-4">
+    <NAlert v-if="successMessage" type="success" class="mb-3" closable @close="successMessage = ''">
+      {{ successMessage }}
+    </NAlert>
+    <NAlert v-if="store.error" type="error" class="mb-3" closable @close="store.clearError">
+      {{ store.error }}
+    </NAlert>
+
+    <NForm label-placement="top">
+      <NFormItem label="数据类型">
+        <NSelect v-model:value="form.data_type" :options="dataTypeOptions" />
+      </NFormItem>
+
+      <NFormItem label="股票代码（逗号分隔，留空则跳过本次导入）">
+        <NInput
+          v-model:value="symbolsText"
+          type="textarea"
+          :rows="2"
+          placeholder="600519,000001"
+        />
+      </NFormItem>
+
+      <NFormItem label="起始日期">
+        <NInput v-model:value="form.start_date" placeholder="2024-01-01" />
+      </NFormItem>
+
+      <NFormItem label="结束日期">
+        <NInput v-model:value="form.end_date" placeholder="2024-12-31" />
+      </NFormItem>
+
+      <NSpace>
+        <NButton type="primary" :loading="store.isLoading" :disabled="!isValid" @click="handleImport">
+          开始导入
+        </NButton>
+        <NButton quaternary @click="resetForm">重置</NButton>
+      </NSpace>
+    </NForm>
+  </NCard>
+</template>
+
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
+import { NAlert, NButton, NCard, NForm, NFormItem, NInput, NSelect, NSpace } from 'naive-ui'
 import { useSyncStore } from '@/stores/sync'
 import type { DataImportRequest } from '@/types/sync'
-import {
-  NCard,
-  NSpace,
-  NButton,
-  NForm,
-  NFormItem,
-  NInput,
-  NSelect,
-  NAlert,
-  NSpin,
-  NDatePicker,
-} from 'naive-ui'
-import { CloudUploadOutline } from '@vicons/ionicons5'
 
 const store = useSyncStore()
 
-const symbols = ref('')
-const dateRange = ref<[number, number] | null>(null)
-const dataType = ref<'ohlcv' | 'fundamental' | 'all'>('ohlcv')
-
 const dataTypeOptions = [
-  { label: 'OHLCV 行情数据', value: 'ohlcv' },
-  { label: '基本面数据', value: 'fundamental' },
-  { label: '全部数据', value: 'all' },
+  { label: '行情（OHLCV）', value: 'ohlcv' },
+  { label: '基本面', value: 'fundamental' },
+  { label: '全部', value: 'all' },
 ]
 
+const form = reactive<DataImportRequest>({
+  symbols: [],
+  start_date: '',
+  end_date: '',
+  data_type: 'ohlcv',
+})
+
+const symbolsText = ref('')
+const successMessage = ref('')
+
+const isValid = computed(() => symbolsText.value.trim() !== '')
+
 async function handleImport() {
-  if (!symbols.value || !dateRange.value) return
-
-  const symbolList = symbols.value.split(',').map(s => s.trim()).filter(Boolean)
-  if (symbolList.length === 0) return
-
-  const startDate = new Date(dateRange.value[0]).toISOString().split('T')[0]
-  const endDate = new Date(dateRange.value[1]).toISOString().split('T')[0]
-
-  const request: DataImportRequest = {
-    symbols: symbolList,
-    start_date: startDate,
-    end_date: endDate,
-    data_type: dataType.value,
-  }
-
+  successMessage.value = ''
+  store.clearError()
   try {
-    await store.importData(request)
-    // Reset form
-    symbols.value = ''
-    dateRange.value = null
+    const ids = await store.importData({
+      ...form,
+      symbols: symbolsText.value
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s !== ''),
+    })
+    successMessage.value = `已创建同步任务：${ids.join('、')}，可在上方同步状态中查看进度`
   } catch {
-    // Error is handled by store
+    // error state is rendered by the panel itself
   }
 }
+
+function resetForm() {
+  form.data_type = 'ohlcv'
+  form.start_date = ''
+  form.end_date = ''
+  symbolsText.value = ''
+  successMessage.value = ''
+  store.clearError()
+}
 </script>
-
-<template>
-  <NCard title="数据导入" embedded>
-    <NSpin :show="store.isLoading">
-      <NSpace vertical>
-        <NAlert
-          v-if="store.error"
-          type="error"
-          closable
-          @close="store.clearError"
-        >
-          {{ store.error }}
-        </NAlert>
-
-        <NForm
-          label-placement="left"
-          label-width="auto"
-        >
-          <NFormItem label="股票代码" required>
-            <NInput
-              v-model:value="symbols"
-              placeholder="输入股票代码，用逗号分隔 (如: AAPL,GOOGL,MSFT)"
-              type="textarea"
-              :rows="2"
-              clearable
-            />
-          </NFormItem>
-
-          <NFormItem label="日期范围" required>
-            <NDatePicker
-              v-model:value="dateRange"
-              type="daterange"
-              clearable
-              placeholder="选择数据日期范围"
-            />
-          </NFormItem>
-
-          <NFormItem label="数据类型" required>
-            <NSelect
-              v-model:value="dataType"
-              :options="dataTypeOptions"
-              placeholder="选择数据类型"
-            />
-          </NFormItem>
-
-          <NFormItem>
-            <NButton
-              type="primary"
-              @click="handleImport"
-              :disabled="!symbols || !dateRange"
-              :loading="store.isLoading"
-            >
-              <template #icon>
-                <CloudUploadOutline />
-              </template>
-              开始导入
-            </NButton>
-          </NFormItem>
-        </NForm>
-      </NSpace>
-    </NSpin>
-  </NCard>
-</template>

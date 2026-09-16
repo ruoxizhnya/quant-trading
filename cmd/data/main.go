@@ -129,6 +129,7 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache storage.C
 	api := r.Group("/api/sync")
 	{
 		// Job management
+		api.POST("/jobs", syncHandler.createJobHandler) // typed create door (ODR-062)
 		api.GET("/jobs", syncHandler.listJobsHandler)
 		api.GET("/jobs/:id", syncHandler.getJobHandler)
 		api.POST("/jobs/:id/cancel", syncHandler.cancelJobHandler)

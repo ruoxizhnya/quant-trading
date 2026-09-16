@@ -6,17 +6,42 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
 )
 
-func registerProxyRoutes(router *gin.Engine, httpClient *http.Client, _ zerolog.Logger) {
-	dataServiceURL := viper.GetString("data_service.url")
+// registerProxyRoutes wires the analysis→data forwarding surface. The viper
+// instance is the loaded analysis config (not the global one) so that
+// data_service.url is actually read — the global viper was never populated
+// by loadConfig, which meant the hardcoded docker hostname silently won
+// (ODR-062 S-B wiring fix).
+func registerProxyRoutes(router *gin.Engine, httpClient *http.Client, v *viper.Viper, logger zerolog.Logger) {
+	dataServiceURL := v.GetString("data_service.url")
 	if dataServiceURL == "" {
 		dataServiceURL = "http://data-service:8081"
 	}
+
+	// ODR-062 (S-B): gateway proxy for the L0 sync-job management API
+	// (/api/sync/jobs*, /api/sync/workers, /api/sync/schedules*) — the
+	// contract documented in SPEC.md:1321-1334, consumed by the SPA
+	// (web/src/api/sync.ts) and the e2e data-sync suites. Uses a streaming
+	// ReverseProxy rather than proxyRequest because the family includes an
+	// SSE endpoint (GET /api/sync/jobs/:id/progress) that must not be
+	// buffered.
+	target, err := url.Parse(dataServiceURL)
+	if err != nil {
+		logger.Error().Err(err).Str("url", dataServiceURL).Msg("invalid data_service.url; data proxy routes not registered")
+		return
+	}
+	syncProxy := httputil.NewSingleHostReverseProxy(target)
+	syncProxy.FlushInterval = -1 // flush every write immediately — required for SSE
+	router.Any("/api/sync/*path", func(c *gin.Context) {
+		syncProxy.ServeHTTP(c.Writer, c.Request)
+	})
 
 	proxyRequest := func(c *gin.Context, method, targetURL string, body io.Reader) {
 		var resp *http.Response
@@ -80,14 +105,13 @@ func registerProxyRoutes(router *gin.Engine, httpClient *http.Client, _ zerolog.
 		proxyRequest(c, http.MethodGet, dataServiceURL+"/market/index", nil)
 	})
 
-	router.POST("/api/sync/calendar", func(c *gin.Context) {
-		bodyBytes, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
-			return
-		}
-		proxyRequest(c, http.MethodPost, dataServiceURL+"/sync/calendar", bytes.NewReader(bodyBytes))
-	})
+	// ODR-062 (S-C): removed as dead code (zero consumers across web/src,
+	// e2e, static pages and Go internals — Go side reaches L0 directly):
+	//   POST /api/sync/calendar, POST /sync/calendar (mirror),
+	//   GET  /api/v1/trading/calendar.
+	// Legacy no-prefix mirrors (/ohlcv/:symbol, /screen, /stocks/count,
+	// /market/index) are kept: they serve the built-in legacy pages in
+	// cmd/analysis/static (ODR-062 S-D ruling: coexist with legacy pages).
 
 	router.GET("/ohlcv/:symbol", func(c *gin.Context) {
 		c.Request.URL.Path = "/api/ohlcv/" + c.Param("symbol")
@@ -104,16 +128,5 @@ func registerProxyRoutes(router *gin.Engine, httpClient *http.Client, _ zerolog.
 	router.GET("/market/index", func(c *gin.Context) {
 		c.Request.URL.Path = "/api/market/index"
 		router.HandleContext(c)
-	})
-	router.POST("/sync/calendar", func(c *gin.Context) {
-		c.Request.URL.Path = "/api/sync/calendar"
-		router.HandleContext(c)
-	})
-
-	router.GET("/api/v1/trading/calendar", func(c *gin.Context) {
-		start := c.Query("start")
-		end := c.Query("end")
-		dataURL := fmt.Sprintf("%s/api/v1/trading/calendar?start=%s&end=%s", dataServiceURL, start, end)
-		proxyRequest(c, http.MethodGet, dataURL, nil)
 	})
 }

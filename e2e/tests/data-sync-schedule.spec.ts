@@ -65,7 +65,7 @@ test.describe('D7-29: Data Sync — Schedule Configuration & Trigger Verificatio
     const createRes = await ctx.post('/api/sync/schedules', {
       data: {
         name: 'Test Toggle Schedule',
-        job_type: 'stock_list',
+        job_type: 'stocks',
         cron_expression: '0 0 * * 0',
         params: {},
         enabled: true,
@@ -112,7 +112,7 @@ test.describe('D7-29: Data Sync — Schedule Configuration & Trigger Verificatio
     const createRes = await ctx.post('/api/sync/schedules', {
       data: {
         name: 'Manual Trigger Test',
-        job_type: 'stock_list',
+        job_type: 'stocks',
         cron_expression: '0 0 1 1 *',
         params: {},
         enabled: false,
@@ -199,7 +199,7 @@ test.describe('D7-29: Data Sync — Schedule Configuration & Trigger Verificatio
     const createRes = await ctx.post('/api/sync/schedules', {
       data: {
         name: 'Delete Test',
-        job_type: 'fundamental',
+        job_type: 'fundamentals',
         cron_expression: '0 0 1 * *',
         params: {},
         enabled: false,
