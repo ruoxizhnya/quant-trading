@@ -1,7 +1,7 @@
 # S7-P3-3: Tools Registry — 对外工具提供方架构
 
 > **Task ID**: S7-P3-3
-> **Source**: [ODR-043](docs/odr/odr-043-comprehensive-audit-2026-06-29.md) line 156
+> **Source**: [ODR-043](../odr/odr-043-comprehensive-audit-2026-06-29.md) line 156
 > **Status**: Planning
 > **Date**: 2026-06-30
 

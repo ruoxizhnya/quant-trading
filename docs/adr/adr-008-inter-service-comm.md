@@ -14,7 +14,7 @@ All inter-service communication is synchronous HTTP blocking.
 
 ## Decision (Regime/risk path — RESOLVED, 2026-06-11)
 
-**Status updated PARTIAL → Accepted** based on 2026-06-11 comprehensive audit ([ODR-013](../odr/odr-013-comprehensive-audit-2026-06-11.md) AR-002/AR-009 findings).
+**Status updated PARTIAL → Accepted** based on 2026-06-11 comprehensive audit ([ODR-013](../archive/odr/odr-013-comprehensive-audit-2026-06-11.md) AR-002/AR-009 findings).
 
 **Decision: Merge risk-service and execution-service into analysis-service as in-process libraries** (rationale in [ADR-019](adr-019-service-merge-ai-copilot.md)):
 
@@ -51,10 +51,10 @@ All inter-service communication is synchronous HTTP blocking.
 
 ## Review
 
-Implementation tracked in [TASKS.md §Sprint 6](../../TASKS.md) tasks P1-15 (Service Merge).
+Implementation tracked in [TASKS.md §Sprint 6](../TASKS.md) tasks P1-15 (Service Merge).
 
 ## Related
 
-- [ODR-013 AR-002/AR-009 findings](../odr/odr-013-comprehensive-audit-2026-06-11.md)
+- [ODR-013 AR-002/AR-009 findings](../archive/odr/odr-013-comprehensive-audit-2026-06-11.md)
 - [ADR-019 Service Merge & AI Copilot Sandbox](adr-019-service-merge-ai-copilot.md)
-- [ADR-012 Strategy Service Standby](adr-012-strategy-service-standby.md) (precedent for service consolidation)
+- [ADR-012 Strategy Service Standby](../archive/superseded-adr/adr-012-strategy-service-standby.md) (precedent for service consolidation)

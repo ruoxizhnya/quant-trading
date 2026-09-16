@@ -7,7 +7,7 @@
 
 ## Context
 
-[ODR-013 2026-06-11 综合审查](../odr/odr-013-comprehensive-audit-2026-06-11.md) 发现 2 项 CRITICAL 架构问题：
+[ODR-013 2026-06-11 综合审查](../archive/odr/odr-013-comprehensive-audit-2026-06-11.md) 发现 2 项 CRITICAL 架构问题：
 
 1. **AR-001 — 零分布式追踪/指标系统**：跨服务调用（analysis → risk/execution/strategy/ai）无 trace span 串联、无 latency histogram、无错误率指标。生产环境故障定位时间从分钟级恶化到小时级。
 2. **AR-004 — API 零认证授权**：5 个微服务（含 AI service）的所有端点无 auth 中间件。任何能访问网络的人都能触发回测、创建订单。AI service 无 rate limit 导致 LLM 成本无上限。
@@ -106,7 +106,7 @@ CREATE INDEX idx_audit_endpoint ON audit_logs(endpoint, timestamp DESC);
 
 ## Implementation Roadmap
 
-| Sprint | Tasks (见 [TASKS.md §Sprint 6](../../TASKS.md)) | Effort |
+| Sprint | Tasks (见 [TASKS.md §Sprint 6](../TASKS.md)) | Effort |
 |---|---|---|
 | **Sprint 6 P0-3** (2 days) | OTel SDK + middleware + /metrics + request_id 透传 | Critical |
 | **Sprint 6 P0-1** (1 day) | AI service token bucket 限流 (10 req/min/user) | Critical |
@@ -115,6 +115,6 @@ CREATE INDEX idx_audit_endpoint ON audit_logs(endpoint, timestamp DESC);
 
 ## Related
 
-- [ODR-013 AR-001/AR-004/AR-016 findings](../odr/odr-013-comprehensive-audit-2026-06-11.md)
+- [ODR-013 AR-001/AR-004/AR-016 findings](../archive/odr/odr-013-comprehensive-audit-2026-06-11.md)
 - [ADR-008 §Regime Path Decision](adr-008-inter-service-comm.md)（服务合并后 middleware 复用）
 - Original Future ADR placeholder: `docs/ADR.md` §Future ADRs

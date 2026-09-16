@@ -1,7 +1,7 @@
 # S7-P3-4: 数据层软分层 — `pkg/domain/market/` 子包
 
 > **任务来源**: ODR-043 D3 决策 — "不做 big-bang schema 重构，采用'软分层 + view 过渡'，新增 `pkg/domain/market/` 子包"
-> **任务追踪**: [docs/TASKS.md](../../docs/TASKS.md) — S7-P3-4
+> **任务追踪**: [docs/TASKS.md](../../TASKS.md) — S7-P3-4
 > **执行规范**: AGENTS.md §8 — 测试先行 + 代码审查 + 原子提交
 
 ---

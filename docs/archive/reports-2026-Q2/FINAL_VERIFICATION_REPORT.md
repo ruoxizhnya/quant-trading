@@ -2,7 +2,7 @@
 
 > **报告日期**: 2026-04-09
 > **验证类型**: 全面验证（完整性 + 一致性 + 无缺失 + 无额外内容）
-> **验证依据**: [DOC_MGMT_RESEARCH.md](DOC_MGMT_RESEARCH.md) 研究报告 Phase 1-3 方案
+> **验证依据**: [DOC_MGMT_archive/RESEARCH-equitydeep-legacy.md](../RESEARCH-equitydeep-legacy.md) 研究报告 Phase 1-3 方案
 > **验证结论**: ✅ **全部通过**
 
 ---
@@ -11,11 +11,11 @@
 
 ### 1.1 验证范围
 
-本次验证针对基于 [DOC_MGMT_RESEARCH.md](DOC_MGMT_RESEARCH.md) 研究报告执行的文档迁移工作，覆盖以下三个阶段：
+本次验证针对基于 [DOC_MGMT_archive/RESEARCH-equitydeep-legacy.md](../RESEARCH-equitydeep-legacy.md) 研究报告执行的文档迁移工作，覆盖以下三个阶段：
 
 | 阶段 | 目标文件 | 验证重点 |
 |------|---------|---------|
-| **Phase 1** | [AGENTS.md](../AGENTS.md) | AI Agent 唯一事实来源 (SSOT) |
+| **Phase 1** | [AGENTS.md](../../../AGENTS.md) | AI Agent 唯一事实来源 (SSOT) |
 | **Phase 2** | [CLAUDE.md](../CLAUDE.md) + [.cursorrules](../.cursorrules) + [.windsurfrules](../.windsurfrules) | 工具适配层配置 |
 | **Phase 3** | [.session/](../.session/) 目录 + [task-current.md.template](../.session/task-current.md.template) + [.gitignore](../.gitignore) 更新 | 会话级动态文档机制 |
 
@@ -175,7 +175,7 @@
 | Data Flow (L123-135) | ARCHITECTURE.md 微服务拓扑 | 现有文档 | ❌ 否 | ✅ 通过 |
 | Boundaries (L137-165) | TEST.md + 安全实践 + 项目约定 | 现有文档+行业标准 | ❌ 否 | ✅ 通过 |
 | Document Index (L167-181) | docs/ 目录实际文件列表 | 文件系统 | ❌ 否 | ✅ 通过 |
-| Session Mgmt (L183-217) | DOC_MGMT_RESEARCH.md §3.4 | 研究报告 | ❌ 否 | ✅ 通过 |
+| Session Mgmt (L183-217) | DOC_MGMT_archive/RESEARCH-equitydeep-legacy.md §3.4 | 研究报告 | ❌ 否 | ✅ 通过 |
 | Known Issues (L219-227) | NEXT_STEPS.md + DOC_AUDIT_REPORT.md | 现有文档 | ❌ 否 | ✅ 通过 |
 
 **验证结果**: **所有章节均有明确来源，零杜撰内容** ✅
@@ -213,7 +213,7 @@ AGENTS.md 相对于研究报告模板的以下补充属于**合理的项目特�
 | CACHE.md | 存在 | 存在 | ❌ 未修改 | ✅ 通过 |
 | CLEANUP_REPORT.md | 存在 | 存在 | ❌ 未修改 | ✅ 通过 |
 | DOC_AUDIT_REPORT.md | 存在 | 存在 | ❌ 未修改 | ✅ 通过 |
-| DOC_MGMT_RESEARCH.md | 存在 | 存在 | ❌ 未修改 | ✅ 通过 |
+| DOC_MGMT_archive/RESEARCH-equitydeep-legacy.md | 存在 | 存在 | ❌ 未修改 | ✅ 通过 |
 | PHASE3-PLAN.md | 存在 | 存在 | ❌ 未修改 | ✅ 通过 |
 | phase-gate-reviews.md | 存在 | 存在 | ❌ 未修改 | ✅ 通过 |
 | SPEC.md | 存在 | 存在 | ❌ 未修改 | ✅ 通过 |
@@ -391,7 +391,7 @@ quant-trading/
 | **验证工具** | 文件系统检查 + 内容对比分析 |
 | **验证人** | AI Assistant (Trae IDE) |
 | **项目路径** | /Users/ruoxi/longshaosWorld/quant-trading |
-| **研究报告版本** | DOC_MGMT_RESEARCH.md (v1.0, 2026-04-09) |
+| **研究报告版本** | DOC_MGMT_archive/RESEARCH-equitydeep-legacy.md (v1.0, 2026-04-09) |
 | **迁移执行版本** | Phase 1-3 (2026-04-09) |
 
 ### 12.2 文件校验和（可选）

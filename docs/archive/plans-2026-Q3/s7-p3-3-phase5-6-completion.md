@@ -1,7 +1,7 @@
 # S7-P3-3 收尾计划：Phase 5 + Phase 6
 
 > **Task ID**: S7-P3-3
-> **Parent Plan**: [.trae/documents/s7-p3-3-tools-registry.md](.trae/documents/s7-p3-3-tools-registry.md)（已批准，6 阶段 7 提交）
+> **Parent Plan**: [.trae/documents/s7-p3-3-tools-registry.md](s7-p3-3-tools-registry.md)（已批准，6 阶段 7 提交）
 > **Status**: Phase 1–4 已提交（5 commits on `feat/s7-p3-3-tools-registry`），Phase 5 半完成，Phase 6 未开始
 > **Date**: 2026-06-30
 

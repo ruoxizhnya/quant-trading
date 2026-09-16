@@ -42,9 +42,9 @@ S7-P3-5 计划分 2 个原子 commit 修复文档漂移:
 - `AGENTS.md`: L456, L596, L673, L719 (NEXT_STEPS.md), L727, L735 (IMPLEMENTATION_PLAN.md)
 - `README.md`: L60 (NEXT_STEPS.md) — **原计划遗漏, 新增**
 - `docs/ROADMAP.md`: L262 (IMPLEMENTATION_PLAN.md)
-- `docs/guides/migration-phase3-to-phase4.md`: L7 (IMPLEMENTATION_PLAN.md)
+- `docs/archive/migration-phase3-to-phase4.md`: L7 (IMPLEMENTATION_PLAN.md)
 - `docs/AGENTS_TEMPLATE.md`: L330 (NEXT_STEPS.md) — 需验证
-- `docs/tasks-phase-2.md`: L6 (IMPLEMENTATION_PLAN.md) — 需验证
+- `docs/archive/tasks-phase-2.md`: L6 (IMPLEMENTATION_PLAN.md) — 需验证
 
 ### 测试死锁说明 (不阻塞本任务)
 后台 job `job-32a3b93bcd5f45809dbe9c20adf5e300` 运行 `go test` 时在
@@ -179,16 +179,16 @@ Reviewed: cross-referenced with ODR-021 + cmd/analysis/handlers_*.go"
 
 #### B1-B6: 原计划 6 处 (详见原计划文件)
 - AGENTS.md: 4 处 NEXT_STEPS.md → TASKS.md/archive/NEXT_STEPS.md
-- AGENTS.md: 2 处 IMPLEMENTATION_PLAN.md → tasks-phase-2.md
+- AGENTS.md: 2 处 IMPLEMENTATION_PLAN.md → archive/tasks-phase-2.md
 - docs/AGENTS_TEMPLATE.md: L330
 - docs/ROADMAP.md: L262
-- docs/tasks-phase-2.md: L6
-- docs/guides/migration-phase3-to-phase4.md: L7
+- docs/archive/tasks-phase-2.md: L6
+- docs/archive/migration-phase3-to-phase4.md: L7
 
 #### B7 (新增): README.md L60
 ```diff
-- | [NEXT_STEPS](docs/NEXT_STEPS.md) | 审计报告、问题清单、下一步计划 |
-+ | [NEXT_STEPS](docs/archive/NEXT_STEPS.md) | 审计报告、问题清单、下一步计划 (archived) |
+- | [NEXT_STEPS](../NEXT_STEPS.md) | 审计报告、问题清单、下一步计划 |
++ | [NEXT_STEPS](../NEXT_STEPS.md) | 审计报告、问题清单、下一步计划 (archived) |
 ```
 
 #### B8: 更新 docs/TASKS.md
@@ -199,16 +199,16 @@ ODR-043-7 行 — 移除"服务拓扑/归档引用"部分, 仅保留"ADR 状态"
 
 #### 提交 Commit 2
 ```bash
-git add AGENTS.md README.md docs/AGENTS_TEMPLATE.md docs/ROADMAP.md docs/tasks-phase-2.md docs/guides/migration-phase3-to-phase4.md docs/TASKS.md
+git add AGENTS.md README.md docs/AGENTS_TEMPLATE.md docs/ROADMAP.md docs/archive/tasks-phase-2.md docs/archive/migration-phase3-to-phase4.md docs/TASKS.md
 git commit -m "docs: fix stale references to archived NEXT_STEPS/IMPLEMENTATION_PLAN (S7-P3-5)
 
 NEXT_STEPS.md and IMPLEMENTATION_PLAN.md were archived to docs/archive/
 (per ODR-008) but still cited as active documents in AGENTS.md, README.md,
-ROADMAP.md, tasks-phase-2.md, and the migration guide.
+ROADMAP.md, archive/tasks-phase-2.md, and the migration guide.
 
 Replaces stale references with current active docs:
 - NEXT_STEPS.md → TASKS.md (active Phase 3 task tracker)
-- IMPLEMENTATION_PLAN.md → tasks-phase-2.md (active Phase 4 tracker)
+- IMPLEMENTATION_PLAN.md → archive/tasks-phase-2.md (active Phase 4 tracker)
 
 Refs: S7-P3-5
 Reviewed: grep verified no remaining active-path references"
@@ -297,8 +297,8 @@ go test ./pkg/strategy/expression/... -run TestExpressionStrategy_Configure -cou
 | `README.md` | B7 (L60 NEXT_STEPS) |
 | `docs/AGENTS_TEMPLATE.md` | B2 (L330) |
 | `docs/ROADMAP.md` | B4 (L262) |
-| `docs/tasks-phase-2.md` | B5 (L6) |
-| `docs/guides/migration-phase3-to-phase4.md` | B6 (L7) |
+| `docs/archive/tasks-phase-2.md` | B5 (L6) |
+| `docs/archive/migration-phase3-to-phase4.md` | B6 (L7) |
 | `docs/TASKS.md` | B8 (S7-P3-5 ✅) |
 
 ---

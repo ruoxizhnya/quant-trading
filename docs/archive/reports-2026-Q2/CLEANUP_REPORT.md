@@ -27,7 +27,7 @@
 | **类型**   | AI 生成的重构计划                                               |
 | **内容**   | BFF (Express) 架构方案 + Vue SPA 迁移计划                        |
 | **删除原因** | 计划描述的 BFF 架构**未被采用**（实际使用 Vite proxy）；前端迁移**已完成**，此计划已过时 |
-| **替代**   | [ARCHITECTURE.md](ARCHITECTURE.md) 新增"前端架构"章节记录实际架构      |
+| **替代**   | [ARCHITECTURE.md](../../ARCHITECTURE.md) 新增"前端架构"章节记录实际架构      |
 
 ### 2.2 `FRONTEND_REVIEW.md` (197 行) — ❌ 已删除
 
@@ -36,7 +36,7 @@
 | **类型**   | AI 生成的审查报告                                                                     |
 | **内容**   | Legacy HTML UI 的技术栈分析（纯 Vanilla HTML/JS, 无框架）+ 问题清单                            |
 | **删除原因** | 审查对象（legacy HTML）**已被 Vue SPA 完全替代**；报告中指出的问题（API URL 不一致、无构建工具等）均已通过 Vue 重构解决 |
-| **替代**   | [NEXT\_STEPS.md](NEXT_STEPS.md) 包含当前代码质量审计结果                                   |
+| **替代**   | [NEXT\_STEPS.md](../NEXT_STEPS.md) 包含当前代码质量审计结果                                   |
 
 ### 2.3 `docs/PHASE2.5-REVIEW-PLAN.md` (678 行) — ❌ 已删除
 
@@ -44,8 +44,8 @@
 | -------- | ---------------------------------------------------------------------------------------------- |
 | **类型**   | 系统审查报告                                                                                         |
 | **内容**   | 设计文档/代码一致性/测试/代码质量四维度审计                                                                        |
-| **删除原因** | 与新创建的 [NEXT\_STEPS.md](NEXT_STEPS.md) **高度重复**（覆盖相同 4 个维度）；NEXT\_STEPS 更全面且包含可执行的 Action Items |
-| **替代**   | [NEXT\_STEPS.md](NEXT_STEPS.md) — 合并了 PHASE2.5 的所有发现并增加了 Phase A\~E 开发计划                       |
+| **删除原因** | 与新创建的 [NEXT\_STEPS.md](../NEXT_STEPS.md) **高度重复**（覆盖相同 4 个维度）；NEXT\_STEPS 更全面且包含可执行的 Action Items |
+| **替代**   | [NEXT\_STEPS.md](../NEXT_STEPS.md) — 合并了 PHASE2.5 的所有发现并增加了 Phase A\~E 开发计划                       |
 
 ### 2.4 `memory/2026-03-26.md` (148 行) + memory/ 目录 — ❌ 已删除
 
@@ -53,7 +53,7 @@
 | -------- | --------------------------------------------------------------------------------------------- |
 | **类型**   | 日常操作日志 / heartbeat                                                                            |
 | **内容**   | Sprint 4/5 完成总结、测试状态、commit 链                                                                 |
-| **删除原因** | **临时性日志**（非设计/规格文档）；信息已归档到 [phase-gate-reviews.md](phase-gate-reviews.md)；`memory/` 目录为空后一并移除 |
+| **删除原因** | **临时性日志**（非设计/规格文档）；信息已归档到 [phase-gate-reviews.md](../research-2026-Q2/phase-gate-reviews.md)；`memory/` 目录为空后一并移除 |
 
 ***
 

@@ -46,9 +46,9 @@ Configure(params map[string]interface{}) error
 ```
 
 **修复操作**:
-- [VISION.md:128-140](VISION.md#L128-L140) — 重写接口定义，添加 Canonical 标注 + 完整 7 个方法
-- [SPEC.md:131-143](SPEC.md#L131-L143) — 上轮已修复（本次审查确认一致）
-- [ARCHITECTURE.md:188-200](ARCHITECTURE.md#L188-L200) — 同步更新为 Canonical 定义
+- [VISION.md:128-140](../../VISION.md#L128-L140) — 重写接口定义，添加 Canonical 标注 + 完整 7 个方法
+- [SPEC.md:131-143](../../SPEC.md#L131-L143) — 上轮已修复（本次审查确认一致）
+- [ARCHITECTURE.md:188-200](../../ARCHITECTURE.md#L188-L200) — 同步更新为 Canonical 定义
 
 #### C-02: 未实现服务被描述为当前规格 ⚠️→✅
 
@@ -57,8 +57,8 @@ Configure(params map[string]interface{}) error
 **影响**: 新开发者会误以为这些端点可用并尝试调用。
 
 **修复操作**:
-- [SPEC.md:333](SPEC.md#L333) — Risk Service 标题添加 `⚠️ *Planned — Phase 3*` + Status 说明
-- [SPEC.md:354](SPEC.md#L354) — Execution Service 同上，补充实际状态（接口已定义，mock 存在）
+- [SPEC.md:333](../../SPEC.md#L333) — Risk Service 标题添加 `⚠️ *Planned — Phase 3*` + Status 说明
+- [SPEC.md:354](../../SPEC.md#L354) — Execution Service 同上，补充实际状态（接口已定义，mock 存在）
 
 ---
 
@@ -72,14 +72,14 @@ Configure(params map[string]interface{}) error
 | Footer (Line 693) | `2026-03-24` (旧日期) | → `2026-04-09 (document audit pass)` |
 | Appendix 引用 | `PRODUCT.md`, `ROADMAP_UPDATE_*.md`, `high-level-requirements.yaml` (3个不存在的文件) | 删除，替换为 `ADR.md`, `NEXT_STEPS.md` (实际存在的文档) |
 
-**修复**: [VISION.md:676-693](VISION.md#L676-L693)
+**修复**: [VISION.md:676-693](../../VISION.md#L676-L693)
 
 #### H-02: ROADMAP 概述文本过时
 
 **原内容**: "Phase 1 is the current priority"
 **实际问题**: Phase 1-2 已完成，当前处于 Phase 3
 
-**修复**: [ROADMAP.md:13](ROADMAP.md#L13) — 更新为 "Phases 1-2 complete. Phase 3 is active."
+**修复**: [ROADMAP.md:13](../../ROADMAP.md#L13) — 更新为 "Phases 1-2 complete. Phase 3 is active."
 
 #### H-03: TEST.md Gate 准则含已废弃测试
 
@@ -87,15 +87,15 @@ Configure(params map[string]interface{}) error
 **实际问题**: vnpy 对比因缺少 parquet 数据已被废弃（ROADMAP 标记 ❌ Dropped）
 
 **修复**: 
-- [TEST.md:161](TEST.md#L161) — Gate 表格中标记 ~~vnpy drift~~ 为 Deprioritized
-- [TEST.md:178](TEST.md#L178) — 第 4 节标题添加 📦 Archived 标记 + Status 说明
+- [TEST.md:161](../../TEST.md#L161) — Gate 表格中标记 ~~vnpy drift~~ 为 Deprioritized
+- [TEST.md:178](../../TEST.md#L178) — 第 4 节标题添加 📦 Archived 标记 + Status 说明
 
 #### H-04: PHASE3-PLAN 排除项声明不准确
 
 **原内容**: "❌ K线图可视化前端 — 工程量大，非核心差异化"
 **实际情况**: Vue SPA 已实现净值曲线(Chart.js) + 买卖信号标记可视化
 
-**修复**: [PHASE3-PLAN.md:385](PHASE3-PLAN.md#L385) — 改为 "❌ K线蜡烛图前端；净值曲线+买卖标记已实现(Chart.js)"
+**修复**: [PHASE3-PLAN.md:385](../research-2026-Q2/PHASE3-PLAN.md#L385) — 改为 "❌ K线蜡烛图前端；净值曲线+买卖标记已实现(Chart.js)"
 
 #### H-05: VISION.md Position 结构字段需确认
 

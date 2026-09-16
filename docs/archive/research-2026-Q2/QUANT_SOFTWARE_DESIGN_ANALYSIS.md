@@ -857,10 +857,10 @@ Phase 4: 规模化与多市场
 
 ### 项目内部参考
 
-19. [VISION.md](VISION.md) — Quant Lab 愿景、核心原则与功能分解
-20. [SPEC.md](SPEC.md) — 系统规格、接口与 API 定义
-21. [ARCHITECTURE.md](ARCHITECTURE.md) — 服务拓扑、数据模型与目录结构
-22. [TEST.md](TEST.md) — 测试策略与覆盖率目标
+19. [VISION.md](../../VISION.md) — Quant Lab 愿景、核心原则与功能分解
+20. [SPEC.md](../../SPEC.md) — 系统规格、接口与 API 定义
+21. [ARCHITECTURE.md](../../ARCHITECTURE.md) — 服务拓扑、数据模型与目录结构
+22. [TEST.md](../../TEST.md) — 测试策略与覆盖率目标
 
 ---
 

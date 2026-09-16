@@ -33,7 +33,7 @@ Only allow strategies from a curated library. AI Copilot helps modify existing s
 
 ## Decision (2026-06-11)
 
-**Status updated to Accepted** based on 2026-06-11 comprehensive audit ([ODR-013](../odr/odr-013-comprehensive-audit-2026-06-11.md) AR-003 finding).
+**Status updated to Accepted** based on 2026-06-11 comprehensive audit ([ODR-013](../archive/odr/odr-013-comprehensive-audit-2026-06-11.md) AR-003 finding).
 
 **Adopt Option A (Process Isolation) + Option B (Static Analysis Gate) layered approach:**
 
@@ -67,11 +67,11 @@ Only allow strategies from a curated library. AI Copilot helps modify existing s
 
 ## Review
 
-Phase 2 implementation tied to Sprint 6 (P0-4, P1-11 in [TASKS.md §Sprint 6](../../TASKS.md)).
+Phase 2 implementation tied to Sprint 6 (P0-4, P1-11 in [TASKS.md §Sprint 6](../TASKS.md)).
 Final review checkpoint at Sprint 6 retrospective.
 
 ## Related
 
-- [ODR-013 AR-003 finding](../odr/odr-013-comprehensive-audit-2026-06-11.md#ar-003)
+- [ODR-013 AR-003 finding](../archive/odr/odr-013-comprehensive-audit-2026-06-11.md#ar-003)
 - [ADR-019 §AI Copilot Sandbox Refactor](adr-019-service-merge-ai-copilot.md)
 - Original discussion: see git history commit 0c8bfb3 (pre-Status update)

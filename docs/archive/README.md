@@ -15,7 +15,7 @@ archive/
 └── research-2026-Q2/             ← Archived on 2026-04-11
     ├── CACHE.md                  ← Redis cache design (integrated into ARCHITECTURE.md)
     ├── CODE_REVIEW_REPORT.md     ← Full code review findings (tasks migrated to TASKS.md)
-    ├── DOC_MGMT_RESEARCH.md      ← AGENTS.md best practices research (applied to AGENTS.md v3.0)
+    ├── DOC_MGMT_archive/RESEARCH-equitydeep-legacy.md      ← AGENTS.md best practices research (applied to AGENTS.md v3.0)
     ├── PHASE3-PLAN.md            ← Phase 3 implementation plan (tasks migrated to TASKS.md)
     ├── phase-gate-reviews.md     ← Phase Gate 1 audit records (tasks migrated to TASKS.md)
     ├── QUANT_SOFTWARE_DESIGN_ANALYSIS.md ← Quant software design analysis (reference)

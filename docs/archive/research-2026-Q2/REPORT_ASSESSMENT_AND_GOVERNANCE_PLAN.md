@@ -668,8 +668,8 @@ Superseded (被取代)
 - [ADR 规范 (Michael Nygard)](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)
 - [AGENTS.md 标准 (agentsmd.io)](https://agentsmd.io/)
 - [ThoughtWorks ADR 最佳实践](https://docs.thoughtworks.com/adr)
-- [本项目 ADR 体系](ADR.md)
-- [本项目文档管理研究](DOC_MGMT_RESEARCH.md)
+- [本项目 ADR 体系](../../ADR.md)
+- [本项目文档管理研究](../RESEARCH-equitydeep-legacy.md)
 
 ### 11.3 版本历史
 

@@ -343,7 +343,7 @@ func (p *ETLPipeline) Process(ctx context.Context, dataType string, req FetchReq
 | 文件 | 类型 | 说明 |
 |------|------|------|
 | `docs/adr/adr-016-multi-source-data-architecture.md` | ADR | 本文档 |
-| `docs/odr/odr-011-multi-source-integration.md` | ODR | 整合实施记录 |
+| `docs/archive/odr/odr-011-multi-source-integration.md` | ODR | 整合实施记录 |
 | `pkg/data/source/adapter.go` | Go | DataSourceAdapter 接口 |
 | `pkg/data/source/registry.go` | Go | 适配器注册与降级链 |
 | `pkg/data/source/etl.go` | Go | ETL 管道 |

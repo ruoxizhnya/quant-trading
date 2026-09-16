@@ -16,13 +16,13 @@
 > were **created in P1-13 (ODR-017) then deleted as dead code in S7-P2-7
 > (ODR-043)** — `web/src/components/ai/` directory no longer exists.
 > All 9 planned components are deprecated. See
-> [ODR-045](../odr/odr-045-frontend-ai-component-deprecation.md).
+> [ODR-045](../archive/odr/odr-045-frontend-ai-component-deprecation.md).
 >
 > **ODR-046 (2026-07-02)**: Hermes Agent adopted as the autonomous research
 > layer, replacing the frontend AI UI approach. The Go-native agents in
 > `pkg/ai/agents/` are deprecated (retained for backward compat). The
 > primary research path is now Hermes → MCP bridge (18 tools) → Go backend.
-> See [ODR-046](../odr/odr-046-hermes-agent-integration-decision.md).
+> See [ODR-046](../archive/odr/odr-046-hermes-agent-integration-decision.md).
 
 ---
 
@@ -215,7 +215,7 @@ CREATE TABLE strategy_genes (
 
 > **CR-30 (ODR-012)**: 早期草稿引用了 `*_agent.go`（如 `research_agent.go`），
 > 但实际目录 `pkg/ai/agents/` 中无 `_agent` 后缀（参见
-> [AGENTS.md](file:///Users/ruoxi/longshaosWorld/quant-trading/AGENTS.md) §3
+> [AGENTS.md]](../../AGENTS.md) §3
 > 目录树）。修正为裸文件名以与 `ls pkg/ai/agents/` 输出一致。
 
 ### 维度 3: Factor Expression DSL

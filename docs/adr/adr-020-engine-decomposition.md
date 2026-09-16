@@ -5,7 +5,7 @@
 
 ## Context
 
-[ODR-013 2026-06-11 综合审查](../odr/odr-013-comprehensive-audit-2026-06-11.md) 识别 `pkg/backtest/engine.go` (1408 行) 存在严重 SRP (Single Responsibility) 违反：
+[ODR-013 2026-06-11 综合审查](../archive/odr/odr-013-comprehensive-audit-2026-06-11.md) 识别 `pkg/backtest/engine.go` (1408 行) 存在严重 SRP (Single Responsibility) 违反：
 
 ### 当前 Engine 承担 5+ 个独立职责
 
@@ -247,7 +247,7 @@ func AsResourceManaged(s any) ResourceManaged { ... }
 
 ## Implementation Roadmap
 
-| Sprint | Tasks (见 [TASKS.md §Sprint 6](../../TASKS.md)) | Effort | Status |
+| Sprint | Tasks (见 [TASKS.md §Sprint 6](../TASKS.md)) | Effort | Status |
 |---|---|---|---|
 | **Sprint 6 P1-16** (3d) | 拆 CacheManager + FactorCacheAccessor 子包 | Major | ✅ Done (v3.13.0) |
 | **Sprint 6 P1-17** (3d) | 拆 LiveBridge + ExecutionBridge 子包 | Major | ✅ Done (v3.13.0) |
@@ -262,4 +262,4 @@ func AsResourceManaged(s any) ResourceManaged { ... }
 - [ADR-014 Strategy Framework Refactor](adr-014-strategy-framework-refactor.md) — Strategy 接口拆分的 precedent
 - [ADR-019 Service Merge](adr-019-service-merge-ai-copilot.md) — service 合并后 in-process 调用链简化
 - [ADR-018 Test + Async Safety](adr-018-test-and-async-safety.md) — 测试边界清晰化
-- [ODR-013 CQ-001/CQ-008/CQ-019/AR-012/AR-014 findings](../odr/odr-013-comprehensive-audit-2026-06-11.md)
+- [ODR-013 CQ-001/CQ-008/CQ-019/AR-012/AR-014 findings](../archive/odr/odr-013-comprehensive-audit-2026-06-11.md)

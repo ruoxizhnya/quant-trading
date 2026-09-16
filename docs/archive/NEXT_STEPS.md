@@ -6,7 +6,7 @@
 > **Audit Date:** 2026-04-09
 > **Auditor:** AI Assistant (Code Review Agent)
 > **Scope:** 全栈审查 — 设计文档 / 代码一致性 / 测试有效性 / 代码质量
-> **Related:** [TASKS.md](TASKS.md) (当前任务追踪源), [ROADMAP.md](ROADMAP.md) (进度里程碑)
+> **Related:** [TASKS.md](../TASKS.md) (当前任务追踪源), [ROADMAP.md](../ROADMAP.md) (进度里程碑)
 >
 > **Changelog v3.0 (Consolidation):**
 > - 明确本文档为**只读归档**，不再维护任务列表
@@ -22,8 +22,8 @@
 
 | 需求 | 应查阅文档 | 说明 |
 |------|-----------|------|
-| **查看当前待办任务** | [TASKS.md](TASKS.md) | 唯一活跃的任务追踪源 |
-| **了解项目里程碑** | [ROADMAP.md](ROADMAP.md) | Phase/Sprint 级别进度 |
+| **查看当前待办任务** | [TASKS.md](../TASKS.md) | 唯一活跃的任务追踪源 |
+| **了解项目里程碑** | [ROADMAP.md](../ROADMAP.md) | Phase/Sprint 级别进度 |
 | **查看历史审查发现** | **本文档** | 2026-04-09 审查的详细记录 |
 
 ---
@@ -59,8 +59,8 @@
 
 | 来源 | 方法签名 | 参数 |
 |------|---------|------|
-| [VISION.md:129](VISION.md#L129) | `GenerateSignals(ctx, bars, portfolio)` | OHLCV 数组 + Portfolio |
-| [SPEC.md:130](SPEC.md#L130) | `Signals(ctx, universe, data, date)` | Stock 列表 + MarketData + Date |
+| [VISION.md:129](../VISION.md#L129) | `GenerateSignals(ctx, bars, portfolio)` | OHLCV 数组 + Portfolio |
+| [SPEC.md:130](../SPEC.md#L130) | `Signals(ctx, universe, data, date)` | Stock 列表 + MarketData + Date |
 | **实际代码** [strategy.go](../pkg/strategy/strategy.go) | `GenerateSignals(ctx, bars, portfolio)` | 与 VISION 一致 |
 
 **影响**: SPEC.md 是开发者参考的权威接口定义，但与实际代码不一致。新开发者会困惑。
@@ -103,7 +103,7 @@ ROADMAP.md 标记:
 ### ⚠️ 不一致清单
 
 #### C-01 [CRITICAL]: Strategy 接口签名冲突 (同上)
-**文件**: [SPEC.md:130](SPEC.md#L130) vs [strategy.go](../pkg/strategy/strategy.go)
+**文件**: [SPEC.md:130](../SPEC.md#L130) vs [strategy.go](../pkg/strategy/strategy.go)
 **修复状态**: ✅ 已完成（TASKS.md P2-1）
 
 #### C-02 [HIGH]: API 端点缺失/多余
@@ -236,7 +236,7 @@ ROADMAP.md 标记:
 
 ## 六、历史任务迁移记录
 
-> **重要**: 所有可执行任务已迁移至 [TASKS.md](TASKS.md)
+> **重要**: 所有可执行任务已迁移至 [TASKS.md](../TASKS.md)
 
 ### 迁移映射
 
@@ -251,5 +251,5 @@ ROADMAP.md 标记:
 ---
 
 _审计完成。以上所有发现均已记录并可追溯至具体文件和行号。_
-_所有可执行任务已迁移至 [TASKS.md](TASKS.md) 统一维护。_
+_所有可执行任务已迁移至 [TASKS.md](../TASKS.md) 统一维护。_
 _本文档自 2026-05-03 起进入只读归档状态，不再更新任务列表。_

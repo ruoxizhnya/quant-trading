@@ -5,7 +5,7 @@
 
 ## Context
 
-[ODR-013 2026-06-11 综合审查](../odr/odr-013-comprehensive-audit-2026-06-11.md) 识别 3 项关键架构问题：
+[ODR-013 2026-06-11 综合审查](../archive/odr/odr-013-comprehensive-audit-2026-06-11.md) 识别 3 项关键架构问题：
 
 1. **AR-002 / AR-009 — 微服务过度拆分**：7 个服务中 risk-service、execution-service 与 analysis-service 是紧密耦合的同步 HTTP 调用（`pkg/backtest/engine.go:798-819, 964-993, 1049-1080`）。`pkg/risk` 已是完整 Go 包，提供 0-HTTP in-process 能力。
 2. **AR-003 — Copilot 沙箱违反 ADR-007 设计**：`pkg/strategy/copilot.go:158-162` 硬编码 `buildCmd.Dir = "/Users/ruoxi/..."` 执行 `go build`，无 sandbox 隔离、跨平台/CI 必失败。
@@ -24,7 +24,7 @@
 | ai-research-service | :8086 | 保留 |
 | ~~risk-service~~ | ~~:8083~~ | 合并到 analysis-service in-process |
 | ~~execution-service~~ | ~~:8084~~ | 合并到 analysis-service in-process |
-| ~~strategy-service~~ | ~~:8082~~ | 继续 standby（沿用 [ADR-012](adr-012-strategy-service-standby.md)） |
+| ~~strategy-service~~ | ~~:8082~~ | 继续 standby（沿用 [ADR-012](../archive/superseded-adr/adr-012-strategy-service-standby.md)） |
 | ~~sync~~ | (docker-compose) | 改为 data-service 内部组件 |
 
 **合并方式**：
@@ -128,7 +128,7 @@ type Client struct {
 
 ## Implementation Roadmap
 
-| Sprint | Tasks (见 [TASKS.md §Sprint 6](../../TASKS.md)) | Effort |
+| Sprint | Tasks (见 [TASKS.md §Sprint 6](../TASKS.md)) | Effort |
 |---|---|---|
 | **Sprint 6 P0-4** (1d) | Copilot `WorkingDir` 配置 + 静态分析闸 | Critical |
 | **Sprint 6 P0-1** (1d) | LLMClient interface 化 | Critical |
@@ -141,7 +141,7 @@ type Client struct {
 
 - [ADR-007 AI Sandbox](adr-007-ai-sandbox.md) — 安全决策上下文
 - [ADR-008 Inter-Service Comm](adr-008-inter-service-comm.md) — regime 决策已 Accepted
-- [ADR-012 Strategy Service Standby](adr-012-strategy-service-standby.md) — service 合并的 precedent
+- [ADR-012 Strategy Service Standby](../archive/superseded-adr/adr-012-strategy-service-standby.md) — service 合并的 precedent
 - [ADR-017 Observability + Auth](adr-017-observability-and-auth.md) — middleware 复用
 - [ADR-018 Test + Async Safety](adr-018-test-and-async-safety.md) — LLMClient interface 化联动
-- [ODR-013 AR-002/AR-003/AR-008/AR-009 findings](../odr/odr-013-comprehensive-audit-2026-06-11.md)
+- [ODR-013 AR-002/AR-003/AR-008/AR-009 findings](../archive/odr/odr-013-comprehensive-audit-2026-06-11.md)

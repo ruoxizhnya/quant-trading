@@ -2,7 +2,7 @@
 
 > **归档日期**: 2026-07-01
 > **来源**: `.trae/documents/` — Trae IDE Plan Mode 生成的任务执行计划
-> **关联 ODR**: [ODR-044](../../odr/odr-044-s7-plan-archive-and-pattern-extraction.md)
+> **关联 ODR**: [ODR-044](../../archive/odr/odr-044-s7-plan-archive-and-pattern-extraction.md)
 
 ## 背景
 
@@ -35,7 +35,7 @@
 
 ## 提取的关键模式
 
-详见 [ODR-044](../../odr/odr-044-s7-plan-archive-and-pattern-extraction.md) §Decision，其中记录了 5 个可复用的工程模式：
+详见 [ODR-044](../../archive/odr/odr-044-s7-plan-archive-and-pattern-extraction.md) §Decision，其中记录了 5 个可复用的工程模式：
 
 1. **Leaf + Aliases 提取** — God Package 拆分的零破坏手法
 2. **Narrow Interface 解耦** — `EngineRunner` 单方法接口断循环

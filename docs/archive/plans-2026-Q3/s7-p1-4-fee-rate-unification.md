@@ -227,7 +227,7 @@ b.WriteString(fmt.Sprintf("%sslippage_rate: %.5f\n", indent, config.Backtest.Sli
 
 - **`docs/TASKS.md`**: 找到 S7-P1-4 行，标记 ✅ 完成
 - **`AGENTS.md` §13/§14**: 检查是否需更新（已知问题表中若有 `0.00025` 条目则移除）— 实测 §14 无此条目，无需改
-- **`docs/odr/odr-043-*.md`**: 无需改（任务追踪在 TASKS.md）
+- **`docs/archive/odr/odr-043-*.md`**: 无需改（任务追踪在 TASKS.md）
 - **`docs/live-trading.md`** 等设计文档: grep 检查是否引用旧费率值，按需更新
 
 ### Step 7 (Verify): 验证

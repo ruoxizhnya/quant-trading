@@ -5,7 +5,7 @@
 
 ## Context
 
-[ODR-013 2026-06-11 综合审查](../odr/odr-013-comprehensive-audit-2026-06-11.md) 揭示测试维度严重问题（综合评分 47/100）：
+[ODR-013 2026-06-11 综合审查](../archive/odr/odr-013-comprehensive-audit-2026-06-11.md) 揭示测试维度严重问题（综合评分 47/100）：
 
 1. **CI 套件在标准流程下直接失败**：
    - `pkg/strategy` 触发 SIGSEGV（`copilot_test.go:24-50` 故意构造 `aiClient: nil`）
@@ -127,7 +127,7 @@ test-integration:
 
 ### §6. property-based testing (testing/quick)
 
-实施 [TEST.md §2.4 列出的 5 个 property](../../TEST.md)：
+实施 [TEST.md §2.4 列出的 5 个 property](../TEST.md)：
 1. `Cash >= 0` 任何时刻
 2. `Position qty >= 0`
 3. `NAV == Cash + Σ(position.value)`
@@ -178,7 +178,7 @@ assert.GreaterOrEqual(t, highICFactors, 10, "Phase 4 S8-11 fail-gate: must have 
 
 ## Implementation Roadmap
 
-| Sprint | Tasks (见 [TASKS.md §Sprint 6](../../TASKS.md)) | Effort | Owner |
+| Sprint | Tasks (见 [TASKS.md §Sprint 6](../TASKS.md)) | Effort | Owner |
 |---|---|---|---|
 | **Sprint 6 P0-1** (1d) | LLMClient interface 化 + pkg/strategy 测试 mock | Critical | TBD |
 | **Sprint 6 P0-2** (1d) | pkg/live/engine.go::Stop 重复 close panic 修复 | Critical | TBD |
@@ -192,7 +192,7 @@ assert.GreaterOrEqual(t, highICFactors, 10, "Phase 4 S8-11 fail-gate: must have 
 
 ## Related
 
-- [ODR-013 D 维度全问题列表](../odr/odr-013-comprehensive-audit-2026-06-11.md)
-- [TEST.md §2.4 property-based](../../TEST.md)
+- [ODR-013 D 维度全问题列表](../archive/odr/odr-013-comprehensive-audit-2026-06-11.md)
+- [TEST.md §2.4 property-based](../TEST.md)
 - [ADR-017 鉴权需求](adr-017-observability-and-auth.md)（audit log 写入依赖事务安全）
 - [ADR-020 Engine 拆分](adr-020-engine-decomposition.md)（god object 拆分后测试边界更清晰）

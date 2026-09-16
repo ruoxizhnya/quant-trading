@@ -26,8 +26,8 @@
 
 | 文件 | 行号 | 当前内容 | 目标内容 | 类型 |
 |------|------|----------|----------|------|
-| `docs/adr/adr-014-*.md` | L3 | `> **Status**: Proposed` | `> **Status**: Superseded by [ADR-020 §6](adr-020-engine-decomposition.md)` | 文件头漂移 |
-| `docs/adr/adr-014-*.md` | L7 后 | (无 Superseded By 字段) | 新增 `> **Superseded By**: [ADR-020 §6](adr-020-engine-decomposition.md) — Strategy 接口 ISP 拆分 (CQ-006)` | 模板扩展 |
+| `docs/adr/adr-014-*.md` | L3 | `> **Status**: Proposed` | `> **Status**: Superseded by [ADR-020 §6](../../adr/adr-020-engine-decomposition.md)` | 文件头漂移 |
+| `docs/adr/adr-014-*.md` | L7 后 | (无 Superseded By 字段) | 新增 `> **Superseded By**: [ADR-020 §6](../../adr/adr-020-engine-decomposition.md) — Strategy 接口 ISP 拆分 (CQ-006)` | 模板扩展 |
 | `docs/adr/adr-015-*.md` | L3 | `> **Status**: Accepted` ✅ | (无需修改) | 文件已正确 |
 | `docs/adr/adr-019-*.md` | L4 | `**Status:** Proposed` | `**Status:** Accepted` | 文件头漂移 |
 | `docs/adr/adr-020-*.md` | L4 | `**Status:** Proposed` | `**Status:** Accepted` | 文件头漂移 |
@@ -77,12 +77,12 @@ ADR-019 三个 section 全部实现：
 
 **修改 1a** — L3 状态变更:
 - 旧: `> **Status**: Proposed`
-- 新: `> **Status**: Superseded by [ADR-020 §6](adr-020-engine-decomposition.md)`
+- 新: `> **Status**: Superseded by [ADR-020 §6](../../adr/adr-020-engine-decomposition.md)`
 
 **修改 1b** — L7 后新增 Superseded By 字段:
 - 在 `> **Supersedes**: None (enhances existing decisions)` 行之后插入:
   ```
-  > **Superseded By**: [ADR-020 §6](adr-020-engine-decomposition.md) — Strategy 接口 ISP 拆分 (CQ-006)
+  > **Superseded By**: [ADR-020 §6](../../adr/adr-020-engine-decomposition.md) — Strategy 接口 ISP 拆分 (CQ-006)
   ```
 
 > **说明**: ADR 模板当前只有 `Supersedes` 字段，无 `Superseded By`。本任务作为模板扩展
@@ -104,16 +104,16 @@ ADR-019 三个 section 全部实现：
 #### 文件 4: `docs/ADR.md` (索引)
 
 **修改 4a** — L28 (ADR-014 行):
-- 旧: `| [ADR-014](adr/adr-014-strategy-framework-refactor.md) | Strategy Framework Refactor & Unified Interface | Proposed | 2026-05-04 |`
-- 新: `| [ADR-014](adr/adr-014-strategy-framework-refactor.md) | Strategy Framework Refactor & Unified Interface | Superseded by ADR-020 §6 | 2026-05-04 |`
+- 旧: `| [ADR-014](../../adr/adr-014-strategy-framework-refactor.md) | Strategy Framework Refactor & Unified Interface | Proposed | 2026-05-04 |`
+- 新: `| [ADR-014](../../adr/adr-014-strategy-framework-refactor.md) | Strategy Framework Refactor & Unified Interface | Superseded by ADR-020 §6 | 2026-05-04 |`
 
 **修改 4b** — L29 (ADR-015 行):
-- 旧: `| [ADR-015](adr/adr-015-ai-agent-architecture.md) | AI Agent Quantitative Research Architecture | Proposed | 2026-05-04 |`
-- 新: `| [ADR-015](adr/adr-015-ai-agent-architecture.md) | AI Agent Quantitative Research Architecture | Accepted | 2026-05-04 |`
+- 旧: `| [ADR-015](../../adr/adr-015-ai-agent-architecture.md) | AI Agent Quantitative Research Architecture | Proposed | 2026-05-04 |`
+- 新: `| [ADR-015](../../adr/adr-015-ai-agent-architecture.md) | AI Agent Quantitative Research Architecture | Accepted | 2026-05-04 |`
 
 **修改 4c** — L33 (ADR-019 行):
-- 旧: `| [ADR-019](adr/adr-019-service-merge-ai-copilot.md) | Service 合并 + AI Copilot Sandbox 重构 | Proposed | 2026-06-11 |`
-- 新: `| [ADR-019](adr/adr-019-service-merge-ai-copilot.md) | Service 合并 + AI Copilot Sandbox 重构 | Accepted | 2026-06-11 |`
+- 旧: `| [ADR-019](../../adr/adr-019-service-merge-ai-copilot.md) | Service 合并 + AI Copilot Sandbox 重构 | Proposed | 2026-06-11 |`
+- 新: `| [ADR-019](../../adr/adr-019-service-merge-ai-copilot.md) | Service 合并 + AI Copilot Sandbox 重构 | Accepted | 2026-06-11 |`
 
 **修改 4d** — 文件末尾追加状态变更日志:
 ```
@@ -123,7 +123,7 @@ _2026-07-01 状态变更: ADR-014 Proposed→Superseded by ADR-020 §6 (Strategy
 #### 文件 5: `AGENTS.md` (Known Issues)
 
 **修改 5** — 删除 L687 ODR-043-7 整行:
-- 删除: `| **ODR-043-7 文档漂移: ADR 状态 (剩余)** | ADR-014 被 ADR-020 §6 取代未标记; ADR-019 状态需更新为 Accepted — S7-P3-6 范围 — 详见 [ODR-043](docs/odr/odr-043-comprehensive-audit-2026-06-29.md) |`
+- 删除: `| **ODR-043-7 文档漂移: ADR 状态 (剩余)** | ADR-014 被 ADR-020 §6 取代未标记; ADR-019 状态需更新为 Accepted — S7-P3-6 范围 — 详见 [ODR-043](../odr/odr-043-comprehensive-audit-2026-06-29.md) |`
 - 理由: S7-P3-5 + S7-P3-6 完成后，ODR-043-7 识别的所有文档漂移已全部解决
 
 #### 文件 6: `docs/TASKS.md`
@@ -157,9 +157,9 @@ _2026-07-01 状态变更: ADR-014 Proposed→Superseded by ADR-020 §6 (Strategy
 ```bash
 # ADR-014
 sed -n '3p' docs/adr/adr-014-strategy-framework-refactor.md
-# 期望: > **Status**: Superseded by [ADR-020 §6](adr-020-engine-decomposition.md)
+# 期望: > **Status**: Superseded by [ADR-020 §6](../../adr/adr-020-engine-decomposition.md)
 sed -n '8p' docs/adr/adr-014-strategy-framework-refactor.md
-# 期望: > **Superseded By**: [ADR-020 §6](adr-020-engine-decomposition.md) — Strategy 接口 ISP 拆分 (CQ-006)
+# 期望: > **Superseded By**: [ADR-020 §6](../../adr/adr-020-engine-decomposition.md) — Strategy 接口 ISP 拆分 (CQ-006)
 
 # ADR-019
 sed -n '4p' docs/adr/adr-019-service-merge-ai-copilot.md

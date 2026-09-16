@@ -1,7 +1,7 @@
 # 文档迁移执行报告
 
 > **执行日期**: 2026-04-09
-> **执行依据**: [DOC_MGMT_RESEARCH.md](DOC_MGMT_RESEARCH.md) 研究报告 Phase 1-3 方案
+> **执行依据**: [DOC_MGMT_archive/RESEARCH-equitydeep-legacy.md](../RESEARCH-equitydeep-legacy.md) 研究报告 Phase 1-3 方案
 > **执行人**: AI Assistant
 > **验证状态**: ✅ 全部通过
 
@@ -11,7 +11,7 @@
 
 ### 1.1 执行范围
 
-基于 [DOC_MGMT_RESEARCH.md](DOC_MGMT_RESEARCH.md) 推荐的 "双层四区"文档架构，执行 Phase 1-3 迁移：
+基于 [DOC_MGMT_archive/RESEARCH-equitydeep-legacy.md](../RESEARCH-equitydeep-legacy.md) 推荐的 "双层四区"文档架构，执行 Phase 1-3 迁移：
 
 | 阶段 | 目标 | 状态 |
 |------|------|------|
@@ -51,7 +51,7 @@ AGENTS.md 的所有内容均来自以下已有资料，**无任何额外杜撰�
 | Data Flow | 123-135 | 系统数据流架构图 | ARCHITECTURE.md 微服务拓扑 |
 | Boundaries | 137-165 | AlwaysDo / AskFirst / NeverDo | TEST.md + 安全实践 + 项目约定 |
 | Document Index | 167-181 | 文档索引表 | 实际 docs/ 目录文件列表 |
-| Session Mgmt | 183-191 | 任务状态管理说明 | DOC_MGMT_RESEARCH.md §3.4 发现 3+4 |
+| Session Mgmt | 183-191 | 任务状态管理说明 | DOC_MGMT_archive/RESEARCH-equitydeep-legacy.md §3.4 发现 3+4 |
 | Template | 192-207 | task-current.md 模板 | 同上 |
 | Standup | 208-217 | 会话重置格式 | 同上 §发现 4 |
 | Known Issues | 219-227 | 已知问题与变通方案 | NEXT_STEPS.md + DOC_AUDIT_REPORT.md 发现项 |
@@ -60,7 +60,7 @@ AGENTS.md 的所有内容均来自以下已有资料，**无任何额外杜撰�
 
 | 章节 | 内容 | 来源 |
 |------|------|------|
-| @AGENTS.md 引用 | 导入全部通用配置 | DOC_MGMT_RESEARCH.md ADR-002 方案 |
+| @AGENTS.md 引用 | 导入全部通用配置 | DOC_MGMT_archive/RESEARCH-equitydeep-legacy.md ADR-002 方案 |
 | Subagent Usage | TodoWrite/Task/search/browser_use 工具使用指南 | Trae IDE 实际工具能力 |
 | Instructions Hierarchy | 三层优先级说明 | Agentic Coding Practice #1 |
 
@@ -204,7 +204,7 @@ quant-trading/
 
 **✅ 迁移执行成功，全部验证通过。**
 
-本次迁移严格遵循 [DOC_MGMT_RESEARCH.md](DOC_MGMT_RESEARCH.md) 研究报告推荐的 Phase 1-3 方案：
+本次迁移严格遵循 [DOC_MGMT_archive/RESEARCH-equitydeep-legacy.md](../RESEARCH-equitydeep-legacy.md) 研究报告推荐的 Phase 1-3 方案：
 - 创建了符合行业标准的 **AGENTS.md** (229 行)，包含完整的 Role/Scope/Commands/Code Style/Boundaries/Document Index/Session Management
 - 创建了 **工具适配层** (CLAUDE.md + 2 个符号链接)，支持 Cursor/Windsurf/Claude Code
 - 创建了 **实时任务状态追踪机制** (.session/ + template + Standup 格式)

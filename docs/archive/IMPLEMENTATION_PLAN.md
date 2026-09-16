@@ -3,7 +3,7 @@
 > **Version**: 2.0.0  
 > **Date**: 2026-05-04  
 > **Status**: Proposed  
-> **Related**: ADR-014 (Strategy Refactor), ADR-015 (AI Agent Architecture), TASKS.md, tasks-phase-2.md  
+> **Related**: ADR-014 (Strategy Refactor), ADR-015 (AI Agent Architecture), TASKS.md, archive/tasks-phase-2.md  
 > **Author**: AI Assistant
 
 ---
@@ -623,7 +623,7 @@ func (om *OrderManager) GetOpenOrders() []domain.Order
 | P5-10 | Update AGENTS.md with new patterns and conventions | `docs/AGENTS.md` | 0.5d |
 | P5-11 | Create migration guide for strategy developers | `docs/guides/` | 0.5d |
 | P5-12 | Create ADR-015: Live Trading Architecture | `docs/adr/` | 0.5d |
-| P5-13 | Update TASKS.md and tasks-phase-2.md — mark completed tasks | `docs/TASKS.md`, `docs/tasks-phase-2.md` | 0.5d |
+| P5-13 | Update TASKS.md and archive/tasks-phase-2.md — mark completed tasks | `docs/TASKS.md`, `docs/archive/tasks-phase-2.md` | 0.5d |
 
 ### 5.2 Success Criteria
 

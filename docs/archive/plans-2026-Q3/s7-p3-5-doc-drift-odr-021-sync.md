@@ -1,7 +1,7 @@
 # S7-P3-5: 修复文档漂移 — 同步 ODR-021 服务合并
 
 > **任务来源**: ODR-043-7 已知问题 + ODR-043 P3 任务行
-> **任务追踪**: [docs/TASKS.md](../../docs/TASKS.md) — S7-P3-5
+> **任务追踪**: [docs/TASKS.md](../../TASKS.md) — S7-P3-5
 > **执行规范**: AGENTS.md §8 — 文档任务（一致性审查 + 原子提交）
 
 ---
@@ -20,7 +20,7 @@
 更新属于 S7-P3-6）。
 
 **Canonical 真相来源**:
-- [ODR-021](docs/odr/odr-021-p1-15-service-merge-risk-execution.md) — 合并决策
+- [ODR-021](../odr/odr-021-p1-15-service-merge-risk-execution.md) — 合并决策
 - `docker-compose.yml` — 实际 5 个服务（postgres/redis/data/strategy/analysis）
 - `cmd/analysis/handlers_risk.go` + `handlers_execution.go` — 实际路由注册
 - `cmd/analysis/deps.go` — `RiskManager` + `ExecutionTrader` in-process 注入
@@ -52,8 +52,8 @@
 | B2 | `docs/AGENTS_TEMPLATE.md` | 330 | 模板行引用 NEXT_STEPS.md |
 | B3 | `AGENTS.md` | 727, 735 | 2 处引用 `docs/IMPLEMENTATION_PLAN.md` 为活跃文档 |
 | B4 | `docs/ROADMAP.md` | 262 | 引用 `IMPLEMENTATION_PLAN.md` |
-| B5 | `docs/tasks-phase-2.md` | 6 | Related 行引用 IMPLEMENTATION_PLAN.md |
-| B6 | `docs/guides/migration-phase3-to-phase4.md` | 7 | Related 行引用 IMPLEMENTATION_PLAN.md |
+| B5 | `docs/archive/tasks-phase-2.md` | 6 | Related 行引用 IMPLEMENTATION_PLAN.md |
+| B6 | `docs/archive/migration-phase3-to-phase4.md` | 7 | Related 行引用 IMPLEMENTATION_PLAN.md |
 
 ### 不在范围（S7-P3-6）
 
@@ -179,25 +179,25 @@ under analysis-service (ODR-021), no separate service config needed`
 
 #### B3. `AGENTS.md` IMPLEMENTATION_PLAN.md 引用（2 处）
 - L727 (快速清单): "Phase 4 实施计划 → IMPLEMENTATION_PLAN.md" → 改为指向
-  `docs/tasks-phase-2.md`（当前活跃的 Phase 4 任务追踪）+ 注释 IMPLEMENTATION_PLAN 已归档
+  `docs/archive/tasks-phase-2.md`（当前活跃的 Phase 4 任务追踪）+ 注释 IMPLEMENTATION_PLAN 已归档
 - L735 (footer): 更新引用
 
 #### B4. `docs/ROADMAP.md` L262
 ```diff
-- 详见 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) Phase 0-5.
-+ 详见 [tasks-phase-2.md](tasks-phase-2.md) (IMPLEMENTATION_PLAN.md 已归档至 archive/)。
+- 详见 [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md) Phase 0-5.
++ 详见 [archive/tasks-phase-2.md](../tasks-phase-2.md) (IMPLEMENTATION_PLAN.md 已归档至 archive/)。
 ```
 
-#### B5. `docs/tasks-phase-2.md` L6
+#### B5. `docs/archive/tasks-phase-2.md` L6
 ```diff
 - > **Related**: IMPLEMENTATION_PLAN.md, ROADMAP.md, ADR-015
 + > **Related**: ROADMAP.md, ADR-015 (IMPLEMENTATION_PLAN.md 已归档至 archive/)
 ```
 
-#### B6. `docs/guides/migration-phase3-to-phase4.md` L7
+#### B6. `docs/archive/migration-phase3-to-phase4.md` L7
 ```diff
-- > **Related**: [VISION.md](../VISION.md), [ADR-015](../adr/adr-015-ai-agent-architecture.md), [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md)
-+ > **Related**: [VISION.md](../VISION.md), [ADR-015](../adr/adr-015-ai-agent-architecture.md), [tasks-phase-2.md](../tasks-phase-2.md) (IMPLEMENTATION_PLAN.md 已归档)
+- > **Related**: [VISION.md](../../VISION.md), [ADR-015](../../adr/adr-015-ai-agent-architecture.md), [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md)
++ > **Related**: [VISION.md](../../VISION.md), [ADR-015](../../adr/adr-015-ai-agent-architecture.md), [archive/tasks-phase-2.md](../tasks-phase-2.md) (IMPLEMENTATION_PLAN.md 已归档)
 ```
 
 #### Commit 2 验证
@@ -223,8 +223,8 @@ under analysis-service (ODR-021), no separate service config needed`
 | `AGENTS.md` | 6 处引用更新 |
 | `docs/AGENTS_TEMPLATE.md` | 1 处模板行 |
 | `docs/ROADMAP.md` | 1 处引用 |
-| `docs/tasks-phase-2.md` | 1 处 Related 行 |
-| `docs/guides/migration-phase3-to-phase4.md` | 1 处 Related 行 |
+| `docs/archive/tasks-phase-2.md` | 1 处 Related 行 |
+| `docs/archive/migration-phase3-to-phase4.md` | 1 处 Related 行 |
 
 ### 文档更新（Commit 2 内）
 | 文件 | 改动 |
@@ -242,11 +242,11 @@ under analysis-service (ODR-021), no separate service config needed`
 
 ### D2: NEXT_STEPS 引用替换为 TASKS.md
 **理由**: NEXT_STEPS.md 已归档至 `docs/archive/`（per ODR-008）。当前活跃的
-任务追踪文档是 `docs/TASKS.md`（Phase 3）和 `docs/tasks-phase-2.md`（Phase 4）。
+任务追踪文档是 `docs/TASKS.md`（Phase 3）和 `docs/archive/tasks-phase-2.md`（Phase 4）。
 引用应指向活跃文档。
 
-### D3: IMPLEMENTATION_PLAN 引用替换为 tasks-phase-2.md
-**理由**: IMPLEMENTATION_PLAN.md 已归档。Phase 4 任务追踪在 tasks-phase-2.md。
+### D3: IMPLEMENTATION_PLAN 引用替换为 archive/tasks-phase-2.md
+**理由**: IMPLEMENTATION_PLAN.md 已归档。Phase 4 任务追踪在 archive/tasks-phase-2.md。
 
 ### D4: 归档文档内部自引用不修改
 **理由**: AGENTS.md §4 禁区规定 `docs/archive/` 不可变。归档文档内部引用其他
@@ -314,11 +314,11 @@ docs: fix stale references to archived NEXT_STEPS/IMPLEMENTATION_PLAN (S7-P3-5)
 
 NEXT_STEPS.md and IMPLEMENTATION_PLAN.md were archived to docs/archive/
 (per ODR-008) but still cited as active documents in AGENTS.md,
-ROADMAP.md, tasks-phase-2.md, and the migration guide.
+ROADMAP.md, archive/tasks-phase-2.md, and the migration guide.
 
 Replaces stale references with current active docs:
 - NEXT_STEPS.md → TASKS.md (active Phase 3 task tracker)
-- IMPLEMENTATION_PLAN.md → tasks-phase-2.md (active Phase 4 tracker)
+- IMPLEMENTATION_PLAN.md → archive/tasks-phase-2.md (active Phase 4 tracker)
 
 Refs: S7-P3-5
 Reviewed: grep verified no remaining active-path references
