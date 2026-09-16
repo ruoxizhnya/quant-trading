@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -255,8 +256,16 @@ func (om *OrderManager) SetPriceCageValidator(v *CageValidator, refProvider func
 	om.priceRefProvider = refProvider
 }
 
+// orderIDSeq 保证同一进程内订单 ID 唯一。
+//
+// 修复前 generateOrderID 只用 time.Now().UnixNano()，而 Windows 的时钟粒度较粗
+// （实测连续两次取到的纳秒值可能相同），导致连续提交的两笔订单拿到同一个 ID，
+// 后一笔在 om.orders 这个 map 里把前一笔静默覆盖 —— 订单凭空消失。
+// 交易系统里这属于不可接受的正确性问题。
+var orderIDSeq uint64
+
 func generateOrderID() string {
-	return fmt.Sprintf("ORD-%d", time.Now().UnixNano())
+	return fmt.Sprintf("ORD-%d-%06d", time.Now().UnixNano(), atomic.AddUint64(&orderIDSeq, 1))
 }
 
 // validateOrderShape enforces the type-specific invariants of an Order
