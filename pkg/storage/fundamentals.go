@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,19 @@ import (
 
 // GetFundamentalsSnapshot returns latest fundamental data for all stocks as of a cutoff date.
 // Used by FactorComputer to compute value/quality factors cross-sectionally.
+//
+// PIT（point-in-time）语义 —— 2026-09-16 修复前视偏差，见 TASKS P0-1
+// 与 pkg/storage/fundamentals_pit_test.go 的回归测试。
+//
+// 一条记录的「可用日」= COALESCE(ann_date, trade_date)。原因：
+//   - fina_indicator 路径（pkg/data/tushare.go:457 注释 "Use end_date as trade_date"）
+//     把报告期截止日 end_date 写进了 trade_date 列，真实披露日是 ann_date。
+//     若按 trade_date 过滤，三季报（9/30 截止、10/25 披露）在 9/30 就对回测可见。
+//   - daily_basic 路径（SaveFundamentalBatch）不写 ann_date，其 PE/PB 本身
+//     已是当日收盘口径，故回退到 trade_date。
+//
+// 同一 ts_code 有多期时取「可用日最近」的一期；可用日相同则取报告期更晚的一期，
+// 以正确处理同一期财报被重述（restatement）的情况。
 func (s *PostgresStore) GetFundamentalsSnapshot(ctx context.Context, cutoffDate time.Time) ([]domain.FundamentalData, error) {
 	query := `
 		SELECT DISTINCT ON (ts_code)
@@ -19,8 +33,8 @@ func (s *PostgresStore) GetFundamentalsSnapshot(ctx context.Context, cutoffDate 
 			pe, pb, ps, roe, roa, debt_to_equity, gross_margin, net_margin,
 			revenue, net_profit, total_assets, total_liab, created_at
 		FROM stock_fundamentals
-		WHERE trade_date <= $1 AND pe IS NOT NULL
-		ORDER BY ts_code, trade_date DESC
+		WHERE COALESCE(ann_date, trade_date) <= $1 AND pe IS NOT NULL
+		ORDER BY ts_code, COALESCE(ann_date, trade_date) DESC, end_date DESC
 	`
 	rows, err := s.pool.Query(ctx, query, cutoffDate)
 	if err != nil {
@@ -31,14 +45,19 @@ func (s *PostgresStore) GetFundamentalsSnapshot(ctx context.Context, cutoffDate 
 	var results []domain.FundamentalData
 	for rows.Next() {
 		var f domain.FundamentalData
+		// ann_date / end_date 在 daily_basic 写入路径下可能为 NULL，
+		// 直接扫进 time.Time 会报 "cannot scan NULL"，故用 NullTime 承接。
+		var annDate, endDate sql.NullTime
 		if err := rows.Scan(
-			&f.ID, &f.TsCode, &f.TradeDate, &f.AnnDate, &f.EndDate,
+			&f.ID, &f.TsCode, &f.TradeDate, &annDate, &endDate,
 			&f.PE, &f.PB, &f.PS, &f.ROE, &f.ROA, &f.DebtToEquity,
 			&f.GrossMargin, &f.NetMargin, &f.Revenue, &f.NetProfit,
 			&f.TotalAssets, &f.TotalLiab, &f.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan fundamental row: %w", err)
 		}
+		f.AnnDate = annDate.Time
+		f.EndDate = endDate.Time
 		results = append(results, f)
 	}
 	if err := rows.Err(); err != nil {
@@ -138,13 +157,24 @@ func (s *PostgresStore) GetFundamental(ctx context.Context, symbol string, date 
 
 // GetFundamentals retrieves all fundamental records for a symbol on or before the given date.
 // Returns an empty slice if no records found.
+//
+// 与 GetFundamentalsSnapshot 一致的 PIT 语义：可用日 = COALESCE(ann_date, trade_date)。
+// 见 TASKS P0-1；修复前按 trade_date 过滤存在同样的前视偏差。
+//
+// 注意：domain.Fundamental 的数值字段是 float64（非指针），而表中这些列可为空，
+// 直接扫描会因 "cannot scan NULL" 报错，故用 COALESCE(col, 0) 兜底。
+// 缺失值被当作 0 而非"未知"，对因子计算不够严谨 —— 见 TASKS P2-10。
 func (s *PostgresStore) GetFundamentals(ctx context.Context, symbol string, date time.Time) ([]domain.Fundamental, error) {
 	query := `
-		SELECT ts_code, trade_date, pe, pb, ps, roe, roa, debt_to_equity,
-			gross_margin, net_margin, revenue, net_profit, total_assets, total_liab
+		SELECT ts_code, trade_date,
+			COALESCE(pe, 0), COALESCE(pb, 0), COALESCE(ps, 0),
+			COALESCE(roe, 0), COALESCE(roa, 0), COALESCE(debt_to_equity, 0),
+			COALESCE(gross_margin, 0), COALESCE(net_margin, 0),
+			COALESCE(revenue, 0), COALESCE(net_profit, 0),
+			COALESCE(total_assets, 0), COALESCE(total_liab, 0)
 		FROM stock_fundamentals
-		WHERE ts_code = $1 AND trade_date <= $2
-		ORDER BY trade_date DESC
+		WHERE ts_code = $1 AND COALESCE(ann_date, trade_date) <= $2
+		ORDER BY COALESCE(ann_date, trade_date) DESC, end_date DESC
 	`
 	rows, err := s.pool.Query(ctx, query, symbol, date)
 	if err != nil {

@@ -26,7 +26,6 @@ Thumbs.db
 *.so
 *.dylib
 /test/
-*_test.go
 *.test
 *.out
 /bin/
@@ -40,10 +39,9 @@ Thumbs.db
 /data
 /ai
 
-# Source test files (Go convention: *_test.go) are ignored by the rule above.
-# Pre-existing tracked test files (e.g. pkg/storage/postgres_test.go) remain
-# tracked because they were committed before the rule was added. New tests
-# can be added explicitly with `git add -f path/to/file_test.go`.
+# 注意（2026-09-16 修复，TASKS P0-3）：此处原有 `*_test.go` 规则，
+# 会静默忽略所有新建的 Go 测试文件，导致新测试无法入库、CI 也跑不到。已移除。
+# Go 测试文件必须纳入版本控制；构建产物由上面的 *.test / /bin/ 等规则覆盖。
 
 # Go coverage / profiling
 *.prof
