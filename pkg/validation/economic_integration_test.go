@@ -69,11 +69,21 @@ func synthBars(symbols []string, days int, start time.Time, seed int64) map[stri
 //     于是回测一路跑完但零信号零成交，看起来像成功，其实什么都没测。
 //  2. 全局 registry 是单例，第二次 GlobalRegister 会报 already registered。
 //     所以注册失败时取出已有实例重新 Configure（不同用例用不同调仓频率）。
-func ensureMomentum(t *testing.T, freq string, topN int) {
+type offlineSpec struct {
+	nSyms    int
+	nDays    int
+	topN     int
+	lookback int
+	seed     int64
+	freq     string
+}
+
+func ensureMomentum(t *testing.T, spec offlineSpec) {
 	t.Helper()
+	freq, topN := spec.freq, spec.topN
 
 	params := map[string]interface{}{
-		"lookback_days":       20,
+		"lookback_days":       spec.lookback,
 		"top_n":               topN,
 		"max_positions":       topN,
 		"rebalance_frequency": freq,
@@ -99,8 +109,9 @@ func ensureMomentum(t *testing.T, freq string, topN int) {
 }
 
 // runOfflineBacktest 用真引擎跑一次回测，不碰数据库、不碰网络。
-func runOfflineBacktest(t *testing.T, nSyms, nDays, topN int, seed int64, freq string) *domain.BacktestResult {
+func runOfflineBacktest(t *testing.T, spec offlineSpec) *domain.BacktestResult {
 	t.Helper()
+	nSyms, nDays, seed := spec.nSyms, spec.nDays, spec.seed
 
 	start := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
 	symbols := make([]string, nSyms)
@@ -150,7 +161,7 @@ func runOfflineBacktest(t *testing.T, nSyms, nDays, topN int, seed int64, freq s
 	}
 	eng.SetRiskManager(rm)
 
-	ensureMomentum(t, freq, topN)
+	ensureMomentum(t, spec)
 
 	resp, err := eng.RunBacktest(context.Background(), backtest.BacktestRequest{
 		Strategy:       "momentum",
@@ -179,7 +190,7 @@ func runOfflineBacktest(t *testing.T, nSyms, nDays, topN int, seed int64, freq s
 }
 
 func TestEconomicIntegration_RealEngineProducesUsableTurnover(t *testing.T) {
-	r := runOfflineBacktest(t, 20, 252, 5, 42, "daily")
+	r := runOfflineBacktest(t, offlineSpec{nSyms: 20, nDays: 252, topN: 5, lookback: 20, seed: 42, freq: "daily"})
 
 	if len(r.Trades) == 0 {
 		t.Fatal("真引擎没成交 —— 换手率无从算起，这条取证就没意义")
@@ -206,7 +217,7 @@ func TestEconomicIntegration_RealEngineProducesUsableTurnover(t *testing.T) {
 }
 
 func TestEconomicIntegration_CostIsRealAgainstEngineOutput(t *testing.T) {
-	r := runOfflineBacktest(t, 20, 252, 5, 42, "daily")
+	r := runOfflineBacktest(t, offlineSpec{nSyms: 20, nDays: 252, topN: 5, lookback: 20, seed: 42, freq: "daily"})
 
 	res, ok := ValidateEconomicFromBacktest(r, DefaultAShareCostModel())
 	if !ok {
@@ -258,8 +269,8 @@ func TestEconomicIntegration_CostIsRealAgainstEngineOutput(t *testing.T) {
 // （见 TASKS.md 的 P1-6），weekly 只在「今天是周一」时才发信号 ——
 // 回测结果会随运行日期漂移。daily 恒真，才是这里唯一可靠的构造。
 func TestEconomicIntegration_TurnoverSensitiveToStrategyParams(t *testing.T) {
-	narrow := runOfflineBacktest(t, 20, 252, 5, 42, "daily")
-	wider := runOfflineBacktest(t, 20, 252, 18, 42, "daily")
+	narrow := runOfflineBacktest(t, offlineSpec{nSyms: 20, nDays: 252, topN: 5, lookback: 20, seed: 42, freq: "daily"})
+	wider := runOfflineBacktest(t, offlineSpec{nSyms: 20, nDays: 252, topN: 18, lookback: 20, seed: 42, freq: "daily"})
 
 	n, okN := TurnoverFromBacktest(narrow)
 	w, okW := TurnoverFromBacktest(wider)
