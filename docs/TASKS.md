@@ -74,7 +74,7 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 |---|---|---|---|
 | **P1-1** | **实验日志**：记录 AI 每次尝试（参数向量 / 结果 / 父子关系 / 假设来源） | `experiments` 表 + `pkg/storage/experiments.go` | 能回放一条完整探索路径 |
 | **P1-1a** | └ 存储层：表 + 存取（插入 / 收尾 / 单查 / 按 seq 回放） | **✅ 2026-09-17** | 单测 5 例全绿，表已落库 |
-| **P1-1b** | └ 生产者：pipeline 每次尝试落一行，**失败也要落**。⚠️ `UNIQUE(run_id, seq)` 要求 seq 由调用方分配 —— 并发跑时不能让两边各自 +1 | **✅ 2026-09-17** `pkg/ai/pipeline/pipeline.go` | 真库端到端取证通过（跑完落 completed，失败落 failed） |
+| **P1-1b** | └ 生产者：pipeline 每次尝试落一行，**失败也要落**；`cmd/analysis` 启动时注入 sink。⚠️ `UNIQUE(run_id, seq)` 要求 seq 由调用方分配 —— 并发跑时不能让两边各自 +1 | **✅ 2026-09-17** `pkg/ai/pipeline/pipeline.go`、`cmd/analysis/handlers_pipeline.go:46` | 真库端到端取证通过（跑完落 completed，失败落 failed） |
 | **P1-1c** | └ 回放：路径可读。单次「试了什么」已具备（expression + params + hypothesis + 指标）；**多步「为什么转到下一步」要等 P1-2 有真正的父子链** —— 现在 parent_id 字段留了但没人填 | 单次 ✅ / 多步待 P1-2 | 一条 run 从 seq 0 到 seq n 能讲成一个故事 |
 | **P1-2** | **循环控制器**：让搜索算法（或 LLM）能连续调用底座 + 响应中断 | `pkg/ai/search`（TPE/遗传已实现但零调用） | 能连续跑 100 次实验并支持中途叫停 |
 | **P1-3** | **观察页**：三栏（正在试什么 / 结果流 / 当前最优）+ 干预入口 | `web/src/pages/` 新增 | 能看见路径形状，能输入方向 |
