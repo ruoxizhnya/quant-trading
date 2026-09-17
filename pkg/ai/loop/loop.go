@@ -171,6 +171,11 @@ func (c *Controller) Run(ctx context.Context, cfg Config) (*RunResult, error) {
 			Hypothesis:   sug.Hypothesis,
 			DatasetSplit: cfg.DatasetSplit,
 		})
+		// P1-2b：把这次的参数真的交给底座。少了这一步，控制器搜它的、
+		// 底座跑自己的 —— 一轮下来是同一个策略重复 N 遍，搜索等于没搜。
+		if len(sug.Params) > 0 {
+			execCtx = pipeline.WithParameterOverrides(execCtx, sug.Params)
+		}
 
 		res, err := c.runner.Execute(execCtx, cfg.Description, c.backtest)
 

@@ -43,6 +43,11 @@ func NewTPEProposer(space *search.SearchSpace, seed int64) *TPEProposer {
 	return &TPEProposer{opt: search.NewTPEOptimizer(seed), space: space}
 }
 
+// ⚠️ 参数名必须与意图参数同名（例如 lookback_days），覆盖才会生效。
+// 写成 lookback 之类的别名**不会报错**，只是参数进不了表达式 —— 整轮搜索
+// 会静默退化成「同一个策略跑 N 遍」。这是本设计里最容易踩的坑，
+// 因为错配没有任何信号。
+//
 // Suggest 的父子语义：TPE 是在「好参数所在区间」里采样，所以说它衍生自
 // 当前最优那次尝试。这是近似，不是严格的遗传父代 —— 写清楚免得日后被
 // 当成精确谱系去解读。

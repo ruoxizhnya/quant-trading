@@ -51,8 +51,11 @@ func TestRun_RealPipelineAndRealDB(t *testing.T) {
 		intent.NewParser(), yamlgen.NewGenerator(), &ai.MockClient{},
 		pipeline.WithExperimentSink(store),
 	)
+	// 参数名必须是 lookback_days —— 与意图参数同名，覆盖才生效。
+	// 写成 lookback 会静默失效（错配不报错，只是表达式不变），
+	// 这个坑正是下面那条「表达式必须不同」的断言要兜住的。
 	space := &search.SearchSpace{Params: []search.ParamDef{
-		{Name: "lookback", Type: "int", Min: 10, Max: 60},
+		{Name: "lookback_days", Type: "int", Min: 10, Max: 60},
 	}}
 	ctrl := NewController(p, NewTPEProposer(space, 42), &stubBacktest{})
 
@@ -82,4 +85,40 @@ func TestRun_RealPipelineAndRealDB(t *testing.T) {
 		}
 	}
 	assert.Positive(t, seenParent, "TPE 阶段应该产生父子链 —— 否则路径讲不出「为什么转到下一步」")
+
+	// P1-2b 的核心：一轮下来不能全是同一个表达式。全是同一个，说明参数
+	// 根本没进执行，这一轮等于把同一个策略跑了 N 遍。
+	distinct := map[string]struct{}{}
+	for _, r := range rows {
+		distinct[r.Expression] = struct{}{}
+	}
+	assert.Greater(t, len(distinct), 1,
+		"一轮探索应出现不同的表达式，实际只有 %d 种（参数没进执行？）", len(distinct))
+}
+
+// TestRun_DifferentParamsProduceDifferentConfig 是 P1-2b 的**不带库**回归。
+//
+// 上面那条依赖真库，DB 缺席时会 skip；而「参数没进执行」这种问题一旦回归，
+// 恰恰是最难被发现的（单测照绿、日志照记）。所以这里用真 pipeline 再锁一次。
+func TestRun_DifferentParamsProduceDifferentConfig(t *testing.T) {
+	p := pipeline.NewPipelineWithDeps(
+		intent.NewParser(), yamlgen.NewGenerator(), &ai.MockClient{})
+	space := &search.SearchSpace{Params: []search.ParamDef{
+		{Name: "lookback_days", Type: "int", Min: 10, Max: 60},
+	}}
+	ctrl := NewController(p, NewTPEProposer(space, 42), &stubBacktest{})
+
+	out, err := ctrl.Run(context.Background(), Config{
+		RunID: "cfg-variety", Description: "做一个动量策略", MaxTries: 6,
+	})
+	require.NoError(t, err)
+	require.Len(t, out.Tries, 6)
+
+	distinct := map[string]struct{}{}
+	for _, a := range out.Tries {
+		require.NotNil(t, a.Result)
+		distinct[a.Result.YAMLConfig] = struct{}{}
+	}
+	assert.Greater(t, len(distinct), 1,
+		"同一句描述、不同参数，必须产出不同配置；现在只有 %d 种", len(distinct))
 }

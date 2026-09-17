@@ -267,27 +267,61 @@ func (g *Generator) intentToConfig(i *intent.Intent) Config {
 // 只覆盖能用价量表达的意图。value / quality 要的是 PE / PB / ROE，而
 // 表达式引擎目前只暴露 OHLCV，映射不了：返回 ok=false，让调用方明确
 // 失败，而不是套一个无关的价格表达式产出答非所问的回测数字。
-func defaultSignalExpression(t intent.StrategyType) (string, bool) {
-	switch t {
+// defaultLookback 是意图没指定窗口时用的默认值（沿用此前写死的值）。
+const defaultLookback = 20
+
+func defaultSignalExpression(i *intent.Intent) (string, bool) {
+	lb := intentLookback(i, defaultLookback)
+	switch i.StrategyType {
 	case intent.StrategyTypeMomentum:
-		// 20 日涨幅的横截面排名，取最高的 20%。
-		return "cs_rank(ts_pct_change(close, 20)) > 0.8", true
+		// lb 日涨幅的横截面排名，取最高的 20%。
+		return fmt.Sprintf("cs_rank(ts_pct_change(close, %d)) > 0.8", lb), true
 	case intent.StrategyTypeMeanReversion:
-		// 相对 20 日均值跌得越深分越高（反向做多）。
-		return "cs_rank(ts_mean(close, 20) - close) > 0.8", true
+		// 相对 lb 日均值跌得越深分越高（反向做多）。
+		return fmt.Sprintf("cs_rank(ts_mean(close, %d) - close) > 0.8", lb), true
 	case intent.StrategyTypeTrendFollowing:
-		// 短期均线上穿长期均线的幅度。
-		return "cs_rank(ts_mean(close, 20) - ts_mean(close, 60)) > 0.8", true
+		// 短期均线上穿长期均线的幅度；长窗口沿用原先 3 倍的比例。
+		return fmt.Sprintf("cs_rank(ts_mean(close, %d) - ts_mean(close, %d)) > 0.8", lb, lb*3), true
 	case intent.StrategyTypeBreakout:
-		// 收盘价相对 20 日最高价的位置，越贴近/越突破分越高。
-		return "cs_rank(close - ts_max(high, 20)) > 0.8", true
+		// 收盘价相对 lb 日最高价的位置，越贴近/越突破分越高。
+		return fmt.Sprintf("cs_rank(close - ts_max(high, %d)) > 0.8", lb), true
 	case intent.StrategyTypeMultiFactor:
 		// 动量 + 低波，两个横截面排名各占一半，取最高的 20%。
-		return "cs_rank(ts_pct_change(close, 20)) + cs_rank(neg(ts_std(close, 20))) > 1.6", true
+		return fmt.Sprintf("cs_rank(ts_pct_change(close, %d)) + cs_rank(neg(ts_std(close, %d))) > 1.6", lb, lb), true
 	default:
 		// value / quality / custom：给不出诚实的表达式，交给调用方报错。
 		return "", false
 	}
+}
+
+// intentLookback 取出意图里的回看窗口。
+//
+// 非法值（<=0 或非数值）一律退回默认：搜索空间的边界偶尔会采到奇葩数，
+// 不能让它污染出 ts_mean(close, -5) 这种表达式。
+func intentLookback(i *intent.Intent, fallback int) int {
+	if i == nil {
+		return fallback
+	}
+	for _, p := range i.Parameters {
+		if p.Name != "lookback_days" {
+			continue
+		}
+		switch v := p.Value.(type) {
+		case int:
+			if v > 0 {
+				return v
+			}
+		case int64:
+			if v > 0 {
+				return int(v)
+			}
+		case float64:
+			if v > 0 {
+				return int(v)
+			}
+		}
+	}
+	return fallback
 }
 
 func intentToExpressionConfig(i *intent.Intent) (ExpressionYAML, bool) {
@@ -302,7 +336,7 @@ func intentToExpressionConfig(i *intent.Intent) (ExpressionYAML, bool) {
 		exprStr, _ = signalExpr.(string)
 	}
 	if exprStr == "" {
-		def, ok := defaultSignalExpression(i.StrategyType)
+		def, ok := defaultSignalExpression(i)
 		if !ok {
 			return ExpressionYAML{}, false
 		}

@@ -75,9 +75,9 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 | **P1-1** | **实验日志**：记录 AI 每次尝试（参数向量 / 结果 / 父子关系 / 假设来源） | `experiments` 表 + `pkg/storage/experiments.go` | 能回放一条完整探索路径 |
 | **P1-1a** | └ 存储层：表 + 存取（插入 / 收尾 / 单查 / 按 seq 回放） | **✅ 2026-09-17** | 单测 5 例全绿，表已落库 |
 | **P1-1b** | └ 生产者：pipeline 每次尝试落一行，**失败也要落**；`cmd/analysis` 启动时注入 sink。⚠️ `UNIQUE(run_id, seq)` 要求 seq 由调用方分配 —— 并发跑时不能让两边各自 +1 | **✅ 2026-09-17** `pkg/ai/pipeline/pipeline.go`、`cmd/analysis/handlers_pipeline.go:46` | 真库端到端取证通过（跑完落 completed，失败落 failed） |
-| **P1-1c** | └ 回放：路径可读。单次「试了什么」已具备（expression + params + hypothesis + 指标）；**多步「为什么转到下一步」要等 P1-2 有真正的父子链** —— 现在 parent_id 字段留了但没人填 | 单次 ✅ / 多步待 P1-2 | 一条 run 从 seq 0 到 seq n 能讲成一个故事 |
+| **P1-1c** | └ 回放：路径可读。单次「试了什么」+ 多步「为什么转到下一步」都已具备（expression / params / hypothesis / 指标 / parent_id） | **✅ 2026-09-17** | 一条 run 从 seq 0 到 seq n 能讲成一个故事 |
 | **P1-2** | **循环控制器**：让搜索算法（或 LLM）能连续调用底座 + 响应中断 | **✅ 2026-09-17** `pkg/ai/loop/`（新包；TPE 已复用，遗传仍零调用） | 连续跑 N 次 ✅、中途叫停 ✅、单次失败不中断 ✅、seq 连续 + 父子链 ✅ |
-| **P1-2b** | ⚠️ **搜了但没生效**：TPE 采样的参数**进不了执行** —— `defaultSignalExpression()` 的回看窗口写死 20，且控制器没有传参通道。取证结果：一轮 6 次的 expression 完全相同，等于同一个策略跑了 6 遍 | `pkg/ai/yaml/generator.go:272` + 参数传递通道 | 换一组参数，回测数字必须真的变 |
+| **P1-2b** | ~~搜了但没生效~~ → **已修**：`defaultSignalExpression` 改为读意图参数 + 开结构化传参通道 `WithParameterOverrides`。⚠️ **搜索空间的参数名必须与意图参数同名**（`lookback_days`）—— 写成 `lookback` 之类别名**不报错、只是静默失效**，整轮退化成同一个策略跑 N 遍 | **✅ 2026-09-17** `pkg/ai/yaml/generator.go`、`pkg/ai/pipeline/pipeline.go`、`pkg/ai/loop/loop.go` | 取证：一轮 6 次窗口各不相同（15/30/33/22/47/35）；另有不依赖库的回归 `TestRun_DifferentParamsProduceDifferentConfig` |
 | **P1-3** | **观察页**：三栏（正在试什么 / 结果流 / 当前最优）+ 干预入口 | `web/src/pages/` 新增 | 能看见路径形状，能输入方向 |
 | **P1-4** | **schema 收口**：真实 DDL 硬编码在 Go 里，`migrations/` 无版本管理。**含语义债**：`stock_fundamentals.trade_date` 被两种写入路径复用——fina_indicator 路径存的是报告期截止日，daily_basic 路径存的才是真实交易日（见 P0-1 的 COALESCE 兜底） | `pkg/storage/postgres.go:69-330`、`migration_manager.go:43`（零调用） | migrations 可执行、有版本号、能重放；`trade_date` 语义拆分或改名 |
 | **P1-5** | **统一错误中间件**：154 处手写 `gin.H{"error"}`，`c.Error()` 使用 0 次 | `cmd/analysis/setup.go:528-537` | 全局 AppError → HTTP 映射 |

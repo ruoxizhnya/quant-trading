@@ -133,6 +133,59 @@ func ExperimentContextFrom(ctx context.Context) ExperimentContext {
 	return ExperimentContext{}
 }
 
+type paramOverrideKey struct{}
+
+// WithParameterOverrides 让调用方覆盖本次执行的意图参数（P1-2b）。
+//
+// 搜索控制器需要这条通道：它采出一组参数，得让底座真的照这组参数跑。没有通道的
+// 话，控制器搜它的、底座跑自己的 —— 一轮下来是同一个策略重复 N 遍。
+//
+// 走 context 而不是给 Execute 加形参，理由同 ExperimentContext：参数每次执行
+// 都不同，而 pipeline 实例是复用的。
+func WithParameterOverrides(ctx context.Context, params map[string]any) context.Context {
+	return context.WithValue(ctx, paramOverrideKey{}, params)
+}
+
+// applyParameterOverrides 把覆盖并进已解析的意图：同名的替换，意图里没有的新增。
+//
+// 时机在解析之后、YAML 生成之前 —— 这样解析得出的参数不会丢，调用方又能
+// 精确控制它关心的那几个。
+func applyParameterOverrides(i *intent.Intent, ctx context.Context) {
+	params, ok := ctx.Value(paramOverrideKey{}).(map[string]any)
+	if !ok || len(params) == 0 || i == nil {
+		return
+	}
+	for name, v := range params {
+		replaced := false
+		for j := range i.Parameters {
+			if i.Parameters[j].Name == name {
+				i.Parameters[j].Value = v
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			i.Parameters = append(i.Parameters, intent.Parameter{
+				Name: name, Type: paramTypeOf(v), Value: v,
+			})
+		}
+	}
+}
+
+// paramTypeOf 给新增参数标类型，与 intent 包里的约定一致。
+func paramTypeOf(v any) string {
+	switch v.(type) {
+	case int, int64:
+		return "int"
+	case float64, float32:
+		return "float"
+	case bool:
+		return "bool"
+	default:
+		return "string"
+	}
+}
+
 // Pipeline orchestrates the full strategy generation and validation flow
 type Pipeline struct {
 	intentParser *intent.Parser
@@ -286,6 +339,9 @@ func (p *Pipeline) run(ctx context.Context, result *Result, description string, 
 		return err
 	}
 	result.Intent = parsedIntent
+	// P1-2b：把调用方覆盖的参数并进意图 —— 搜索控制器靠这条通道让底座真的
+	// 照它采出来的参数跑，而不是每次都跑同一个默认配置。
+	applyParameterOverrides(parsedIntent, ctx)
 	p.log(result, fmt.Sprintf("Parsed intent: type=%s, name=%s", parsedIntent.StrategyType, parsedIntent.StrategyName))
 
 	// Stage 2: Generate YAML
