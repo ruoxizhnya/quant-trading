@@ -317,6 +317,32 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_fund_detail_lookup
 			ON fundamentals_detail (ts_code, field_code, end_date DESC)`,
+		// Migration 028: experiments (P1-1 / S1 通回路)
+		// AI 每次尝试落一行，回答五个问题：从哪开始(hypothesis) · 试了什么(params) ·
+		// 结果怎样(metrics) · 怎么走到这(seq + parent_id) · 用的哪份数据(dataset_split)。
+		// 失败也必须留行 —— 「试几次才撞出来」本身就是过拟合检测的证据
+		// （PRODUCT §验证器：试 5 次和试 500 次撞出来的，可信度差一个量级）。
+		// 因此 status 停在 running 的行不是垃圾数据，那是「跑到第几步被叫停」，
+		// 清理它就等于抹掉回路中断的位置。
+		// UNIQUE(run_id, seq)：一次 run 内第 n 次尝试只有一条，路径回放才不会歧义。
+		`CREATE TABLE IF NOT EXISTS experiments (
+			id            BIGSERIAL PRIMARY KEY,
+			run_id        VARCHAR(64)  NOT NULL,
+			seq           INT          NOT NULL,
+			parent_id     BIGINT       REFERENCES experiments(id) ON DELETE SET NULL,
+			hypothesis    TEXT,
+			params        JSONB        NOT NULL DEFAULT '{}',
+			dataset_split VARCHAR(16)  NOT NULL DEFAULT 'train',
+			strategy_name VARCHAR(100),
+			expression    TEXT,
+			status        VARCHAR(16)  NOT NULL DEFAULT 'running',
+			metrics       JSONB,
+			error_message TEXT,
+			created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+			finished_at   TIMESTAMPTZ,
+			UNIQUE (run_id, seq)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_experiments_run_seq ON experiments(run_id, seq)`,
 		// Migration 026: docs/migrations/026_widen_factor_name.sql (EQD-P1-2 / 桥 B1)
 		// 桥 B1 的 5 个纵向基本面因子名最长 24 字符，超出既有 VARCHAR(20)。
 		// 因子链路的三个表同源同一列，须同时放宽；加宽 varchar 为 metadata-only，不改写表。

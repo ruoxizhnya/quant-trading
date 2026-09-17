@@ -72,7 +72,10 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 
 | # | 任务 | 位置 | 验收 |
 |---|---|---|---|
-| **P1-1** | **实验日志表**：记录 AI 每次尝试（参数向量 / 结果 / 父子关系 / 假设来源） | 新建 `experiments` 表 | 能回放一条完整探索路径 |
+| **P1-1** | **实验日志**：记录 AI 每次尝试（参数向量 / 结果 / 父子关系 / 假设来源） | `experiments` 表 + `pkg/storage/experiments.go` | 能回放一条完整探索路径 |
+| **P1-1a** | └ 存储层：表 + 存取（插入 / 收尾 / 单查 / 按 seq 回放） | **✅ 2026-09-17** | 单测 5 例全绿，表已落库 |
+| **P1-1b** | └ 生产者：pipeline 每次尝试落一行，**失败也要落**。⚠️ `UNIQUE(run_id, seq)` 要求 seq 由调用方分配 —— 并发跑时不能让两边各自 +1 | `pkg/ai/pipeline/pipeline.go` | 真跑一次意图后库里有行，崩了也留 running 行 |
+| **P1-1c** | └ 回放：一条 run 的完整路径可读，含被叫停的 running 行 | 待办 | 能讲清「第 n 次试了什么、为什么转到第 n+1 次」 |
 | **P1-2** | **循环控制器**：让搜索算法（或 LLM）能连续调用底座 + 响应中断 | `pkg/ai/search`（TPE/遗传已实现但零调用） | 能连续跑 100 次实验并支持中途叫停 |
 | **P1-3** | **观察页**：三栏（正在试什么 / 结果流 / 当前最优）+ 干预入口 | `web/src/pages/` 新增 | 能看见路径形状，能输入方向 |
 | **P1-4** | **schema 收口**：真实 DDL 硬编码在 Go 里，`migrations/` 无版本管理。**含语义债**：`stock_fundamentals.trade_date` 被两种写入路径复用——fina_indicator 路径存的是报告期截止日，daily_basic 路径存的才是真实交易日（见 P0-1 的 COALESCE 兜底） | `pkg/storage/postgres.go:69-330`、`migration_manager.go:43`（零调用） | migrations 可执行、有版本号、能重放；`trade_date` 语义拆分或改名 |
