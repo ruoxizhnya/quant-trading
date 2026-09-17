@@ -21,6 +21,8 @@ type PipelineHandler struct {
 	// so main.go can inject the same copilotRunner already wired into
 	// /api/copilot.
 	runner pipeline.BacktestRunner
+	// expSink 是实验日志的落点（P1-1b）。nil 表示这一路不记日志。
+	expSink pipeline.ExperimentSink
 }
 
 // PipelineHandlerOption configures a PipelineHandler at construction
@@ -37,19 +39,35 @@ func WithBacktestRunner(r pipeline.BacktestRunner) PipelineHandlerOption {
 	}
 }
 
+// WithExperimentSink 注入实验日志落点（P1-1b）。
+//
+// pipeline 有能力记日志还不够 —— 服务启动时必须真的把 sink 接上。少了这一步，
+// 线上跑一百次实验库里依然一行都没有，而过拟合检测完全建立在「试了多少次」
+// 这个数字上。不调用这个 option 就维持不记日志的旧行为。
+func WithExperimentSink(s pipeline.ExperimentSink) PipelineHandlerOption {
+	return func(h *PipelineHandler) {
+		h.expSink = s
+	}
+}
+
 // NewPipelineHandler creates a new pipeline handler. Default behaviour
 // (no options) leaves the runner nil for backward compatibility —
 // callers that need end-to-end pipeline execution should pass
 // WithBacktestRunner.
 func NewPipelineHandler(opts ...PipelineHandlerOption) *PipelineHandler {
-	h := &PipelineHandler{
-		pipeline: pipeline.NewPipeline(),
-	}
+	h := &PipelineHandler{}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(h)
 		}
 	}
+	// pipeline 必须在 options 收集完之后再构造 —— sink 是构造时注入的，
+	// 先构造再注入就永远接不上。
+	var popts []pipeline.PipelineOption
+	if h.expSink != nil {
+		popts = append(popts, pipeline.WithExperimentSink(h.expSink))
+	}
+	h.pipeline = pipeline.NewPipeline(popts...)
 	return h
 }
 
@@ -57,8 +75,12 @@ func NewPipelineHandler(opts ...PipelineHandlerOption) *PipelineHandler {
 // The runner parameter is forwarded to the handler via WithBacktestRunner
 // so that the AI pipeline can execute the backtest stage end-to-end;
 // pass nil to keep the legacy "skip backtest" behaviour.
-func registerPipelineRoutes(router *gin.Engine, runner pipeline.BacktestRunner) {
-	handler := NewPipelineHandler(WithBacktestRunner(runner))
+func registerPipelineRoutes(router *gin.Engine, runner pipeline.BacktestRunner, sink pipeline.ExperimentSink) {
+	opts := []PipelineHandlerOption{WithBacktestRunner(runner)}
+	if sink != nil {
+		opts = append(opts, WithExperimentSink(sink))
+	}
+	handler := NewPipelineHandler(opts...)
 	api := router.Group("/api")
 	handler.RegisterPipelineRoutes(api)
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/internal/sandbox/runner"
 	"github.com/ruoxizhnya/quant-trading/internal/sandbox/staticcheck"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/pipeline"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/compliance"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -329,7 +330,15 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 	// execute the backtest stage end-to-end instead of silently skipping
 	// it. copilotRunner is the same *strategyEngineAdapter already wired
 	// into /api/copilot above.
-	registerPipelineRoutes(router, deps.CopilotRunner)
+	// P1-1b：把实验日志落点接进 pipeline。
+	// 显式判空而不是直接传 deps.Store —— *PostgresStore 的 nil 塞进接口会
+	// 变成一个非 nil 的接口值，pipeline 会拿着空指针去写日志（这个坑在
+	// P0-5 的 aiClient 上踩过一次）。
+	var expSink pipeline.ExperimentSink
+	if deps.Store != nil {
+		expSink = deps.Store
+	}
+	registerPipelineRoutes(router, deps.CopilotRunner, expSink)
 	registerAuthRoutes(router, deps.AuthSvc, deps.Logger)
 
 	// P1-15 (Sprint 6, ODR-021): risk + execution endpoints
