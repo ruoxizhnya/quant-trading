@@ -616,6 +616,11 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		)
 		prevCloseCache = updatedPrevClose
 
+		// P1-12：把「回测的今天」交给 tracker，必须在生成信号之前。
+		// 策略据此判断今天是不是调仓日 —— 没有它，策略只能退回墙钟，
+		// weekly / monthly 的成交就取决于你周几跑（详见 TASKS.md P1-12）。
+		state.Tracker.SetAsOf(date)
+
 		regime, err := e.detectRegime(ctx, marketDataCache)
 		if err != nil {
 			logger.Warn().Err(err).Msg("Failed to detect market regime, using default")

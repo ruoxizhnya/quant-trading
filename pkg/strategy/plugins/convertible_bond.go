@@ -322,7 +322,18 @@ func (s *convertibleBondStrategy) GenerateSignals(ctx context.Context, bars map[
 		params.PutTriggerDays = 30
 	}
 
-	now := time.Now()
+	// 「现在」决定纯债价值的剩余期限。回测里它必须是被回放的那一天：
+	// 用墙钟的话，同一段历史今天跑和明天跑，剩余期限少一天、纯债价值
+	// 不一样，回测结果就不可复现（P1-12）。
+	now := strategy.LatestBarDate(bars)
+	if portfolio != nil && !portfolio.UpdatedAt.IsZero() {
+		now = portfolio.UpdatedAt
+	}
+	if now.IsZero() {
+		// 既没有行情也没有组合快照 —— 实时场景，此刻确实就是现在。
+		now = time.Now()
+	}
+
 	var signals []strategy.Signal
 
 	for symbol, bondData := range s.bonds {

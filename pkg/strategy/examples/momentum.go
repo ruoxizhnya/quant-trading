@@ -3,6 +3,7 @@ package examples
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -103,13 +104,21 @@ func (s *momentumStrategy) GenerateSignals(ctx context.Context, bars map[string]
 		return nil, nil
 	}
 
-	// Date comes from portfolio snapshot (or fallback to now)
+	// 日期来源二选一：组合快照（回测引擎写进去的当前交易日），或行情本身。
+	// 两者都来自被回放的数据 —— 绝不退回 time.Now()。墙钟会让 weekly /
+	// monthly 的成交取决于运行当天是星期几（P1-12），回测就不可复现了。
 	var date time.Time
 	if portfolio != nil {
 		date = portfolio.UpdatedAt
 	}
 	if date.IsZero() {
-		date = time.Now()
+		date = strategy.LatestBarDate(bars)
+	}
+	if date.IsZero() {
+		// 说不出今天是哪天，就无法判断该不该调仓。宁可发不出信号，
+		// 也不要拿墙钟编一个 —— 编出来的数字看起来完全正常。
+		return nil, fmt.Errorf(
+			"momentum: 无法确定当前交易日（组合快照与行情都没有日期），拒绝用墙钟判断调仓日")
 	}
 
 	// Check if today is a rebalance day

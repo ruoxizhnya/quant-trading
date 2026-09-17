@@ -87,7 +87,7 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 | **P1-9** | 前端 `/alerts` `/compliance` 缺 `/api` 前缀，dev 下必 404 | `web/src/api/alerts.ts:53`、`compliance.ts:104` | 对齐后端路由 |
 | **P1-10** | **`make build` 会失败**：Makefile 仍 build `cmd/execution`、`cmd/risk`，这两个目录 ODR-021 合并后已不存在 | `Makefile:49-70` | `make build` 通过，或删掉这两个目标 |
 | **P1-11** | **`cmd/ai` 无 Dockerfile、不在 `docker-compose.yml`**，只能本地 `go run` | `cmd/ai/`、`docker-compose.yml` | 补 Dockerfile 与 compose 条目，或明确标注为仅本地运行 |
-| **P1-12** | **回测的「今天」取自 `time.Now()`**：引擎从不设置 `Portfolio.UpdatedAt`，于是策略回退到 `time.Now()` 判断调仓日（`pkg/strategy/examples/momentum.go:112`）。后果是 weekly / monthly 回测结果**依赖运行当天是星期几** —— 同一份代码周一跑有信号、周二跑零成交，回测不可复现（daily 恒调仓，侥幸不受影响）。取证时实测：weekly 构造下 252 个交易日 0 笔成交 | `pkg/backtest/`（未设 UpdatedAt）、`pkg/strategy/examples/momentum.go:112` | 引擎在推进交易日时把当前回测日期写进 `Portfolio.UpdatedAt`；策略侧不得用 `time.Now()` 作回退 |
+| ~~**P1-12**~~ | ~~**回测的「今天」取自 `time.Now()`**~~ → **已修（2026-09-17）**：两层都改了。① 引擎侧：`Tracker` 新增 `asOf`，主循环在生成信号**之前**调 `SetAsOf(date)`，`GetPortfolio` 用它填 `UpdatedAt`（零值才退回墙钟 —— 那是实时撮合场景）。② 策略侧：momentum 不再用 `time.Now()` 兜底，改为「组合快照 → 行情最新日期 → 直接报错」；`multi_factor` / `value_screen` 无日期时不发信号；`convertible_bond` 的纯债折现改用回放日期。取证：weekly 252 天 0 成交 → 114 笔 | **✅** `pkg/backtest/tracker/tracker.go`、`pkg/backtest/engine.go:625`、`pkg/strategy/utils.go`（新增 `LatestBarDate`）、`examples/momentum.go`、`plugins/{multi_factor,value_screen,convertible_bond}.go` | 回归测试：`pkg/backtest/engine_rebalance_date_test.go`（spy 盯契约 + weekly 盯后果 + tracker 单测） |
 
 ---
 

@@ -225,7 +225,8 @@ func (s *valueScreeningStrategy) GenerateSignals(
 		if portfolio != nil && !portfolio.UpdatedAt.IsZero() {
 			screenDate = portfolio.UpdatedAt
 		} else {
-			screenDate = time.Now()
+			// 同 multi_factor：没有日期就不发信号，不用墙钟（P1-12）。
+			return nil, nil
 		}
 	}
 	screenDateStr := screenDate.Format("20060102")

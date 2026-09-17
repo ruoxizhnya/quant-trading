@@ -29,6 +29,14 @@ type Tracker struct {
 	trades          []domain.Trade
 	equityCurve     []domain.PortfolioValue
 
+	// asOf 是回测的「今天」——引擎推进到哪个交易日，这里就是哪天。
+	//
+	// P1-12：从前 GetPortfolio 里写的是 time.Now()，于是策略判断调仓日时
+	// 拿到的是墙钟时间。后果是 weekly / monthly 回测的成交取决于你周几跑
+	// ——同一份代码周一跑有信号、周四跑零成交，回测不可复现。
+	// 回测里根本不该有墙钟：一切时间都来自被回放的日期序列。
+	asOf time.Time
+
 	// Configuration
 	commissionRate   float64
 	slippageRate     float64
@@ -868,6 +876,23 @@ func (t *Tracker) HasPosition(symbol string) bool {
 	return exists && !settlement.IsFlat(pos.Quantity)
 }
 
+// SetAsOf 告诉 tracker 回测当前处于哪一天（P1-12）。
+//
+// 引擎必须在每个交易日**开始**时调用，先于任何信号生成与仓位计算 ——
+// 否则策略看到的还是昨天的日期，调仓日判断会整体错一位。
+func (t *Tracker) SetAsOf(date time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.asOf = date
+}
+
+// AsOf 返回回测的当前日期，未设置则返回零值。
+func (t *Tracker) AsOf() time.Time {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.asOf
+}
+
 // GetPortfolio returns a snapshot of the current portfolio state.
 func (t *Tracker) GetPortfolio(prices map[string]float64) *domain.Portfolio {
 	t.mu.RLock()
@@ -894,11 +919,19 @@ func (t *Tracker) GetPortfolio(prices map[string]float64) *domain.Portfolio {
 		}
 	}
 
+	// 回测里的时间只能来自被回放的日期序列（P1-12）：asOf 由引擎每交易日
+	// 设置。零值意味着调用方不是回测引擎（实时撮合、手写用例等），
+	// 这时才退回墙钟 —— 实时场景下「现在」确实是现在。
+	asOf := t.asOf
+	if asOf.IsZero() {
+		asOf = time.Now()
+	}
+
 	return &domain.Portfolio{
 		Cash:       t.cash,
 		Positions:  positions,
 		TotalValue: totalValue,
-		UpdatedAt:  time.Now(),
+		UpdatedAt:  asOf,
 	}
 }
 
@@ -912,6 +945,7 @@ func (t *Tracker) Reset(initialCapital float64) {
 	t.portfolioValues = nil
 	t.trades = nil
 	t.equityCurve = nil
+	t.asOf = time.Time{}
 }
 
 // Helper functions

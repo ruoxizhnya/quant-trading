@@ -303,7 +303,9 @@ func (s *multiFactorStrategy) GenerateSignals(
 		if portfolio != nil && !portfolio.UpdatedAt.IsZero() {
 			screenDate = portfolio.UpdatedAt
 		} else {
-			screenDate = time.Now()
+			// 行情为空、组合也没有日期：既没东西可算，也无从判断调仓日。
+			// 不用 time.Now() —— 墙钟会让回测结果随运行日期漂移（P1-12）。
+			return nil, nil
 		}
 	}
 	screenDateStr := screenDate.Format("20060102")
