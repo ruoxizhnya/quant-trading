@@ -35,6 +35,7 @@
 | [ADR-021](archive/superseded-adr/adr-021-equitydeep-research-layer.md) | EquityDeep 纵向基本面研究层 — 双时间尺度层定位 + 契约式整合 (B1 深财务→因子 / B2 档案→MCP / B3 质量门禁共享) | **Superseded by ADR-023** | 2026-09-15 |
 | [ADR-022](archive/superseded-adr/adr-022-unified-research-platform.md) | 统一研究平台 — 单一数据面 + 双对等工作面 + 内容坐标证据 + 飞轮闭环 | **Superseded by ADR-023**（Proposed 期间即被取代，从未实施） | 2026-09-15 |
 | [ADR-023](adr/adr-023-ai-experimenter-lab.md) | **AI 实验员 + 人类监督者实验室** — 三层模型（AI 编排 / 能力 / 数据）+ EquityDeep 降为数据底座 + 挖掘/红队双 agent + 校准优于准确率 | **Accepted** | 2026-09-16 |
+| [ADR-024](adr/adr-024-expression-as-execution-target.md) | **策略执行载体是表达式，LLM 生成的代码只是 artifact** — 意图类型 → 确定性默认表达式映射；不做 `plugin.Open`（Windows 不支持 / 依赖版本须一致 / 违背 ADR-023）；value·quality 缺基本面数据时明确失败而非给假数字 | **Accepted** | 2026-09-17 |
 
 ---
 

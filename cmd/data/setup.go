@@ -24,6 +24,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
 
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
 	"github.com/ruoxizhnya/quant-trading/pkg/data/equitydeep"
 	"github.com/ruoxizhnya/quant-trading/pkg/logging"
@@ -221,7 +222,7 @@ func buildRouter() *gin.Engine {
 
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Use(corsMiddleware())
+	router.Use(httpserver.CORS(httpserver.AllowedOrigins(viper.GetViper())))
 	router.Use(newRateLimiter(rateLimitPerMinute(), time.Minute).middleware())
 	router.Use(requestLogger())
 	return router

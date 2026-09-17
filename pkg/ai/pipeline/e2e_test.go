@@ -202,22 +202,27 @@ func TestE2E_Execute_EmptyDescription_FailsAtParse(t *testing.T) {
 	}
 }
 
-func TestE2E_Execute_UnconfiguredClient_FailsAtCodeGeneration(t *testing.T) {
+// TestE2E_Execute_UnconfiguredClient_StillCompletes
+//
+// P0-5 契约变更：LLM 未配置时不再失败。执行载体是 YAML → 表达式策略，
+// LLM 只负责生成一份**可审阅的 Go 代码 artifact**；没有 LLM 就没有
+// artifact，但实验本身照跑。此前这一步会直接 fail 掉整个流程。
+func TestE2E_Execute_UnconfiguredClient_StillCompletes(t *testing.T) {
 	p := NewPipeline()
 	result, err := p.Execute(context.Background(), "动量策略，使用RSI指标", nil)
 
-	if err == nil {
-		t.Error("expected error when AI client is not configured")
+	if err != nil {
+		t.Errorf("expected no error (code artifact is optional), got %v", err)
 	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if result.Status != StageFailed {
-		t.Errorf("expected status %s, got %s", StageFailed, result.Status)
+	if result.Status != StageComplete {
+		t.Errorf("expected status %s, got %s", StageComplete, result.Status)
 	}
 	// Intent should be parsed successfully (rule-based)
 	if result.Intent == nil {
-		t.Error("expected intent to be parsed even without LLM")
+		t.Fatal("expected intent to be parsed even without LLM")
 	}
 	if result.Intent.StrategyType != intent.StrategyTypeMomentum {
 		t.Errorf("expected momentum strategy type, got %s", result.Intent.StrategyType)
@@ -225,6 +230,9 @@ func TestE2E_Execute_UnconfiguredClient_FailsAtCodeGeneration(t *testing.T) {
 	// YAML should be generated
 	if result.YAMLConfig == "" {
 		t.Error("expected YAML config to be generated")
+	}
+	if result.GeneratedCode != "" {
+		t.Error("expected no generated code when LLM is unconfigured")
 	}
 }
 
@@ -310,8 +318,10 @@ func TestE2E_Execute_FullFlow_WithMockLLM_AndRunner(t *testing.T) {
 	if call.StrategyName != result.Intent.StrategyName {
 		t.Errorf("expected strategy name %s, got %s", result.Intent.StrategyName, call.StrategyName)
 	}
-	if call.StartDate != "2022-01-01" {
-		t.Errorf("expected start date 2022-01-01, got %s", call.StartDate)
+	// P0-5：日期取 YAML 配置里的值（生成器默认 2020-01-01 ~ 2024-01-01），
+	// 而不是 pipeline 里另一份硬编码的 2022-01-01。配置是唯一真相。
+	if call.StartDate != "2020-01-01" {
+		t.Errorf("expected start date 2020-01-01, got %s", call.StartDate)
 	}
 	if call.EndDate != "2024-01-01" {
 		t.Errorf("expected end date 2024-01-01, got %s", call.EndDate)
@@ -357,14 +367,16 @@ func TestE2E_Execute_CompilationFailure(t *testing.T) {
 
 	result, err := p.Execute(context.Background(), "动量策略", nil)
 
-	if err == nil {
-		t.Error("expected error when compilation fails")
+	// P0-5 契约变更：编译失败只记录，不阻断。执行的是 YAML/表达式策略，
+	// LLM 写的那段代码不参与运行，所以不该让整个实验跑不了。
+	if err != nil {
+		t.Errorf("expected no error (artifact compile failure is non-fatal), got %v", err)
 	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if result.Status != StageFailed {
-		t.Errorf("expected status %s, got %s", StageFailed, result.Status)
+	if result.Status != StageComplete {
+		t.Errorf("expected status %s, got %s", StageComplete, result.Status)
 	}
 	if result.BuildError == "" {
 		t.Error("expected build error to be set")
@@ -385,14 +397,19 @@ func TestE2E_Execute_LLMServerError(t *testing.T) {
 
 	result, err := p.Execute(context.Background(), "动量策略", nil)
 
-	if err == nil {
-		t.Error("expected error when LLM server returns 500")
+	// P0-5 契约变更：LLM 挂了只影响 artifact，实验照跑（执行载体是
+	// YAML/表达式策略，不依赖 LLM 生成的代码）。
+	if err != nil {
+		t.Errorf("expected no error (LLM artifact failure is non-fatal), got %v", err)
 	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if result.Status != StageFailed {
-		t.Errorf("expected status %s, got %s", StageFailed, result.Status)
+	if result.Status != StageComplete {
+		t.Errorf("expected status %s, got %s", StageComplete, result.Status)
+	}
+	if result.GeneratedCode != "" {
+		t.Error("expected no generated code when LLM call fails")
 	}
 }
 
@@ -412,14 +429,15 @@ func TestE2E_Execute_LLMServerReturnsEmptyChoices(t *testing.T) {
 
 	result, err := p.Execute(context.Background(), "动量策略", nil)
 
-	if err == nil {
-		t.Error("expected error when LLM returns no choices")
+	// P0-5 契约变更：同上，LLM 返回空只影响 artifact。
+	if err != nil {
+		t.Errorf("expected no error (LLM artifact failure is non-fatal), got %v", err)
 	}
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if result.Status != StageFailed {
-		t.Errorf("expected status %s, got %s", StageFailed, result.Status)
+	if result.Status != StageComplete {
+		t.Errorf("expected status %s, got %s", StageComplete, result.Status)
 	}
 }
 

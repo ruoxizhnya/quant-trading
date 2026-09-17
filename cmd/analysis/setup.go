@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/client"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/contracts"
@@ -71,6 +73,10 @@ func loadConfig(logger zerolog.Logger) *viper.Viper {
 	v.SetConfigType("yaml")
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	// P0-4: 密钥只允许从 env 注入（YAML 是入库的）。两个名字都认，
+	// JWT_SECRET 是历史用法，AUTH_JWT_SECRET 与 AutomaticEnv 的键名一致。
+	_ = v.BindEnv("auth.jwt_secret", "JWT_SECRET", "AUTH_JWT_SECRET")
+	_ = v.BindEnv("auth.allow_insecure", "AUTH_INSECURE")
 
 	if err := v.ReadInConfig(); err != nil {
 		logger.Fatal().Err(err).Msg("Failed to read config file")
@@ -224,19 +230,80 @@ func initStore(v *viper.Viper, logger zerolog.Logger) *storage.PostgresStore {
 	return store
 }
 
-// initAuth constructs the JWT + RBAC auth service (P1-2, ADR-017 §2).
-// If JWT_SECRET env var is unset, falls back to auth.jwt_secret from
-// config. If neither is set, the service runs in "disabled" mode.
-func initAuth(v *viper.Viper, store *storage.PostgresStore, logger zerolog.Logger) *auth.Service {
-	// The secret is read from env (JWT_SECRET) or, failing that, from
-	// the YAML config — but YAML is checked in, so prefer env in
-	// production.
-	jwtSecret := []byte(os.Getenv("JWT_SECRET"))
-	if len(jwtSecret) == 0 {
-		jwtSecret = []byte(v.GetString("auth.jwt_secret"))
+// authStartup 是启动期对鉴权配置的裁决结果。做成纯值是为了可测 ——
+// 真正的 os.Exit 只在 initAuth 里发生一次，测试测 decideAuthStartup 即可。
+type authStartup struct {
+	secret   []byte // 空 = open-access
+	insecure bool   // 明确处于「无鉴权」模式
+	refuse   bool   // 拒绝启动
+	reason   string // 拒绝原因（必须给出可操作的修复指引）
+}
+
+// decideAuthStartup 裁决启动期的鉴权配置（P0-4）。
+//
+// 契约：**没有密钥就拒绝启动**。此前密钥为空会静默进入 open-access —
+// 任何能访问网络的人都能触发回测、创建订单。修成 fail-closed 后，
+// 唯一豁免是「显式声明不安全的本地模式」：
+//
+//	auth.allow_insecure=true（env: AUTH_INSECURE）且 server.host 是 loopback
+//
+// 非 loopback 监听时即使声明了豁免也照样拒绝 —— 0.0.0.0 上的
+// open-access 等于把下单接口开给整个局域网。
+func decideAuthStartup(secret string, allowInsecure bool, bindHost string) authStartup {
+	if s := strings.TrimSpace(secret); s != "" {
+		return authStartup{secret: []byte(s)}
 	}
+	if !allowInsecure {
+		return authStartup{
+			refuse: true,
+			reason: "auth: JWT secret missing — refusing to start in open-access mode. " +
+				"Set JWT_SECRET (or auth.jwt_secret) to a strong random value. " +
+				"Local dev only: set AUTH_INSECURE=true AND server.host=127.0.0.1",
+		}
+	}
+	if !isLoopbackHost(bindHost) {
+		return authStartup{
+			refuse: true,
+			reason: fmt.Sprintf("auth: AUTH_INSECURE=true but server.host=%q is not loopback — "+
+				"open-access would be reachable from other hosts. "+
+				"Set server.host=127.0.0.1, or configure JWT_SECRET instead", bindHost),
+		}
+	}
+	return authStartup{insecure: true}
+}
+
+// isLoopbackHost 报告 host 是否只监听本机。空 host 视为非 loopback —
+// gin 绑 ":port" 等价于 0.0.0.0，fail closed 更安全。
+func isLoopbackHost(host string) bool {
+	h := strings.TrimSpace(host)
+	if h == "" {
+		return false
+	}
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(h, "[]"))
+	return ip != nil && ip.IsLoopback()
+}
+
+// initAuth constructs the JWT + RBAC auth service (P1-2, ADR-017 §2)
+// and enforces the P0-4 startup gate: no secret, no start (unless the
+// operator explicitly opts into loopback-only open access).
+//
+// 密钥来源（按优先级）：JWT_SECRET env → AUTH_JWT_SECRET env →
+// auth.jwt_secret 配置项。YAML 是入库的，生产一律走 env。
+func initAuth(v *viper.Viper, store *storage.PostgresStore, logger zerolog.Logger) *auth.Service {
+	d := decideAuthStartup(
+		v.GetString("auth.jwt_secret"),
+		v.GetBool("auth.allow_insecure"),
+		v.GetString("server.host"),
+	)
+	if d.refuse {
+		logger.Fatal().Msg(d.reason)
+	}
+
 	authSvc := auth.NewService(store.DB(), auth.Config{
-		JWTSecret:       jwtSecret,
+		JWTSecret:       d.secret,
 		AccessTokenTTL:  v.GetDuration("auth.access_token_ttl"),
 		RefreshTokenTTL: v.GetDuration("auth.refresh_token_ttl"),
 		Issuer:          v.GetString("auth.issuer"),
@@ -246,7 +313,7 @@ func initAuth(v *viper.Viper, store *storage.PostgresStore, logger zerolog.Logge
 			Int("access_ttl_sec", int(authSvc.AccessTTL().Seconds())).
 			Msg("auth: JWT enabled (P1-2)")
 	} else {
-		logger.Warn().Msg("auth: JWT secret not configured — running in open-access mode (dev only)")
+		logger.Warn().Msg("auth: INSECURE open-access mode — NO authentication, loopback only, do not use outside local dev")
 	}
 	return authSvc
 }
@@ -526,7 +593,9 @@ func buildRouter(authSvc *auth.Service, v *viper.Viper, logger zerolog.Logger) *
 	}
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Use(corsMiddleware())
+	// P0-4: CORS 按白名单回显，白名单来自 server.cors.allowed_origins。
+	// 未配置 = 不回显任何 ACAO（fail closed），不再是硬编码的 `*`。
+	router.Use(httpserver.CORS(httpserver.AllowedOrigins(v)))
 	router.Use(newRateLimiter(rateLimitPerMinute(v), time.Minute).middleware())
 	router.Use(requestLogger(logger))
 	// P1-2: JWT auth middleware (no-op when auth is disabled) + audit

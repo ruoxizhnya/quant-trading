@@ -8,19 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		c.Header("Access-Control-Max-Age", "86400")
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-		c.Next()
-	}
-}
+// CORS 中间件已收口到 internal/httpserver（P0-4）：cmd/analysis 与
+// cmd/data 此前各有一份复制粘贴的版本，都硬编码 `*`。装配见
+// setup.go 的 buildRouter。
 
 type rateLimiter struct {
 	mu       sync.Mutex

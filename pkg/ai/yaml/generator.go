@@ -251,19 +251,62 @@ func (g *Generator) intentToConfig(i *intent.Intent) Config {
 // pkg/strategy/expression/strategy.go. Only signal_expr is required to
 // trigger emission; other fields fall back to their zero values and
 // LoadStrategy/NewExpressionStrategy apply defaults downstream.
+// defaultSignalExpression 是「意图类型 → 默认信号表达式」的确定性映射。
+//
+// P0-5：这层映射此前完全缺失。Generator 只在 intent 自带 signal_expr
+// 参数时才产出 expression 段，而规则解析出来的 intent 只有一个语义标签
+// （momentum / breakout / ...），于是生成的 YAML 根本加载不成策略 ——
+// LoadStrategy 只认 expression 类型。整条实验链路就断在这里。
+//
+// 为什么做成确定性映射而不是让 LLM 每次现编：
+//  1. 映射写在生成的 YAML 里，人能审阅、能直接改参数；
+//  2. 同样的话术永远得到同样的起点，实验可复现；
+//  3. AI 调的是旋钮（窗口、阈值、权重），不是重新发明一个策略 ——
+//     这符合 ADR-023：AI 是操作仪器的实验员，不是造仪器的生成器。
+//
+// 只覆盖能用价量表达的意图。value / quality 要的是 PE / PB / ROE，而
+// 表达式引擎目前只暴露 OHLCV，映射不了：返回 ok=false，让调用方明确
+// 失败，而不是套一个无关的价格表达式产出答非所问的回测数字。
+func defaultSignalExpression(t intent.StrategyType) (string, bool) {
+	switch t {
+	case intent.StrategyTypeMomentum:
+		// 20 日涨幅的横截面排名，取最高的 20%。
+		return "cs_rank(ts_pct_change(close, 20)) > 0.8", true
+	case intent.StrategyTypeMeanReversion:
+		// 相对 20 日均值跌得越深分越高（反向做多）。
+		return "cs_rank(ts_mean(close, 20) - close) > 0.8", true
+	case intent.StrategyTypeTrendFollowing:
+		// 短期均线上穿长期均线的幅度。
+		return "cs_rank(ts_mean(close, 20) - ts_mean(close, 60)) > 0.8", true
+	case intent.StrategyTypeBreakout:
+		// 收盘价相对 20 日最高价的位置，越贴近/越突破分越高。
+		return "cs_rank(close - ts_max(high, 20)) > 0.8", true
+	case intent.StrategyTypeMultiFactor:
+		// 动量 + 低波，两个横截面排名各占一半，取最高的 20%。
+		return "cs_rank(ts_pct_change(close, 20)) + cs_rank(neg(ts_std(close, 20))) > 1.6", true
+	default:
+		// value / quality / custom：给不出诚实的表达式，交给调用方报错。
+		return "", false
+	}
+}
+
 func intentToExpressionConfig(i *intent.Intent) (ExpressionYAML, bool) {
 	params := make(map[string]interface{}, len(i.Parameters))
 	for _, p := range i.Parameters {
 		params[p.Name] = p.Value
 	}
 
-	signalExpr, ok := params["signal_expr"]
-	if !ok {
-		return ExpressionYAML{}, false
+	// 显式指定的 signal_expr 优先；没有就用意图类型的确定性默认（P0-5）。
+	exprStr := ""
+	if signalExpr, ok := params["signal_expr"]; ok {
+		exprStr, _ = signalExpr.(string)
 	}
-	exprStr, _ := signalExpr.(string)
 	if exprStr == "" {
-		return ExpressionYAML{}, false
+		def, ok := defaultSignalExpression(i.StrategyType)
+		if !ok {
+			return ExpressionYAML{}, false
+		}
+		exprStr = def
 	}
 
 	expr := ExpressionYAML{

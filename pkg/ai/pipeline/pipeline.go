@@ -28,6 +28,10 @@ const (
 	StageParse    Stage = "parse"
 	StageGenerate Stage = "generate"
 	StageValidate Stage = "validate"
+	// StageRegister 是 P0-5 新增的阶段：把 YAML 配置构建成可执行策略
+	// 并注册进全局 registry。此前没有这一阶段 —— 回测拿一个从未注册
+	// 过的名字去找策略，必然 strategy not found。
+	StageRegister Stage = "register"
 	StageCompile  Stage = "compile"
 	StageBacktest Stage = "backtest"
 	StageComplete Stage = "complete"
@@ -73,7 +77,9 @@ type BacktestRunner = contracts.BacktestRunner
 type Pipeline struct {
 	intentParser *intent.Parser
 	yamlGen      *yamlgen.Generator
-	aiClient     *ai.Client
+	// aiClient 用接口而非具体类型，这样测试可以注入 ai.MockClient
+	// 跑完整条链（意图 → YAML → 注册 → 回测）而不碰真实 LLM。
+	aiClient ai.LLMClient
 	jobs         sync.Map // jobID -> *Result
 	// buildDir is the working directory passed to `go build` when
 	// validating AI-generated strategy code. It must point at the
@@ -168,7 +174,7 @@ func NewPipeline(opts ...PipelineOption) *Pipeline {
 // NewPipelineWithDeps creates a pipeline with specific dependencies.
 // The build directory defaults to the detected project root; override
 // it with the WithBuildDir option.
-func NewPipelineWithDeps(parser *intent.Parser, gen *yamlgen.Generator, client *ai.Client, opts ...PipelineOption) *Pipeline {
+func NewPipelineWithDeps(parser *intent.Parser, gen *yamlgen.Generator, client ai.LLMClient, opts ...PipelineOption) *Pipeline {
 	p := &Pipeline{
 		intentParser: parser,
 		yamlGen:      gen,
@@ -191,13 +197,20 @@ func (p *Pipeline) IsConfigured() bool {
 // Execute runs the full pipeline synchronously and returns the result
 func (p *Pipeline) Execute(ctx context.Context, description string, runner BacktestRunner) (*Result, error) {
 	result := p.StartJob(description)
+	return result, p.run(ctx, result, description, runner)
+}
 
+// run 是 Execute / ExecuteAsync 共享的实现。
+//
+// 此前这两个方法各有一份复制粘贴的五段逻辑 —— 正是这种重复让 P0-5
+// 只修一边就会漏掉另一边。现在只有一份。
+func (p *Pipeline) run(ctx context.Context, result *Result, description string, runner BacktestRunner) error {
 	// Stage 1: Parse intent
 	p.log(result, "Stage 1/5: Parsing intent...")
 	parsedIntent, err := p.intentParser.Parse(ctx, description)
 	if err != nil {
 		p.fail(result, StageParse, fmt.Sprintf("Intent parsing failed: %v", err))
-		return result, err
+		return err
 	}
 	result.Intent = parsedIntent
 	p.log(result, fmt.Sprintf("Parsed intent: type=%s, name=%s", parsedIntent.StrategyType, parsedIntent.StrategyName))
@@ -207,37 +220,51 @@ func (p *Pipeline) Execute(ctx context.Context, description string, runner Backt
 	yamlConfig := p.yamlGen.Generate(parsedIntent)
 	if yamlConfig == "" {
 		p.fail(result, StageGenerate, "YAML generation failed: empty output")
-		return result, fmt.Errorf("yaml generation failed")
+		return fmt.Errorf("yaml generation failed")
 	}
 	result.YAMLConfig = yamlConfig
 	p.log(result, "YAML configuration generated successfully")
 
-	// Stage 3: Generate strategy code via LLM
-	p.log(result, "Stage 3/5: Generating strategy code...")
-	code, err := p.generateStrategyCode(ctx, parsedIntent)
+	// Stage 3: Build + register the strategy that will actually execute.
+	//
+	// P0-5：这一步此前**完全缺失**。回测拿 parsedIntent.StrategyName 去
+	// registry 里找策略，而那个名字从来没被注册过 —— 编译出来的 Go 代码
+	// 产物又被 os.RemoveAll 删掉，于是回测必然 strategy not found。
+	//
+	// 执行载体是 YAML → ExpressionStrategy（确定性底座），不是 LLM 写的
+	// 那段 Go 代码。这与 ADR-023 一致：AI 是操作仪器的实验员，不是造仪
+	// 器的生成器。
+	p.log(result, "Stage 3/5: Building and registering strategy...")
+	s, cfg, err := p.buildAndRegister(yamlConfig)
 	if err != nil {
-		p.fail(result, StageGenerate, fmt.Sprintf("Code generation failed: %v", err))
-		return result, err
+		p.fail(result, StageRegister, fmt.Sprintf("Strategy registration failed: %v", err))
+		return err
 	}
-	result.GeneratedCode = code
-	p.log(result, "Strategy code generated successfully")
+	p.log(result, fmt.Sprintf("Strategy registered: name=%s", s.Name()))
 
-	// Stage 4: Compile validation
-	p.log(result, "Stage 4/5: Validating compilation...")
-	compileErr := p.validateCompilation(code, result)
-	if compileErr != nil {
-		p.fail(result, StageCompile, fmt.Sprintf("Compilation failed: %v", compileErr))
-		return result, compileErr
-	}
-	p.log(result, "Compilation validation passed")
+	// Stage 4: Optional artifact —— LLM 写一段 Go 代码并编译校验。
+	// 产物不加载、不执行，只留在结果里供人审阅，所以失败不阻断。
+	p.log(result, "Stage 4/5: Generating code artifact (optional)...")
+	p.generateCodeArtifact(ctx, parsedIntent, result)
 
 	// Stage 5: Backtest (if runner provided)
 	if runner != nil {
 		p.log(result, "Stage 5/5: Running backtest...")
-		btResult, err := p.runBacktest(ctx, parsedIntent, runner, result)
+		startDate, endDate := cfg.Backtest.StartDate, cfg.Backtest.EndDate
+		if startDate == "" {
+			startDate = "2022-01-01"
+		}
+		if endDate == "" {
+			endDate = "2024-01-01"
+		}
+		universe := parseUniverse(cfg.Data.Universe)
+		if len(universe) == 0 {
+			universe = parseUniverse(parsedIntent.Universe)
+		}
+		btResult, err := p.runBacktest(ctx, s.Name(), universe, startDate, endDate, runner, result)
 		if err != nil {
 			p.fail(result, StageBacktest, fmt.Sprintf("Backtest failed: %v", err))
-			return result, err
+			return err
 		}
 		result.BacktestResult = btResult
 		p.log(result, "Backtest completed successfully")
@@ -245,9 +272,51 @@ func (p *Pipeline) Execute(ctx context.Context, description string, runner Backt
 		p.log(result, "Stage 5/5: Skipping backtest (no runner provided)")
 	}
 
-	// Complete
 	p.complete(result)
-	return result, nil
+	return nil
+}
+
+// buildAndRegister 把 YAML 配置构建成可执行策略并注册进全局 registry。
+//
+// 这是 P0-5 的修复点：回测按名字查 registry，所以「生成」之后必须有
+// 「注册」，否则名字对不上任何东西。ExecuteFromYAML 复用同一份逻辑。
+func (p *Pipeline) buildAndRegister(yamlStr string) (strategy.Strategy, *yamlgen.Config, error) {
+	cfg, err := yamlgen.ParseConfig(yamlStr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("YAML parse failed: %w", err)
+	}
+	s, err := yamlgen.LoadStrategy(yamlStr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Strategy load failed: %w", err)
+	}
+	if err := p.registerOrConfigure(s, cfg); err != nil {
+		return nil, nil, err
+	}
+	return s, cfg, nil
+}
+
+// generateCodeArtifact 让 LLM 生成一段 Go 代码，编译校验，把结果留在
+// result.GeneratedCode / result.BuildError 里供人类审阅。
+//
+// 产物**不加载也不执行** —— 执行载体是 Stage 3 注册的表达式策略。因此
+// 这里的任何失败都只记录、不阻断：LLM 写不出能编译的代码，不该导致
+// 整个实验跑不了，何况回测压根不用这段代码。
+func (p *Pipeline) generateCodeArtifact(ctx context.Context, i *intent.Intent, result *Result) {
+	if p.aiClient == nil || !p.aiClient.IsConfigured() {
+		p.log(result, "Code artifact skipped: AI client not configured")
+		return
+	}
+	code, err := p.generateStrategyCode(ctx, i)
+	if err != nil {
+		p.log(result, fmt.Sprintf("Code artifact skipped: %v", err))
+		return
+	}
+	result.GeneratedCode = code
+	if buildErr := p.validateCompilation(code, result); buildErr != nil {
+		p.log(result, fmt.Sprintf("Code artifact does not compile (not used for execution): %v", buildErr))
+		return
+	}
+	p.log(result, "Code artifact generated and compiles")
 }
 
 // ExecuteAsync starts the pipeline asynchronously and returns the job ID
@@ -260,60 +329,8 @@ func (p *Pipeline) ExecuteAsync(ctx context.Context, description string, runner 
 		// fields without racing with our writes. The channel close
 		// establishes a happens-before edge per the Go memory model.
 		defer close(result.done)
-		// Stage 1: Parse intent
-		p.log(result, "Stage 1/5: Parsing intent...")
-		parsedIntent, err := p.intentParser.Parse(ctx, description)
-		if err != nil {
-			p.fail(result, StageParse, fmt.Sprintf("Intent parsing failed: %v", err))
-			return
-		}
-		result.Intent = parsedIntent
-		p.log(result, fmt.Sprintf("Parsed intent: type=%s, name=%s", parsedIntent.StrategyType, parsedIntent.StrategyName))
-
-		// Stage 2: Generate YAML
-		p.log(result, "Stage 2/5: Generating YAML configuration...")
-		yamlConfig := p.yamlGen.Generate(parsedIntent)
-		if yamlConfig == "" {
-			p.fail(result, StageGenerate, "YAML generation failed: empty output")
-			return
-		}
-		result.YAMLConfig = yamlConfig
-		p.log(result, "YAML configuration generated successfully")
-
-		// Stage 3: Generate strategy code
-		p.log(result, "Stage 3/5: Generating strategy code...")
-		code, err := p.generateStrategyCode(ctx, parsedIntent)
-		if err != nil {
-			p.fail(result, StageGenerate, fmt.Sprintf("Code generation failed: %v", err))
-			return
-		}
-		result.GeneratedCode = code
-		p.log(result, "Strategy code generated successfully")
-
-		// Stage 4: Compile validation
-		p.log(result, "Stage 4/5: Validating compilation...")
-		compileErr := p.validateCompilation(code, result)
-		if compileErr != nil {
-			p.fail(result, StageCompile, fmt.Sprintf("Compilation failed: %v", compileErr))
-			return
-		}
-		p.log(result, "Compilation validation passed")
-
-		// Stage 5: Backtest
-		if runner != nil {
-			p.log(result, "Stage 5/5: Running backtest...")
-			btResult, err := p.runBacktest(ctx, parsedIntent, runner, result)
-			if err != nil {
-				p.fail(result, StageBacktest, fmt.Sprintf("Backtest failed: %v", err))
-				return
-			}
-			result.BacktestResult = btResult
-			p.log(result, "Backtest completed successfully")
-		} else {
-			p.log(result, "Stage 5/5: Skipping backtest (no runner provided)")
-		}
-
-		p.complete(result)
+		// 与 Execute 共用 p.run —— 此前这里是复制粘贴的第二份逻辑。
+		p.run(ctx, result, description, runner)
 	}()
 
 	return result.ID
@@ -349,16 +366,12 @@ func (p *Pipeline) ExecuteFromYAML(ctx context.Context, yamlStr string, runner B
 	}
 	result.YAMLConfig = yamlStr
 
-	s, err := yamlgen.LoadStrategy(yamlStr)
-	if err != nil {
-		p.fail(result, StageGenerate, fmt.Sprintf("Strategy load failed: %v", err))
-		return result, err
-	}
-
 	// Stage 2: Register or reconfigure (collision-safe).
+	// 复用 buildAndRegister —— 与 Execute 同一份注册逻辑（P0-5）。
 	p.log(result, "Stage 2/3: Registering strategy...")
-	if err := p.registerOrConfigure(s, config); err != nil {
-		p.fail(result, StageGenerate, fmt.Sprintf("Registration failed: %v", err))
+	s, config, err := p.buildAndRegister(yamlStr)
+	if err != nil {
+		p.fail(result, StageRegister, fmt.Sprintf("Registration failed: %v", err))
 		return result, err
 	}
 
@@ -374,7 +387,7 @@ func (p *Pipeline) ExecuteFromYAML(ctx context.Context, yamlStr string, runner B
 		if endDate == "" {
 			endDate = "2024-01-01"
 		}
-		btResult, err := runner.RunBacktest(ctx, s.Name(), universe, startDate, endDate)
+		btResult, err := p.runBacktest(ctx, s.Name(), universe, startDate, endDate, runner, result)
 		if err != nil {
 			p.fail(result, StageBacktest, fmt.Sprintf("Backtest failed: %v", err))
 			return result, err
@@ -503,13 +516,13 @@ func (p *Pipeline) validateCompilation(code string, result *Result) error {
 	return nil
 }
 
-// runBacktest executes a backtest with the generated strategy
-func (p *Pipeline) runBacktest(ctx context.Context, i *intent.Intent, runner BacktestRunner, result *Result) (*domain.BacktestResult, error) {
-	universe := parseUniverse(i.Universe)
-	startDate := "2022-01-01"
-	endDate := "2024-01-01"
-
-	btResult, err := runner.RunBacktest(ctx, i.StrategyName, universe, startDate, endDate)
+// runBacktest executes a backtest by strategy name.
+//
+// P0-5：name 必须来自**已注册**的策略（buildAndRegister 的返回值），
+// 而不是意图里那个从未注册过的字符串 —— 回测引擎是按名字去 registry
+// 里取策略的，名字没注册就等于 strategy not found。
+func (p *Pipeline) runBacktest(ctx context.Context, name string, universe []string, startDate, endDate string, runner BacktestRunner, result *Result) (*domain.BacktestResult, error) {
+	btResult, err := runner.RunBacktest(ctx, name, universe, startDate, endDate)
 	if err != nil {
 		result.BacktestError = err.Error()
 		return nil, err

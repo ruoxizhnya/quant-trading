@@ -121,10 +121,12 @@ func TestPipeline_Execute_WithoutAIConfig(t *testing.T) {
 
 	result, err := p.Execute(context.Background(), "动量策略", runner)
 
-	// Should fail at code generation since AI is not configured
-	require.Error(t, err)
+	// P0-5 契约变更：不再在「代码生成」这一步失败。执行载体是 YAML →
+	// 表达式策略，LLM 生成的 Go 代码只是可审阅的 artifact —— 没有 LLM
+	// 就没有 artifact，但实验本身必须跑完。
+	require.NoError(t, err)
 	require.NotNil(t, result)
-	assert.Equal(t, StageFailed, result.Status)
+	assert.Equal(t, StageComplete, result.Status)
 	assert.NotNil(t, result.CompletedAt)
 	assert.GreaterOrEqual(t, result.DurationMs, int64(0))
 }
@@ -144,8 +146,8 @@ func TestPipeline_ExecuteAsync_WithoutAIConfig(t *testing.T) {
 	require.NotNil(t, result)
 	result.WaitDone()
 
-	// Should have failed since AI is not configured
-	assert.Equal(t, StageFailed, result.Status)
+	// P0-5 契约变更：异步路径同样不再因缺 LLM 而失败。
+	assert.Equal(t, StageComplete, result.Status)
 }
 
 func TestPipeline_ExecuteAsync_WithNilRunner(t *testing.T) {
@@ -341,7 +343,7 @@ func TestPipeline_runBacktest(t *testing.T) {
 		Universe:     "csi300",
 	}
 
-	btResult, err := p.runBacktest(context.Background(), i, runner, result)
+	btResult, err := p.runBacktest(context.Background(), i.StrategyName, parseUniverse(i.Universe), "2022-01-01", "2024-01-01", runner, result)
 	require.NoError(t, err)
 	assert.NotNil(t, btResult)
 	assert.Equal(t, 5, btResult.TotalTrades)
@@ -357,7 +359,7 @@ func TestPipeline_runBacktest_WithError(t *testing.T) {
 		Universe:     "csi300",
 	}
 
-	btResult, err := p.runBacktest(context.Background(), i, runner, result)
+	btResult, err := p.runBacktest(context.Background(), i.StrategyName, parseUniverse(i.Universe), "2022-01-01", "2024-01-01", runner, result)
 	assert.Error(t, err)
 	assert.Nil(t, btResult)
 	assert.NotEmpty(t, result.BacktestError)
@@ -376,7 +378,7 @@ func TestPipeline_runBacktest_NilRunner(t *testing.T) {
 	// This test documents that behavior - it will panic
 	// In production, the caller should ensure runner is not nil
 	assert.Panics(t, func() {
-		p.runBacktest(context.Background(), i, nil, result)
+		p.runBacktest(context.Background(), i.StrategyName, parseUniverse(i.Universe), "2022-01-01", "2024-01-01", nil, result)
 	})
 }
 

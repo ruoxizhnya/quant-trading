@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-09-16
-verified-by: 代码审查（2026-09-16）+ 产品重构讨论
+last-verified: 2026-09-17
+verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）
 ---
 
 # TASKS — 未完成项
@@ -34,17 +34,37 @@ verified-by: 代码审查（2026-09-16）+ 产品重构讨论
   顺带修掉全仓基线上的 4 个失败，以及一个真 bug：
   `generateOrderID()` 仅用 `UnixNano()`，Windows 时钟粒度粗导致**连续订单 ID 相撞，
   后一笔静默覆盖前一笔** → 加 atomic 序号（`pkg/live/order_manager.go:258`）。
+- **P0-4 鉴权收口**：① 无密钥直接 `Fatal` 拒绝启动（裁决逻辑拆成纯函数
+  `decideAuthStartup` 以便测试）；唯一豁免是 `AUTH_INSECURE=true` **且**
+  `server.host` 为 loopback —— 非 loopback 时豁免无效。
+  ② CORS 从硬编码 `*` 改为按 `server.cors.allowed_origins` 回显，留空即 fail closed；
+  analysis / data 两份复制粘贴的中间件收成 `internal/httpserver.CORS`。
+  回归测试：`cmd/analysis/auth_bootstrap_test.go`、`internal/httpserver/cors_test.go`，
+  两侧各一个装配测试（防"实现改对了但 buildRouter 没接上"）。
+  **副作用**：`docker-compose.yml` 的 analysis 服务现在强制要求 `JWT_SECRET`
+  （未设则 compose 报错退出）；本地 `go run ./cmd/analysis` 也要带密钥或走豁免，
+  见 `guides/local-dev.md`。
+- **P0-5 实验链路打通**（根因比原描述深两层，见 [ADR-024](adr/adr-024-expression-as-execution-target.md)）：
+  ① `Execute` 在生成 YAML 后**从未把策略注册进 registry**，Stage 5 拿
+  `parsedIntent.StrategyName` 回测必然 `strategy not found` —— 补上 `buildAndRegister`；
+  ② 更深一层：YAML 生成器只在 intent 自带 `signal_expr` 时才产出 expression 段，
+  规则解析出的 intent 只有语义类型（momentum/…），`LoadStrategy` 只认 expression
+  → 生成的 YAML 根本加载不成策略。补 `defaultSignalExpression()`：意图类型 →
+  确定性默认表达式（价量可表达者）；value / quality 需要 PE/ROE 而表达式引擎
+  只有 OHLCV，**明确失败而不是给假数字**。
+  ③ LLM 生成的 Go 代码降级为**可审阅 artifact**：编译失败 / LLM 未配置只记录不阻断。
+  ④ `Execute` 与 `ExecuteAsync` 的五段逻辑是复制粘贴的两份 → 合并为 `p.run`，
+  只修一边就会漏另一边。
+- **P0-6 编译校验恒真**：`go tool compile -V=full` 是**打印编译器版本号**的开关，
+  根本不读文件，`Compiles` 恒为 true。换成在 module 根下真跑 `go build`；
+  找不到 go.mod 时报「无法验证」而非假装通过（fail closed）。
 
 ---
 
 ## P0 — 正确性（不修，其它一切都是沙上建塔）
 
-| # | 任务 | 位置 | 验收 |
-|---|---|---|---|
-| **P0-4** | **鉴权默认关闭**：无 `JWT_SECRET` 时进入 open-access；CORS 硬编码 `*` | `cmd/analysis/setup.go:234-236,536`、`middleware.go:13` | 密钥为空时拒绝启动；CORS 白名单可配 |
-| **P0-4** | **鉴权默认关闭**：无 `JWT_SECRET` 时进入 open-access；CORS 硬编码 `*` | `cmd/analysis/setup.go:234-236,536`、`middleware.go:13` | 密钥为空时拒绝启动；CORS 白名单可配 |
-| **P0-5** | **AI 编译后不加载**：`go build` 真跑但产物从未被 `plugin.Open`，回测按名字必然 `strategy not found` | `pkg/ai/pipeline/pipeline.go:490,512` | 端到端：一条意图 → 编译 → 加载 → 回测出结果 |
-| **P0-6** | **编译校验恒真**：`go tool compile -V=full` 只打印版本号 | `pkg/ai/validator/code_validator.go:105,119` | 换成真实编译检查或显式返回"未实现" |
+**P0-1 ~ P0-6 已于 2026-09-17 全部完成**（明细见上方「已完成」）。
+S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 
 ---
 
@@ -81,6 +101,7 @@ verified-by: 代码审查（2026-09-16）+ 产品重构讨论
 | **P2-9** | **验证器链**：5 个确定性校验器（统计 / 经济 / 稳健 / 偏差 / 冗余）落 L2 + 1 个因果审查落 L3。被调用、不自主循环 | 新建 `pkg/validation/` | 输入一份提案 → 输出质疑清单 + 概率估计；五个校验器无需 LLM |
 | **P2-10** | `domain.Fundamental` 数值字段是 `float64`，而表中列可为空。P0-1 中用 `COALESCE(col,0)` 兜底，导致**缺失值被当作 0 而非"未知"**（PE=0 会被误判为极便宜） | `pkg/domain/market/types.go:69` | 改为 `*float64`，或让因子层显式跳过缺失值 |
 | **P2-11** | Hermes Agent 系统设计文档遗失（原在 `.trae/documents/`，目录已删）。SPEC §6 与 hermes 验收测试均引用它 | `docs/hermes/` | 补写设计文档，或在引用处说明以配置为准 |
+| **P2-12** | **表达式引擎只暴露 OHLCV**（open/high/low/close/volume/turnover），因此 `value` / `quality` 类意图表达不出 —— P0-5 中它们只能明确失败，而不是套一个无关的价格表达式产出误导性回测数字 | `pkg/strategy/expression/data_provider.go:88` | 把 PE / PB / ROE 等基本面列接入表达式引擎，这两类意图才能执行 |
 
 ---
 

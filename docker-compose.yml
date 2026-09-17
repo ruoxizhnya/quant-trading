@@ -104,6 +104,14 @@ services:
     environment:
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      # P0-4: 鉴权密钥，必须设置。容器里监听 0.0.0.0，不配密钥服务会
+      # 拒绝启动（`auth: JWT secret missing`）—— 这是刻意的 fail-closed。
+      # 生成：openssl rand -hex 32
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is required (generate it with: openssl rand -hex 32)}"
+      # 跨源白名单，逗号分隔。留空 = 不回显任何 ACAO（默认，最安全）。
+      # 需要让独立部署的 SPA 直连时再填，例如：
+      # SERVER_CORS_ALLOWED_ORIGINS: http://localhost:5173
+      SERVER_CORS_ALLOWED_ORIGINS: ${SERVER_CORS_ALLOWED_ORIGINS:-}
       DATABASE_HOST: postgres
       DATABASE_PORT: 5432
       DATABASE_USER: postgres

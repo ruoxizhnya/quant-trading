@@ -2,6 +2,30 @@ server:
   host: "0.0.0.0"
   port: 8085
 
+  # P0-4: CORS 跨源白名单。未配置（空）= 不回显任何
+  # Access-Control-Allow-Origin，浏览器侧一律拦截（fail closed）。
+  # 只有确实要让独立站点直连时才填，且不要写 "*" 除非有意对外开放。
+  # env 覆盖：SERVER_CORS_ALLOWED_ORIGINS="http://a.example,http://b.example"
+  #
+  # 注意：dev 下 Vite 已代理 /api（web/vite.config.ts），同源，不需要配这里。
+  cors:
+    allowed_origins: []
+
+# P0-4: 鉴权。**没有密钥服务拒绝启动**（此前是静默进入 open-access）。
+# 密钥只从 env 注入，不要写进这份入库的 YAML：
+#   JWT_SECRET（或 AUTH_JWT_SECRET）= openssl rand -hex 32
+#
+# 本地开发的唯一豁免：同时满足
+#   AUTH_INSECURE=true  且  server.host 是 loopback（127.0.0.1 / localhost）
+# 非 loopback 监听时豁免无效 —— 0.0.0.0 上的 open-access 等于把下单接口
+# 开给整个局域网。豁免生效时会打 WARN 横幅。
+auth:
+  # jwt_secret: 只从 env 读，此处留空
+  allow_insecure: false        # env: AUTH_INSECURE（仅本地 + loopback）
+  issuer: "quant-trading"
+  access_token_ttl: 15m
+  refresh_token_ttl: 168h      # 7d
+
 # 网关限流（每 ClientIP / 每分钟窗口）。env 覆盖：RATE_LIMIT_PER_MINUTE
 # （viper AutomaticEnv）；e2e/压测调高、事故响应调低（ODR-013 模式）。
 rate_limit:

@@ -577,7 +577,9 @@ func TestGenerator_Generate_NoExpressionParams(t *testing.T) {
 	yamlStr := g.Generate(i)
 	require.NotEmpty(t, yamlStr)
 
-	// No expression: section should appear.
-	assert.NotContains(t, yamlStr, "\nexpression:")
-	assert.NotContains(t, yamlStr, "signal:")
+	// P0-5 契约变更：即便没给 signal_expr，也要按意图类型产出确定性的
+	// 默认表达式。否则生成的 YAML 加载不成策略（LoadStrategy 只认
+	// expression 类型），「一条意图 → 回测出结果」这条链路就断在这里。
+	assert.Contains(t, yamlStr, "\nexpression:")
+	assert.Contains(t, yamlStr, "cs_rank(ts_pct_change(close, 20)) > 0.8")
 }

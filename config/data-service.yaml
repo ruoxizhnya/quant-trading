@@ -6,6 +6,12 @@ server:
   host: "0.0.0.0"
   port: 8081
 
+  # P0-4: CORS 跨源白名单（与 analysis 服务同源，实现在
+  # internal/httpserver）。留空 = 不回显任何 ACAO（fail closed）。
+  # env 覆盖：SERVER_CORS_ALLOWED_ORIGINS="http://a.example,http://b.example"
+  cors:
+    allowed_origins: []
+
 # 网关限流（每 ClientIP / 每分钟窗口）。env 覆盖：RATE_LIMIT_PER_MINUTE
 # （viper AutomaticEnv）；e2e/压测调高、事故响应调低（ODR-013 模式）。
 rate_limit:

@@ -26,6 +26,8 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 )
 
 // TestLoadConfig_SetsDefaults verifies that loadConfig populates
@@ -79,13 +81,16 @@ func TestBuildRouter_HasMiddleware(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// TestCorsMiddleware_SetsPreflightHeaders verifies that OPTIONS
-// requests get the permissive CORS headers the SPA frontend relies on.
-// corsMiddleware short-circuits OPTIONS with 204 No Content.
+// TestCorsMiddleware_SetsPreflightHeaders verifies that an allowed
+// origin's OPTIONS preflight short-circuits with 204 + CORS headers.
+//
+// P0-4: 此前断言的是 `Access-Control-Allow-Origin: *`（硬编码通配）。
+// 现在白名单来自配置，未命中就不回显；契约测试在
+// internal/httpserver/cors_test.go，这里只守装配仍然生效。
 func TestCorsMiddleware_SetsPreflightHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(corsMiddleware())
+	r.Use(httpserver.CORS([]string{"http://localhost:5173"}))
 	r.OPTIONS("/anything", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	w := httptest.NewRecorder()
@@ -95,8 +100,33 @@ func TestCorsMiddleware_SetsPreflightHeaders(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
-	assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "http://localhost:5173", w.Header().Get("Access-Control-Allow-Origin"))
 	assert.NotEmpty(t, w.Header().Get("Access-Control-Allow-Methods"))
+}
+
+// TestBuildRouter_WiresCORSAllowlist (P0-4) 守装配：中间件实现改对了但
+// buildRouter 没接上，等于没改。白名单通过 viper override 注入，避免测试
+// 依赖仓库里的真实配置文件。
+func TestBuildRouter_WiresCORSAllowlist(t *testing.T) {
+	require.NoError(t, loadConfig())
+	viper.Set("server.cors.allowed_origins", []string{"http://localhost:5173"})
+	defer viper.Set("server.cors.allowed_origins", nil)
+
+	gin.SetMode(gin.TestMode)
+	r := buildRouter()
+	r.GET("/probe", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+
+	req, _ := http.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, "http://localhost:5173", w.Header().Get("Access-Control-Allow-Origin"))
+
+	req, _ = http.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
 }
 
 // TestNewRateLimiter_AllowsBurstThenBlocks verifies that the

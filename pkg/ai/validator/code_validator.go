@@ -22,12 +22,51 @@ type ValidationResult struct {
 // CodeValidator validates generated strategy code.
 type CodeValidator struct {
 	tempDir string
+	// workDir 是 `go build` 的工作目录。它必须是一个 module 根（含
+	// go.mod），否则生成的策略代码里 `github.com/ruoxizhnya/...` 这类
+	// import 解析不了，合法代码也会被判成编译失败。
+	//
+	// 构造时向上探测；探测不到就留空，此时 ValidateCompilation 会按
+	// 「无法验证」处理 —— 宁可说不知道，也不能像以前那样谎报通过。
+	workDir string
 }
 
 // NewCodeValidator creates a new code validator.
 func NewCodeValidator() *CodeValidator {
 	return &CodeValidator{
 		tempDir: os.TempDir(),
+		workDir: findModuleRoot(),
+	}
+}
+
+// NewCodeValidatorWithWorkDir creates a validator that compiles in dir.
+// 容器里二进制所在目录未必有 go.mod，那时要么把源码挂进去，要么接受
+// 「无法验证」的结果。
+func NewCodeValidatorWithWorkDir(dir string) *CodeValidator {
+	v := NewCodeValidator()
+	if dir != "" {
+		v.workDir = dir
+	}
+	return v
+}
+
+// findModuleRoot walks upward from the working directory looking for
+// go.mod. Returns "" when not found — callers must treat that as
+// "cannot verify", never as "compiles".
+func findModuleRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
 	}
 }
 
@@ -101,19 +140,29 @@ func (v *CodeValidator) ValidateCompilation(code string) *ValidationResult {
 		return result
 	}
 
-	// Try syntax check with go vet
-	cmd = exec.Command("go", "tool", "compile", "-V=full", tempFile)
+	// P0-6: 真的编译一遍。
+	//
+	// 此前这里是 `go tool compile -V=full` —— 那是**打印编译器版本号**
+	// 的开关，压根不读后面的文件。于是只要 gofmt 过得去，Compiles 就
+	// 恒为 true：调用方以为代码编译过了，实际上只验证了语法。
+	if v.workDir == "" {
+		result.Valid = false
+		result.Compiles = false
+		result.Errors = append(result.Errors,
+			"cannot verify compilation: no go.mod found above the working directory "+
+				"(use NewCodeValidatorWithWorkDir to point at the module root)")
+		return result
+	}
+
+	cmd = exec.Command("go", "build", tempFile)
+	cmd.Dir = v.workDir
 	output, err = cmd.CombinedOutput()
 	if err != nil {
-		// go tool compile may fail due to missing imports, which is expected for isolated files
-		// Check if it's a syntax error or import error
-		outputStr := string(output)
-		if strings.Contains(outputStr, "syntax error") {
-			result.Valid = false
-			result.Compiles = false
-			result.Errors = append(result.Errors, fmt.Sprintf("Syntax error: %s", outputStr))
-			return result
-		}
+		result.Valid = false
+		result.Compiles = false
+		result.Errors = append(result.Errors,
+			fmt.Sprintf("compilation failed: %s", strings.TrimSpace(string(output))))
+		return result
 	}
 
 	result.Compiles = true

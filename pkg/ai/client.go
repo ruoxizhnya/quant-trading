@@ -176,8 +176,12 @@ func WithTracer(t Tracer) ClientOption {
 }
 
 // IsConfigured returns true when both AI_API_KEY and AI_API_URL are set.
+//
+// nil receiver 返回 false：调用方常把 *Client 装进 ai.LLMClient 接口，
+// 而「装了类型的 nil 指针」不等于 nil 接口 —— 没有这层防御，
+// `p.aiClient != nil && p.aiClient.IsConfigured()` 会在传 nil 时 panic。
 func (c *Client) IsConfigured() bool {
-	return c.apiKey != "" && c.apiURL != ""
+	return c != nil && c.apiKey != "" && c.apiURL != ""
 }
 
 // Limiter returns the rate limiter (read-only handle). Useful for the

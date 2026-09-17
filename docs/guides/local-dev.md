@@ -1,8 +1,8 @@
 ---
 status: evergreen
 type: how-to
-last-verified: 2026-09-16
-verified-by: 实际命令核对（Makefile / docker-compose.yml / go.mod / cmd/）
+last-verified: 2026-09-17
+verified-by: 实际命令核对（Makefile / docker-compose.yml / go.mod / cmd/）+ P0-4 启动门禁运行时取证
 ---
 
 # 本地开发指南（How-to）
@@ -31,8 +31,13 @@ verified-by: 实际命令核对（Makefile / docker-compose.yml / go.mod / cmd/�
 ## 起基础设施
 
 ```bash
+cp .env.example .env     # 一次性：至少把 JWT_SECRET 换成 openssl rand -hex 32
 docker-compose up -d postgres redis
 ```
+
+> ⚠️ **必须先有 `.env`**。P0-4 之后 `docker-compose.yml` 对 `JWT_SECRET` 用了
+> `${JWT_SECRET:?...}` 必填插值 —— 没配的话连 `docker-compose up -d postgres`
+> 都会在解析阶段报错（这是刻意的：analysis 监听 0.0.0.0，无鉴权不能起）。
 
 > ⚠️ **必须用带连字符的 `docker-compose`**。本机 Docker 27.4.1 不支持 `docker compose`
 > （空格写法会报 `'compose' is not a docker command`）。
@@ -67,13 +72,47 @@ PIT 回归测试就跑不到了）。
 ## 跑服务（本地）
 
 ```bash
-go run ./cmd/analysis    # :8085  主服务（含 risk/execution，已合并）
+# analysis 必须带密钥，否则拒绝启动（P0-4）
+JWT_SECRET=$(openssl rand -hex 32) go run ./cmd/analysis   # :8085 主服务（含 risk/execution，已合并）
+
 go run ./cmd/data        # :8081
 go run ./cmd/strategy    # :8082
 go run ./cmd/ai          # :8086  AI 研究服务
 ```
 
 > ⚠️ **`cmd/ai` 没有 Dockerfile，也不在 `docker-compose.yml` 里**——只能本地 `go run`。（见 TASKS P1-11）
+
+### analysis 服务的两种启动姿势
+
+**① 带鉴权（默认，任何非 loopback 部署都必须）**
+
+```bash
+export JWT_SECRET=$(openssl rand -hex 32)
+```
+
+生效后 `/api/*` 需要 `Authorization: Bearer <access_token>`，
+token 从 `POST /api/auth/login` 拿。不设就直接 `auth: JWT secret missing` 退出。
+
+**② 无鉴权的本地模式（仅开发）**
+
+必须**同时**满足两个条件，缺一不可：
+
+```bash
+AUTH_INSECURE=true CONFIG_PATH=config/analysis-service.yaml go run ./cmd/analysis
+# 且配置里 server.host 必须是 127.0.0.1 / localhost
+```
+
+监听 `0.0.0.0` 时豁免**无效**（照样拒绝启动）—— 否则等于把回测和下单接口
+开给整个局域网。豁免生效时日志会打 WARN 横幅。
+
+> e2e 走的是这种姿势：`e2e/playwright.config.ts` 的 `BACKEND_URL` 默认
+> `http://localhost:8085`，后端需要 `AUTH_INSECURE=true` + loopback 才能起来。
+
+### CORS
+
+两个服务的 `server.cors.allowed_origins`（env：`SERVER_CORS_ALLOWED_ORIGINS`，
+逗号分隔）控制跨源白名单。**留空 = 不回显任何 `Access-Control-Allow-Origin`**，
+浏览器侧一律拦截。dev 下 Vite 已代理 `/api`，同源，不需要配。
 
 ---
 
@@ -101,7 +140,7 @@ go test ./pkg/... -coverprofile=coverage.out   # 带覆盖率
 | **`make build` 会失败** | Makefile 仍 build `cmd/execution`、`cmd/risk`，这两个目录早在 ODR-021 合并进 analysis 后**已不存在** | 用 `go build ./...` 代替；或修 Makefile（TASKS P1-10） |
 | **两份 compose 文件互相漂移** | `docker-compose.yml` 与 `docker-compose.services.yml` 重复定义同批服务且版本标签不一致；后者还引用不存在的 Dockerfile | 只用 `docker-compose.yml`（TASKS P1-8） |
 | **AI pipeline 编译后不加载** | `go build` 真跑，但产物从未 `plugin.Open`，回测必然 `strategy not found` | 见 TASKS P0-5 |
-| **鉴权默认关闭** | 未设 `JWT_SECRET` 时进入 open-access，仅打 Warn | 见 TASKS P0-4 |
+| **服务起不来：`auth: JWT secret missing`** | P0-4 之后没有密钥就拒绝启动（此前是静默 open-access） | 见下方「启动后端」 |
 
 ---
 
