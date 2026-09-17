@@ -49,10 +49,14 @@ type Result struct {
 	BuildError     string                 `json:"build_error,omitempty"`
 	BacktestResult *domain.BacktestResult `json:"backtest_result,omitempty"`
 	BacktestError  string                 `json:"backtest_error,omitempty"`
-	StartedAt      time.Time              `json:"started_at"`
-	CompletedAt    *time.Time             `json:"completed_at,omitempty"`
-	DurationMs     int64                  `json:"duration_ms"`
-	Logs           []string               `json:"logs,omitempty"`
+	// ExperimentID 是这次尝试在实验日志中的行 ID（P1-2）。调用方要靠它把
+	// 尝试串成父子链 —— 控制器知道「第 n 次」，但只有 pipeline 知道那一行
+	// 落在库里的哪个 ID。0 表示这一路没记日志（无 sink 或写入失败）。
+	ExperimentID int64      `json:"experiment_id,omitempty"`
+	StartedAt    time.Time  `json:"started_at"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	DurationMs   int64      `json:"duration_ms"`
+	Logs         []string   `json:"logs,omitempty"`
 	// done is closed when the ExecuteAsync goroutine finishes, giving
 	// callers (especially tests) a safe way to wait for all writes to
 	// the Result fields to complete before reading them. Without this
@@ -119,7 +123,10 @@ func WithExperimentContext(ctx context.Context, ec ExperimentContext) context.Co
 	return context.WithValue(ctx, experimentCtxKey{}, ec)
 }
 
-func experimentContextFrom(ctx context.Context) ExperimentContext {
+// ExperimentContextFrom 读出 ctx 里的探索位置。导出是因为调用方（P1-2 的
+// 循环控制器及其测试）要能验证位置确实被传下去了 —— seq 传错是那种静默出错、
+// 事后才发现路径对不上的问题。
+func ExperimentContextFrom(ctx context.Context) ExperimentContext {
 	if ec, ok := ctx.Value(experimentCtxKey{}).(ExperimentContext); ok {
 		return ec
 	}
@@ -266,6 +273,7 @@ func (p *Pipeline) run(ctx context.Context, result *Result, description string, 
 	// 「先落行」是刻意的 —— 回测可能跑很久，进程崩在半路时那行 running
 	// 是「跑到第几步断的」的唯一证据。等跑完再写，崩了就什么都没留下。
 	expID := p.openExperiment(ctx, result, description)
+	result.ExperimentID = expID
 	defer func() {
 		p.closeExperiment(ctx, expID, result, err)
 	}()
@@ -647,7 +655,7 @@ func (p *Pipeline) openExperiment(ctx context.Context, result *Result, descripti
 	if p.expSink == nil {
 		return 0
 	}
-	ec := experimentContextFrom(ctx)
+	ec := ExperimentContextFrom(ctx)
 	if ec.RunID == "" {
 		ec.RunID = result.ID
 	}

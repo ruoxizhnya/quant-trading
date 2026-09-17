@@ -54,7 +54,25 @@ type OptimizeResult struct {
 	BestValue float64  `json:"best_value"`
 }
 
+// Suggest 给出下一组待试参数（单步采样）。
+//
+// 为什么要有它：原先只有一个跑到底的 Optimize，中间插不进任何动作 ——
+// 而循环控制器（P1-2）每一步都要分配 seq、写实验日志、检查该不该中断，
+// 这些只有控制器知道。把采样这一步单独暴露出来，控制器才能一步一步地驱动。
+//
+// 前 nStartupTrials 次用随机采样：TPE 要拟合「好参数长什么样」，历史太少时
+// 建不出有意义的分布，硬采样只会过拟合到噪声上。
+func (o *TPEOptimizer) Suggest(space *SearchSpace, history []*Trial) map[string]interface{} {
+	if len(history) < o.nStartupTrials {
+		return o.sampleRandom(space)
+	}
+	return o.sampleTPE(space, history)
+}
+
 // Optimize runs TPE optimization.
+//
+// 现在只是 Suggest 的薄封装 —— 循环逻辑与采样逻辑分开，控制器才能复用同一份
+// 采样而自己掌握节奏。
 func (o *TPEOptimizer) Optimize(objective func(map[string]interface{}) float64, space *SearchSpace, nTrials int) *OptimizeResult {
 	result := &OptimizeResult{
 		AllTrials: make([]*Trial, 0, nTrials),
@@ -68,13 +86,7 @@ func (o *TPEOptimizer) Optimize(objective func(map[string]interface{}) float64, 
 			State:  "running",
 		}
 
-		// Startup trials: random sampling
-		if i < o.nStartupTrials {
-			trial.Params = o.sampleRandom(space)
-		} else {
-			// TPE: sample based on observed history
-			trial.Params = o.sampleTPE(space, result.AllTrials)
-		}
+		trial.Params = o.Suggest(space, result.AllTrials)
 
 		// Evaluate objective
 		value := objective(trial.Params)
