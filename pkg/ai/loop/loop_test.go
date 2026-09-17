@@ -245,6 +245,28 @@ func TestRun_MaxTriesMustBePositive(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestRun_OnAttemptSeesEveryTry：进度回调每次都要调，失败的也不例外。
+//
+// 这是观察页（P1-3）唯一的实时数据源 —— 漏一次，界面上就少一行，
+// 而「少了一行」看起来跟「没跑」一模一样。
+func TestRun_OnAttemptSeesEveryTry(t *testing.T) {
+	var seqs []int
+	var okFlags []bool
+	r := &fakeTryRunner{sharpe: []float64{1, 2, 3, 4}, failAt: map[int]bool{2: true}}
+
+	_, err := newController(r, &scriptedProposer{}).Run(context.Background(), Config{
+		RunID: "run-1", MaxTries: 4,
+		OnAttempt: func(a Attempt) {
+			seqs = append(seqs, a.Seq)
+			okFlags = append(okFlags, a.OK)
+		},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []int{0, 1, 2, 3}, seqs)
+	assert.Equal(t, []bool{true, true, false, true}, okFlags, "失败的尝试也要通知观察者")
+}
+
 // TestRun_DefaultDatasetSplit：没指定划分时按 train 记 —— 默认必须显式偏向
 // 训练期，而不是留空让人分不清这行到底用的哪份数据。
 func TestRun_DefaultDatasetSplit(t *testing.T) {

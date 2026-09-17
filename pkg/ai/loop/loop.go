@@ -99,6 +99,11 @@ type Config struct {
 	// DatasetSplit 这批尝试用的数据划分。空则按 train 记 —— 默认必须显式
 	// 偏向训练期，而不是留空让人分不清这行用的哪份数据。
 	DatasetSplit string
+	// OnAttempt 在每次尝试结束后调用（P1-3）。成功失败都会调。
+	//
+	// 没有它，一轮几十上百次尝试在跑完之前完全是黑盒 —— 观察者既不知道
+	// 正在试什么，也没法中途判断该不该叫停。回调是同步的，别在里面做慢事。
+	OnAttempt func(Attempt)
 }
 
 // Controller 驱动一轮探索。
@@ -205,6 +210,10 @@ func (c *Controller) Run(ctx context.Context, cfg Config) (*RunResult, error) {
 		if a.OK && (out.Best == nil || a.Value < out.Best.Value) {
 			best := a
 			out.Best = &best
+		}
+
+		if cfg.OnAttempt != nil {
+			cfg.OnAttempt(a)
 		}
 	}
 

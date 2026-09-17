@@ -339,6 +339,9 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 		expSink = deps.Store
 	}
 	registerPipelineRoutes(router, deps.CopilotRunner, expSink)
+	// P1-2：探索的 HTTP 入口。与上面共用同一个 sink，所以每一轮探索的
+	// 每一次尝试都会落进 experiments 表。
+	registerExploreRoutes(router, deps.CopilotRunner, expSink)
 	registerAuthRoutes(router, deps.AuthSvc, deps.Logger)
 
 	// P1-15 (Sprint 6, ODR-021): risk + execution endpoints
