@@ -59,6 +59,12 @@ func (s *asOfSpy) GenerateSignals(ctx context.Context, bars map[string][]domain.
 	}}, nil
 }
 
+func (s *asOfSpy) reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dates = nil
+}
+
 func (s *asOfSpy) seen() []time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -78,7 +84,18 @@ func TestEngine_PortfolioSnapshotCarriesBacktestDate(t *testing.T) {
 
 	spy := &asOfSpy{sym: symbols[0]}
 	if err := strategy.GlobalRegister(spy); err != nil {
-		t.Fatalf("注册 spy 策略失败：%v", err)
+		// registry 是全局单例（-count=3 或隔壁用例注册过），
+		// 取出已有的那只复用，先清空它记的日期。
+		existing, getErr := strategy.DefaultRegistry.Get(spy.Name())
+		if getErr != nil {
+			t.Fatalf("spy 既注册不上也取不出：register=%v get=%v", err, getErr)
+		}
+		prev, ok := existing.(*asOfSpy)
+		if !ok {
+			t.Fatal("已注册的 asof-spy 不是预期类型")
+		}
+		prev.reset()
+		spy = prev
 	}
 
 	start := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)

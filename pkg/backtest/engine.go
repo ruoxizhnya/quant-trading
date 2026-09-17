@@ -774,10 +774,12 @@ func dateRangeBounds(bars []domain.OHLCV, start, end time.Time) (int, int) {
 
 // detectRegime detects market regime using risk service.
 func (e *Engine) detectRegime(ctx context.Context, marketData map[string][]domain.OHLCV) (*domain.MarketRegime, error) {
-	// Merge all OHLCV data for regime detection
+	// 拼接顺序必须确定：allData 的顺序会进到 DetectRegime 的统计里
+	// （浮点求和、均线），进而改变仓位倍数的判断 —— 顺序一变，同一天
+	// 买卖的数量就不同，回测不可复现（P1-14）。
 	var allData []domain.OHLCV
-	for _, data := range marketData {
-		allData = append(allData, data...)
+	for _, sym := range sortedKeys(marketData) {
+		allData = append(allData, marketData[sym]...)
 	}
 
 	if len(allData) < 20 {
@@ -785,7 +787,8 @@ func (e *Engine) detectRegime(ctx context.Context, marketData map[string][]domai
 			Trend:      "sideways",
 			Volatility: "medium",
 			Sentiment:  0.0,
-			Timestamp:  time.Now(),
+			// 同上：不用墙钟。取不到就留零值 —— 假日期比没日期更危险。
+			Timestamp: strategy.LatestBarDate(marketData),
 		}, nil
 	}
 
@@ -822,6 +825,20 @@ func (e *Engine) detectRegime(ctx context.Context, marketData map[string][]domai
 	}
 
 	return &regime, nil
+}
+
+// sortedKeys 返回 map 的键，按字典序排好。
+//
+// 持仓、价格这类 map 的遍历顺序是随机的，而下游（止损检查、风险管理器
+// 内部的求和）对顺序敏感：同一天先平 A 还是先平 B，成交序列就不同。
+// 要复现一份回测，就得先定序（P1-14，与 tracker 包里的同名 helper 同理）。
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // getSignals retrieves trading signals from strategy service.
@@ -1073,9 +1090,10 @@ func (e *Engine) checkStopLosses(ctx context.Context, tracker *Tracker, prices m
 	e.mu.RUnlock()
 
 	if rm != nil {
+		// 持仓来自 map，遍历顺序随机 —— 定序后再交给风险管理器（P1-14）。
 		var positionsList []domain.Position
-		for _, pos := range positions {
-			positionsList = append(positionsList, pos)
+		for _, sym := range sortedKeys(positions) {
+			positionsList = append(positionsList, positions[sym])
 		}
 		events, err := rm.CheckStopLoss(ctx, positionsList, prices)
 		if err != nil {
@@ -1088,8 +1106,8 @@ func (e *Engine) checkStopLosses(ctx context.Context, tracker *Tracker, prices m
 
 	// Convert positions map to slice
 	var positionsList []domain.Position
-	for _, pos := range positions {
-		positionsList = append(positionsList, pos)
+	for _, sym := range sortedKeys(positions) {
+		positionsList = append(positionsList, positions[sym])
 	}
 
 	reqBody := struct {
@@ -1130,9 +1148,10 @@ func (e *Engine) checkStopLossesWithATR(ctx context.Context, tracker *Tracker, p
 	e.mu.RUnlock()
 
 	if rm != nil {
+		// 持仓来自 map，遍历顺序随机 —— 定序后再交给风险管理器（P1-14）。
 		var positionsList []domain.Position
-		for _, pos := range positions {
-			positionsList = append(positionsList, pos)
+		for _, sym := range sortedKeys(positions) {
+			positionsList = append(positionsList, positions[sym])
 		}
 		regime := risk.InferRegimeFromMarket(positionsList, prices)
 		events, err := rm.GetStopLossChecker().CheckStopLossWithRegime(ctx, positionsList, prices, precomputedATR, regime)

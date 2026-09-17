@@ -681,7 +681,10 @@ func (e *Engine) forceCloseAllPositions(
 	lastTradingDay time.Time,
 	logger zerolog.Logger,
 ) {
-	for symbol, pos := range state.Tracker.GetAllPositions() {
+	// 强平顺序也要定序：先平哪只影响当天的现金与成交序列（P1-14）。
+	openPositions := state.Tracker.GetAllPositions()
+	for _, symbol := range sortedKeys(openPositions) {
+		pos := openPositions[symbol]
 		if abs(pos.Quantity) > 1e-8 {
 			price, priceExists := pricesCache[symbol]
 			if !priceExists || price <= 0 {

@@ -144,9 +144,20 @@ func (s *momentumStrategy) GenerateSignals(ctx context.Context, bars map[string]
 		topN = 5
 	}
 
+	// 遍历顺序必须确定：Go 的 map 遍历顺序是随机的，而下面的 top-N 截断
+	// 对输入顺序敏感 —— 两只票动量相同时，谁进前 N 每次跑都可能不同（P1-14）。
+	// 实测：8 只动量相同的票选 top-3，200 次调用出现 8 种不同组合。
+	// 先按 symbol 排序再遍历，回测才复现得出来。
+	symbols := make([]string, 0, len(bars))
+	for symbol := range bars {
+		symbols = append(symbols, symbol)
+	}
+	sort.Strings(symbols)
+
 	// Iterate over all symbols present in `bars` (the canonical "stock universe"
 	// under the new strategy interface is the keys of the OHLCV map).
-	for symbol, data := range bars {
+	for _, symbol := range symbols {
+		data := bars[symbol]
 		if len(data) < lookback+1 {
 			continue
 		}
@@ -185,9 +196,14 @@ func (s *momentumStrategy) GenerateSignals(ctx context.Context, bars map[string]
 		})
 	}
 
-	// Sort by momentum descending
+	// Sort by momentum descending。动量相同时按 symbol 升序 ——
+	// sort.Slice 不稳定，没有这个 tie-break，并列项谁在前取决于输入顺序，
+	// 回测就不可复现（P1-14）。
 	sort.Slice(results, func(i, j int) bool {
-		return results[i].momentum > results[j].momentum
+		if results[i].momentum != results[j].momentum {
+			return results[i].momentum > results[j].momentum
+		}
+		return results[i].symbol < results[j].symbol
 	})
 
 	// Build signals

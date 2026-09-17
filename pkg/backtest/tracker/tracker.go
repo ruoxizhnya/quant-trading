@@ -3,6 +3,7 @@ package tracker
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -146,7 +147,8 @@ func (t *Tracker) GetPortfolioValue(prices map[string]float64) float64 {
 	defer t.mu.RUnlock()
 
 	totalValue := t.cash
-	for sym, pos := range t.positions {
+	for _, sym := range sortedKeys(t.positions) {
+		pos := t.positions[sym]
 		if price, ok := prices[sym]; ok {
 			pos.MarketValue = pos.Quantity * price
 			pos.CurrentPrice = price
@@ -790,7 +792,8 @@ func (t *Tracker) RecordDailyValue(date time.Time, prices map[string]float64) do
 	positionsValue := 0.0
 
 	// Update positions with current prices
-	for sym, pos := range t.positions {
+	for _, sym := range sortedKeys(t.positions) {
+		pos := t.positions[sym]
 		if price, ok := prices[sym]; ok {
 			pos.CurrentPrice = price
 			pos.MarketValue = abs(pos.Quantity) * price
@@ -899,7 +902,8 @@ func (t *Tracker) GetPortfolio(prices map[string]float64) *domain.Portfolio {
 	defer t.mu.RUnlock()
 
 	positions := make(map[string]domain.Position)
-	for sym, pos := range t.positions {
+	for _, sym := range sortedKeys(t.positions) {
+		pos := t.positions[sym]
 		if price, ok := prices[sym]; ok {
 			posCopy := *pos
 			posCopy.CurrentPrice = price
@@ -910,7 +914,8 @@ func (t *Tracker) GetPortfolio(prices map[string]float64) *domain.Portfolio {
 	}
 
 	totalValue := t.cash
-	for _, pos := range positions {
+	for _, sym := range sortedKeys(positions) {
+		pos := positions[sym]
 		// Long positions add value, short positions are liabilities
 		if pos.Quantity > 0 {
 			totalValue += pos.MarketValue
@@ -946,6 +951,21 @@ func (t *Tracker) Reset(initialCapital float64) {
 	t.trades = nil
 	t.equityCurve = nil
 	t.asOf = time.Time{}
+}
+
+// sortedKeys 返回 map 的键，按字典序排好。
+//
+// 为什么必须有它：Go 的 map 遍历顺序是随机的，而持仓求和是浮点加法 ——
+// 加法不满足结合律，换一种顺序结果就差最后几位（实测 1e-10）。这点差异
+// 在回测里会随复利放大，最后变成不同的成交数量。要复现一份回测，
+// 所有影响数值和顺序的遍历都得先定序（P1-14）。
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // Helper functions
