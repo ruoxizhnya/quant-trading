@@ -104,7 +104,7 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 | **P2-8** | 幸存的前视风险复核：复权口径无 hfq 对照 | migrations |
 | **P2-9** | **验证器链**：5 个确定性校验器 + 1 个因果审查。被调用、不自主循环；输出**概率估计 + 质疑清单**，不是通过/不通过（决策权在人） | `pkg/validation/`（新包） | 输入提案 + 实验日志 → 输出质疑清单 + 概率估计 |
 | **P2-9a** | └ **统计**：多重检验校正（试了 N 次，门槛按 N 收紧）。吃 P1-1 的实验日志 | **✅ 2026-09-17** `pkg/validation/statistical.go` | 同样 Sharpe，试 500 次必须比试 5 次更不可信 |
-| **P2-9b** | └ **经济**：扣费后净收益 | 待办 | 毛收益扣掉手续费 / 冲击成本后仍成立 |
+| **P2-9b** | └ **经济**：扣费后净收益 | **✅ 2026-09-17** `pkg/validation/economic.go` + `turnover.go` | 毛收益扣掉手续费 / 印花税 / 过户费 / 冲击成本后仍成立；附盈亏平衡换手率 |
 | **P2-9c** | └ **稳健**：参数敏感度、分年度、分市值 / 行业 | 待办 | 邻域参数不能塌 |
 | **P2-9d** | └ **偏差**：前视、幸存者、复权口径 | 待办 | 与 P0-1 / P2-4 / P2-8 的已知债联动 |
 | **P2-9e** | └ **冗余**：与已有策略相关性（防「伪分散」） | 待办 | 相关性过高要质疑 |
@@ -112,6 +112,7 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 | **P2-10** | `domain.Fundamental` 数值字段是 `float64`，而表中列可为空。P0-1 中用 `COALESCE(col,0)` 兜底，导致**缺失值被当作 0 而非"未知"**（PE=0 会被误判为极便宜） | `pkg/domain/market/types.go:69` | 改为 `*float64`，或让因子层显式跳过缺失值 |
 | **P2-11** | Hermes Agent 系统设计文档遗失（原在 `.trae/documents/`，目录已删）。SPEC §6 与 hermes 验收测试均引用它 | `docs/hermes/` | 补写设计文档，或在引用处说明以配置为准 |
 | **P2-12** | **表达式引擎只暴露 OHLCV**（open/high/low/close/volume/turnover），因此 `value` / `quality` 类意图表达不出 —— P0-5 中它们只能明确失败，而不是套一个无关的价格表达式产出误导性回测数字 | `pkg/strategy/expression/data_provider.go:88` | 把 PE / PB / ROE 等基本面列接入表达式引擎，这两类意图才能执行 |
+| **P2-13** | **验证器链拿不到真实回测做端到端取证**（2026-09-17 记录）。两道缺口：① 本地库是空的（`stocks` / `trading_calendar` / `ohlcv_daily_qfq` 均 0 行，需先跑同步）；② 回测引擎 `calculatePosition` **无条件**经 HTTP 调 `{riskServiceURL}/calculate_position`（`engine.go:1011`），risk 端点不可达就跑不出回测。所以在补齐数据 + 起 risk 端点之前，P2-9 各维只能以「调用方提供指标」的方式工作 | `pkg/backtest/engine.go:1011` | 要么给引擎加 in-process 仓位计算兜底（ODR-021 已把 risk 合并进 analysis，本不该再走 HTTP），要么在取证脚本里把端点顶起来 |
 
 ---
 
