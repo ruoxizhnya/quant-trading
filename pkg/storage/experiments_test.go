@@ -158,3 +158,58 @@ func TestListExperiments_EmptyRun(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got)
 }
+
+// TestUpdateExperiment_FillsWhatWasTried：尝试先落行、参数后补。
+//
+// 顺序不能反 —— 等参数齐了才写，进程崩在中途就什么都没留下。
+func TestUpdateExperiment_FillsWhatWasTried(t *testing.T) {
+	store := testStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	runID := uniqueRunID(t)
+	defer store.DB().Exec(ctx, "DELETE FROM experiments WHERE run_id=$1", runID)
+
+	id, err := store.InsertExperiment(ctx, &Experiment{RunID: runID, Seq: 0})
+	require.NoError(t, err)
+
+	require.NoError(t, store.UpdateExperiment(ctx, id, ExperimentUpdate{
+		Params:       map[string]any{"lookback": 30},
+		StrategyName: "momentum_30",
+		Expression:   "cs_rank(ts_pct_change(close, 30)) > 0.8",
+	}))
+
+	got, err := store.GetExperiment(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, 30.0, got.Params["lookback"])
+	assert.Equal(t, "momentum_30", got.StrategyName)
+	assert.Equal(t, "cs_rank(ts_pct_change(close, 30)) > 0.8", got.Expression)
+	assert.Equal(t, "running", got.Status, "补写参数不该改变状态")
+}
+
+// TestUpdateExperiment_EmptyFieldsKeepOriginal：零值字段表示「不改」，
+// 否则后一次补写会把前一次已经填好的内容擦掉。
+func TestUpdateExperiment_EmptyFieldsKeepOriginal(t *testing.T) {
+	store := testStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	runID := uniqueRunID(t)
+	defer store.DB().Exec(ctx, "DELETE FROM experiments WHERE run_id=$1", runID)
+
+	id, err := store.InsertExperiment(ctx, &Experiment{
+		RunID: runID, Seq: 0, StrategyName: "momentum_20",
+		Expression: "cs_rank(ts_pct_change(close, 20)) > 0.8",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, store.UpdateExperiment(ctx, id, ExperimentUpdate{
+		Params: map[string]any{"lookback": 20},
+	}))
+
+	got, err := store.GetExperiment(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, "momentum_20", got.StrategyName, "没传的字段要保留原值")
+	assert.Equal(t, "cs_rank(ts_pct_change(close, 20)) > 0.8", got.Expression)
+	assert.Equal(t, 20.0, got.Params["lookback"])
+}

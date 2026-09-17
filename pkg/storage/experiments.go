@@ -213,11 +213,62 @@ func scanExperiment(row pgx.Row) (*Experiment, error) {
 	return &e, nil
 }
 
+// ExperimentUpdate 补写「试了什么」这部分字段。
+//
+// 为什么需要两步写：尝试必须**先落行**再填参数 —— 进程崩在中途时，那行
+// running 是「跑到第几步断的」的唯一证据。但落行的那一刻参数还没定：
+// 表达式要等 YAML 生成并注册之后才存在。所以先落占位，参数定了再补。
+//
+// 零值字段表示「不改」（SQL 侧走 COALESCE，传 NULL 即保留原值）。
+type ExperimentUpdate struct {
+	Params       map[string]any
+	StrategyName string
+	Expression   string
+}
+
+// UpdateExperiment 把「试了什么」补进已存在的那一行。id 为 0 表示这一轮
+// 没有日志落点（例如 sink 写入失败），静默跳过。
+func (s *PostgresStore) UpdateExperiment(ctx context.Context, id int64, u ExperimentUpdate) error {
+	if id == 0 {
+		return nil
+	}
+	var params []byte
+	if u.Params != nil {
+		b, err := marshalJSONBObject(u.Params)
+		if err != nil {
+			return fmt.Errorf("failed to encode experiment params: %w", err)
+		}
+		params = b
+	}
+	query := `
+		UPDATE experiments SET
+			params        = COALESCE($2, params),
+			strategy_name = COALESCE($3, strategy_name),
+			expression    = COALESCE($4, expression)
+		WHERE id = $1
+	`
+	_, err := s.pool.Exec(ctx, query, id, params,
+		nullableString(u.StrategyName), nullableString(u.Expression))
+	if err != nil {
+		return fmt.Errorf("failed to update experiment: %w", err)
+	}
+	return nil
+}
+
 func nullString(p *string) string {
 	if p == nil {
 		return ""
 	}
 	return *p
+}
+
+// nullableString 把空串转成 SQL NULL —— COALESCE 靠它区分
+// 「这个字段没传（保留原值）」和「这个字段设为空」。
+func nullableString(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 // marshalJSONBObject 把 map 编成 JSONB；nil 编成 '{}' 而不是 'null' ——
