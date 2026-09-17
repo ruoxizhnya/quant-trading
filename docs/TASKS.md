@@ -87,6 +87,7 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 | **P1-9** | 前端 `/alerts` `/compliance` 缺 `/api` 前缀，dev 下必 404 | `web/src/api/alerts.ts:53`、`compliance.ts:104` | 对齐后端路由 |
 | **P1-10** | **`make build` 会失败**：Makefile 仍 build `cmd/execution`、`cmd/risk`，这两个目录 ODR-021 合并后已不存在 | `Makefile:49-70` | `make build` 通过，或删掉这两个目标 |
 | **P1-11** | **`cmd/ai` 无 Dockerfile、不在 `docker-compose.yml`**，只能本地 `go run` | `cmd/ai/`、`docker-compose.yml` | 补 Dockerfile 与 compose 条目，或明确标注为仅本地运行 |
+| **P1-12** | **回测的「今天」取自 `time.Now()`**：引擎从不设置 `Portfolio.UpdatedAt`，于是策略回退到 `time.Now()` 判断调仓日（`pkg/strategy/examples/momentum.go:112`）。后果是 weekly / monthly 回测结果**依赖运行当天是星期几** —— 同一份代码周一跑有信号、周二跑零成交，回测不可复现（daily 恒调仓，侥幸不受影响）。取证时实测：weekly 构造下 252 个交易日 0 笔成交 | `pkg/backtest/`（未设 UpdatedAt）、`pkg/strategy/examples/momentum.go:112` | 引擎在推进交易日时把当前回测日期写进 `Portfolio.UpdatedAt`；策略侧不得用 `time.Now()` 作回退 |
 
 ---
 
@@ -112,7 +113,7 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 | **P2-10** | `domain.Fundamental` 数值字段是 `float64`，而表中列可为空。P0-1 中用 `COALESCE(col,0)` 兜底，导致**缺失值被当作 0 而非"未知"**（PE=0 会被误判为极便宜） | `pkg/domain/market/types.go:69` | 改为 `*float64`，或让因子层显式跳过缺失值 |
 | **P2-11** | Hermes Agent 系统设计文档遗失（原在 `.trae/documents/`，目录已删）。SPEC §6 与 hermes 验收测试均引用它 | `docs/hermes/` | 补写设计文档，或在引用处说明以配置为准 |
 | **P2-12** | **表达式引擎只暴露 OHLCV**（open/high/low/close/volume/turnover），因此 `value` / `quality` 类意图表达不出 —— P0-5 中它们只能明确失败，而不是套一个无关的价格表达式产出误导性回测数字 | `pkg/strategy/expression/data_provider.go:88` | 把 PE / PB / ROE 等基本面列接入表达式引擎，这两类意图才能执行 |
-| **P2-13** | **验证器链拿不到真实回测做端到端取证**（2026-09-17 记录）。两道缺口：① 本地库是空的（`stocks` / `trading_calendar` / `ohlcv_daily_qfq` 均 0 行，需先跑同步）；② 回测引擎 `calculatePosition` **无条件**经 HTTP 调 `{riskServiceURL}/calculate_position`（`engine.go:1011`），risk 端点不可达就跑不出回测。所以在补齐数据 + 起 risk 端点之前，P2-9 各维只能以「调用方提供指标」的方式工作 | `pkg/backtest/engine.go:1011` | 要么给引擎加 in-process 仓位计算兜底（ODR-021 已把 risk 合并进 analysis，本不该再走 HTTP），要么在取证脚本里把端点顶起来 |
+| **P2-13** | **验证器链缺真实回测的端到端取证**（2026-09-17 已解决一半）。缺口只剩数据：本地库 `stocks` / `trading_calendar` / `ohlcv_daily_qfq` 均 0 行。~~引擎离线跑不了~~ —— 这是误判，引擎三处 HTTP（仓位 / 择时 / 止损）**都有 in-process 分支**，`cmd/analysis/main.go:160` 也已 `SetRiskManager`；取证时用 `marketdata.NewInMemoryProvider()` + `SetRiskManager` 即可完全离线（范式见 `pkg/validation/economic_integration_test.go`） | `pkg/validation/economic_integration_test.go` | 跑数据同步补齐行情后，用同一范式接真库 |
 
 ---
 
