@@ -17,6 +17,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/intent"
 	yamlgen "github.com/ruoxizhnya/quant-trading/pkg/ai/yaml"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy/expression"
 )
@@ -73,6 +74,58 @@ type Result struct {
 // unchanged because Go type aliases are transparent.
 type BacktestRunner = contracts.BacktestRunner
 
+// ExperimentSink 是实验日志的落点（P1-1b）。
+//
+// 用接口而非 *storage.PostgresStore，有两个理由：pipeline 不该绑死在具体
+// 存储上；更要紧的是，实验日志最有价值的契约是「失败也落行」，而这条契约
+// 不该被「DB 没起来」挡在测试门外。
+//
+// 三个动作对应一次尝试的三个时刻：开始（落 running 行）→ 参数确定（补写
+// 试了什么）→ 结束（收尾成 completed / failed）。
+type ExperimentSink interface {
+	InsertExperiment(ctx context.Context, e *storage.Experiment) (int64, error)
+	UpdateExperiment(ctx context.Context, id int64, u storage.ExperimentUpdate) error
+	CompleteExperiment(ctx context.Context, id int64, m *storage.ExperimentMetrics, errMsg string) error
+}
+
+// WithExperimentSink 注入实验日志落点。不注入即不记日志 —— 日志是观测
+// 设施，不能反过来成为链路的硬依赖。
+func WithExperimentSink(s ExperimentSink) PipelineOption {
+	return func(p *Pipeline) {
+		p.expSink = s
+	}
+}
+
+// ExperimentContext 描述一次尝试在一轮探索中的位置。
+//
+// 走 context 而不是构造 pipeline 时传入，是因为 run_id / seq 每次执行都不同：
+// P1-2 的循环控制器要在同一个 run 下连跑 100 次尝试（seq 从 0 递增），
+// 而 pipeline 实例是复用的。
+//
+// 注意 seq 必须由调用方分配 —— experiments 表上有 UNIQUE(run_id, seq)，
+// 并发下两边各自 +1 会撞车。
+type ExperimentContext struct {
+	RunID        string // 一轮探索的标识；空则用 job ID
+	Seq          int    // 本轮第几次尝试
+	ParentID     *int64 // 由哪次尝试衍生而来（首轮为 nil）
+	Hypothesis   string // 假设来源：为什么试这个
+	DatasetSplit string // train / hold / test；空则按 train 记
+}
+
+type experimentCtxKey struct{}
+
+// WithExperimentContext 把探索位置放进 ctx，供本次执行读取。
+func WithExperimentContext(ctx context.Context, ec ExperimentContext) context.Context {
+	return context.WithValue(ctx, experimentCtxKey{}, ec)
+}
+
+func experimentContextFrom(ctx context.Context) ExperimentContext {
+	if ec, ok := ctx.Value(experimentCtxKey{}).(ExperimentContext); ok {
+		return ec
+	}
+	return ExperimentContext{}
+}
+
 // Pipeline orchestrates the full strategy generation and validation flow
 type Pipeline struct {
 	intentParser *intent.Parser
@@ -80,7 +133,10 @@ type Pipeline struct {
 	// aiClient 用接口而非具体类型，这样测试可以注入 ai.MockClient
 	// 跑完整条链（意图 → YAML → 注册 → 回测）而不碰真实 LLM。
 	aiClient ai.LLMClient
-	jobs         sync.Map // jobID -> *Result
+	// expSink 是实验日志的落点（P1-1b）。nil 表示这一路不记日志，
+	// 链路照跑 —— 观测设施不该拖垮被观测的东西。
+	expSink ExperimentSink
+	jobs    sync.Map // jobID -> *Result
 	// buildDir is the working directory passed to `go build` when
 	// validating AI-generated strategy code. It must point at the
 	// project root (the directory containing go.mod) so that imports
@@ -204,7 +260,16 @@ func (p *Pipeline) Execute(ctx context.Context, description string, runner Backt
 //
 // 此前这两个方法各有一份复制粘贴的五段逻辑 —— 正是这种重复让 P0-5
 // 只修一边就会漏掉另一边。现在只有一份。
-func (p *Pipeline) run(ctx context.Context, result *Result, description string, runner BacktestRunner) error {
+func (p *Pipeline) run(ctx context.Context, result *Result, description string, runner BacktestRunner) (err error) {
+	// 实验日志（P1-1b）：先落一行 running，再用 defer 收尾。
+	//
+	// 「先落行」是刻意的 —— 回测可能跑很久，进程崩在半路时那行 running
+	// 是「跑到第几步断的」的唯一证据。等跑完再写，崩了就什么都没留下。
+	expID := p.openExperiment(ctx, result, description)
+	defer func() {
+		p.closeExperiment(ctx, expID, result, err)
+	}()
+
 	// Stage 1: Parse intent
 	p.log(result, "Stage 1/5: Parsing intent...")
 	parsedIntent, err := p.intentParser.Parse(ctx, description)
@@ -242,6 +307,21 @@ func (p *Pipeline) run(ctx context.Context, result *Result, description string, 
 	}
 	p.log(result, fmt.Sprintf("Strategy registered: name=%s", s.Name()))
 
+	// 回测区间/universe 既是回测输入，也是参数向量的一部分 —— 回放时要知道
+	// 「在哪个区间、哪批票上试的」。提到 Stage 5 之外算，日志和回测共用同一份。
+	startDate, endDate := cfg.Backtest.StartDate, cfg.Backtest.EndDate
+	if startDate == "" {
+		startDate = "2022-01-01"
+	}
+	if endDate == "" {
+		endDate = "2024-01-01"
+	}
+	universe := parseUniverse(cfg.Data.Universe)
+	if len(universe) == 0 {
+		universe = parseUniverse(parsedIntent.Universe)
+	}
+	p.recordWhatWasTried(ctx, expID, result, parsedIntent, s, cfg, startDate, endDate, universe)
+
 	// Stage 4: Optional artifact —— LLM 写一段 Go 代码并编译校验。
 	// 产物不加载、不执行，只留在结果里供人审阅，所以失败不阻断。
 	p.log(result, "Stage 4/5: Generating code artifact (optional)...")
@@ -250,17 +330,6 @@ func (p *Pipeline) run(ctx context.Context, result *Result, description string, 
 	// Stage 5: Backtest (if runner provided)
 	if runner != nil {
 		p.log(result, "Stage 5/5: Running backtest...")
-		startDate, endDate := cfg.Backtest.StartDate, cfg.Backtest.EndDate
-		if startDate == "" {
-			startDate = "2022-01-01"
-		}
-		if endDate == "" {
-			endDate = "2024-01-01"
-		}
-		universe := parseUniverse(cfg.Data.Universe)
-		if len(universe) == 0 {
-			universe = parseUniverse(parsedIntent.Universe)
-		}
 		btResult, err := p.runBacktest(ctx, s.Name(), universe, startDate, endDate, runner, result)
 		if err != nil {
 			p.fail(result, StageBacktest, fmt.Sprintf("Backtest failed: %v", err))
@@ -569,6 +638,105 @@ func (p *Pipeline) registerOrConfigure(s strategy.Strategy, config *yamlgen.Conf
 }
 
 // fail marks a pipeline job as failed
+// openExperiment 落一行 running，返回它的 ID。返回 0 表示「这一轮不记日志」，
+// 后续补写与收尾都会静默跳过（没配 sink，或者写失败了）。
+//
+// 此刻还不知道参数与表达式 —— 那些要等 YAML 生成并注册之后才存在。先记下
+// 原始意图，万一后面几步崩了，至少知道「本来想试什么」。
+func (p *Pipeline) openExperiment(ctx context.Context, result *Result, description string) int64 {
+	if p.expSink == nil {
+		return 0
+	}
+	ec := experimentContextFrom(ctx)
+	if ec.RunID == "" {
+		ec.RunID = result.ID
+	}
+	if ec.DatasetSplit == "" {
+		ec.DatasetSplit = storage.DatasetSplitTrain
+	}
+
+	id, err := p.expSink.InsertExperiment(ctx, &storage.Experiment{
+		RunID:        ec.RunID,
+		Seq:          ec.Seq,
+		ParentID:     ec.ParentID,
+		Hypothesis:   ec.Hypothesis,
+		DatasetSplit: ec.DatasetSplit,
+		Params:       map[string]any{"intent": description},
+		Status:       storage.ExperimentStatusRunning,
+	})
+	if err != nil {
+		// 写不进去不能把实验搞挂，但必须留下可见痕迹：「库里没行」若被读成
+		// 「没试过」，方向就完全反了 —— 实际是「试过但没记上」。
+		p.log(result, fmt.Sprintf("实验日志写入失败，本次尝试不会被记录: %v", err))
+		return 0
+	}
+	return id
+}
+
+// recordWhatWasTried 把「试了什么」补进已落的那一行。
+//
+// 分两步写不是啰嗦，是顺序不能反：先落行（崩溃时有证据），参数确定后再补。
+// 到这一刻 YAML 已生成、策略已注册，表达式与回测区间才真正存在。
+func (p *Pipeline) recordWhatWasTried(ctx context.Context, id int64, result *Result, i *intent.Intent, s strategy.Strategy, cfg *yamlgen.Config, startDate, endDate string, universe []string) {
+	if id == 0 {
+		return
+	}
+	params := map[string]any{
+		"intent":     i.RawText,
+		"start_date": startDate,
+		"end_date":   endDate,
+		"universe":   universe,
+	}
+	for _, pm := range i.Parameters {
+		if pm.Name != "" {
+			params[pm.Name] = pm.Value
+		}
+	}
+	if cfg.Expression.Signal.Lookback > 0 {
+		params["lookback"] = cfg.Expression.Signal.Lookback
+	}
+	if cfg.Expression.Signal.MinStrength > 0 {
+		params["min_strength"] = cfg.Expression.Signal.MinStrength
+	}
+
+	if err := p.expSink.UpdateExperiment(ctx, id, storage.ExperimentUpdate{
+		Params:       params,
+		StrategyName: s.Name(),
+		Expression:   cfg.Expression.Signal.Expression,
+	}); err != nil {
+		// 补写失败同样不阻断：主行已经在库里，只是参数粗一点。
+		p.log(result, fmt.Sprintf("实验日志补写参数失败: %v", err))
+	}
+}
+
+// closeExperiment 收尾一次尝试。err 是 run 的最终错误，决定落成 completed
+// 还是 failed —— **两者都要落**，失败尤其要落。
+func (p *Pipeline) closeExperiment(ctx context.Context, id int64, result *Result, err error) {
+	if id == 0 {
+		return
+	}
+	if err != nil {
+		if e := p.expSink.CompleteExperiment(ctx, id, nil, err.Error()); e != nil {
+			p.log(result, fmt.Sprintf("实验日志收尾失败（失败态）: %v", e))
+		}
+		return
+	}
+
+	// 没跑回测（runner 为 nil）时 BacktestResult 是 nil，指标留空 ——
+	// 那也是一次真实的尝试，只是没有产出指标。
+	var m *storage.ExperimentMetrics
+	if bt := result.BacktestResult; bt != nil {
+		m = &storage.ExperimentMetrics{
+			SharpeRatio: bt.SharpeRatio,
+			TotalReturn: bt.TotalReturn,
+			TotalTrades: bt.TotalTrades,
+		}
+	}
+	if e := p.expSink.CompleteExperiment(ctx, id, m, ""); e != nil {
+		p.log(result, fmt.Sprintf("实验日志收尾失败: %v", e))
+	}
+}
+
 func (p *Pipeline) fail(result *Result, stage Stage, message string) {
 	result.Status = StageFailed
 	result.BuildError = message
