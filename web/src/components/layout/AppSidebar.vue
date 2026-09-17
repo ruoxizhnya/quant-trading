@@ -52,6 +52,7 @@ import {
   CashOutline,
   DocumentTextOutline,
   StatsChartOutline,
+  FlaskOutline,
 } from '@vicons/ionicons5'
 import { NSpace, NIcon } from 'naive-ui'
 
@@ -70,6 +71,7 @@ const navItems = [
   { path: '/backtest/compare', label: '多策略对比', icon: markRaw(GitCompareOutline) },
   { path: '/screener', label: '选股器', icon: markRaw(SearchOutline) },
   { path: '/copilot', label: '策略 Copilot', icon: markRaw(ChatbubbleEllipsesOutline) },
+  { path: '/explore', label: '探索观察台', icon: markRaw(FlaskOutline) },
   { path: '/strategy-lab', label: '策略实验室', icon: markRaw(BeakerOutline) },
   { path: '/strategy-builder', label: '策略编辑器', icon: markRaw(ConstructOutline) },
   { path: '/paper-trading', label: '模拟交易', icon: markRaw(CashOutline) },

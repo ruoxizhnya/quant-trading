@@ -78,7 +78,7 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 | **P1-1c** | └ 回放：路径可读。单次「试了什么」+ 多步「为什么转到下一步」都已具备（expression / params / hypothesis / 指标 / parent_id） | **✅ 2026-09-17** | 一条 run 从 seq 0 到 seq n 能讲成一个故事 |
 | **P1-2** | **循环控制器**：让搜索算法（或 LLM）能连续调用底座 + 响应中断 | **✅ 2026-09-17** `pkg/ai/loop/`（新包；TPE 已复用，遗传仍零调用） | 连续跑 N 次 ✅、中途叫停 ✅、单次失败不中断 ✅、seq 连续 + 父子链 ✅ |
 | **P1-2b** | ~~搜了但没生效~~ → **已修**：`defaultSignalExpression` 改为读意图参数 + 开结构化传参通道 `WithParameterOverrides`。⚠️ **搜索空间的参数名必须与意图参数同名**（`lookback_days`）—— 写成 `lookback` 之类别名**不报错、只是静默失效**，整轮退化成同一个策略跑 N 遍 | **✅ 2026-09-17** `pkg/ai/yaml/generator.go`、`pkg/ai/pipeline/pipeline.go`、`pkg/ai/loop/loop.go` | 取证：一轮 6 次窗口各不相同（15/30/33/22/47/35）；另有不依赖库的回归 `TestRun_DifferentParamsProduceDifferentConfig` |
-| **P1-3** | **观察页**：三栏（正在试什么 / 结果流 / 当前最优）+ 干预入口 | `web/src/pages/` 新增 | 能看见路径形状，能输入方向 |
+| **P1-3** | **观察页**：三栏（正在试什么 / 结果流 / 当前最优）+ 干预入口 | **✅ 2026-09-17** `web/src/pages/Explore.vue`、`web/src/api/explore.ts`、`cmd/analysis/handlers_explore.go` | 能看见路径形状，能输入方向，能叫停 |
 | **P1-4** | **schema 收口**：真实 DDL 硬编码在 Go 里，`migrations/` 无版本管理。**含语义债**：`stock_fundamentals.trade_date` 被两种写入路径复用——fina_indicator 路径存的是报告期截止日，daily_basic 路径存的才是真实交易日（见 P0-1 的 COALESCE 兜底） | `pkg/storage/postgres.go:69-330`、`migration_manager.go:43`（零调用） | migrations 可执行、有版本号、能重放；`trade_date` 语义拆分或改名 |
 | **P1-5** | **统一错误中间件**：154 处手写 `gin.H{"error"}`，`c.Error()` 使用 0 次 | `cmd/analysis/setup.go:528-537` | 全局 AppError → HTTP 映射 |
 | **P1-6** | **无界 goroutine**：信号量只限并发执行，goroutine 数 = 任务数 | `pkg/backtest/batch/batch.go:173`、`walkforward.go:152` | 固定 worker pool |

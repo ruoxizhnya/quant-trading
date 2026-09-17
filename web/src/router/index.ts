@@ -41,6 +41,13 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '策略 Copilot' },
       },
       {
+        // P1-3: 探索观察台 —— 看见 AI 正在试什么、试得怎么样，并随时叫停。
+        path: 'explore',
+        name: 'explore',
+        component: () => import('@/pages/Explore.vue'),
+        meta: { title: '探索观察台' },
+      },
+      {
         path: 'strategy-lab',
         name: 'strategy-lab',
         component: () => import('@/pages/StrategyLab.vue'),
