@@ -17,7 +17,8 @@
 - **语言**: Go 1.21+ (后端), TypeScript + Vue 3 (前端)
 - **当前版本**: Phase 3 (Integration & Scale) → Phase 4 (AI-Native Evolution) 进行中；统一研究平台 (ADR-022) 处于 **P0 顶层定义已完成 / P1 底座契约已全部关闭（L0-1~L0-4 + EQD-P0-1/P0-2 + EQD-P3-2 复核）/ P2 待 EquityDeep 仓 / P3 计算面起步（EQD-P1-1 已落地）**
 - **状态**: 底座（Quant Lab）核心功能已完成、AI 研究服务已上线运行；**工作面 1（EquityDeep）处于启动状态** — Python 3.11 独立实现，尚未接入共享底座（形态变更待 P2 落地）
-- **入口**: `cmd/analysis/main.go` (后端), `cmd/ai/main.go` (AI 服务), `web/src/main.ts` (前端)
+- **入口**: `cmd/analysis/main.go` (后端), `cmd/data/main.go` (数据服务), `web/src/main.ts` (前端)
+  - ~~`cmd/ai` (AI 服务 :8086)~~ 已于 2026-09-18 删除（TASKS P2-5）：零调用方且建在废弃交互层的定位上。AI 能力走 `cmd/analysis` 的 MCP 工具层
 - **构建**: `go build ./...` (后端), `npm run build` (前端)
 
 ### 技术栈
@@ -27,7 +28,6 @@
 | 后端 API | Go + Gin | :8085 |
 | 前端 SPA | Vue 3 + Naive UI | :5173 (dev) |
 | 数据服务 | Go + Gin | :8081 |
-| **AI 研究服务** | **Go + Gin** | **:8086** |
 | 策略服务 | Go + Gin | :8082 (备用 per ADR-012) |
 | **风控 + 执行** | **in-process** | **合并到 analysis (per ODR-021, P1-15)** |
 | 数据库 | PostgreSQL | :5432 |
@@ -87,7 +87,6 @@ Browser (Vue SPA :5173)
 
   data-service :8081 (tushare data ingestion)
   strategy-service :8082 (standby — see ADR-012)
-  ai-research-service :8086 (LLM-driven strategy generation)
 
   EquityDeep 工作面 (worker 容器 equitydeep-research, Python 3.11 + Obsidian Vault — ADR-022)
     │  取数: 经 L0 只读证据 API (严格单一入口, 零本地数据副本)
@@ -128,14 +127,15 @@ Browser (Vue SPA :5173)
 ```
 quant-trading/
 ├── cmd/                    # 服务入口
-│   ├── analysis/           # 主服务 (:8085)
-│   └── ai/                 # AI 研究服务 (:8086) — Phase 4
+│   ├── analysis/           # 主服务 (:8085，含 MCP 工具层 — AI 能力的唯一入口)
+│   ├── data/               # 数据服务 (:8081)
+│   └── strategy/           # 策略服务 (:8082，备用)
 ├── pkg/                    # 业务逻辑包
 │   ├── ai/                 # AI Agent 系统 (Phase 4)
 │   │   ├── intent/         # LLM 意图解析：自然语言 → 结构化策略参数
 │   │   ├── yaml/           # YAML 配置生成器：结构化意图 → 策略配置
 │   │   ├── pipeline/       # 策略生成流水线：意图 → YAML → 代码 → 编译 → 回测
-│   │   ├── agents/         # ⚠️ DEPRECATED (ODR-046): Research/Generate/Validate/Evolve — 保留向后兼容
+│   │   ├── agents/         # Research/Generate/Validate/Evolve — pipeline 内部在用（见 doc.go，ODR-046 废的是交互层不是能力层）
 │   │   ├── expression/     # 因子表达式 DSL + AST
 │   │   ├── gene_pool/      # 因子/策略基因池
 │   │   ├── client/         # 回测/因子 HTTP 客户端
@@ -182,7 +182,8 @@ quant-trading/
 >
 > **ODR-046 (2026-07-02)**: Hermes Agent 作为自主研究层替代前端 AI UI 方案。
 > 研究主路径现为: Hermes → MCP bridge (`pkg/tools/`, 19 个工具) → Go 后端。
-> `pkg/ai/agents/` Go-native agents 保留向后兼容但已弃用 (见 `doc.go`)。
+> `pkg/ai/agents/` 是 pipeline 的实现细节，**仍在用**；ODR-046 废的是前端 AI UI
+> 那条交互路径，不是这批能力（2026-09-18 更正，见该包 `doc.go` 与 TASKS P2-5）。
 
 ---
 

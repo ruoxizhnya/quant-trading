@@ -25,11 +25,3 @@ spec:
                 name: analysis-service
                 port:
                   number: 8085
-          # AI research service exposed on its own path
-          - path: /ai
-            pathType: Prefix
-            backend:
-              service:
-                name: ai-research-service
-                port:
-                  number: 8086

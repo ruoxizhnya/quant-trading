@@ -46,23 +46,14 @@ build-strategy:
 		-t ${REGISTRY}/quant-trading-strategy:latest \
 		-f cmd/strategy/Dockerfile .
 
-build-ai:
-	@echo "🔨 Building ai-service:${VERSION}..."
-	docker build \
-		--build-arg BUILD_VERSION=${VERSION} \
-		--build-arg BUILD_COMMIT=${COMMIT} \
-		--build-arg BUILD_TIME=${BUILD_TIME} \
-		-t ${REGISTRY}/quant-trading-ai:${VERSION} \
-		-t ${REGISTRY}/quant-trading-ai:latest \
-		-f cmd/ai/Dockerfile .
-
 # Build all services
 #
 # 曾经这里还有 build-execution / build-risk —— 那两个服务在 ODR-021
 # （P1-15）里已并进 analysis（in-process 的 risk.RiskManager + live.MockTrader），
 # 目录也删了，于是 `make build` 一定失败在找不到的 Dockerfile 上。
 # 留着死目标比删掉更糟：它看起来还能用，只在动手时才炸。
-build: build-analysis build-data build-strategy build-ai
+# build-ai 同样于 2026-09-18 移除（cmd/ai 已删，见 TASKS P2-5）。
+build: build-analysis build-data build-strategy
 	@echo ""
 	@echo "✅ All services built successfully!"
 	@echo "   Version: ${VERSION}"
@@ -83,11 +74,7 @@ push-strategy: build-strategy
 	docker push ${REGISTRY}/quant-trading-strategy:${VERSION}
 	docker push ${REGISTRY}/quant-trading-strategy:latest
 
-push-ai: build-ai
-	docker push ${REGISTRY}/quant-trading-ai:${VERSION}
-	docker push ${REGISTRY}/quant-trading-ai:latest
-
-push: push-analysis push-data push-strategy push-ai
+push: push-analysis push-data push-strategy
 
 # ============================================================
 # Docker Compose targets
@@ -148,7 +135,6 @@ help:
 	@echo "  build-analysis     Build analysis service only"
 	@echo "  build-data         Build data service only"
 	@echo "  build-strategy     Build strategy service only"
-	@echo "  build-ai           Build AI research service only"
 	@echo ""
 	@echo "Push Targets:"
 	@echo "  push               Push all services to registry"

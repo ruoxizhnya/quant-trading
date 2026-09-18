@@ -10,7 +10,8 @@ data:
   # Service ports (per AGENTS.md service topology)
   ANALYSIS_PORT: "8085"
   DATA_PORT: "8081"
-  AI_PORT: "8086"
+  # AI_PORT 已移除：cmd/ai 于 2026-09-18 删除（TASKS P2-5），它零调用方
+  # 且建在待废弃的 pkg/ai/agents 上。AI 能力走 cmd/analysis 的 MCP 工具层。
   # Database (PostgreSQL)
   POSTGRES_HOST: "postgres"
   POSTGRES_PORT: "5432"

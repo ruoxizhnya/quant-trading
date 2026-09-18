@@ -14,8 +14,8 @@ version: '3.9'
 #   - strategy-service (8082) — strategy registry (standby per ADR-012)
 #   - analysis-service (8085) — backtest + risk + execution + auth
 #
-# (ai-service is started by the separate ai/ cmd, not via
-# docker-compose; see cmd/ai/main.go and the AI Research docs.)
+# (ai-service 已删除：2026-09-18，TASKS P2-5。它零调用方且建在待废弃的
+# pkg/ai/agents 上；AI 能力现在走 cmd/analysis 的 MCP 工具层。)
 
 services:
   postgres:

@@ -17,6 +17,18 @@ type Detector struct {
 }
 
 // NewDetector creates a new drift detector.
+//
+// ⚠️ threshold 是 **p 值阈值（显著性水平），不是统计量阈值** —— 三个检测
+// 方法的判定统一为 `pValue < threshold`。典型取值 0.05 或 0.01。
+//
+// 这一点极易搞错，而且**曾经确实不一致**（2026-09-18 修正，P2-6）：
+// mean shift 比 p 值，variance shift 比 `logF > threshold*2`，distribution
+// shift 比 `ksStat > threshold` —— 三个方法各用一套语义，于是**没有任何
+// threshold 取值能同时让三者合理**：传 2.0 会让 mean shift 把一切都判成
+// 漂移而 distribution shift 永不触发（KS 统计量最大为 1）；传 0.05 则
+// 后两者宽松到形同虚设。现在统一为 p 值，0.05 就是 5% 显著性。
+//
+// 各方法的原始统计量仍保留在 DriftResult.Statistic 里，供诊断。
 func NewDetector(windowSize int, threshold float64) *Detector {
 	return &Detector{
 		windowSize: windowSize,
@@ -143,13 +155,16 @@ func (d *Detector) DetectVarianceShift(values []float64) (*DriftResult, error) {
 	// Use log to make it symmetric
 	logF := math.Abs(math.Log(fStat))
 
-	driftDetected := logF > d.threshold*2
+	// 判定统一用 p 值（与均值漂移一致），不再直接比统计量 —— 三个检测
+	// 方法曾各用一套语义，导致没有任何 threshold 取值能同时合理。
+	pValue := math.Exp(-logF)
+	driftDetected := pValue < d.threshold
 
 	severity := "low"
 	if driftDetected {
-		if logF > d.threshold*4 {
+		if pValue < d.threshold/10 {
 			severity = "high"
-		} else if logF > d.threshold*3 {
+		} else if pValue < d.threshold/2 {
 			severity = "medium"
 		}
 	}
@@ -158,7 +173,7 @@ func (d *Detector) DetectVarianceShift(values []float64) (*DriftResult, error) {
 		DriftDetected: driftDetected,
 		DriftType:     "variance_change",
 		Severity:      severity,
-		PValue:        math.Exp(-logF),
+		PValue:        pValue,
 		Statistic:     fStat,
 		ReferenceStd:  refStd,
 		CurrentStd:    curStd,
@@ -188,13 +203,15 @@ func (d *Detector) DetectDistributionShift(values []float64) (*DriftResult, erro
 	// Calculate empirical CDFs and find maximum difference
 	ksStat := calculateKSStatistic(reference, current)
 
-	driftDetected := ksStat > d.threshold
+	// 判定统一用 p 值（KS 的渐近近似），与另外两个检测方法一致。
+	pValue := math.Exp(-ksStat * ksStat * float64(len(values)) / 2)
+	driftDetected := pValue < d.threshold
 
 	severity := "low"
 	if driftDetected {
-		if ksStat > d.threshold*2 {
+		if pValue < d.threshold/10 {
 			severity = "high"
-		} else if ksStat > d.threshold*1.5 {
+		} else if pValue < d.threshold/2 {
 			severity = "medium"
 		}
 	}
@@ -206,7 +223,7 @@ func (d *Detector) DetectDistributionShift(values []float64) (*DriftResult, erro
 		DriftDetected: driftDetected,
 		DriftType:     "distribution_shift",
 		Severity:      severity,
-		PValue:        math.Exp(-ksStat * ksStat * float64(len(values)) / 2),
+		PValue:        pValue,
 		Statistic:     ksStat,
 		ReferenceMean: refMean,
 		CurrentMean:   curMean,

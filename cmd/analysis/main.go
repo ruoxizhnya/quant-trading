@@ -22,8 +22,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-// httpClient wraps the outbound data-service / strategy-service /
-// ai-service calls. Sprint 6 P0-3: HTTPTransport propagates the
+// httpClient wraps the outbound data-service / strategy-service calls.
+// （原先还列了 ai-service，该服务于 2026-09-18 删除，见 TASKS P2-5。） Sprint 6 P0-3: HTTPTransport propagates the
 // per-request X-Request-ID from the inbound request context to
 // downstream calls AND records an observation in
 // http_client_requests_total{service="data",status=...}.
@@ -187,7 +187,7 @@ func main() {
 	factorPool := gene_pool.NewFactorPool(store.DB())
 	strategyPool := gene_pool.NewStrategyPool(store.DB())
 	wfRunner := &walkForwardEngineAdapter{engine: ds.WFEngine}
-	toolsRegistry := buildToolsRegistry(v, copilotRunner, wfRunner, factorPool, strategyPool, riskManager, store, logger)
+	toolsRegistry := buildToolsRegistry(v, copilotRunner, wfRunner, factorPool, strategyPool, riskManager, store, store, logger)
 
 	deps := &ServerDeps{
 		Engine:           engine,

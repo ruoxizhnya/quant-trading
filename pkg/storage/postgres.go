@@ -45,6 +45,12 @@ func NewPostgresStore(ctx context.Context, connString string) (*PostgresStore, e
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
+	// P2-3：把内置因子的假设来源写进库（只补没有的，不覆盖人写的）。
+	// 失败只记日志 —— 假设来源查不到会降级到代码里的内置表，不至于让服务起不来。
+	if _, err := store.SeedBuiltinFactorHypotheses(ctx); err != nil {
+		logger.Warn().Err(err).Msg("Failed to seed factor hypotheses — 查询会回退到代码里的内置表")
+	}
+
 	logger.Info().Msg("PostgreSQL/TimescaleDB connection established")
 	return store, nil
 }
@@ -409,6 +415,23 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		// 从此在所有按可用日过滤的查询里消失。存量的这类行必须清成 NULL，
 		// 否则加完列反而会少数据（写入侧已用 nullableDate 堵住新增）。
 		`UPDATE stock_fundamentals SET ann_date = NULL WHERE ann_date < DATE '1900-01-01'`,
+		// Migration 032: factor_hypothesis (P2-3 / 因子的因果来源)
+		//
+		// 因子的数值存在 factor_cache 里，但**它为什么该有效**此前没有地方记。
+		// 缺了这一条就没法区分「有经济学依据」和「数据挖掘挖出来的」—— 而
+		// 后者正是过拟合的主要来源：在数据上试出来的相关性，换个时间段就散。
+		//
+		// 为什么是独立的表而不是 factor_cache 的一列：假设是**因子级**元数据，
+		// 而 factor_cache 是 symbol × date × factor 的行级缓存 —— 存成列会让
+		// 同一个字符串重复几十万次，改一次要全表 UPDATE。
+		`CREATE TABLE IF NOT EXISTS factor_hypothesis (
+			factor_name  VARCHAR(32) PRIMARY KEY,
+			source_kind  VARCHAR(24) NOT NULL,
+			hypothesis   TEXT        NOT NULL,
+			reference    TEXT,
+			created_at   TIMESTAMPTZ DEFAULT NOW(),
+			updated_at   TIMESTAMPTZ DEFAULT NOW()
+		)`,
 		// 把「已经是普通列」的存量安装升级成生成列。
 		//
 		// ADD COLUMN IF NOT EXISTS 只管"列在不在"，不管"列是怎么算的"：

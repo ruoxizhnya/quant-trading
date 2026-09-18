@@ -469,6 +469,7 @@ func buildToolsRegistry(
 	strategyPool builtin.StrategyPoolClient,
 	regimeDetector builtin.RegimeDetectorClient,
 	researchProfile builtin.ResearchProfileClient,
+	hypothesisStore *storage.PostgresStore,
 	logger zerolog.Logger,
 ) *tools.Registry {
 	reg := tools.NewRegistry()
@@ -565,6 +566,28 @@ func buildToolsRegistry(
 	// mounted read-only; an empty path simply disables the fallback.
 	if err := reg.Register(builtin.NewResearchProfileTool(researchProfile, v.GetString("equitydeep.vault_path"))); err != nil {
 		logger.Fatal().Err(err).Msg("failed to register research.profile tool")
+	}
+
+	// ── Group 11: Factor hypothesis (P2-3) ─────────────────────────
+	// 「这个因子凭什么有效」—— 采用一个因子之前先看它的机制来自哪里。
+	//
+	// 显式判空而不是直接传 hypothesisStore：*PostgresStore 的 nil 塞进
+	// 接口会变成非 nil 的接口值，工具会拿着空指针去查库（P1-1b 的老坑）。
+	// 没连库时工具仍可用 —— 它回退到 domain 里的内置假设表。
+	var hs builtin.FactorHypothesisStore
+	if hypothesisStore != nil {
+		hs = hypothesisStore
+	}
+	if err := reg.Register(builtin.NewFactorHypothesisTool(hs)); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register factor.hypothesis tool")
+	}
+
+	// ── Group 12: Strategy health (P2-6) ───────────────────────────
+	// 「这个策略是不是开始不行了」—— 滚动指标 + 概念漂移检测。
+	// 接上之前 pkg/ai/drift 与 pkg/strategy/monitor 是两个零调用方的孤儿包，
+	// 实现完整却没人消费。无状态：每次调用新建 monitor 喂完整段序列。
+	if err := reg.Register(builtin.NewStrategyHealthTool()); err != nil {
+		logger.Fatal().Err(err).Msg("failed to register monitor.strategy_health tool")
 	}
 
 	logger.Info().

@@ -177,11 +177,11 @@ func TestBuildToolsRegistry_RegistersAll19Tools(t *testing.T) {
 	factorPool := gene_pool.NewFactorPool(nil)
 	strategyPool := gene_pool.NewStrategyPool(nil)
 
-	reg := buildToolsRegistry(v, &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubRegimeDetector{}, stubResearchProfile{}, zerolog.Nop())
+	reg := buildToolsRegistry(v, &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubRegimeDetector{}, stubResearchProfile{}, nil, zerolog.Nop())
 	require.NotNil(t, reg)
 
 	tools := reg.List()
-	assert.Len(t, tools, 19, "registry should contain exactly 19 tools (8 original + 8 Hermes Phase 1 + 1 Phase 2.2 + 1 Phase 2.3 + 1 EQD-P2-1)")
+	assert.Len(t, tools, 21, "registry should contain exactly 21 tools (8 original + 8 Hermes Phase 1 + 1 Phase 2.2 + 1 Phase 2.3 + 1 EQD-P2-1 + 1 P2-3 + 1 P2-6)")
 
 	// Collect names into a set for O(1) lookup.
 	names := make(map[string]bool, len(tools))
@@ -229,7 +229,7 @@ func TestBuildToolsRegistry_NoDuplicateNames(t *testing.T) {
 	factorPool := gene_pool.NewFactorPool(nil)
 	strategyPool := gene_pool.NewStrategyPool(nil)
 
-	reg := buildToolsRegistry(v, &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubRegimeDetector{}, stubResearchProfile{}, zerolog.Nop())
+	reg := buildToolsRegistry(v, &stubBacktestRunner{}, stubWFRunner{}, factorPool, strategyPool, stubRegimeDetector{}, stubResearchProfile{}, nil, zerolog.Nop())
 	require.NotNil(t, reg)
 
 	tools := reg.List()

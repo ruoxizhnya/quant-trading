@@ -79,7 +79,7 @@ L1  数据层       行情 | 财务 | 产业链图谱 | 研究洞察 | 实验日
 
 | 层 | 现状 | 目标 |
 |---|---|---|
-| **L3** | `cmd/ai` 仅 2 个端点，主链路仍是已废弃的 `pkg/ai/agents`；pipeline 真跑 `go build` 但产物从未加载，回测必然 `strategy not found` | 实验员循环控制器 + 验证器链（含因果审查）+ 干预接口 |
+| **L3** | 实验员循环控制器（`pkg/ai/loop`）+ 验证器链六维（含因果审查，P2-9 已接线）+ Explore 干预页已落地；~~`cmd/ai` 仅 2 个端点~~ 已于 2026-09-18 删除（P2-5，零调用方）。策略执行载体按 ADR-024 改为 YAML → ExpressionStrategy（确定性引擎），不再生成并加载 Go 代码 | 验证器链接真实回测的端到端取证（缺数据，P2-13） |
 | **L2** | 19 个 MCP 工具已暴露于 `/api/tools`，但**无 agent driver 循环调用**；产业链查询、证据查询未接通 | 被 AI 循环调用；产业链 / 证据能力补全 |
 | **L1** | `ingest.raw`（content_hash 主键）与 `research` schema 已建，但 DDL 硬编码在 `pkg/storage/postgres.go`，`migrations/` 无版本管理；`market` / `quant` schema 未建 | schema 收口 + 版本管理 + PIT 修正 + 宏观/跨境与产业链接入 |
 
@@ -1110,9 +1110,13 @@ var bar market.OHLCV
 
 ## AI 研究架构 (pkg/ai/) — Phase 4
 
-> **状态**: Active — 核心组件已实现，服务运行中
-> **定位**: AI 作为资深量化研究员，通过现有回测基础设施验证假设
-> **入口**: `cmd/ai/main.go` (:8086)
+> **状态**: Active — 核心组件已实现
+> **定位**: AI 是**操作仪器的实验员**（ADR-023），人是实验室主任
+> **入口**: `cmd/analysis/main.go` (:8085) — MCP 工具层 `/api/tools` 是 AI 操作底座的唯一通道
+>
+> ⚠️ 原文此处写的是 `cmd/ai/main.go` (:8086)。该服务已于 2026-09-18 删除
+> （TASKS P2-5）：它只有 2 个端点且零调用方，建在废弃交互层的定位上。
+> AI 能力现在由 `cmd/analysis` 的 MCP 工具层（20 个工具）承载。
 
 ### 服务架构
 
