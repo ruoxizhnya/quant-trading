@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,7 +21,8 @@ import (
 //   - 如果读取端按 trade_date 过滤，三季报（9/30 截止、10/25 披露）在 9/30
 //     当天就对回测可见 —— 典型 look-ahead bias，回测结果会系统性虚高。
 //
-// 正确规则：一条财务记录的可用日 = COALESCE(ann_date, trade_date)
+// 正确规则：一条财务记录的可用日 = available_date（= COALESCE(ann_date, trade_date)，
+// P1-4 起是独立的列，所有读取一律用它 —— 见 pkg/storage/fundamentals.go 顶部）
 //   - ann_date 有值（fina_indicator 路径）→ 披露日才是可用日
 //   - ann_date 为 NULL（daily_basic 路径，PE/PB 本身已是当日口径）→ 用 trade_date
 
@@ -197,3 +199,134 @@ func TestGetFundamentalsSnapshot_PIT_PicksLatestDisclosedPeriod(t *testing.T) {
 	require.NotNil(t, latest.PE)
 	assert.Equal(t, 20.0, *latest.PE, "12/31 应取最近披露的三季报 PE=20")
 }
+
+// ─── P1-4：路径 A 的 ann_date 与 available_date 生成列 ─────────────────
+//
+// P0-1 的 COALESCE(ann_date, trade_date) 只是把洞盖住了：路径 A
+//（FetchFundamentals → normalizeFundamentals）压根不写 ann_date，COALESCE
+// 对它退化成报告期截止日，前视偏差照旧。
+
+// TestSaveFundamentalBatch_PathA_WritesAnnDate：路径 A 必须把披露日写进去。
+//
+// 修之前，同一份 API 响应经两个归一化函数处理后结果不同：一个丢 ann_date，
+// 一个不丢。丢的那个让整行数据提前约一个月可见。
+func TestSaveFundamentalBatch_PathA_WritesAnnDate(t *testing.T) {
+	store := testStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	const tsCode = "TEST_PATHA.SH"
+	defer store.DB().Exec(ctx, "DELETE FROM stock_fundamentals WHERE ts_code=$1", tsCode)
+
+	periodEnd := parseDate("2024-09-30")
+	announced := parseDate("2024-10-25")
+	require.NoError(t, store.SaveFundamentalBatch(ctx, []*domain.Fundamental{
+		{
+			Symbol:  tsCode,
+			Date:    periodEnd, // 路径 A 的 Date 是报告期截止日（既有行为）
+			AnnDate: &announced,
+			PE:      float64PtrOf(12),
+		},
+	}))
+
+	var available, ann interface{}
+	err := store.DB().QueryRow(ctx, `
+		SELECT available_date, ann_date FROM stock_fundamentals WHERE ts_code=$1`, tsCode).
+		Scan(&available, &ann)
+	require.NoError(t, err)
+	require.NotNil(t, ann, "路径 A 必须把 ann_date 写进去 —— 不写就等于让数据提前可见")
+	require.NotNil(t, available)
+
+	// 关键断言：可用日是披露日，**不是**报告期截止日。
+	assert.Equal(t, announced.Format("2006-01-02"), fmtTime(available),
+		"可用日必须是披露日；若是报告期截止日，三季报在 9/30 就可见了")
+
+	// 截止日当天不可见，披露后才可见。
+	snapBefore, err := store.GetFundamentalsSnapshot(ctx, parseDate("2024-10-01"))
+	require.NoError(t, err)
+	assert.False(t, containsTsCode(snapBefore, tsCode),
+		"10/01（披露前）不应看到 9/30 截止的三季报")
+
+	snapAfter, err := store.GetFundamentalsSnapshot(ctx, parseDate("2024-10-26"))
+	require.NoError(t, err)
+	assert.True(t, containsTsCode(snapAfter, tsCode), "10/26（披露后）应能看到")
+}
+
+// TestAvailableDate_IsGeneratedColumn：available_date 必须是生成列。
+//
+// 为什么非得是生成列：普通列要靠每个写入函数记得填，而任何绕过写入函数的
+// 路径（手工 INSERT、修数、别的 ETL）都会留下一行 available_date 为 NULL
+// 的数据 —— 它随后从所有按可用日过滤的查询里**凭空消失**，而且看不出为什么。
+//
+// 这个测试防的是它被悄悄换回普通列（例如某次改动把 GENERATED 写漏了，
+// 而 ADD COLUMN IF NOT EXISTS 会因为列已存在而静默跳过）。
+func TestAvailableDate_IsGeneratedColumn(t *testing.T) {
+	store := testStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	var generation string
+	err := store.DB().QueryRow(ctx, `
+		SELECT coalesce(generation_expression, '') FROM information_schema.columns
+		WHERE table_name='stock_fundamentals' AND column_name='available_date'`).Scan(&generation)
+	require.NoError(t, err)
+	require.NotEmpty(t, generation,
+		"available_date 必须是生成列 —— 普通列会让绕过写入函数的路径留下 NULL，数据凭空消失")
+	assert.Contains(t, generation, "ann_date")
+
+	// 端到端验证：裸 INSERT（完全不提 available_date），它照样有值。
+	const tsCode = "TEST_GENCOL.SH"
+	defer store.DB().Exec(ctx, "DELETE FROM stock_fundamentals WHERE ts_code=$1", tsCode)
+
+	_, err = store.DB().Exec(ctx, `
+		INSERT INTO stock_fundamentals (ts_code, trade_date, end_date, pe, pb)
+		VALUES ($1, $2, $2, 12.0, 1.5)`, tsCode, parseDate("2024-09-30"))
+	require.NoError(t, err)
+
+	var available interface{}
+	require.NoError(t, store.DB().QueryRow(ctx, `
+		SELECT available_date FROM stock_fundamentals WHERE ts_code=$1`, tsCode).Scan(&available))
+	assert.Equal(t, "2024-09-30", fmtTime(available),
+		"裸 INSERT 也应该拿到可用日（生成列自动算）")
+}
+
+// TestSaveFundamentalData_ZeroAnnDateBecomesNull：零值公告日必须写成 NULL。
+//
+// domain.FundamentalData.AnnDate 是 time.Time 而非指针，缺字段时是零值。
+// 原样写库会让 COALESCE 拿到 0001-01-01 —— 整行数据从此不可见，
+// 而且看不出为什么少了它。
+func TestSaveFundamentalData_ZeroAnnDateBecomesNull(t *testing.T) {
+	store := testStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	const tsCode = "TEST_ZEROANN.SH"
+	defer store.DB().Exec(ctx, "DELETE FROM stock_fundamentals WHERE ts_code=$1", tsCode)
+
+	require.NoError(t, store.SaveFundamentalData(ctx, &domain.FundamentalData{
+		TsCode:    tsCode,
+		TradeDate: parseDate("2024-09-30"),
+		EndDate:   parseDate("2024-09-30"),
+		PE:        float64PtrOf(12),
+	}))
+
+	var ann interface{}
+	require.NoError(t, store.DB().QueryRow(ctx, `
+		SELECT ann_date FROM stock_fundamentals WHERE ts_code=$1`, tsCode).Scan(&ann))
+	assert.Nil(t, ann, "零值 ann_date 必须写成 NULL，否则 COALESCE 会拿到 0001-01-01")
+
+	// 而且回退到 trade_date 之后这条数据应当是可见的。
+	snap, err := store.GetFundamentalsSnapshot(ctx, parseDate("2024-10-01"))
+	require.NoError(t, err)
+	assert.True(t, containsTsCode(snap, tsCode))
+}
+
+func fmtTime(v interface{}) string {
+	t, ok := v.(time.Time)
+	if !ok {
+		return ""
+	}
+	return t.Format("2006-01-02")
+}
+
+func float64PtrOf(v float64) *float64 { return &v }

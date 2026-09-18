@@ -59,7 +59,8 @@ func NewOHLCVDataProvider(bars map[string][]domain.OHLCV) *OHLCVDataProvider {
 
 // NewOHLCVDataProviderWithFundamentals 额外带上基本面数据（P2-12）。
 //
-// records 里每条的 Date 必须是**可用日**（= COALESCE(ann_date, trade_date)），
+// records 里每条的 Date 必须是**可用日**（= stock_fundamentals.available_date，
+// 即 COALESCE(ann_date, trade_date)，见 P1-4），
 // 不是报告期截止日 —— 对齐错一格就是前视偏差（见 storage.GetFundamentalsPIT）。
 func NewOHLCVDataProviderWithFundamentals(
 	bars map[string][]domain.OHLCV, records map[string][]domain.Fundamental,

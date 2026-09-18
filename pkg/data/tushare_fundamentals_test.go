@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestNormalizeFundamentalsData_CompleteData tests normalizeFundamentalsData
@@ -402,4 +403,51 @@ func TestNormalizeStocks_FutureDelistDateStaysActive(t *testing.T) {
 	}
 	assert.NotNil(t, stocks[0].DelistDate, "已公告的摘牌日要记下来")
 	assert.Equal(t, "active", stocks[0].Status, "还没到摘牌日就还是 active")
+}
+
+// 两条路径调的是**同一个 API**（fina_indicator），字段顺序也一样。
+// 修 P1-4 之前它们的行为却不同：normalizeFundamentalsData 存 ann_date，
+// normalizeFundamentals 直接丢弃 —— 后者让整行数据提前约一个月可见。
+func TestNormalizeFundamentals_PathAKeepsAnnDate(t *testing.T) {
+	client := &TushareClient{}
+
+	resp := &TushareResponse{
+		Code: 0,
+		Data: TushareData{
+			Fields: []string{"ts_code", "ann_date", "end_date", "pe", "pb", "ps", "roe", "roa", "debt_to_equity", "gross_margin", "net_margin", "revenue", "net_profit", "total_assets", "total_liab"},
+			Items: [][]any{
+				{"600000.SH", "20241025", "20240930", 12.5, 1.2, 1.8, 0.15, 0.08, 0.5, 0.30, 0.15, 1000000000.0, 150000000.0, 5000000000.0, 2000000000.0},
+			},
+		},
+	}
+
+	result := client.normalizeFundamentals(resp)
+	require.Len(t, result, 1)
+
+	// 报告期截止日仍然落在 Date（既有行为，也是主键的一部分）。
+	wantEnd, _ := time.Parse("20060102", "20240930")
+	assert.Equal(t, wantEnd, result[0].Date)
+
+	// ann_date 必须留下来 —— 丢了它，可用日就退化成报告期截止日。
+	require.NotNil(t, result[0].AnnDate,
+		"路径 A 必须保留 ann_date：丢弃它会让三季报在 9/30 而不是 10/25 可见")
+	wantAnn, _ := time.Parse("20060102", "20241025")
+	assert.Equal(t, wantAnn, *result[0].AnnDate)
+}
+
+// 源端没给 ann_date 时是 nil，不是零值 —— 零值会被当成"从未披露"。
+func TestNormalizeFundamentals_MissingAnnDateStaysNil(t *testing.T) {
+	client := &TushareClient{}
+
+	resp := &TushareResponse{
+		Code: 0,
+		Data: TushareData{
+			Fields: []string{"ts_code", "ann_date", "end_date", "pe"},
+			Items:  [][]any{{"600000.SH", nil, "20240930", 12.5}},
+		},
+	}
+
+	result := client.normalizeFundamentals(resp)
+	require.Len(t, result, 1)
+	assert.Nil(t, result[0].AnnDate, "没有披露日就是 nil，不是零值时间")
 }

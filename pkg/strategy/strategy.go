@@ -26,7 +26,8 @@ type FactorAware interface {
 
 // FundamentalSeries 是一只股票的财务记录序列，**按可用日升序**。
 //
-// 每条记录的 Date 必须是「可用日」（= COALESCE(ann_date, trade_date)），
+// 每条记录的 Date 必须是「可用日」（= stock_fundamentals.available_date，
+// 即 COALESCE(ann_date, trade_date)，见 P1-4），
 // 不是报告期截止日。对齐发生在可用日上，才有 PIT 语义 —— 详见
 // storage.GetFundamentalsPIT。
 type FundamentalSeries = []domain.Fundamental

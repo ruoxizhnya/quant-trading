@@ -391,11 +391,25 @@ func (c *TushareClient) normalizeFundamentals(resp *TushareResponse) []domain.Fu
 		endDateStr := c.fieldStr(item, 2)
 		t, _ := time.Parse("20060102", endDateStr)
 
+		// ann_date 在响应第 2 列，**此前被整个丢弃**（P1-4）。
+		//
+		// 丢掉它的后果不是"少存一个字段"这么轻：只存 end_date 的话，读取侧
+		// COALESCE(ann_date, trade_date) 会退化成 end_date，三季报（9/30
+		// 截止、10/25 披露）在 9/30 就能被回测看见。P0-1 的 COALESCE 只是
+		// 把这个洞盖住了，没补上 —— 补在这里。
+		var annDate *time.Time
+		if annDateStr := c.fieldStr(item, 1); annDateStr != "" {
+			if a, err := time.Parse("20060102", annDateStr); err == nil {
+				annDate = &a
+			}
+		}
+
 		// 用 fieldFloatPtr 而不是 fieldFloat：源端缺字段时留下 nil（未知），
 		// 而不是 0（会被下游读成"PE = 0，白送的股票"）。见 TASKS P2-10。
 		fund := domain.Fundamental{
 			Symbol:       symbol,
 			Date:         t,
+			AnnDate:      annDate,
 			PE:           c.fieldFloatPtr(item, 3),
 			PB:           c.fieldFloatPtr(item, 4),
 			PS:           c.fieldFloatPtr(item, 5),

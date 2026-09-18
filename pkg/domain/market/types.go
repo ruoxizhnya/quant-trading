@@ -85,20 +85,35 @@ type Dividend struct {
 // 库里的 NULL 和真实 0 都被折成 0.0，下游无从分辨。现在 nil 就是"不知道"，
 // 用之前必须显式判空 —— 这层啰嗦正是这个类型存在的理由。
 type Fundamental struct {
-	Symbol       string    `json:"symbol"`
-	Date         time.Time `json:"date"`
-	PE           *float64  `json:"pe"`
-	PB           *float64  `json:"pb"`
-	PS           *float64  `json:"ps"`
-	ROE          *float64  `json:"roe"`
-	ROA          *float64  `json:"roa"`
-	DebtToEquity *float64  `json:"debt_to_equity"`
-	GrossMargin  *float64  `json:"gross_margin"`
-	NetMargin    *float64  `json:"net_margin"`
-	Revenue      *float64  `json:"revenue"`
-	NetProfit    *float64  `json:"net_profit"`
-	TotalAssets  *float64  `json:"total_assets"`
-	TotalLiab    *float64  `json:"total_liab"`
+	Symbol string `json:"symbol"`
+	// Date 是这条记录的**可用日**（P1-4）：读出来时等于
+	// COALESCE(ann_date, trade_date)，即"从哪天起这条数据才存在"。
+	//
+	// 写进去时历史上曾被当成报告期截止日（路径 A 把 end_date 塞进来），
+	// 那是 P0-1 想修又没修干净的前视偏差 —— 见下方 AnnDate。
+	Date time.Time `json:"date"`
+	// AnnDate 是真实披露日（P1-4）。nil = 不知道什么时候披露的。
+	//
+	// 为什么必须留着它：路径 A（FetchFundamentals）此前把 API 返回的
+	// ann_date 直接丢弃，只存报告期截止日 end_date。于是读取侧
+	// COALESCE(ann_date, trade_date) 对它退化成 end_date —— 三季报
+	// 9/30 截止、10/25 披露，却能在 9/30 就被回测看见。P0-1 的 COALESCE
+	// 只是把洞盖住了，没补上；补的办法是让写入侧真的把 ann_date 存下来。
+	//
+	// 指针语义同 DelistDate：零值 time.Time 会被读成"从未披露"。
+	AnnDate      *time.Time `json:"ann_date,omitempty"`
+	PE           *float64   `json:"pe"`
+	PB           *float64   `json:"pb"`
+	PS           *float64   `json:"ps"`
+	ROE          *float64   `json:"roe"`
+	ROA          *float64   `json:"roa"`
+	DebtToEquity *float64   `json:"debt_to_equity"`
+	GrossMargin  *float64   `json:"gross_margin"`
+	NetMargin    *float64   `json:"net_margin"`
+	Revenue      *float64   `json:"revenue"`
+	NetProfit    *float64   `json:"net_profit"`
+	TotalAssets  *float64   `json:"total_assets"`
+	TotalLiab    *float64   `json:"total_liab"`
 }
 
 // FundamentalData represents financial data from Tushare financial_data API.

@@ -11,18 +11,39 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
+// nullableDate 把零值时间转成 NULL（P1-4）。
+//
+// 0001-01-01 不是一个披露日，它只能是"没填"。而 domain.FundamentalData 的
+// AnnDate 是 time.Time 而非指针，缺字段时就是零值 —— 原样写进库，
+// COALESCE(ann_date, trade_date) 会拿到一个公元前的值，这条记录从此在所有
+// 按可用日过滤的查询里消失，而且**看不出为什么少了它**。
+//
+// 零值当 NULL 写，语义才对：没有披露日 → 回退到报告期截止日。
+func nullableDate(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
 // GetFundamentalsSnapshot returns latest fundamental data for all stocks as of a cutoff date.
 // Used by FactorComputer to compute value/quality factors cross-sectionally.
 //
 // PIT（point-in-time）语义 —— 2026-09-16 修复前视偏差，见 TASKS P0-1
 // 与 pkg/storage/fundamentals_pit_test.go 的回归测试。
 //
-// 一条记录的「可用日」= COALESCE(ann_date, trade_date)。原因：
-//   - fina_indicator 路径（pkg/data/tushare.go:457 注释 "Use end_date as trade_date"）
-//     把报告期截止日 end_date 写进了 trade_date 列，真实披露日是 ann_date。
-//     若按 trade_date 过滤，三季报（9/30 截止、10/25 披露）在 9/30 就对回测可见。
-//   - daily_basic 路径（SaveFundamentalBatch）不写 ann_date，其 PE/PB 本身
-//     已是当日收盘口径，故回退到 trade_date。
+// 一条记录的「可用日」= available_date（P1-4 起是独立的列）。
+//
+// 为什么非得有这一列：trade_date 装的是**报告期截止日** end_date（两条
+// 写入路径都这么写，见 SaveFundamental 的注释），而真实披露日是 ann_date。
+// 按 trade_date 过滤，三季报（9/30 截止、10/25 披露）在 9/30 就对回测可见。
+//
+// 2026-09-16（P0-1）的修法是每个查询里写 COALESCE(ann_date, trade_date)。
+// 它把洞盖住了但没补上：路径 A 压根不写 ann_date，COALESCE 对它退化成
+// 报告期截止日，前视偏差照旧；而且只有 5 个查询这么写，另外 5 个裸用
+// trade_date。语义散在调用方脑子里，一定会有人忘 —— 2026-09-18（P1-4）
+// 改成：ann_date 由写入侧负责填上（路径 A 的 bug 已修），available_date
+// 是唯一定义，所有读取一律用它。
 //
 // 同一 ts_code 有多期时取「可用日最近」的一期；可用日相同则取报告期更晚的一期，
 // 以正确处理同一期财报被重述（restatement）的情况。
@@ -33,8 +54,8 @@ func (s *PostgresStore) GetFundamentalsSnapshot(ctx context.Context, cutoffDate 
 			pe, pb, ps, roe, roa, debt_to_equity, gross_margin, net_margin,
 			revenue, net_profit, total_assets, total_liab, created_at
 		FROM stock_fundamentals
-		WHERE COALESCE(ann_date, trade_date) <= $1 AND pe IS NOT NULL
-		ORDER BY ts_code, COALESCE(ann_date, trade_date) DESC, end_date DESC
+		WHERE available_date <= $1 AND pe IS NOT NULL
+		ORDER BY ts_code, available_date DESC, end_date DESC
 	`
 	rows, err := s.pool.Query(ctx, query, cutoffDate)
 	if err != nil {
@@ -68,7 +89,7 @@ func (s *PostgresStore) GetFundamentalsSnapshot(ctx context.Context, cutoffDate 
 }
 
 // GetFundamentalsPIT 取一只股票在 asOf 之前**已可用**的全部财务记录，
-// 每条记录的 Date 是它的可用日（= COALESCE(ann_date, trade_date)）。
+// 每条记录的 Date 是它的可用日（= available_date）。
 //
 // 为什么不能直接用 GetFundamentals：那个查询 SELECT 的是 trade_date，而
 // fina_indicator 路径把报告期截止日（end_date）写进了 trade_date 列 ——
@@ -80,13 +101,13 @@ func (s *PostgresStore) GetFundamentalsSnapshot(ctx context.Context, cutoffDate 
 // 可用日上，所以这个入口返回的是可用日而不是报告期。
 func (s *PostgresStore) GetFundamentalsPIT(ctx context.Context, symbol string, asOf time.Time) ([]domain.Fundamental, error) {
 	query := `
-		SELECT ts_code, COALESCE(ann_date, trade_date),
+		SELECT ts_code, available_date,
 			pe, pb, ps, roe, roa, debt_to_equity,
 			gross_margin, net_margin,
 			revenue, net_profit, total_assets, total_liab
 		FROM stock_fundamentals
-		WHERE ts_code = $1 AND COALESCE(ann_date, trade_date) <= $2
-		ORDER BY COALESCE(ann_date, trade_date) ASC, end_date DESC
+		WHERE ts_code = $1 AND available_date <= $2
+		ORDER BY available_date ASC, end_date DESC
 	`
 	rows, err := s.pool.Query(ctx, query, symbol, asOf)
 	if err != nil {
@@ -124,13 +145,13 @@ func (s *PostgresStore) GetFundamentalsPITBulk(ctx context.Context, symbols []st
 	}
 
 	query := `
-		SELECT ts_code, COALESCE(ann_date, trade_date),
+		SELECT ts_code, available_date,
 			pe, pb, ps, roe, roa, debt_to_equity,
 			gross_margin, net_margin,
 			revenue, net_profit, total_assets, total_liab
 		FROM stock_fundamentals
-		WHERE ts_code = ANY($1) AND COALESCE(ann_date, trade_date) <= $2
-		ORDER BY ts_code, COALESCE(ann_date, trade_date) ASC, end_date DESC
+		WHERE ts_code = ANY($1) AND available_date <= $2
+		ORDER BY ts_code, available_date ASC, end_date DESC
 	`
 	rows, err := s.pool.Query(ctx, query, symbols, asOf)
 	if err != nil {
@@ -166,13 +187,22 @@ func (s *PostgresStore) GetFundamentalsPITBulk(ctx context.Context, symbols []st
 // Tushare client passes ts_code as the query key and stores item[0] verbatim —
 // and end_date is backfilled from trade_date, mirroring the ETL convention in
 // pkg/data/tushare.go (normalizeFundamentals / normalizeFundamentalsData).
-// ann_date is not part of domain.Fundamental and is left NULL.
+//
+// P1-4：ann_date 现在会写。此前这条路径不写它（API 返回了却被
+// normalizeFundamentals 丢弃），于是 available_date = COALESCE(ann_date,
+// trade_date) 退化成报告期截止日 —— 三季报能在截止当天就被回测看见。
+//
+// available_date 本身不在这里写：它是 GENERATED ALWAYS AS 的生成列，
+// 写了会报错。好处是它不可能为空、也不可能和 COALESCE 不一致 —— 任何
+// 绕过本函数的写入路径（手工 INSERT、修数）都不会漏掉它。
 func (s *PostgresStore) SaveFundamental(ctx context.Context, f *domain.Fundamental) error {
 	query := `
-		INSERT INTO stock_fundamentals (ts_code, trade_date, end_date, pe, pb, ps, roe, roa, debt_to_equity,
+		INSERT INTO stock_fundamentals (ts_code, trade_date, end_date, ann_date,
+			pe, pb, ps, roe, roa, debt_to_equity,
 			gross_margin, net_margin, revenue, net_profit, total_assets, total_liab)
-		VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT (ts_code, trade_date) DO UPDATE SET
+			ann_date = EXCLUDED.ann_date,
 			pe = EXCLUDED.pe, pb = EXCLUDED.pb, ps = EXCLUDED.ps,
 			roe = EXCLUDED.roe, roa = EXCLUDED.roa, debt_to_equity = EXCLUDED.debt_to_equity,
 			gross_margin = EXCLUDED.gross_margin, net_margin = EXCLUDED.net_margin,
@@ -180,7 +210,7 @@ func (s *PostgresStore) SaveFundamental(ctx context.Context, f *domain.Fundament
 			total_assets = EXCLUDED.total_assets, total_liab = EXCLUDED.total_liab
 	`
 	_, err := s.pool.Exec(ctx, query,
-		f.Symbol, f.Date, f.PE, f.PB, f.PS, f.ROE, f.ROA, f.DebtToEquity,
+		f.Symbol, f.Date, f.AnnDate, f.PE, f.PB, f.PS, f.ROE, f.ROA, f.DebtToEquity,
 		f.GrossMargin, f.NetMargin, f.Revenue, f.NetProfit, f.TotalAssets, f.TotalLiab,
 	)
 	if err != nil {
@@ -203,16 +233,18 @@ func (s *PostgresStore) SaveFundamentalBatch(ctx context.Context, records []*dom
 	batch := &pgx.Batch{}
 	for _, f := range records {
 		batch.Queue(`
-			INSERT INTO stock_fundamentals (ts_code, trade_date, end_date, pe, pb, ps, roe, roa, debt_to_equity,
+			INSERT INTO stock_fundamentals (ts_code, trade_date, end_date, ann_date,
+				pe, pb, ps, roe, roa, debt_to_equity,
 				gross_margin, net_margin, revenue, net_profit, total_assets, total_liab)
-			VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+			VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 			ON CONFLICT (ts_code, trade_date) DO UPDATE SET
-				pe = EXCLUDED.pe, pb = EXCLUDED.pb, ps = EXCLUDED.ps,
+				ann_date = EXCLUDED.ann_date,
+					pe = EXCLUDED.pe, pb = EXCLUDED.pb, ps = EXCLUDED.ps,
 				roe = EXCLUDED.roe, roa = EXCLUDED.roa, debt_to_equity = EXCLUDED.debt_to_equity,
 				gross_margin = EXCLUDED.gross_margin, net_margin = EXCLUDED.net_margin,
 				revenue = EXCLUDED.revenue, net_profit = EXCLUDED.net_profit,
 				total_assets = EXCLUDED.total_assets, total_liab = EXCLUDED.total_liab
-		`, f.Symbol, f.Date, f.PE, f.PB, f.PS, f.ROE, f.ROA, f.DebtToEquity,
+		`, f.Symbol, f.Date, f.AnnDate, f.PE, f.PB, f.PS, f.ROE, f.ROA, f.DebtToEquity,
 			f.GrossMargin, f.NetMargin, f.Revenue, f.NetProfit, f.TotalAssets, f.TotalLiab)
 	}
 
@@ -230,11 +262,19 @@ func (s *PostgresStore) SaveFundamentalBatch(ctx context.Context, records []*dom
 }
 
 // GetFundamental retrieves fundamental data for a symbol on a specific date.
+//
+// P1-4 之前是 `trade_date = $2` 的精确匹配 —— 那等于按**报告期截止日**查，
+// 而且查不到就报错。改成「截至该日已可用的最新一期」：语义上是调用方真正
+// 想要的（"这天我能看到什么"），而且不会因为披露日落在别处就查不到。
+// 返回的 Date 也是可用日，与其他读取入口一致。
 func (s *PostgresStore) GetFundamental(ctx context.Context, symbol string, date time.Time) (*domain.Fundamental, error) {
 	query := `
-		SELECT ts_code, trade_date, pe, pb, ps, roe, roa, debt_to_equity,
+		SELECT ts_code, available_date, pe, pb, ps, roe, roa, debt_to_equity,
 			gross_margin, net_margin, revenue, net_profit, total_assets, total_liab
-		FROM stock_fundamentals WHERE ts_code = $1 AND trade_date = $2
+		FROM stock_fundamentals
+		WHERE ts_code = $1 AND available_date <= $2
+		ORDER BY available_date DESC, end_date DESC
+		LIMIT 1
 	`
 	var f domain.Fundamental
 	err := s.pool.QueryRow(ctx, query, symbol, date).Scan(
@@ -250,7 +290,7 @@ func (s *PostgresStore) GetFundamental(ctx context.Context, symbol string, date 
 // GetFundamentals retrieves all fundamental records for a symbol on or before the given date.
 // Returns an empty slice if no records found.
 //
-// 与 GetFundamentalsSnapshot 一致的 PIT 语义：可用日 = COALESCE(ann_date, trade_date)。
+// 与 GetFundamentalsSnapshot 一致的 PIT 语义：可用日 = available_date。
 // 见 TASKS P0-1；修复前按 trade_date 过滤存在同样的前视偏差。
 //
 // 数值列可为空，而 domain.Fundamental 用的是 *float64：NULL 扫成 nil，
@@ -260,13 +300,13 @@ func (s *PostgresStore) GetFundamental(ctx context.Context, symbol string, date 
 // 而 PE=0 在估值因子眼里是"极便宜"。宁可让下游判空，也不能给假数字。
 func (s *PostgresStore) GetFundamentals(ctx context.Context, symbol string, date time.Time) ([]domain.Fundamental, error) {
 	query := `
-		SELECT ts_code, trade_date,
+		SELECT ts_code, available_date,
 			pe, pb, ps, roe, roa, debt_to_equity,
 			gross_margin, net_margin,
 			revenue, net_profit, total_assets, total_liab
 		FROM stock_fundamentals
-		WHERE ts_code = $1 AND COALESCE(ann_date, trade_date) <= $2
-		ORDER BY COALESCE(ann_date, trade_date) DESC, end_date DESC
+		WHERE ts_code = $1 AND available_date <= $2
+		ORDER BY available_date DESC, end_date DESC
 	`
 	rows, err := s.pool.Query(ctx, query, symbol, date)
 	if err != nil {
@@ -312,7 +352,7 @@ func (s *PostgresStore) SaveFundamentalData(ctx context.Context, f *domain.Funda
 			total_liab = EXCLUDED.total_liab
 	`
 	_, err := s.pool.Exec(ctx, query,
-		f.TsCode, f.TradeDate, f.AnnDate, f.EndDate,
+		f.TsCode, f.TradeDate, nullableDate(f.AnnDate), f.EndDate,
 		f.PE, f.PB, f.PS, f.ROE, f.ROA, f.DebtToEquity,
 		f.GrossMargin, f.NetMargin, f.Revenue, f.NetProfit,
 		f.TotalAssets, f.TotalLiab,
@@ -340,7 +380,7 @@ func (s *PostgresStore) SaveFundamentalDataBatch(ctx context.Context, records []
 			ON CONFLICT (ts_code, trade_date) DO UPDATE SET
 				ann_date = EXCLUDED.ann_date,
 				end_date = EXCLUDED.end_date,
-				pe = EXCLUDED.pe,
+					pe = EXCLUDED.pe,
 				pb = EXCLUDED.pb,
 				ps = EXCLUDED.ps,
 				roe = EXCLUDED.roe,
@@ -352,7 +392,7 @@ func (s *PostgresStore) SaveFundamentalDataBatch(ctx context.Context, records []
 				net_profit = EXCLUDED.net_profit,
 				total_assets = EXCLUDED.total_assets,
 				total_liab = EXCLUDED.total_liab
-		`, f.TsCode, f.TradeDate, f.AnnDate, f.EndDate,
+		`, f.TsCode, f.TradeDate, nullableDate(f.AnnDate), f.EndDate,
 			f.PE, f.PB, f.PS, f.ROE, f.ROA, f.DebtToEquity,
 			f.GrossMargin, f.NetMargin, f.Revenue, f.NetProfit,
 			f.TotalAssets, f.TotalLiab)
@@ -379,7 +419,7 @@ func (s *PostgresStore) GetFundamentalDataLatest(ctx context.Context, tsCode str
 			revenue, net_profit, total_assets, total_liab, created_at
 		FROM stock_fundamentals
 		WHERE ts_code = $1
-		ORDER BY trade_date DESC
+		ORDER BY available_date DESC, end_date DESC
 		LIMIT 1
 	`
 	var f domain.FundamentalData
@@ -409,8 +449,8 @@ func (s *PostgresStore) GetFundamentalDataHistory(ctx context.Context, tsCode st
 				pe, pb, ps, roe, roa, debt_to_equity, gross_margin, net_margin,
 				revenue, net_profit, total_assets, total_liab, created_at
 			FROM stock_fundamentals
-			WHERE ts_code = $1 AND trade_date >= $2 AND trade_date <= $3
-			ORDER BY trade_date DESC
+			WHERE ts_code = $1 AND available_date >= $2 AND available_date <= $3
+			ORDER BY available_date DESC, end_date DESC
 		`
 		args = []interface{}{tsCode, *startDate, *endDate}
 	} else {
@@ -420,7 +460,7 @@ func (s *PostgresStore) GetFundamentalDataHistory(ctx context.Context, tsCode st
 				revenue, net_profit, total_assets, total_liab, created_at
 			FROM stock_fundamentals
 			WHERE ts_code = $1
-			ORDER BY trade_date DESC
+			ORDER BY available_date DESC, end_date DESC
 		`
 		args = []interface{}{tsCode}
 	}
@@ -491,7 +531,7 @@ func buildScreenFundamentalsQuery(filters domain.ScreenFilters, date *time.Time,
 	argIdx := 1
 
 	if date != nil {
-		conditions = append(conditions, fmt.Sprintf("sf.trade_date = $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("sf.available_date <= $%d", argIdx))
 		args = append(args, *date)
 		argIdx++
 	} else {
@@ -501,7 +541,7 @@ func buildScreenFundamentalsQuery(filters domain.ScreenFilters, date *time.Time,
 			FROM (
 				SELECT ts_code, pe, pb, ps, roe, roa, debt_to_equity,
 					gross_margin, net_margin,
-					ROW_NUMBER() OVER (PARTITION BY ts_code ORDER BY trade_date DESC) as rn
+					ROW_NUMBER() OVER (PARTITION BY ts_code ORDER BY available_date DESC, end_date DESC) as rn
 				FROM stock_fundamentals
 			) sf
 			LEFT JOIN stocks st ON sf.ts_code = st.symbol

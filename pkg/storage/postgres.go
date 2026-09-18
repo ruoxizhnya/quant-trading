@@ -66,6 +66,28 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 }
 
 // migrate creates tables and hypertables.
+//
+// ─── 这里是 DDL 的唯一真相（P1-4）─────────────────────────────────────
+//
+// 每次启动按顺序跑一遍下面这个数组，每条都必须是幂等的（CREATE ...
+// IF NOT EXISTS / ALTER ... ADD COLUMN IF NOT EXISTS / DO 块守卫）。
+// 没有版本表、没有 down、没有执行记录 —— 这是有意的取舍，理由见下。
+//
+// 目录里那些 .sql 的历史：
+//   - `migrations/`：3 个 golang-migrate 格式的子目录 + 10 个裸编号 .sql
+//   - `docs/migrations/`：另一批，含 025-027 的实际变更记录
+//
+// 它们**不被执行**。golang-migrate 的封装（MigrationManager）从来没有被
+// 调用过，2026-09-18 删除。为什么没有改用标准迁移工具：
+//   - 现有库都是这套 Go DDL 建的，没有 schema_migrations 表，接入要先
+//     baseline，而 baseline 一旦和真实结构对不上，后面每条迁移都在
+//     错误的假设上跑；
+//   - 回测结果依赖表结构。为了工程上的整洁去动一个能用的库，收益是
+//     洁癖，风险是数据。不划算。
+//
+// 因此约定：**加表 / 加列就在这个数组末尾追加一条，并写上
+// `// Migration 0NN:` 注释**（编号续最大的那个）。散落的 .sql 留作历史
+// 记录，只读、不维护、不进导航。
 func (s *PostgresStore) migrate(ctx context.Context) error {
 	migrations := []string{
 		`CREATE TABLE IF NOT EXISTS stocks (
@@ -357,6 +379,58 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		// 2021 年之后继续参与交易。两条都只能靠这个日期判定。
 		// 带默认值加列为 metadata-only，幂等。
 		`ALTER TABLE stocks ADD COLUMN IF NOT EXISTS delist_date DATE`,
+		// Migration 031: stock_fundamentals.available_date (P1-4 / 语义债)
+		// 「这条财报从哪天起可见」此前没有自己的列，只在 5 个查询里以
+		// COALESCE(ann_date, trade_date) 的形式散着写 —— 另外 5 个查询压根
+		// 没写，直接拿 trade_date 当可见日，而 trade_date 装的是报告期截止日。
+		// 语义散在调用方脑子里，就一定会有人忘。
+		//
+		// 现在钉成一个列：available_date = COALESCE(ann_date, trade_date)。
+		// ann_date 为 NULL 时它仍等于报告期截止日（那笔债还在，见路径 A），
+		// 但**列的存在让债可见** —— 可以数得出来有多少行 ann_date 是空的，
+		// 也可以在回填之后把缺口补上。
+		// 用**生成列**而不是普通列：普通列要靠每个写入函数记得填，而
+		// 任何绕过写入函数的路径（手工 INSERT、修数、别的 ETL）都会留下
+		// 一行 available_date 为 NULL 的数据 —— 它随后会从所有按可用日
+		// 过滤的查询里**凭空消失**，而且看不出为什么少了一只票。
+		// 生成列从物理上保证：它不可能为空，也不可能和 COALESCE 的结果
+		// 不一致，加列时存量自动算好（不需要回填 UPDATE）。
+		//
+		// 代价：不能 INSERT/UPDATE 这一列，写入函数里必须去掉它。
+		`ALTER TABLE stock_fundamentals
+			ADD COLUMN IF NOT EXISTS available_date DATE
+			GENERATED ALWAYS AS (COALESCE(ann_date, trade_date)) STORED`,
+		// 按可用日过滤是这个表最主要的读法，给个索引。
+		`CREATE INDEX IF NOT EXISTS idx_stock_fundamentals_available
+			ON stock_fundamentals (ts_code, available_date DESC)`,
+		// 清理历史脏数据：domain.FundamentalData.AnnDate 是 time.Time 而非
+		// 指针，缺字段时写进去的是零值 0001-01-01 —— 那不是披露日，是"没填"。
+		// 它让 COALESCE(ann_date, trade_date) 拿到一个公元前的值，整行数据
+		// 从此在所有按可用日过滤的查询里消失。存量的这类行必须清成 NULL，
+		// 否则加完列反而会少数据（写入侧已用 nullableDate 堵住新增）。
+		`UPDATE stock_fundamentals SET ann_date = NULL WHERE ann_date < DATE '1900-01-01'`,
+		// 把「已经是普通列」的存量安装升级成生成列。
+		//
+		// ADD COLUMN IF NOT EXISTS 只管"列在不在"，不管"列是怎么算的"：
+		// 早期那版把它建成普通 DATE 列，之后再跑到的 GENERATED 版就会因为
+		// IF NOT EXISTS 被整个跳过 —— 结果是一个永远为 NULL 的普通列，
+		// 所有按可用日过滤的查询静默返回空。这个 DO 块按
+		// generation_expression 是否为空来判断，只在实际需要时重建一次，
+		// 之后重复启动等价 no-op。
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_name = 'stock_fundamentals'
+				  AND column_name = 'available_date'
+				  AND coalesce(generation_expression, '') = ''
+			) THEN
+				ALTER TABLE stock_fundamentals DROP COLUMN available_date;
+				ALTER TABLE stock_fundamentals
+					ADD COLUMN available_date DATE
+					GENERATED ALWAYS AS (COALESCE(ann_date, trade_date)) STORED;
+			END IF;
+		END $$`,
 		// Migration 026: docs/migrations/026_widen_factor_name.sql (EQD-P1-2 / 桥 B1)
 		// 桥 B1 的 5 个纵向基本面因子名最长 24 字符，超出既有 VARCHAR(20)。
 		// 因子链路的三个表同源同一列，须同时放宽；加宽 varchar 为 metadata-only，不改写表。

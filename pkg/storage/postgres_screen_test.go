@@ -238,11 +238,15 @@ func TestBuildScreenFundamentalsQuery(t *testing.T) {
 		assert.Empty(t, args, "no filters/date → no args")
 	})
 
-	t.Run("with date uses direct trade_date filter", func(t *testing.T) {
+	t.Run("with date filters by available_date, not report period", func(t *testing.T) {
 		d := time.Date(2024, 9, 30, 0, 0, 0, 0, time.UTC)
 		query, args := buildScreenFundamentalsQuery(domain.ScreenFilters{}, &d, 0)
 		assert.NotContains(t, query, "ROW_NUMBER()")
-		assert.Contains(t, query, "sf.trade_date = $1")
+		// P1-4：按可用日过滤。此前是 sf.trade_date = $1（按**报告期截止日**
+		// 精确匹配），那会让三季报在截止当天就对选股可见，而且披露日落在
+		// 别处时直接查不到。改成 <= 取「截至该日已可用的最新一期」。
+		assert.Contains(t, query, "sf.available_date <= $1")
+		assert.NotContains(t, query, "sf.trade_date =")
 		require.Len(t, args, 1)
 		assert.Equal(t, d, args[0])
 	})
@@ -293,7 +297,7 @@ func TestBuildScreenFundamentalsQuery(t *testing.T) {
 		require.Len(t, args, 2)
 		assert.Equal(t, d, args[0])
 		assert.Equal(t, peMax, args[1])
-		assert.Contains(t, query, "sf.trade_date = $1")
+		assert.Contains(t, query, "sf.available_date <= $1")
 		assert.Contains(t, query, "(sf.pe IS NULL OR sf.pe <= $2)")
 		// date path has no "WHERE sf.rn = 1", so conditions use WHERE
 		assert.NotContains(t, query, "WHERE sf.rn = 1")
