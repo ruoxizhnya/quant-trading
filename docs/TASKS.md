@@ -100,7 +100,7 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 | **P2-1** | 补**宏观/跨境数据源**（美股、汇率、利率、大宗）—— 对产业链认知价值最高 | 新建 adapter |
 | **P2-2** | 产业链数据底座最小版：`query_supply_chain(name)` | 新建 |
 | **P2-3** | 因子加 `hypothesis_source` 字段（因果来源） | `factor_cache` schema |
-| **P2-4** | 幸存者偏差：无退市/剔除逻辑，回测 universe 不完整 | `pkg/backtest/engine.go` |
+| **P2-4** | ~~幸存者偏差：无退市/剔除逻辑，回测 universe 不完整~~ | **✅ 2026-09-18** `pkg/domain/market/types.go` + `pkg/data/tushare.go` + `pkg/storage/stocks.go` + `pkg/backtest/engine.go` + `engine_daily.go` + `cmd/data/sync_handlers.go` + `cmd/analysis/handlers_explore.go` | 三层一起修：① **数据侧**——`stock_basic` 的 `delist_date` 此前被 `normalizeStocks` 整个丢弃、`Status` 还硬编码 `active`，现在落进 `stocks.delist_date`（migration 030，`*time.Time` —— 零值时间会被读成"一万年前就退市"，必须区分"没有"和"零值"）；同步入口支持 `list_status=ALL` / 逗号分隔，展开成 L+D+P 三次拉取。② **引擎侧**——预热一次上市日历，`eligibleUniverse` 每天把池子过滤成「当日仍在市」：未上市的剔除（未来股，另一种前视偏差）、已摘牌的剔除（那时它已不存在）、**但退市前一直在池子里**（这才是修偏差的关键，只做"剔除"等于把偏差坐实）。③ **持仓**——已退市但还持仓的票保留在 universe 里并在摘牌后强平，否则这笔钱一路挂到回测结束，中间所有损益被抹平。摘牌当天仍算在市（退市整理期有行情）。**没有日历时不过滤**，且偏差维照实报 `PoolSourceCurrent` —— 债还在就别装作修好了。接线后 `ExploreHandler.biasInput()` 按引擎实际口径切换 `PoolSourcePointInTime`，那条每轮都带的 blocking 到此才能真正消失 |
 | **P2-5** | 废弃模块清理：`pkg/ai/agents` 标记 DEPRECATED 仍是 `cmd/ai` 主链路 | `cmd/ai/main.go:13` |
 | **P2-6** | `drift` 概念漂移检测零调用（孤儿代码）；`get_market_regime` 未进主流程 | `pkg/ai/drift/`、`pkg/tools/builtin/` |
 | **P2-7** | 死配置 `config/ai-service.yaml` 从未被读取；~~`docker-compose.services.yml` 引用不存在的 Dockerfile~~（该文件已于 2026-09-18 删除，见 P1-10） | config/（待办） |

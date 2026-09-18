@@ -14,6 +14,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/loop"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/pipeline"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/validation"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -326,4 +327,46 @@ func TestExploreHandler_RejectsMissingDescription(t *testing.T) {
 
 	w := postJSON(r, "/api/explore/runs", `{"max_tries":3}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// P2-4：偏差维的池子来源必须跟引擎的实际口径一致。
+//
+// 写死 PoolSourceCurrent 会让每一条裁决都带一条 blocking 质疑 —— 那在
+// P2-4 修好之前是对的（看得见的债才是债）。但修好之后还这么报就是假警报，
+// 而假警报比没警报更糟：它会训练人忽略质疑清单。
+
+func TestExploreBias_NoListingCalendarKeepsCurrentPool(t *testing.T) {
+	h := &ExploreHandler{}
+	in := h.biasInput()
+	if in.PoolSource != validation.PoolSourceCurrent {
+		t.Fatalf("没有上市日历时必须报 PoolSourceCurrent，got %q", in.PoolSource)
+	}
+	// 引擎返回空日历（stocks 表为空 / 没连库）同样算没修好。
+	h.listing = func() map[string]storage.ListingWindow { return nil }
+	if got := h.biasInput().PoolSource; got != validation.PoolSourceCurrent {
+		t.Fatalf("空日历时仍须报 current，got %q", got)
+	}
+}
+
+func TestExploreBias_ListingCalendarSwitchesToPointInTime(t *testing.T) {
+	delist := time.Now().AddDate(-1, 0, 0)
+	h := &ExploreHandler{
+		listing: func() map[string]storage.ListingWindow {
+			return map[string]storage.ListingWindow{
+				"600519.SH": {List: time.Now().AddDate(-10, 0, 0)},
+				"600001.SH": {List: time.Now().AddDate(-20, 0, 0), Delist: &delist},
+			}
+		},
+	}
+
+	in := h.biasInput()
+	if in.PoolSource != validation.PoolSourcePointInTime {
+		t.Fatalf("引擎真的按日在市过滤了，就该报 point_in_time，got %q", in.PoolSource)
+	}
+	if in.PoolSize != 2 {
+		t.Errorf("PoolSize = %d, want 2", in.PoolSize)
+	}
+	if in.DelistedInPool != 1 {
+		t.Errorf("DelistedInPool = %d, want 1", in.DelistedInPool)
+	}
 }

@@ -28,6 +28,16 @@ type Stock struct {
 	MarketCap float64   `json:"market_cap"`
 	ListDate  time.Time `json:"list_date"`
 	Status    string    `json:"status"` // active, suspended, delisted
+
+	// DelistDate 是摘牌日，**nil = 仍在市**（P2-4）。
+	//
+	// 用指针不是偷懒：零值 time.Time 是 0001-01-01，跟"退市日期未知"
+	// 是两回事，混在一起会让「今天还在市」被算成「一万年前就退市了」。
+	//
+	// 没有这个字段就不可能修幸存者偏差 —— 回测 2020 年时，2021 年退市的
+	// 票必须**在池子里**（否则收益被系统性高估），但又不能在 2021 年之后
+	// 继续参与交易（那时候它已经不存在了）。两条都要靠这个日期。
+	DelistDate *time.Time `json:"delist_date,omitempty"`
 }
 
 // IndexConstituent represents a constituent stock of an index.

@@ -249,6 +249,22 @@ func (c *TushareClient) normalizeStocks(resp *TushareResponse) []domain.Stock {
 			}
 		}
 
+		// delist_date（P2-4）：摘牌日。**此前这一列被整个丢弃**，退市票
+		// 同步进来也被标成 active —— 于是「某日仍在市的池子」根本构造
+		// 不出来，幸存者偏差只能诊断、治不了。
+		//
+		// Status 由摘牌日推导，不再无条件写 "active"：摘牌日已过就是
+		// delisted。写死 active 会让退市票在下游被当成正常可交易标的。
+		if delistDate := c.fieldStr(item, 7); delistDate != "" {
+			if t, err := time.Parse("20060102", delistDate); err == nil {
+				d := t
+				stock.DelistDate = &d
+				if !d.After(time.Now()) {
+					stock.Status = "delisted"
+				}
+			}
+		}
+
 		stocks = append(stocks, stock)
 	}
 	return stocks

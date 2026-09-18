@@ -724,6 +724,74 @@ func (e *Engine) forceCloseAllPositions(
 	}
 }
 
+// forceCloseDelisted 平掉「已摘牌却还留在账上」的持仓（P2-4）。
+//
+// 为什么必须做：一旦把已退市的票从 universe 里剔掉，市场数据里就没有它了，
+// 价格拿不到、止损触发不了，这笔持仓会一直挂到回测结束才被末尾的强平兜住
+// —— 中间几十上百个交易日的资金占用和损益全被抹平，等于凭空造收益。
+// 真实情况是：摘牌之后这笔钱要么按退市整理期的价格收回，要么血本无归，
+// 总之不是继续持有。
+//
+// 价格优先级：当天价格 → 持仓里最后一次已知价 → 都取不到就跳过并告警。
+// 最后一种情况宁可留着（并留下 warn）也不用 0 去平 —— 用 0 平仓等于
+// 凭空抹掉一笔资产，账面上看不出来。
+//
+// 摘牌当天仍算在市（ListingWindow.IsListed 用 After 判断），所以真正触发
+// 的是摘牌后的第一个交易日，那时通常已无行情，走 CurrentPrice 兜底。
+func (e *Engine) forceCloseDelisted(
+	state *BacktestState,
+	pricesCache map[string]float64,
+	date time.Time,
+	logger zerolog.Logger,
+) {
+	listing := e.ListingWindows()
+	if len(listing) == 0 {
+		return // 没有上市日历，无从判断谁退市了
+	}
+
+	positions := state.Tracker.GetAllPositions()
+	// 定序：先平哪只影响当天的现金与成交序列（P1-14）。
+	for _, symbol := range sortedKeys(positions) {
+		pos := positions[symbol]
+		if abs(pos.Quantity) <= 1e-8 {
+			continue
+		}
+		w, known := listing[symbol]
+		if !known || w.IsListed(date) {
+			continue
+		}
+
+		price, priceExists := pricesCache[symbol]
+		if !priceExists || price <= 0 {
+			if pos.CurrentPrice > 0 {
+				price = pos.CurrentPrice
+			} else {
+				logger.Warn().
+					Str("symbol", symbol).
+					Float64("qty", pos.Quantity).
+					Time("date", date).
+					Msg("Skipping delisted force close: no price available (position left open)")
+				continue
+			}
+		}
+
+		trade, err := state.Tracker.ClosePosition(symbol, price, date)
+		if err != nil {
+			logger.Warn().Str("symbol", symbol).Err(err).Time("date", date).
+				Msg("Failed to force close delisted position")
+			continue
+		}
+		if trade != nil {
+			logger.Info().
+				Str("symbol", symbol).
+				Float64("qty", trade.Quantity).
+				Float64("price", trade.Price).
+				Time("date", date).
+				Msg("Force closed delisted position")
+		}
+	}
+}
+
 // abs returns the absolute value of x. Local copy — tracker/ and metrics/
 // each have their own (S7-P2-1: tracker.go moved to tracker/ subpackage).
 func abs(x float64) float64 {

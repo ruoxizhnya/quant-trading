@@ -129,6 +129,13 @@ type Engine struct {
 	// 受 e.mu 保护：Engine 实例是共享的，多个回测可以并发跑。
 	fundamentals map[string]strategy.FundamentalSeries
 
+	// L1 上市日历（P2-4）：symbol → 在市区间（上市日 / 摘牌日）。
+	//
+	// 空 map = 没有这份数据，引擎**不过滤**并如实上报（偏差维会带
+	// PoolSourceCurrent 的 blocking）。绝不能反过来假设「没记录 = 一直在市」
+	// —— 那正是幸存者偏差本身。
+	listing map[string]storage.ListingWindow
+
 	// liveBridge 桥接 backtest 信号到 live/paper trading (P1-17 ADR-020)。
 	// 取代旧 `liveTrader live.LiveTrader` 字段；旧 SetLiveTrader /
 	// GetLiveTrader / ExecuteSignalViaLiveTrader 等方法保留为
@@ -595,6 +602,9 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		logger.Warn().Err(err).Msg("Fundamentals warm-up failed — 用了 pe/pb/roe 的表达式会明确失败（不会静默当 0）")
 	}
 
+	// P2-4：上市日历。拿不到就放弃按日在市过滤，并由偏差维如实记上。
+	e.loadListingCalendar(ctx)
+
 	tradingDays, err := e.getTradingDays(ctx, params.StartDate, params.EndDate)
 	if err != nil {
 		return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, "failed to get trading days", "RunBacktest")
@@ -625,10 +635,19 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 				Msg("Processing day")
 		}
 
+		// P2-4：池子按当天在市名单过滤，外加「还持仓的」（含已退市待平仓）。
+		held := heldSymbols(state.Tracker)
+		universe := e.eligibleUniverse(params.StockPool, date, held)
+
 		marketDataCache, pricesCache, _, updatedPrevClose := e.fetchMarketDataForDay(
-			ctx, params.StockPool, params, date, prevCloseCache, logger,
+			ctx, universe, params, date, prevCloseCache, logger,
 		)
 		prevCloseCache = updatedPrevClose
+
+		// 摘牌之后还留在账上的持仓，趁这天处理掉。退市当天的价格通常还在
+		// （退市整理期），取不到就退回最后一次已知价 —— 与回测末尾的强平
+		// 同一套兜底逻辑，但发生在真正摘牌的时候而不是最后一天。
+		e.forceCloseDelisted(state, pricesCache, date, logger)
 
 		// P1-12：把「回测的今天」交给 tracker，必须在生成信号之前。
 		// 策略据此判断今天是不是调仓日 —— 没有它，策略只能退回墙钟，
@@ -646,7 +665,7 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 			}
 		}
 
-		signals, err := e.getSignals(ctx, params.StrategyName, params.StockPool, marketDataCache, date, state.Tracker)
+		signals, err := e.getSignals(ctx, params.StrategyName, universe, marketDataCache, date, state.Tracker)
 		if err != nil {
 			logger.Warn().
 				Time("date", date).
@@ -663,7 +682,7 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		state.Tracker.RecordDailyValue(date, pricesCache)
 		state.Tracker.AdvanceDay(date)
 
-		for _, symbol := range params.StockPool {
+		for _, symbol := range universe {
 			if ohlcvData, ok := marketDataCache[symbol]; ok && len(ohlcvData) > 0 {
 				todayBar := ohlcvData[len(ohlcvData)-1]
 				if todayBar.LimitUp {
@@ -772,6 +791,118 @@ func (e *Engine) fundamentalsSnapshot() map[string]strategy.FundamentalSeries {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.fundamentals
+}
+
+// SetListingWindows 让调用方直接注入上市日历（P2-4），跳过预热。
+//
+// 给测试和「stocks 表在别处」的场景留的门。传 nil = 没有这份数据，
+// 引擎会放弃过滤并如实上报（见 listing 字段注释）。
+func (e *Engine) SetListingWindows(windows map[string]storage.ListingWindow) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.listing = windows
+}
+
+// ListingWindows 返回当前使用的上市日历（并发安全，只读）。
+func (e *Engine) ListingWindows() map[string]storage.ListingWindow {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.listing
+}
+
+// loadListingCalendar 预热上市日历（P2-4）。
+//
+// 一次查询覆盖整个回测区间：回测每天要判断几千只票在不在市，逐日查库
+// 不可行，而这份数据是低频的（一年变不了几只）。
+//
+// 取不到时不报错 —— 没有日历只是「治不了幸存者偏差」，不是回测失败。
+// 但会打 warn，并且 ListingWindows() 返回空，让偏差维能如实记上这条债。
+func (e *Engine) loadListingCalendar(ctx context.Context) {
+	e.mu.RLock()
+	store := e.store
+	e.mu.RUnlock()
+	if store == nil {
+		return
+	}
+
+	windows, err := store.GetListingWindows(ctx)
+	if err != nil {
+		e.logger.Warn().Err(err).Msg(
+			"Listing calendar load failed — 无法按日在市过滤，池子仍是当前上市名单（幸存者偏差未修）")
+		return
+	}
+	if len(windows) == 0 {
+		e.logger.Warn().Msg(
+			"stocks 表为空 — 无法按日在市过滤，池子仍是当前上市名单（幸存者偏差未修）")
+		return
+	}
+
+	delisted := 0
+	for _, w := range windows {
+		if w.Delist != nil {
+			delisted++
+		}
+	}
+	e.mu.Lock()
+	e.listing = windows
+	e.mu.Unlock()
+
+	e.logger.Info().
+		Int("stocks", len(windows)).
+		Int("delisted", delisted).
+		Msg("Listing calendar loaded")
+}
+
+// heldSymbols 取出当前还持仓的股票。
+//
+// universe 过滤要用到它：已退市但还持仓的票不能从池子里消失，否则永远
+// 平不掉仓。只统计数量非零的 —— 数量为 0 的残留条目不该撑开 universe。
+func heldSymbols(tracker *Tracker) map[string]bool {
+	out := make(map[string]bool)
+	for symbol, pos := range tracker.GetAllPositions() {
+		if abs(pos.Quantity) > 1e-8 {
+			out[symbol] = true
+		}
+	}
+	return out
+}
+
+// eligibleUniverse 返回 date 当天真正参与回测的股票集合（P2-4）。
+//
+// 两个来源取并集：
+//  1. 当天仍在市 —— 未上市的不能算（那是"未来股"，另一种前视偏差），
+//     已摘牌的不能算（那时候它已经不存在了，拿不到价格也交易不了）。
+//  2. 还持仓的 —— 哪怕已退市也要留着，否则持仓永远卡在账上：既卖不掉
+//     也不计损益，比"收益被高估"更离谱。它们会在当天被强制平掉。
+//
+// 没有上市日历时原样返回 pool（不过滤），调用方需自行上报这条偏差。
+// 返回的顺序与入参一致 —— 顺序会影响成交序列，不能引入随机性（P1-14）。
+func (e *Engine) eligibleUniverse(pool []string, date time.Time, held map[string]bool) []string {
+	e.mu.RLock()
+	listing := e.listing
+	e.mu.RUnlock()
+
+	if len(listing) == 0 {
+		return pool
+	}
+
+	out := make([]string, 0, len(pool))
+	for _, s := range pool {
+		w, known := listing[s]
+		switch {
+		case !known:
+			// 日历里查不到这只票 —— 不知道就放进去了？不。
+			// 宁可漏也不能凭空造：留它在池子里等于假设"它一直在市"，
+			// 那正是要修的偏差本身。但要如实记一笔，否则池子悄悄缩水。
+			e.logger.Debug().Str("symbol", s).Time("date", date).
+				Msg("Symbol absent from listing calendar — excluded from universe")
+		case w.IsListed(date):
+			out = append(out, s)
+		case held[s]:
+			out = append(out, s) // 已退市但仍持仓：留着等强平
+		}
+	}
+	return out
 }
 
 // warmFundamentals 预热基本面数据（P2-12）。

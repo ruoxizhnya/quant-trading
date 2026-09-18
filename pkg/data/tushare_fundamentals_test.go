@@ -340,3 +340,66 @@ func TestNormalizeFundamentals_MissingStaysNil(t *testing.T) {
 		t.Fatalf("PE 应为 0，实际 %v", *got[1].PE)
 	}
 }
+
+// ─── P2-4：退市日期 ────────────────────────────────────────────────────
+//
+// stock_basic 的第 8 列 delist_date 此前被整个丢弃，且 Status 无条件写
+// "active" —— 于是就算同步了退市票（list_status=D），库里也看不出谁退了市，
+// 「某日仍在市的池子」根本构造不出来。
+
+func TestNormalizeStocks_ParsesDelistDate(t *testing.T) {
+	client := &TushareClient{}
+
+	resp := &TushareResponse{
+		Code: 0,
+		Data: TushareData{
+			Fields: []string{"ts_code", "symbol", "name", "area", "industry", "market", "list_date", "delist_date", "is_hs"},
+			Items: [][]any{
+				// 已退市（摘牌日已过）
+				{"600001.SH", "600001", "老股票", "上海", "银行", "主板", "20000101", "20210601", "S"},
+				// 仍在市（delist_date 为空）
+				{"600519.SH", "600519", "贵州茅台", "贵州", "食品", "主板", "20010827", "", "S"},
+			},
+		},
+	}
+
+	stocks := client.normalizeStocks(resp)
+	if len(stocks) != 2 {
+		t.Fatalf("expected 2 stocks, got %d", len(stocks))
+	}
+
+	gone := stocks[0]
+	if gone.DelistDate == nil {
+		t.Fatal("delist_date 必须落进 DelistDate —— 没有它就无法构造按日在市的池子")
+	}
+	want, _ := time.Parse("20060102", "20210601")
+	assert.Equal(t, want, *gone.DelistDate)
+	// 摘牌日已过 → 状态必须是 delisted，不能还是 active。
+	assert.Equal(t, "delisted", gone.Status,
+		"退市票不能被标成 active，否则下游会当成正常可交易标的")
+
+	alive := stocks[1]
+	assert.Nil(t, alive.DelistDate, "未退市的 DelistDate 必须是 nil，不是零值时间")
+	assert.Equal(t, "active", alive.Status)
+}
+
+// 摘牌日在未来（已公告但尚未执行）：票还在市，Status 不该提前变。
+func TestNormalizeStocks_FutureDelistDateStaysActive(t *testing.T) {
+	client := &TushareClient{}
+
+	future := time.Now().AddDate(1, 0, 0).Format("20060102")
+	resp := &TushareResponse{
+		Code: 0,
+		Data: TushareData{
+			Fields: []string{"ts_code", "symbol", "name", "area", "industry", "market", "list_date", "delist_date", "is_hs"},
+			Items:  [][]any{{"600002.SH", "600002", "待退市", "上海", "银行", "主板", "20000101", future, "S"}},
+		},
+	}
+
+	stocks := client.normalizeStocks(resp)
+	if len(stocks) != 1 {
+		t.Fatalf("expected 1 stock, got %d", len(stocks))
+	}
+	assert.NotNil(t, stocks[0].DelistDate, "已公告的摘牌日要记下来")
+	assert.Equal(t, "active", stocks[0].Status, "还没到摘牌日就还是 active")
+}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -809,12 +810,56 @@ func (e *stocksExecutor) Execute(ctx context.Context, job *sync.Job, progress sy
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
-	stocks, err := e.tc.FetchStocks(ctx, params.Exchange, params.ListStatus)
-	if err != nil {
-		return nil, err
+	// P2-4：一次同步拿全「在市 + 退市 + 暂停上市」三档。
+	//
+	// tushare stock_basic 的 list_status 一次只接受一档，而**只同步 L（在市）
+	// 就是幸存者偏差的物理成因** —— 回测 2020 年时，2021 年退市的票根本
+	// 不在库里，于是它最惨的那段行情永远不会出现在任何回测结果中。
+	// "ALL" 与逗号分隔展开成 L/D/P 三次拉取，结果合并落库。
+	statuses := expandListStatus(params.ListStatus)
+
+	total := 0
+	perStatus := make(map[string]int, len(statuses))
+	for _, s := range statuses {
+		stocks, err := e.tc.FetchStocks(ctx, params.Exchange, s)
+		if err != nil {
+			return nil, fmt.Errorf("fetch stocks (list_status=%s): %w", s, err)
+		}
+		total += len(stocks)
+		perStatus[s] = len(stocks)
 	}
 
-	return map[string]any{"count": len(stocks)}, nil
+	return map[string]any{
+		"count":      total,
+		"per_status": perStatus,
+		// 明示这一批是否含退市票 —— 下游判断池子有没有幸存者偏差要看它。
+		"includes_delisted": len(statuses) > 1,
+	}, nil
+}
+
+// expandListStatus 把同步参数里的 list_status 展开成 tushare 能接受的单档列表。
+//
+//   - "" / "L" → 只在市（现状，保留默认行为）
+//   - "ALL"    → L 上市 + D 退市 + P 暂停上市
+//   - "L,P"    → 按逗号原样展开
+func expandListStatus(v string) []string {
+	switch strings.ToUpper(strings.TrimSpace(v)) {
+	case "":
+		return []string{"L"}
+	case "ALL":
+		return []string{"L", "D", "P"}
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.ToUpper(strings.TrimSpace(p)); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"L"}
+	}
+	return out
 }
 
 // ohlcvExecutor executes OHLCV sync jobs.

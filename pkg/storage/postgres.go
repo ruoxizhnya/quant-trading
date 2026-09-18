@@ -351,6 +351,12 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		// 「为什么当初没采纳它」的东西 —— 它和 metrics 一样是实验的证据。
 		// 加列带默认值即 metadata-only，幂等。
 		`ALTER TABLE experiments ADD COLUMN IF NOT EXISTS verdict JSONB`,
+		// Migration 030: stocks.delist_date (P2-4 / 幸存者偏差)
+		// 没有摘牌日就不可能构造「某日仍在市」的股票池：回测 2020 年时，
+		// 2021 年退市的票必须在池子里（否则收益被系统性高估），但又不能在
+		// 2021 年之后继续参与交易。两条都只能靠这个日期判定。
+		// 带默认值加列为 metadata-only，幂等。
+		`ALTER TABLE stocks ADD COLUMN IF NOT EXISTS delist_date DATE`,
 		// Migration 026: docs/migrations/026_widen_factor_name.sql (EQD-P1-2 / 桥 B1)
 		// 桥 B1 的 5 个纵向基本面因子名最长 24 字符，超出既有 VARCHAR(20)。
 		// 因子链路的三个表同源同一列，须同时放宽；加宽 varchar 为 metadata-only，不改写表。

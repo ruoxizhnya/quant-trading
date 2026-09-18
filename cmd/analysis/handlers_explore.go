@@ -12,11 +12,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	aicausal "github.com/ruoxizhnya/quant-trading/pkg/ai/causal"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/loop"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/pipeline"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/search"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/validation"
 )
 
@@ -67,9 +69,37 @@ type ExploreHandler struct {
 	// narrator 是因果维（P2-9f）的叙述者。nil = 因果维未评估 —— 没讲就是
 	// 没讲，不拿剩下五维凑一个"看起来完整"的结论。
 	narrator validation.Narrator
+	// listing 读引擎当前使用的上市日历（P2-4）。nil 或返回空 = 引擎这次
+	// 没能按日在市过滤，偏差维必须照实记上 PoolSourceCurrent。
+	listing func() map[string]storage.ListingWindow
 
 	mu   sync.Mutex
 	runs map[string]*exploreRun
+}
+
+// biasInput 组装这一轮的偏差维输入（P2-4）。
+//
+// 池子来源**按引擎的实测状态**决定，不再是写死的常量：引擎预热到了上市
+// 日历，就说明这次回测真的是「按日在市」取池子，那条 blocking 该消失；
+// 预热不到（stocks 表空 / 没连库），就仍然报 PoolSourceCurrent ——
+// 这时候债还在，藏起来它就会变成错误的自信。
+func (h *ExploreHandler) biasInput() validation.BiasInput {
+	in := exploreBias
+	if h.listing == nil {
+		return in // 无从判断，保持最保守的口径
+	}
+	windows := h.listing()
+	if len(windows) == 0 {
+		return in
+	}
+	in.PoolSource = validation.PoolSourcePointInTime
+	in.PoolSize = len(windows)
+	for _, w := range windows {
+		if w.Delist != nil {
+			in.DelistedInPool++
+		}
+	}
+	return in
 }
 
 // exploreRun 是一轮进行中（或已结束）的探索。
@@ -140,12 +170,18 @@ func (h *ExploreHandler) RegisterExploreRoutes(router *gin.RouterGroup) {
 //
 // 探索用的 pipeline 实例**必须带上实验日志落点** —— 否则这一路的尝试一行
 // 都不会记，而「试了多少次」正是过拟合检测唯一依赖的数字。
-func registerExploreRoutes(router *gin.Engine, runner pipeline.BacktestRunner, sink pipeline.ExperimentSink) {
+func registerExploreRoutes(router *gin.Engine, runner pipeline.BacktestRunner, sink pipeline.ExperimentSink, engine *backtest.Engine) {
 	var opts []pipeline.PipelineOption
 	if sink != nil {
 		opts = append(opts, pipeline.WithExperimentSink(sink))
 	}
 	handler := NewExploreHandler(pipeline.NewPipeline(opts...), runner)
+	// P2-4：上市日历读到什么口径，偏差维就报什么口径。engine 可能为 nil
+	//（DB 没配），那种情况下 listing 保持 nil，偏差维退回最保守的
+	// PoolSourceCurrent —— 债还在就照实记。
+	if engine != nil {
+		handler.listing = engine.ListingWindows
+	}
 	// 实验日志落点若同时能写裁决（*storage.PostgresStore 满足），就把裁决
 	// 也接上；不满足就只记日志不记裁决。main.go 里 Store 可能为 nil
 	//（DB 没配），那种情况 sink 是 nil 接口，断言自然失败。
@@ -210,7 +246,7 @@ func (h *ExploreHandler) Start(c *gin.Context) {
 			RunID:       runID,
 			Description: req.Description,
 			MaxTries:    req.MaxTries,
-			Bias:        exploreBias,
+			Bias:        h.biasInput(),
 			OnAttempt: func(a loop.Attempt) {
 				run.mu.Lock()
 				run.attempts = append(run.attempts, a)
