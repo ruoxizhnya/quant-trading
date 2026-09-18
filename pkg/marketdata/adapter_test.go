@@ -272,15 +272,17 @@ func TestDataAdapter_GetFundamental(t *testing.T) {
 
 	primary := newMockProvider("primary")
 	date := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	pe := 15.5
 	primary.fundamentals["A"] = map[time.Time]*domain.Fundamental{
-		date: {Symbol: "A", Date: date, PE: 15.5},
+		date: {Symbol: "A", Date: date, PE: &pe},
 	}
 
 	adapter := NewDataAdapter(bus, primary, nil, zerolog.Nop())
 
 	fund, err := adapter.GetFundamental(context.Background(), "A", date)
 	require.NoError(t, err)
-	assert.Equal(t, 15.5, fund.PE)
+	require.NotNil(t, fund.PE, "PE 有值时不该是 nil —— nil 表示未披露")
+	assert.Equal(t, 15.5, *fund.PE)
 }
 
 func TestDataAdapter_GetStocks(t *testing.T) {

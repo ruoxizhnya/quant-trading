@@ -66,21 +66,29 @@ type Dividend struct {
 }
 
 // Fundamental represents fundamental financial data.
+//
+// 数值字段一律是 *float64：财报里缺一项是常态（当季没披露、口径不同、
+// 采集漏了），而 **"缺失"和"等于 0"是两件完全不同的事** ——
+// PE=0 会被读成"白送的股票"，是那种会让人真的买错东西的错。
+//
+// 改用指针之前，存储层用 COALESCE(col, 0) 兜底（见 TASKS P2-10）：
+// 库里的 NULL 和真实 0 都被折成 0.0，下游无从分辨。现在 nil 就是"不知道"，
+// 用之前必须显式判空 —— 这层啰嗦正是这个类型存在的理由。
 type Fundamental struct {
 	Symbol       string    `json:"symbol"`
 	Date         time.Time `json:"date"`
-	PE           float64   `json:"pe"`
-	PB           float64   `json:"pb"`
-	PS           float64   `json:"ps"`
-	ROE          float64   `json:"roe"`
-	ROA          float64   `json:"roa"`
-	DebtToEquity float64   `json:"debt_to_equity"`
-	GrossMargin  float64   `json:"gross_margin"`
-	NetMargin    float64   `json:"net_margin"`
-	Revenue      float64   `json:"revenue"`
-	NetProfit    float64   `json:"net_profit"`
-	TotalAssets  float64   `json:"total_assets"`
-	TotalLiab    float64   `json:"total_liab"`
+	PE           *float64  `json:"pe"`
+	PB           *float64  `json:"pb"`
+	PS           *float64  `json:"ps"`
+	ROE          *float64  `json:"roe"`
+	ROA          *float64  `json:"roa"`
+	DebtToEquity *float64  `json:"debt_to_equity"`
+	GrossMargin  *float64  `json:"gross_margin"`
+	NetMargin    *float64  `json:"net_margin"`
+	Revenue      *float64  `json:"revenue"`
+	NetProfit    *float64  `json:"net_profit"`
+	TotalAssets  *float64  `json:"total_assets"`
+	TotalLiab    *float64  `json:"total_liab"`
 }
 
 // FundamentalData represents financial data from Tushare financial_data API.

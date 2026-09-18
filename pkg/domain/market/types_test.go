@@ -132,23 +132,27 @@ func TestDividend_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+// f64 把常量转成 *float64 —— Fundamental 的数值字段是指针，
+// nil 表示"未披露"，非 nil 才是真的数。
+func f64(v float64) *float64 { return &v }
+
 // TestFundamental_JSONRoundTrip verifies Fundamental serialization.
 func TestFundamental_JSONRoundTrip(t *testing.T) {
 	original := Fundamental{
 		Symbol:       "000001.SZ",
 		Date:         time.Date(2025, 3, 31, 0, 0, 0, 0, time.UTC),
-		PE:           8.5,
-		PB:           0.7,
-		PS:           1.2,
-		ROE:          12.3,
-		ROA:          1.1,
-		DebtToEquity: 95.4,
-		GrossMargin:  50.2,
-		NetMargin:    25.1,
-		Revenue:      1.2e11,
-		NetProfit:    3.0e10,
-		TotalAssets:  8.5e12,
-		TotalLiab:    7.8e12,
+		PE:           f64(8.5),
+		PB:           f64(0.7),
+		PS:           f64(1.2),
+		ROE:          f64(12.3),
+		ROA:          f64(1.1),
+		DebtToEquity: f64(95.4),
+		GrossMargin:  f64(50.2),
+		NetMargin:    f64(25.1),
+		Revenue:      f64(1.2e11),
+		NetProfit:    f64(3.0e10),
+		TotalAssets:  f64(8.5e12),
+		TotalLiab:    f64(7.8e12),
 	}
 	data, err := json.Marshal(original)
 	if err != nil {
@@ -158,8 +162,14 @@ func TestFundamental_JSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
-	if decoded != original {
-		t.Fatalf("round-trip mismatch:\n  original=%+v\n  decoded =%+v", original, decoded)
+	// 指针字段不能用 == 比（比的是地址，永远不等）—— 比序列化后的字节，
+	// 那里比的才是值。
+	redata, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatalf("Re-marshal failed: %v", err)
+	}
+	if string(redata) != string(data) {
+		t.Fatalf("round-trip mismatch:\n  original=%s\n  decoded =%s", data, redata)
 	}
 }
 

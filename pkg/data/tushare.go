@@ -375,21 +375,23 @@ func (c *TushareClient) normalizeFundamentals(resp *TushareResponse) []domain.Fu
 		endDateStr := c.fieldStr(item, 2)
 		t, _ := time.Parse("20060102", endDateStr)
 
+		// 用 fieldFloatPtr 而不是 fieldFloat：源端缺字段时留下 nil（未知），
+		// 而不是 0（会被下游读成"PE = 0，白送的股票"）。见 TASKS P2-10。
 		fund := domain.Fundamental{
 			Symbol:       symbol,
 			Date:         t,
-			PE:           c.fieldFloat(item, 3),
-			PB:           c.fieldFloat(item, 4),
-			PS:           c.fieldFloat(item, 5),
-			ROE:          c.fieldFloat(item, 6),
-			ROA:          c.fieldFloat(item, 7),
-			DebtToEquity: c.fieldFloat(item, 8),
-			GrossMargin:  c.fieldFloat(item, 9),
-			NetMargin:    c.fieldFloat(item, 10),
-			Revenue:      c.fieldFloat(item, 11),
-			NetProfit:    c.fieldFloat(item, 12),
-			TotalAssets:  c.fieldFloat(item, 13),
-			TotalLiab:    c.fieldFloat(item, 14),
+			PE:           c.fieldFloatPtr(item, 3),
+			PB:           c.fieldFloatPtr(item, 4),
+			PS:           c.fieldFloatPtr(item, 5),
+			ROE:          c.fieldFloatPtr(item, 6),
+			ROA:          c.fieldFloatPtr(item, 7),
+			DebtToEquity: c.fieldFloatPtr(item, 8),
+			GrossMargin:  c.fieldFloatPtr(item, 9),
+			NetMargin:    c.fieldFloatPtr(item, 10),
+			Revenue:      c.fieldFloatPtr(item, 11),
+			NetProfit:    c.fieldFloatPtr(item, 12),
+			TotalAssets:  c.fieldFloatPtr(item, 13),
+			TotalLiab:    c.fieldFloatPtr(item, 14),
 		}
 		records = append(records, fund)
 	}

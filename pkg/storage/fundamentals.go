@@ -161,17 +161,17 @@ func (s *PostgresStore) GetFundamental(ctx context.Context, symbol string, date 
 // 与 GetFundamentalsSnapshot 一致的 PIT 语义：可用日 = COALESCE(ann_date, trade_date)。
 // 见 TASKS P0-1；修复前按 trade_date 过滤存在同样的前视偏差。
 //
-// 注意：domain.Fundamental 的数值字段是 float64（非指针），而表中这些列可为空，
-// 直接扫描会因 "cannot scan NULL" 报错，故用 COALESCE(col, 0) 兜底。
-// 缺失值被当作 0 而非"未知"，对因子计算不够严谨 —— 见 TASKS P2-10。
+// 数值列可为空，而 domain.Fundamental 用的是 *float64：NULL 扫成 nil，
+// 于是"这一项没披露"和"这一项是 0"终于能分开（见 TASKS P2-10）。
+//
+// 这里**不再**用 COALESCE(col, 0) 兜底 —— 那个兜底把 PE 缺失读成 PE=0，
+// 而 PE=0 在估值因子眼里是"极便宜"。宁可让下游判空，也不能给假数字。
 func (s *PostgresStore) GetFundamentals(ctx context.Context, symbol string, date time.Time) ([]domain.Fundamental, error) {
 	query := `
 		SELECT ts_code, trade_date,
-			COALESCE(pe, 0), COALESCE(pb, 0), COALESCE(ps, 0),
-			COALESCE(roe, 0), COALESCE(roa, 0), COALESCE(debt_to_equity, 0),
-			COALESCE(gross_margin, 0), COALESCE(net_margin, 0),
-			COALESCE(revenue, 0), COALESCE(net_profit, 0),
-			COALESCE(total_assets, 0), COALESCE(total_liab, 0)
+			pe, pb, ps, roe, roa, debt_to_equity,
+			gross_margin, net_margin,
+			revenue, net_profit, total_assets, total_liab
 		FROM stock_fundamentals
 		WHERE ts_code = $1 AND COALESCE(ann_date, trade_date) <= $2
 		ORDER BY COALESCE(ann_date, trade_date) DESC, end_date DESC

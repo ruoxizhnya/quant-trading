@@ -203,13 +203,19 @@ func (s *valueMomentumStrategy) GenerateSignals(
 }
 
 // stockFactorData holds calculated factor data for a stock.
+// stockFactorData 里估值/质量项用 *float64：财报没披露就是 nil，不是 0。
+//
+// 之前用 float64 + 「0 表示缺」的隐式约定，问题在于 **0 本身就是个合法
+// 的数**（ROE 为 0 是盈亏平衡，不是"没数据"），而 PE 缺失被折成 0 之后，
+// 在「PE 越低越便宜」的排序里会直接冲到第一名 —— 一只数据不全的股票会被
+// 当成最便宜的票买进来。见 TASKS P2-10。
 type stockFactorData struct {
 	Symbol    string
 	MarketCap float64
-	PE        float64
-	PB        float64
+	PE        *float64
+	PB        *float64
 	Momentum  float64
-	ROE       float64
+	ROE       *float64
 }
 
 // percentileData holds percentile thresholds.
@@ -324,11 +330,13 @@ func (s *valueMomentumStrategy) calculatePercentiles(data map[string]*stockFacto
 	pbValues := make([]float64, 0)
 
 	for _, d := range data {
-		if d.PE > 0 {
-			peValues = append(peValues, d.PE)
+		// 只把**有数据**的放进分布：没披露的不补 0、不补均值 ——
+		// 补进去就是把假数字当成观测值，分位数会被它们拖偏。
+		if d.PE != nil && *d.PE > 0 {
+			peValues = append(peValues, *d.PE)
 		}
-		if d.PB > 0 {
-			pbValues = append(pbValues, d.PB)
+		if d.PB != nil && *d.PB > 0 {
+			pbValues = append(pbValues, *d.PB)
 		}
 	}
 
@@ -346,25 +354,27 @@ func (s *valueMomentumStrategy) calculateZScores(
 	zScores := make(map[string]*zScoreData)
 
 	// Calculate z-scores for PE (inverse: lower is better)
-	peMean, peStd := calculateMeanStd(data, func(d *stockFactorData) float64 { return d.PE })
+	peMean, peStd := calculateMeanStd(data, func(d *stockFactorData) *float64 { return d.PE })
 	// Calculate z-scores for PB (inverse: lower is better)
-	pbMean, pbStd := calculateMeanStd(data, func(d *stockFactorData) float64 { return d.PB })
+	pbMean, pbStd := calculateMeanStd(data, func(d *stockFactorData) *float64 { return d.PB })
 	// Calculate z-scores for momentum (higher is better)
-	moMean, moStd := calculateMeanStd(data, func(d *stockFactorData) float64 { return d.Momentum })
+	moMean, moStd := calculateMeanStd(data, func(d *stockFactorData) *float64 { return &d.Momentum })
 	// Calculate z-scores for quality/ROE (higher is better)
-	quMean, quStd := calculateMeanStd(data, func(d *stockFactorData) float64 { return d.ROE })
+	quMean, quStd := calculateMeanStd(data, func(d *stockFactorData) *float64 { return d.ROE })
 
 	for symbol, d := range data {
 		zs := &zScoreData{Symbol: symbol}
 
 		// PE: inverse (cheaper = better, so negative z-score for high PE)
-		if peStd > 0 && d.PE > 0 {
-			zs.ZScorePE = -(d.PE - peMean) / peStd
+		// 没有 PE 的股票在这一项上得 0 分（= 中性），而不是"最便宜" ——
+		// 缺失不该变成极端值，那是把数据问题翻译成了投资信号。
+		if peStd > 0 && d.PE != nil && *d.PE > 0 {
+			zs.ZScorePE = -(*d.PE - peMean) / peStd
 		}
 
 		// PB: inverse (cheaper = better)
-		if pbStd > 0 && d.PB > 0 {
-			zs.ZScorePB = -(d.PB - pbMean) / pbStd
+		if pbStd > 0 && d.PB != nil && *d.PB > 0 {
+			zs.ZScorePB = -(*d.PB - pbMean) / pbStd
 		}
 
 		// Momentum: higher is better
@@ -373,8 +383,8 @@ func (s *valueMomentumStrategy) calculateZScores(
 		}
 
 		// Quality/ROE: higher is better
-		if quStd > 0 {
-			zs.ZScoreQu = (d.ROE - quMean) / quStd
+		if quStd > 0 && d.ROE != nil {
+			zs.ZScoreQu = (*d.ROE - quMean) / quStd
 		}
 
 		zScores[symbol] = zs
@@ -470,12 +480,22 @@ func calculatePercentile(values []float64, percentile float64) float64 {
 // The NaN/Inf/zero filter is preserved here (legacy behaviour: ignore
 // stocks with missing or zero factor values) and the core math is
 // delegated to pkg/statistics (ODR-013 P1-21).
-func calculateMeanStd(data map[string]*stockFactorData, extractor func(*stockFactorData) float64) (mean, std float64) {
+// calculateMeanStd 只统计**有数据**的样本。
+//
+// extractor 返回 nil 表示这一项没披露 —— 它不进分布，既不补 0 也不补均值。
+// 补进去就是拿假观测值参与统计，标准差和均值会一起被拖偏。
+//
+// （改指针之前这里靠 "v != 0" 来近似"缺数据"，而 0 本身是合法值：
+// ROE 为 0 是盈亏平衡，不是没数据。）
+func calculateMeanStd(data map[string]*stockFactorData, extractor func(*stockFactorData) *float64) (mean, std float64) {
 	values := make([]float64, 0, len(data))
 	for _, d := range data {
 		v := extractor(d)
-		if !math.IsNaN(v) && !math.IsInf(v, 0) && v != 0 {
-			values = append(values, v)
+		if v == nil {
+			continue
+		}
+		if !math.IsNaN(*v) && !math.IsInf(*v, 0) {
+			values = append(values, *v)
 		}
 	}
 

@@ -297,3 +297,46 @@ func TestFieldFloatPtr_ValidValue(t *testing.T) {
 		})
 	}
 }
+
+// TestNormalizeFundamentals_MissingStaysNil 是 P2-10 的回归测试。
+//
+// normalizeFundamentals 走的是 domain.Fundamental 这条路径，之前它把源端
+// 缺的字段折成 0 —— 于是「这家公司没披露 PE」被下游读成「PE = 0，白送的
+// 股票」。现在缺就是 nil，0 只在该公司真的算出 0 的时候出现。
+func TestNormalizeFundamentals_MissingStaysNil(t *testing.T) {
+	client := &TushareClient{}
+
+	resp := &TushareResponse{
+		Code: 0,
+		Msg:  "ok",
+		Data: TushareData{
+			Fields: []string{"ts_code", "ann_date", "end_date", "pe", "pb"},
+			Items: [][]any{
+				// PE 缺失（源端给 null）—— 第三列之后全部没有。
+				{"600000.SH", "20241025", "20240930", nil, 1.2},
+				// PE 是 0 的情况：亏损股在部分口径下 PE 会是 0，
+				// 那是真值，必须和"没披露"区分开。
+				{"000001.SZ", "20241020", "20240930", 0.0, 1.1},
+			},
+		},
+	}
+
+	got := client.normalizeFundamentals(resp)
+	if len(got) != 2 {
+		t.Fatalf("应有 2 条，实际 %d", len(got))
+	}
+
+	if got[0].PE != nil {
+		t.Fatalf("源端没给 PE，应当是 nil（未知），实际 %v", *got[0].PE)
+	}
+	if got[0].PB == nil {
+		t.Fatal("PB 有值，不该是 nil")
+	}
+
+	if got[1].PE == nil {
+		t.Fatal("第二条的 PE 是真实的 0，不能和「未披露」混为一谈")
+	}
+	if *got[1].PE != 0 {
+		t.Fatalf("PE 应为 0，实际 %v", *got[1].PE)
+	}
+}
