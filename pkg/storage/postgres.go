@@ -337,12 +337,20 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			expression    TEXT,
 			status        VARCHAR(16)  NOT NULL DEFAULT 'running',
 			metrics       JSONB,
+			verdict       JSONB,
 			error_message TEXT,
 			created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 			finished_at   TIMESTAMPTZ,
 			UNIQUE (run_id, seq)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_experiments_run_seq ON experiments(run_id, seq)`,
+		// Migration 029: experiments.verdict (P2-9 接线 / A)
+		// 验证器链每次尝试后跑一遍，裁决（概率 + 质疑清单）写回那一行。
+		// 为什么要落库而不是只在内存里传给前端：runs 是进程内 map，一重启裁决
+		// 就没了，而「这次尝试当时被质疑了什么」是复盘时唯一能回答
+		// 「为什么当初没采纳它」的东西 —— 它和 metrics 一样是实验的证据。
+		// 加列带默认值即 metadata-only，幂等。
+		`ALTER TABLE experiments ADD COLUMN IF NOT EXISTS verdict JSONB`,
 		// Migration 026: docs/migrations/026_widen_factor_name.sql (EQD-P1-2 / 桥 B1)
 		// 桥 B1 的 5 个纵向基本面因子名最长 24 字符，超出既有 VARCHAR(20)。
 		// 因子链路的三个表同源同一列，须同时放宽；加宽 varchar 为 metadata-only，不改写表。

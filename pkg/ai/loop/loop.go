@@ -16,6 +16,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/pipeline"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
+	"github.com/ruoxizhnya/quant-trading/pkg/validation"
 )
 
 // TryRunner 跑一次尝试。*pipeline.Pipeline 天然满足它。
@@ -76,6 +77,12 @@ type Attempt struct {
 	Err          error
 	Value        float64
 	OK           bool
+
+	// Verdict 是验证器链对这次尝试的裁决（P2-9）。
+	//
+	// 只有跑出回测结果的尝试才有 —— 失败的尝试没有可被证伪的东西。
+	// 质疑清单和概率都在这里，观察页直接拿去展示，不必再算一遍。
+	Verdict *validation.Verdict `json:"verdict,omitempty"`
 }
 
 // RunResult 是一轮探索的结果。
@@ -99,6 +106,13 @@ type Config struct {
 	// DatasetSplit 这批尝试用的数据划分。空则按 train 记 —— 默认必须显式
 	// 偏向训练期，而不是留空让人分不清这行用的哪份数据。
 	DatasetSplit string
+	// Bias 是偏差维的输入（前视 / 幸存者 / 复权口径）。
+	//
+	// 它是**全局口径**而不是每次尝试的属性：行情是不是前复权、股票池按哪个
+	// 名单取的，这些对整轮探索都一样。所以由调用方（handler）给一次，
+	// 而不是控制器自己猜。留空 = 偏差维未评估（会在质疑清单里明说）。
+	Bias validation.BiasInput
+
 	// OnAttempt 在每次尝试结束后调用（P1-3）。成功失败都会调。
 	//
 	// 没有它，一轮几十上百次尝试在跑完之前完全是黑盒 —— 观察者既不知道
@@ -156,6 +170,10 @@ func (c *Controller) Run(ctx context.Context, cfg Config) (*RunResult, error) {
 
 	out := &RunResult{RunID: cfg.RunID, Stopped: StopExhausted}
 	observed := make([]Observation, 0, cfg.MaxTries)
+	// 本轮已完成的成功尝试 —— 它天然就是稳健维要的「参数邻域」：
+	// 一轮探索里试过的那些相近参数，正是判断中心点是高原还是尖峰的素材。
+	history := make([]validation.NeighborPoint, 0, cfg.MaxTries)
+	failed := 0
 	// seq → 实验日志行 ID。Proposer 只给 seq，翻译成 ID 要靠这张表。
 	idBySeq := make(map[int]int64, cfg.MaxTries)
 
@@ -201,6 +219,32 @@ func (c *Controller) Run(ctx context.Context, cfg Config) (*RunResult, error) {
 			a.OK = true
 			a.Value = objective(res.BacktestResult)
 		}
+
+		if a.OK {
+			// 验证器在**每次尝试后**跑，不是跑完整轮才跑 ——
+			// 观察者要能在中途就看见「这个方向被质疑了」，
+			// 而不是等几十次尝试跑完才知道该不该叫停。
+			v := validation.ValidateProposal(validation.Proposal{
+				Name:         cfg.Description,
+				Result:       res.BacktestResult,
+				NumTrials:    seq + 1, // 含当前这次，也含失败
+				FailedTrials: failed,
+				Neighbors:    history,
+				Bias:         cfg.Bias,
+			})
+			a.Verdict = &v
+
+			history = append(history, validation.NeighborPoint{
+				Params: a.Params,
+				Sharpe: res.BacktestResult.SharpeRatio,
+				Return: res.BacktestResult.TotalReturn,
+			})
+		} else {
+			failed++
+		}
+
+		// 追加放在裁决算完之后 —— Attempt 是值类型，append 拷的是副本。
+		// 先 append 再填 Verdict，库里那一版永远是空的（踩过一次）。
 		out.Tries = append(out.Tries, a)
 
 		observed = append(observed, Observation{

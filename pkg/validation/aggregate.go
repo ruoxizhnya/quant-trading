@@ -3,6 +3,7 @@ package validation
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
@@ -42,6 +43,14 @@ type Proposal struct {
 
 	// Existing 是组合里已有的策略，冗余维拿它比相关性。
 	Existing map[string]*domain.BacktestResult `json:"-"`
+
+	// Causal 是因果维的结果，由调用方**预先跑好**再喂进来。
+	//
+	// 为什么不在这里调 LLM：聚合器必须是纯的、快跑的 —— 探索里每次尝试
+	// 都要过一遍验证器，而因果维是唯一要花一次模型调用的一维。让它留在
+	// 调用方手里，才能决定「只给最终候选做一次」还是「每次都做」。
+	// 为 nil = 未评估（不是通过），会被记进 Unassessed。
+	Causal *CausalResult `json:"-"`
 }
 
 // Verdict 是聚合后的结论。
@@ -77,6 +86,7 @@ type Verdict struct {
 	Robustness  *RobustnessResult  `json:"robustness,omitempty"`
 	BiasResult  *BiasResult        `json:"bias,omitempty"`
 	Redundancy  *RedundancyResult  `json:"redundancy,omitempty"`
+	Causal      *CausalResult      `json:"causal,omitempty"`
 }
 
 // ValidateProposal 跑一遍验证器链，输出质疑清单 + 概率估计。
@@ -183,8 +193,76 @@ func ValidateProposal(p Proposal) Verdict {
 		})
 	}
 
+	// --- 因果 ---
+	// 六维里唯一需要语言模型的一维，由调用方决定什么时候跑。
+	if p.Causal != nil {
+		v.Causal = p.Causal
+		v.Dimensions[DimensionCausal] = p.Causal.Probability
+		v.Challenges = append(v.Challenges, p.Causal.Challenges...)
+	} else {
+		v.Unassessed = append(v.Unassessed, DimensionCausal)
+		v.Challenges = append(v.Challenges, Challenge{
+			Dimension: DimensionCausal,
+			Severity:  SeverityNote,
+			Message: "因果维未评估：这一维要先让模型讲出机制并下可证伪的预测，" +
+				"再用确定性检验去验。没讲就是没讲 —— 不拿剩下的五维凑数。",
+		})
+	}
+
 	finalizeVerdict(&v)
 	return v
+}
+
+// AttachCausal 把因果维补进已有裁决，并重算综合概率。
+//
+// 因果维的节奏天生和另外五维不一样：另外五维每次尝试都跑，而它是**只对
+// 最终候选做一次**（一次模型调用不是免费的）。所以它是事后补进来的 ——
+// 补完之后必须重算综合概率，否则最弱维还停留在补之前的那一维上。
+func AttachCausal(v *Verdict, c *CausalResult) {
+	if v == nil || c == nil {
+		return
+	}
+	if _, ok := v.Dimensions[DimensionCausal]; !ok {
+		// 之前记过「未评估」，现在补上了 —— 从 Unassessed 里摘掉。
+		v.Unassessed = removeString(v.Unassessed, DimensionCausal)
+		// 同时摘掉那条「未评估」的 note，免得页面上自相矛盾。
+		v.Challenges = filterChallenges(v.Challenges, func(ch Challenge) bool {
+			return ch.Dimension == DimensionCausal && ch.Severity == SeverityNote &&
+				len(ch.Message) > 0 && containsUnassessedCausal(ch.Message)
+		})
+	}
+	v.Causal = c
+	v.Dimensions[DimensionCausal] = c.Probability
+	v.Challenges = append(v.Challenges, c.Challenges...)
+	finalizeVerdict(v)
+}
+
+// containsUnassessedCausal 认出「因果维未评估」那条 note。
+//
+// 用前缀而不是把文案抽成常量再比相等：那条 note 是给人读的，它属于输出
+// 而不是身份，为它建一个常量反而会诱导调用方去依赖文案本身。
+func containsUnassessedCausal(msg string) bool {
+	return strings.HasPrefix(msg, "因果维未评估")
+}
+
+func removeString(xs []string, s string) []string {
+	out := xs[:0]
+	for _, x := range xs {
+		if x != s {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+func filterChallenges(cs []Challenge, drop func(Challenge) bool) []Challenge {
+	out := cs[:0]
+	for _, c := range cs {
+		if !drop(c) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // finalizeVerdict 算综合概率与统计信息。
@@ -202,7 +280,14 @@ func finalizeVerdict(v *Verdict) {
 	// 顺序固定 —— 同一个提案两次跑出来的 weakest 必须一样。
 	order := []string{
 		DimensionStatistical, DimensionEconomic, DimensionRobustness,
-		DimensionBias, DimensionRedundancy,
+		DimensionBias, DimensionRedundancy, DimensionCausal,
+	}
+	// 缺的维度（未评估）也要排进来，否则因果维这种"后补"的一维
+	// 会因为不在 order 里而被漏掉。
+	for d := range v.Dimensions {
+		if !containsString(order, d) {
+			order = append(order, d)
+		}
 	}
 
 	minProb, weakest, prod := 2.0, "", 1.0
@@ -222,9 +307,20 @@ func finalizeVerdict(v *Verdict) {
 	v.Weakest = weakest
 	v.GeometricMean = math.Pow(prod, 1.0/float64(n))
 
+	// 重算而不是累加：AttachCausal 会二次调用，累加会把质疑数算成两倍。
+	v.Blocking = 0
 	for _, c := range v.Challenges {
 		if c.Severity == SeverityBlocking {
 			v.Blocking++
 		}
 	}
+}
+
+func containsString(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }

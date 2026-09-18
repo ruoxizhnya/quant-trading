@@ -47,9 +47,15 @@ type Experiment struct {
 	Expression   string
 	Status       string
 	Metrics      *ExperimentMetrics // 失败时为 nil
-	Error        string
-	CreatedAt    time.Time
-	FinishedAt   *time.Time // 未结束（含被叫停）时为 nil
+	// Verdict 是验证器链对这次尝试的裁决（P2-9），原样存 JSONB。
+	//
+	// 类型是 json.RawMessage 而不是 *validation.Verdict：storage 不能引
+	// validation（backtest → storage，引了就成环）。反正库里要的也是一份
+	// 能读的证据，不是能在 Go 里调方法的对象 —— 反序列化由读的那侧决定。
+	Verdict    json.RawMessage
+	Error      string
+	CreatedAt  time.Time
+	FinishedAt *time.Time // 未结束（含被叫停）时为 nil
 }
 
 // ExperimentMetrics 是一次尝试的产出指标。
@@ -65,7 +71,7 @@ type ExperimentMetrics struct {
 
 // experimentColumns 是 SELECT 的固定列序，scanExperiment 依赖它。
 const experimentColumns = `id, run_id, seq, parent_id, hypothesis, params, dataset_split,
-		       strategy_name, expression, status, metrics, error_message,
+		       strategy_name, expression, status, metrics, verdict, error_message,
 		       created_at, finished_at`
 
 // InsertExperiment 开一次尝试，返回自增 ID。
@@ -152,6 +158,29 @@ func (s *PostgresStore) CompleteExperiment(ctx context.Context, id int64, m *Exp
 	return nil
 }
 
+// RecordVerdict 把验证器链的裁决写回那一行实验（P2-9 接线）。
+//
+// 和 CompleteExperiment 分开，是因为裁决**不在 pipeline 里产生** —— 它由
+// 循环控制器在每次尝试之后跑（控制器不评价结果，它只负责把裁决接到链路上），
+// 时间上晚于 metrics 落库。硬塞进 CompleteExperiment 就得让 pipeline 认识
+// 验证器，那是编排层的事。
+//
+// 裁决写失败不回滚实验本身：它是对已有结果的评论，评论丢了，
+// 实验记录还在 —— 反过来（为了写评论把实验弄丢）才不可接受。
+func (s *PostgresStore) RecordVerdict(ctx context.Context, id int64, verdict json.RawMessage) error {
+	if id == 0 {
+		return nil
+	}
+	if len(verdict) == 0 {
+		return nil
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE experiments SET verdict = $2 WHERE id = $1`, id, verdict); err != nil {
+		return fmt.Errorf("failed to record experiment verdict: %w", err)
+	}
+	return nil
+}
+
 // ListExperiments 按尝试顺序（seq）回放一轮 run 的完整路径。
 //
 // 刻意不按插入时间排：并发跑的时候插入顺序是调度顺序，不是探索顺序，
@@ -179,12 +208,12 @@ func (s *PostgresStore) ListExperiments(ctx context.Context, runID string) ([]*E
 // 共有的最小接口，两条查询路径因此可以共用一份列序。
 func scanExperiment(row pgx.Row) (*Experiment, error) {
 	var e Experiment
-	var params, metrics []byte
+	var params, metrics, verdict []byte
 	var hypothesis, strategyName, expression, errMsg *string
 
 	err := row.Scan(
 		&e.ID, &e.RunID, &e.Seq, &e.ParentID, &hypothesis, &params, &e.DatasetSplit,
-		&strategyName, &expression, &e.Status, &metrics, &errMsg,
+		&strategyName, &expression, &e.Status, &metrics, &verdict, &errMsg,
 		&e.CreatedAt, &e.FinishedAt,
 	)
 	if err != nil {
@@ -202,6 +231,9 @@ func scanExperiment(row pgx.Row) (*Experiment, error) {
 			return nil, fmt.Errorf("failed to decode experiment metrics: %w", err)
 		}
 		e.Metrics = &m
+	}
+	if len(verdict) > 0 {
+		e.Verdict = json.RawMessage(verdict)
 	}
 
 	// TEXT 列允许 NULL（手工修数据的行会是 NULL），但 Go 侧用 string 而非 *string：
