@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -21,7 +22,7 @@ func runWalkForwardHandler(wfEngine *backtest.WalkForwardEngine, logger zerolog.
 	return func(c *gin.Context) {
 		var req backtest.WalkForwardRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+			httpserver.Wrap(c, http.StatusBadRequest, err, "invalid request: ")
 			return
 		}
 
@@ -41,7 +42,7 @@ func runWalkForwardHandler(wfEngine *backtest.WalkForwardEngine, logger zerolog.
 		report, err := wfEngine.RunWalkForward(c.Request.Context(), req)
 		if err != nil {
 			logger.Error().Err(err).Str("strategy", req.Strategy).Msg("Walk-forward validation failed")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -55,11 +56,11 @@ func getWalkForwardReportHandler(wfEngine *backtest.WalkForwardEngine) gin.Handl
 
 		report, err := wfEngine.GetLatestReport(c.Request.Context(), strategyID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		if report == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no walk-forward report found"})
+			httpserver.Fail(c, http.StatusNotFound, "no walk-forward report found")
 			return
 		}
 		c.JSON(http.StatusOK, report)
@@ -70,7 +71,7 @@ func listWalkForwardReportsHandler(wfEngine *backtest.WalkForwardEngine) gin.Han
 	return func(c *gin.Context) {
 		reports, err := wfEngine.ListReports(c.Request.Context(), 50)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"reports": reports, "count": len(reports)})

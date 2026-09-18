@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"errors"
 	"net/http"
 
@@ -52,25 +53,25 @@ func loginHandler(svc *auth.Service, logger zerolog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req loginRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "username and password required"})
+			httpserver.Fail(c, http.StatusBadRequest, "username and password required")
 			return
 		}
 		u, err := svc.Authenticate(c.Request.Context(), req.Username, req.Password)
 		if err != nil {
 			if errors.Is(err, auth.ErrUserDisabled) {
-				c.JSON(http.StatusForbidden, gin.H{"error": "account disabled"})
+				httpserver.Fail(c, http.StatusForbidden, "account disabled")
 				return
 			}
 			// Bad creds, unknown user, etc. — collapse to a single
 			// 401 with a generic message to avoid leaking which
 			// usernames exist.
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid username or password"})
+			httpserver.Fail(c, http.StatusUnauthorized, "invalid username or password")
 			return
 		}
 		access, refresh, err := svc.IssueTokens(u)
 		if err != nil {
 			logger.Error().Err(err).Msg("auth: IssueTokens failed")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "token issuance failed"})
+			httpserver.Fail(c, http.StatusInternalServerError, "token issuance failed")
 			return
 		}
 		c.JSON(http.StatusOK, tokenResponse{
@@ -92,12 +93,12 @@ func refreshHandler(svc *auth.Service, logger zerolog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req refreshRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "refresh_token required"})
+			httpserver.Fail(c, http.StatusBadRequest, "refresh_token required")
 			return
 		}
 		access, refresh, err := svc.Refresh(req.RefreshToken)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid refresh token"})
+			httpserver.Fail(c, http.StatusUnauthorized, "invalid refresh token")
 			return
 		}
 		c.JSON(http.StatusOK, tokenResponse{
@@ -113,7 +114,7 @@ func meHandler(svc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		uid, role, ok := auth.UserFromContext(c)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+			httpserver.Fail(c, http.StatusUnauthorized, "not authenticated")
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -134,22 +135,22 @@ func createUserHandler(svc *auth.Service, logger zerolog.Logger) gin.HandlerFunc
 	return func(c *gin.Context) {
 		var req createUserRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "username, password (≥8), and role required"})
+			httpserver.Fail(c, http.StatusBadRequest, "username, password (≥8), and role required")
 			return
 		}
 		role := auth.Role(req.Role)
 		if !role.IsValid() {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "role must be one of viewer/trader/admin"})
+			httpserver.Fail(c, http.StatusBadRequest, "role must be one of viewer/trader/admin")
 			return
 		}
 		u, err := svc.CreateUser(c.Request.Context(), req.Username, req.Password, role)
 		if err != nil {
 			if errors.Is(err, auth.ErrUserExists) {
-				c.JSON(http.StatusConflict, gin.H{"error": "username already taken"})
+				httpserver.Fail(c, http.StatusConflict, "username already taken")
 				return
 			}
 			logger.Error().Err(err).Str("username", req.Username).Msg("create user failed")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "create user failed"})
+			httpserver.Fail(c, http.StatusInternalServerError, "create user failed")
 			return
 		}
 		c.JSON(http.StatusCreated, gin.H{
@@ -164,7 +165,7 @@ func listUsersHandler(svc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		users, err := svc.ListUsers(c.Request.Context(), 100)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"users": users})
@@ -175,7 +176,7 @@ func listAuditHandler(svc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rows, err := svc.ListAudit(c.Request.Context(), 100)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"audit": rows})

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -75,27 +76,27 @@ func getFactorHandler(store *storage.PostgresStore) gin.HandlerFunc {
 		dateStr := c.Query("date")
 
 		if symbol == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "symbol query param is required"})
+			httpserver.Fail(c, http.StatusBadRequest, "symbol query param is required")
 			return
 		}
 		if dateStr == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "date query param is required (YYYYMMDD)"})
+			httpserver.Fail(c, http.StatusBadRequest, "date query param is required (YYYYMMDD)")
 			return
 		}
 
 		date, err := time.Parse("20060102", dateStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid date format, use YYYYMMDD")
 			return
 		}
 
 		entry, err := store.GetFactorCache(ctx, symbol, date, factorName)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		if entry == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "factor cache entry not found"})
+			httpserver.Fail(c, http.StatusNotFound, "factor cache entry not found")
 			return
 		}
 
@@ -121,13 +122,13 @@ func syncFactorHandler(fc *data.FactorComputer) gin.HandlerFunc {
 			Date string `json:"date"` // YYYYMMDD
 		}
 		if err := c.ShouldBindJSON(&req); err != nil || req.Date == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "date field required (YYYYMMDD)"})
+			httpserver.Fail(c, http.StatusBadRequest, "date field required (YYYYMMDD)")
 			return
 		}
 
 		date, err := time.Parse("20060102", req.Date)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid date format, use YYYYMMDD")
 			return
 		}
 
@@ -151,12 +152,12 @@ func syncFactorHandler(fc *data.FactorComputer) gin.HandlerFunc {
 		case domain.FactorInventoryTurnoverDelta:
 			computeErr = fc.ComputeInventoryTurnoverDeltaFactor(ctx, date)
 		default:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported factor: " + factorName})
+			httpserver.Failf(c, http.StatusBadRequest, "unsupported factor: %s", factorName)
 			return
 		}
 
 		if computeErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": computeErr.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, computeErr)
 			return
 		}
 
@@ -178,18 +179,18 @@ func syncAllFactorsHandler(fc *data.FactorComputer) gin.HandlerFunc {
 			Date string `json:"date"` // YYYYMMDD
 		}
 		if err := c.ShouldBindJSON(&req); err != nil || req.Date == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "date field required (YYYYMMDD)"})
+			httpserver.Fail(c, http.StatusBadRequest, "date field required (YYYYMMDD)")
 			return
 		}
 
 		date, err := time.Parse("20060102", req.Date)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid date format, use YYYYMMDD")
 			return
 		}
 
 		if err := fc.ComputeAllFactors(ctx, date, 20, true); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -212,24 +213,24 @@ func getFactorAttributionHandler(fa *data.FactorAttributor) gin.HandlerFunc {
 		endDateStr := c.Query("end_date")
 
 		if startDateStr == "" || endDateStr == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date query params required (YYYYMMDD)"})
+			httpserver.Fail(c, http.StatusBadRequest, "start_date and end_date query params required (YYYYMMDD)")
 			return
 		}
 
 		startDate, err := time.Parse("20060102", startDateStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid start_date format, use YYYYMMDD")
 			return
 		}
 		endDate, err := time.Parse("20060102", endDateStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid end_date format, use YYYYMMDD")
 			return
 		}
 
 		returns, err := fa.GetFactorReturnsTimeSeries(ctx, factorName, startDate, endDate)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -247,24 +248,24 @@ func getICHandler(fa *data.FactorAttributor) gin.HandlerFunc {
 		endDateStr := c.Query("end_date")
 
 		if startDateStr == "" || endDateStr == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date query params required (YYYYMMDD)"})
+			httpserver.Fail(c, http.StatusBadRequest, "start_date and end_date query params required (YYYYMMDD)")
 			return
 		}
 
 		startDate, err := time.Parse("20060102", startDateStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid start_date format, use YYYYMMDD")
 			return
 		}
 		endDate, err := time.Parse("20060102", endDateStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid end_date format, use YYYYMMDD")
 			return
 		}
 
 		icEntries, err := fa.GetICTimeSeries(ctx, factorName, startDate, endDate)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -286,24 +287,24 @@ func syncFactorAttributionHandler(fa *data.FactorAttributor) gin.HandlerFunc {
 
 		var req syncAttributionRequest
 		if err := c.ShouldBindJSON(&req); err != nil || req.StartDate == "" || req.EndDate == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date fields required (YYYYMMDD)"})
+			httpserver.Fail(c, http.StatusBadRequest, "start_date and end_date fields required (YYYYMMDD)")
 			return
 		}
 
 		startDate, err := time.Parse("20060102", req.StartDate)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid start_date format, use YYYYMMDD")
 			return
 		}
 		endDate, err := time.Parse("20060102", req.EndDate)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid end_date format, use YYYYMMDD")
 			return
 		}
 
 		tradingDays, err := fa.GetTradingDaysForRange(ctx, startDate, endDate)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -341,11 +342,11 @@ func syncFactorICHandler(fa *data.FactorAttributor) gin.HandlerFunc {
 
 		var req syncICRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 		if req.StartDate == "" || req.EndDate == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date fields required (YYYYMMDD)"})
+			httpserver.Fail(c, http.StatusBadRequest, "start_date and end_date fields required (YYYYMMDD)")
 			return
 		}
 		if req.ForwardDays <= 0 {
@@ -354,18 +355,18 @@ func syncFactorICHandler(fa *data.FactorAttributor) gin.HandlerFunc {
 
 		startDate, err := time.Parse("20060102", req.StartDate)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid start_date format, use YYYYMMDD")
 			return
 		}
 		endDate, err := time.Parse("20060102", req.EndDate)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid end_date format, use YYYYMMDD")
 			return
 		}
 
 		tradingDays, err := fa.GetTradingDaysForRange(ctx, startDate, endDate)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 

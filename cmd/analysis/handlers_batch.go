@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -21,12 +22,12 @@ func runBatchHandler(batchEngine *backtest.BatchEngine, logger zerolog.Logger) g
 	return func(c *gin.Context) {
 		var req batchRunRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+			httpserver.Wrap(c, http.StatusBadRequest, err, "invalid request: ")
 			return
 		}
 
 		if len(req.Tasks) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no tasks provided"})
+			httpserver.Fail(c, http.StatusBadRequest, "no tasks provided")
 			return
 		}
 
@@ -52,7 +53,7 @@ func runBatchHandler(batchEngine *backtest.BatchEngine, logger zerolog.Logger) g
 		report, err := batchEngine.Run(ctx, req.Tasks)
 		if err != nil {
 			logger.Error().Err(err).Int("tasks", len(req.Tasks)).Msg("Batch backtest failed")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -65,7 +66,7 @@ func getBatchReportHandler(batchEngine *backtest.BatchEngine) gin.HandlerFunc {
 		batchID := c.Param("batch_id")
 		report, err := batchEngine.GetReport(batchID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "batch report not found"})
+			httpserver.Fail(c, http.StatusNotFound, "batch report not found")
 			return
 		}
 		c.JSON(http.StatusOK, report)
@@ -79,7 +80,7 @@ func exportBatchReportHandler(batchEngine *backtest.BatchEngine, logger zerolog.
 
 		report, err := batchEngine.GetReport(batchID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "batch report not found"})
+			httpserver.Fail(c, http.StatusNotFound, "batch report not found")
 			return
 		}
 
@@ -96,7 +97,7 @@ func exportBatchReportHandler(batchEngine *backtest.BatchEngine, logger zerolog.
 			// and we stream CSV in a real implementation.
 			c.JSON(http.StatusOK, gin.H{"message": "CSV export not yet implemented, use JSON"})
 		default:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported format: " + format})
+			httpserver.Failf(c, http.StatusBadRequest, "unsupported format: %s", format)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"net/http"
 	"time"
 
@@ -19,23 +20,23 @@ func getFundamentalHandler(store *storage.PostgresStore) gin.HandlerFunc {
 		dateStr := c.Query("date")
 
 		if dateStr == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "date query parameter required"})
+			httpserver.Fail(c, http.StatusBadRequest, "date query parameter required")
 			return
 		}
 
 		date, err := time.Parse("20060102", dateStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid date format, use YYYYMMDD")
 			return
 		}
 
 		fundamental, err := store.GetFundamental(ctx, symbol, date)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		if fundamental == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "fundamental data not found"})
+			httpserver.Fail(c, http.StatusNotFound, "fundamental data not found")
 			return
 		}
 
@@ -52,11 +53,11 @@ func getFundamentalsHandler(store *storage.PostgresStore) gin.HandlerFunc {
 
 		fundamental, err := store.GetFundamentalDataLatest(ctx, symbol)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		if fundamental == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "fundamental data not found for symbol"})
+			httpserver.Fail(c, http.StatusNotFound, "fundamental data not found for symbol")
 			return
 		}
 
@@ -75,7 +76,7 @@ func getFundamentalsHistoryHandler(store *storage.PostgresStore) gin.HandlerFunc
 		if startStr != "" {
 			t, err := time.Parse("20060102", startStr)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
+				httpserver.Fail(c, http.StatusBadRequest, "invalid start_date format, use YYYYMMDD")
 				return
 			}
 			startDate = &t
@@ -83,7 +84,7 @@ func getFundamentalsHistoryHandler(store *storage.PostgresStore) gin.HandlerFunc
 		if endStr != "" {
 			t, err := time.Parse("20060102", endStr)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+				httpserver.Fail(c, http.StatusBadRequest, "invalid end_date format, use YYYYMMDD")
 				return
 			}
 			endDate = &t
@@ -91,7 +92,7 @@ func getFundamentalsHistoryHandler(store *storage.PostgresStore) gin.HandlerFunc
 
 		history, err := store.GetFundamentalDataHistory(ctx, symbol, startDate, endDate)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 

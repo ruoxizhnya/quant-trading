@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"net/http"
 	"sync"
 	"time"
@@ -46,7 +47,7 @@ func (rl *rateLimiter) middleware() gin.HandlerFunc {
 		}
 		if info.count >= rl.rate {
 			rl.mu.Unlock()
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate limit exceeded"})
+			httpserver.Fail(c, http.StatusTooManyRequests, "rate limit exceeded")
 			c.Abort()
 			return
 		}

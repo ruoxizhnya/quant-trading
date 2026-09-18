@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"fmt"
 	"net/http"
@@ -20,13 +21,13 @@ func getIndexConstituentsHandler(tc *data.TushareClient, store *storage.Postgres
 
 		// Validate supported indexes
 		if indexCode != "000300.SH" && indexCode != "000500.SH" && indexCode != "000852.SH" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported index code, supported: 000300.SH (CSI 300), 000500.SH (CSI 500), 000852.SH (CSI 800)"})
+			httpserver.Fail(c, http.StatusBadRequest, "unsupported index code, supported: 000300.SH (CSI 300), 000500.SH (CSI 500), 000852.SH (CSI 800)")
 			return
 		}
 
 		constituents, err := tc.GetIndexConstituents(ctx, indexCode, date)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -43,14 +44,14 @@ func syncIndexConstituentsHandler(tc *data.TushareClient) gin.HandlerFunc {
 
 		// Validate supported indexes
 		if indexCode != "000300.SH" && indexCode != "000500.SH" && indexCode != "000852.SH" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported index code, supported: 000300.SH (CSI 300), 000500.SH (CSI 500), 000852.SH (CSI 800)"})
+			httpserver.Fail(c, http.StatusBadRequest, "unsupported index code, supported: 000300.SH (CSI 300), 000500.SH (CSI 500), 000852.SH (CSI 800)")
 			return
 		}
 
 		// Fetch latest constituents (no specific date = latest)
 		constituents, err := tc.FetchIndexConstituents(ctx, indexCode, "")
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -77,7 +78,7 @@ func syncStocksHandler(tc *data.TushareClient, store *storage.PostgresStore) gin
 
 		stocks, err := tc.FetchStocks(ctx, req.Exchange, req.ListStatus)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -99,7 +100,7 @@ func syncOHLCVHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.
 		ctx := c.Request.Context()
 		var req syncOHLCVRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 
@@ -107,7 +108,7 @@ func syncOHLCVHandler(tc *data.TushareClient, store *storage.PostgresStore) gin.
 			// Fall back to all stocks from DB
 			allStocks, err := store.GetAllStocks(ctx)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks from DB: " + err.Error()})
+				httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to fetch stocks from DB: ")
 				return
 			}
 			for _, s := range allStocks {
@@ -149,7 +150,7 @@ func syncAllOHLCVHandler(tc *data.TushareClient, store *storage.PostgresStore) g
 	return func(c *gin.Context) {
 		var req syncAllOHLCVRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 
@@ -168,12 +169,12 @@ func syncAllOHLCVHandler(tc *data.TushareClient, store *storage.PostgresStore) g
 		ctx := context.Background()
 		stocks, err := store.GetAllStocks(ctx)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks: " + err.Error()})
+			httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to fetch stocks: ")
 			return
 		}
 
 		if len(stocks) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no stocks found in DB. Run POST /sync/stocks first."})
+			httpserver.Fail(c, http.StatusBadRequest, "no stocks found in DB. Run POST /sync/stocks first.")
 			return
 		}
 
@@ -266,16 +267,16 @@ func syncFundamentalHandler(tc *data.TushareClient) gin.HandlerFunc {
 		ctx := c.Request.Context()
 		var req syncFundamentalRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 
 		if len(req.Symbols) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "symbols array is required"})
+			httpserver.Fail(c, http.StatusBadRequest, "symbols array is required")
 			return
 		}
 		if req.Date == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "date is required"})
+			httpserver.Fail(c, http.StatusBadRequest, "date is required")
 			return
 		}
 
@@ -318,7 +319,7 @@ func syncFundamentalsHandler(tc *data.TushareClient, store *storage.PostgresStor
 			// Fetch all stocks from DB
 			allStocks, err := store.GetAllStocks(ctx)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks from DB: " + err.Error()})
+				httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to fetch stocks from DB: ")
 				return
 			}
 			for _, s := range allStocks {
@@ -328,7 +329,7 @@ func syncFundamentalsHandler(tc *data.TushareClient, store *storage.PostgresStor
 		}
 
 		if len(symbols) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no stocks found in DB. Run POST /sync/stocks first."})
+			httpserver.Fail(c, http.StatusBadRequest, "no stocks found in DB. Run POST /sync/stocks first.")
 			return
 		}
 
@@ -392,11 +393,11 @@ func syncCalendarHandler(tc *data.TushareClient, store *storage.PostgresStore) g
 		}
 
 		if _, err := time.Parse("20060102", req.StartDate); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid start_date format, use YYYYMMDD")
 			return
 		}
 		if _, err := time.Parse("20060102", req.EndDate); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format, use YYYYMMDD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid end_date format, use YYYYMMDD")
 			return
 		}
 
@@ -421,7 +422,7 @@ func syncCalendarHandler(tc *data.TushareClient, store *storage.PostgresStore) g
 		for _, exchange := range exchanges {
 			entries, err := tc.FetchTradingCalendar(ctx, exchange, startFormatted, endFormatted)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to fetch %s calendar from Tushare: %v", exchange, err)})
+				httpserver.Failf(c, http.StatusInternalServerError, "failed to fetch %s calendar from Tushare: %v", exchange, err)
 				return
 			}
 
@@ -456,7 +457,7 @@ func syncCalendarHandler(tc *data.TushareClient, store *storage.PostgresStore) g
 			domainEntries[i] = &allEntries[i]
 		}
 		if err := store.SaveTradingCalendarBatch(ctx, domainEntries); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save calendar: " + err.Error()})
+			httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to save calendar: ")
 			return
 		}
 
@@ -506,7 +507,7 @@ func syncDividendsHandler(tc *data.TushareClient, store *storage.PostgresStore) 
 			// Fetch all stocks from DB
 			allStocks, err := store.GetAllStocks(ctx)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks from DB: " + err.Error()})
+				httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to fetch stocks from DB: ")
 				return
 			}
 			for _, s := range allStocks {
@@ -516,7 +517,7 @@ func syncDividendsHandler(tc *data.TushareClient, store *storage.PostgresStore) 
 		}
 
 		if len(symbols) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no stocks found in DB. Run POST /sync/stocks first."})
+			httpserver.Fail(c, http.StatusBadRequest, "no stocks found in DB. Run POST /sync/stocks first.")
 			return
 		}
 
@@ -584,7 +585,7 @@ func syncSplitsHandler(tc *data.TushareClient, store *storage.PostgresStore) gin
 		} else {
 			allStocks, err := store.GetAllStocks(ctx)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks from DB: " + err.Error()})
+				httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to fetch stocks from DB: ")
 				return
 			}
 			for _, s := range allStocks {
@@ -594,7 +595,7 @@ func syncSplitsHandler(tc *data.TushareClient, store *storage.PostgresStore) gin
 		}
 
 		if len(symbols) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no stocks found in DB. Run POST /sync/stocks first."})
+			httpserver.Fail(c, http.StatusBadRequest, "no stocks found in DB. Run POST /sync/stocks first.")
 			return
 		}
 

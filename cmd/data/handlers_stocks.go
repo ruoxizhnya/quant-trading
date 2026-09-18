@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"net/http"
 	"time"
 
@@ -39,7 +40,7 @@ func listStocksHandler(store *storage.PostgresStore, cache storage.Cache) gin.Ha
 
 		stocks, err := store.GetStocks(ctx, exchange)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -65,11 +66,11 @@ func getStockHandler(store *storage.PostgresStore, cache storage.Cache) gin.Hand
 
 		stock, err := store.GetStock(ctx, symbol)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		if stock == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "stock not found"})
+			httpserver.Fail(c, http.StatusNotFound, "stock not found")
 			return
 		}
 
@@ -87,7 +88,7 @@ func stocksCountHandler(store *storage.PostgresStore) gin.HandlerFunc {
 		var count int
 		err := store.DB().QueryRow(ctx, "SELECT COUNT(*) FROM stocks").Scan(&count)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count stocks: " + err.Error()})
+			httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to count stocks: ")
 			return
 		}
 
@@ -156,7 +157,7 @@ func screenStocksHandler(store *storage.PostgresStore) gin.HandlerFunc {
 		ctx := c.Request.Context()
 		var req domain.ScreenRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 
@@ -164,7 +165,7 @@ func screenStocksHandler(store *storage.PostgresStore) gin.HandlerFunc {
 		if req.Date != "" {
 			t, err := time.Parse("20060102", req.Date)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date format, use YYYYMMDD"})
+				httpserver.Fail(c, http.StatusBadRequest, "invalid date format, use YYYYMMDD")
 				return
 			}
 			date = &t
@@ -177,7 +178,7 @@ func screenStocksHandler(store *storage.PostgresStore) gin.HandlerFunc {
 
 		results, err := store.ScreenFundamentals(ctx, req.Filters, date, limit)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -197,24 +198,24 @@ func getTradingCalendarHandler(store *storage.PostgresStore) gin.HandlerFunc {
 		endStr := c.Query("end")
 
 		if startStr == "" || endStr == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "start and end query params required"})
+			httpserver.Fail(c, http.StatusBadRequest, "start and end query params required")
 			return
 		}
 
 		startDate, err := time.Parse("2006-01-02", startStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start date format, use YYYY-MM-DD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid start date format, use YYYY-MM-DD")
 			return
 		}
 		endDate, err := time.Parse("2006-01-02", endStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end date format, use YYYY-MM-DD"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid end date format, use YYYY-MM-DD")
 			return
 		}
 
 		days, err := store.GetTradingDates(ctx, startDate, endDate)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 

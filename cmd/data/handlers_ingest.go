@@ -18,6 +18,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -61,13 +62,13 @@ func ingestRawHandler(store *storage.PostgresStore) gin.HandlerFunc {
 
 		var req ingestRawRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ingest request: " + err.Error()})
+			httpserver.Wrap(c, http.StatusBadRequest, err, "invalid ingest request: ")
 			return
 		}
 
 		hash, err := storage.ContentHashOf(req.Payload)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "payload must be valid JSON: " + err.Error()})
+			httpserver.Wrap(c, http.StatusBadRequest, err, "payload must be valid JSON: ")
 			return
 		}
 		if req.ContentHash != "" && req.ContentHash != hash {
@@ -80,7 +81,7 @@ func ingestRawHandler(store *storage.PostgresStore) gin.HandlerFunc {
 
 		asOf, err := parseIngestAsOf(req.AsOf)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 
@@ -94,7 +95,7 @@ func ingestRawHandler(store *storage.PostgresStore) gin.HandlerFunc {
 			FetchedAt:   time.Now().UTC(),
 		}
 		if err := store.SaveRawIngest(c.Request.Context(), record); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to archive raw response"})
+			httpserver.Fail(c, http.StatusInternalServerError, "failed to archive raw response")
 			return
 		}
 

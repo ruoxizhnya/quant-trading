@@ -20,6 +20,7 @@ package main
 // RegisterRoutes method.
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -74,7 +75,7 @@ func (h *EvidenceHandler) handleGet(c *gin.Context) {
 	if err != nil {
 		h.logger.Error().Err(err).Str("content_hash", contentHash).
 			Msg("failed to resolve evidence")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve evidence"})
+		httpserver.Fail(c, http.StatusInternalServerError, "failed to resolve evidence")
 		return
 	}
 	if record == nil {

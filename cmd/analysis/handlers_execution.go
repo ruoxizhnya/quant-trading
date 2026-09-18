@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"crypto/subtle"
 	"net/http"
@@ -102,7 +103,7 @@ type createOrderRequest struct {
 func (h *ExecutionHandler) createOrder(c *gin.Context) {
 	var req createOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 	if req.OrderType == "" {
@@ -164,7 +165,7 @@ func (h *ExecutionHandler) getOrder(c *gin.Context) {
 	defer cancel()
 	result, err := h.trader.GetOrder(ctx, id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		httpserver.Fail(c, http.StatusNotFound, "order not found")
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -177,7 +178,7 @@ func (h *ExecutionHandler) cancelOrder(c *gin.Context) {
 	defer cancel()
 
 	if err := h.trader.CancelOrder(ctx, id); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -198,7 +199,7 @@ func (h *ExecutionHandler) getPositions(c *gin.Context) {
 	defer cancel()
 	positions, err := h.trader.GetPositions(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -212,7 +213,7 @@ func (h *ExecutionHandler) getAccount(c *gin.Context) {
 	defer cancel()
 	account, err := h.trader.GetAccount(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, account)
@@ -277,31 +278,31 @@ func (h *ExecutionHandler) emergencyFlattenHandler(c *gin.Context) {
 	const prefix = "Bearer "
 	if !strings.HasPrefix(authHeader, prefix) {
 		c.Header("WWW-Authenticate", `Bearer realm="emergency-flatten"`)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing or malformed Authorization header"})
+		httpserver.Fail(c, http.StatusUnauthorized, "missing or malformed Authorization header")
 		return
 	}
 	gotToken := strings.TrimPrefix(authHeader, prefix)
 	if subtle.ConstantTimeCompare([]byte(gotToken), []byte(h.emergencyToken)) != 1 {
-		c.JSON(http.StatusForbidden, gin.H{"error": "invalid bearer token"})
+		httpserver.Fail(c, http.StatusForbidden, "invalid bearer token")
 		return
 	}
 
 	// Body parse.
 	var req emergencyFlattenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
 	// Confirmation token check (defence in depth — operator must
 	// re-type the token to prevent accidental triggers).
 	if subtle.ConstantTimeCompare([]byte(req.ConfirmationToken), []byte(h.emergencyToken)) != 1 {
-		c.JSON(http.StatusForbidden, gin.H{"error": "confirmation_token mismatch"})
+		httpserver.Fail(c, http.StatusForbidden, "confirmation_token mismatch")
 		return
 	}
 
 	if req.Reason == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "reason is required for audit"})
+		httpserver.Fail(c, http.StatusBadRequest, "reason is required for audit")
 		return
 	}
 

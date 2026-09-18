@@ -13,6 +13,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"bufio"
 	"bytes"
 	"fmt"
@@ -80,7 +81,7 @@ func equityDeepIngestHandler(store *storage.PostgresStore, dict *equitydeep.Dict
 
 		raw, err := store.GetRawIngest(c.Request.Context(), contentHash)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve content_hash"})
+			httpserver.Fail(c, http.StatusInternalServerError, "failed to resolve content_hash")
 			return
 		}
 		if raw == nil {
@@ -139,11 +140,11 @@ func equityDeepIngestHandler(store *storage.PostgresStore, dict *equitydeep.Dict
 			snapshots++
 		}
 		if err := scanner.Err(); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read ndjson body: " + err.Error()})
+			httpserver.Wrap(c, http.StatusBadRequest, err, "failed to read ndjson body: ")
 			return
 		}
 		if snapshots == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "body contains no snapshot records"})
+			httpserver.Fail(c, http.StatusBadRequest, "body contains no snapshot records")
 			return
 		}
 
@@ -157,7 +158,7 @@ func equityDeepIngestHandler(store *storage.PostgresStore, dict *equitydeep.Dict
 		}
 
 		if err := store.SaveFundamentalsDetailBatch(c.Request.Context(), rows); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save fundamentals detail"})
+			httpserver.Fail(c, http.StatusInternalServerError, "failed to save fundamentals detail")
 			return
 		}
 

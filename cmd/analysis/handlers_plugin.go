@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"net/http"
 	"path/filepath"
 
@@ -37,7 +38,7 @@ func registerPluginRoutes(router *gin.Engine, loader *strategy.PluginLoader) {
 		name := c.Param("name")
 		info, err := loader.Get(name)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusNotFound, err)
 			return
 		}
 		c.JSON(http.StatusOK, info)
@@ -49,13 +50,13 @@ func registerPluginRoutes(router *gin.Engine, loader *strategy.PluginLoader) {
 			Path string `json:"path" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 
 		info, err := loader.Load(req.Path)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -68,7 +69,7 @@ func registerPluginRoutes(router *gin.Engine, loader *strategy.PluginLoader) {
 	router.POST("/api/plugins/:name/unload", func(c *gin.Context) {
 		name := c.Param("name")
 		if err := loader.Unload(name); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "plugin unloaded", "name": name})
@@ -79,7 +80,7 @@ func registerPluginRoutes(router *gin.Engine, loader *strategy.PluginLoader) {
 		name := c.Param("name")
 		info, err := loader.ReloadByName(name)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -94,13 +95,13 @@ func registerPluginRoutes(router *gin.Engine, loader *strategy.PluginLoader) {
 			Path string `json:"path" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 
 		info, err := loader.Reload(req.Path)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -131,19 +132,19 @@ func registerPluginRoutes(router *gin.Engine, loader *strategy.PluginLoader) {
 			Dir string `json:"dir" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 
 		// Resolve to absolute path
 		absDir, err := filepath.Abs(req.Dir)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 
 		if err := loader.SetWatchDir(absDir); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{

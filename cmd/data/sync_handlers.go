@@ -2,6 +2,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"encoding/json"
 	"errors"
@@ -92,7 +93,7 @@ func (h *SyncHandler) syncStocksHandler(c *gin.Context) {
 
 	job, err := h.jobService.CreateJob(ctx, sync.JobTypeStocks, req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -108,14 +109,14 @@ func (h *SyncHandler) syncOHLCVHandler(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req sync.OHLCVSyncParams
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
 	if len(req.Symbols) == 0 {
 		allStocks, err := h.store.GetAllStocks(ctx)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks from DB: " + err.Error()})
+			httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to fetch stocks from DB: ")
 			return
 		}
 		for _, s := range allStocks {
@@ -125,7 +126,7 @@ func (h *SyncHandler) syncOHLCVHandler(c *gin.Context) {
 
 	job, err := h.jobService.CreateJob(ctx, sync.JobTypeOHLCV, req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -156,7 +157,7 @@ func (h *SyncHandler) syncAllOHLCVHandler(c *gin.Context) {
 
 	job, err := h.jobService.CreateJob(ctx, sync.JobTypeOHLCVAll, req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -180,7 +181,7 @@ func (h *SyncHandler) syncFundamentalsHandler(c *gin.Context) {
 	if len(req.Symbols) == 0 {
 		allStocks, err := h.store.GetAllStocks(ctx)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks from DB: " + err.Error()})
+			httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to fetch stocks from DB: ")
 			return
 		}
 		for _, s := range allStocks {
@@ -190,7 +191,7 @@ func (h *SyncHandler) syncFundamentalsHandler(c *gin.Context) {
 
 	job, err := h.jobService.CreateJob(ctx, sync.JobTypeFundamentals, req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -216,7 +217,7 @@ func (h *SyncHandler) syncCalendarHandler(c *gin.Context) {
 
 	job, err := h.jobService.CreateJob(ctx, sync.JobTypeCalendar, req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -241,7 +242,7 @@ func (h *SyncHandler) syncDividendsHandler(c *gin.Context) {
 	if len(params.Symbols) == 0 {
 		allStocks, err := h.store.GetAllStocks(ctx)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks from DB: " + err.Error()})
+			httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to fetch stocks from DB: ")
 			return
 		}
 		for _, s := range allStocks {
@@ -251,7 +252,7 @@ func (h *SyncHandler) syncDividendsHandler(c *gin.Context) {
 
 	job, err := h.jobService.CreateJob(ctx, sync.JobTypeDividends, params)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -277,7 +278,7 @@ func (h *SyncHandler) syncSplitsHandler(c *gin.Context) {
 	if len(params.Symbols) == 0 {
 		allStocks, err := h.store.GetAllStocks(ctx)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stocks from DB: " + err.Error()})
+			httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to fetch stocks from DB: ")
 			return
 		}
 		for _, s := range allStocks {
@@ -287,7 +288,7 @@ func (h *SyncHandler) syncSplitsHandler(c *gin.Context) {
 
 	job, err := h.jobService.CreateJob(ctx, sync.JobTypeSplits, params)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -324,7 +325,7 @@ func (h *SyncHandler) listJobsHandler(c *gin.Context) {
 	}
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -338,11 +339,11 @@ func (h *SyncHandler) getJobHandler(c *gin.Context) {
 
 	job, err := h.jobService.GetJob(ctx, jobID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 	if job == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		httpserver.Fail(c, http.StatusNotFound, "job not found")
 		return
 	}
 
@@ -355,7 +356,7 @@ func (h *SyncHandler) cancelJobHandler(c *gin.Context) {
 	jobID := c.Param("id")
 
 	if err := h.jobService.CancelJob(ctx, jobID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -369,7 +370,7 @@ func (h *SyncHandler) retryJobHandler(c *gin.Context) {
 
 	job, err := h.jobService.RetryJob(ctx, jobID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -396,11 +397,11 @@ func (h *SyncHandler) createJobHandler(c *gin.Context) {
 		Params json.RawMessage `json:"params"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 	if req.Type == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "type is required"})
+		httpserver.Fail(c, http.StatusBadRequest, "type is required")
 		return
 	}
 	// params may be absent — treat as an empty object.
@@ -415,7 +416,7 @@ func (h *SyncHandler) createJobHandler(c *gin.Context) {
 	case sync.JobTypeStocks:
 		var params sync.StocksSyncParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 		if params.ListStatus == "" {
@@ -426,7 +427,7 @@ func (h *SyncHandler) createJobHandler(c *gin.Context) {
 	case sync.JobTypeOHLCV:
 		var params sync.OHLCVSyncParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 		// The typed door requires an explicit symbol list (possibly empty —
@@ -434,11 +435,11 @@ func (h *SyncHandler) createJobHandler(c *gin.Context) {
 		// job type (ohlcv_all). A missing key (vs an empty array) is
 		// rejected so a mistyped body fails fast.
 		if !jsonHasKey(req.Params, "symbols") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": `params.symbols is required (use type "ohlcv_all" for whole-market sync)`})
+			httpserver.Fail(c, http.StatusBadRequest, `params.symbols is required (use type "ohlcv_all" for whole-market sync)`)
 			return
 		}
 		if !validDateRange(params.StartDate, params.EndDate) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "params.start_date/end_date must be YYYYMMDD or YYYY-MM-DD"})
+			httpserver.Fail(c, http.StatusBadRequest, "params.start_date/end_date must be YYYYMMDD or YYYY-MM-DD")
 			return
 		}
 		job, err = h.jobService.CreateJob(ctx, sync.JobTypeOHLCV, params)
@@ -446,7 +447,7 @@ func (h *SyncHandler) createJobHandler(c *gin.Context) {
 	case sync.JobTypeOHLCVAll:
 		var params sync.OHLCVSyncParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 		if params.BatchSize <= 0 {
@@ -459,7 +460,7 @@ func (h *SyncHandler) createJobHandler(c *gin.Context) {
 			params.StartDate = time.Now().AddDate(-1, 0, 0).Format("20060102")
 		}
 		if !validDateRange(params.StartDate, params.EndDate) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "params.start_date/end_date must be YYYYMMDD or YYYY-MM-DD"})
+			httpserver.Fail(c, http.StatusBadRequest, "params.start_date/end_date must be YYYYMMDD or YYYY-MM-DD")
 			return
 		}
 		job, err = h.jobService.CreateJob(ctx, sync.JobTypeOHLCVAll, params)
@@ -467,11 +468,11 @@ func (h *SyncHandler) createJobHandler(c *gin.Context) {
 	case sync.JobTypeFundamentals:
 		var params sync.FundamentalSyncParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 		if !jsonHasKey(req.Params, "symbols") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "params.symbols is required"})
+			httpserver.Fail(c, http.StatusBadRequest, "params.symbols is required")
 			return
 		}
 		job, err = h.jobService.CreateJob(ctx, sync.JobTypeFundamentals, params)
@@ -479,7 +480,7 @@ func (h *SyncHandler) createJobHandler(c *gin.Context) {
 	case sync.JobTypeCalendar:
 		var params sync.CalendarSyncParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 		if params.Exchange == "" {
@@ -492,7 +493,7 @@ func (h *SyncHandler) createJobHandler(c *gin.Context) {
 			params.EndDate = time.Now().Format("20060102")
 		}
 		if !validDateRange(params.StartDate, params.EndDate) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "params.start_date/end_date must be YYYYMMDD or YYYY-MM-DD"})
+			httpserver.Fail(c, http.StatusBadRequest, "params.start_date/end_date must be YYYYMMDD or YYYY-MM-DD")
 			return
 		}
 		job, err = h.jobService.CreateJob(ctx, sync.JobTypeCalendar, params)
@@ -502,11 +503,11 @@ func (h *SyncHandler) createJobHandler(c *gin.Context) {
 			Symbols []string `json:"symbols"`
 		}
 		if err := json.Unmarshal(req.Params, &params); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 		if !jsonHasKey(req.Params, "symbols") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "params.symbols is required"})
+			httpserver.Fail(c, http.StatusBadRequest, "params.symbols is required")
 			return
 		}
 		job, err = h.jobService.CreateJob(ctx, sync.JobType(req.Type), sync.FundamentalSyncParams{Symbols: params.Symbols})
@@ -519,7 +520,7 @@ func (h *SyncHandler) createJobHandler(c *gin.Context) {
 	}
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -571,21 +572,21 @@ func (h *SyncHandler) createScheduleHandler(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req sync.Schedule
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
 	if req.Name == "" || req.CronExpression == "" || req.JobType == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name, cron_expression, and job_type are required"})
+		httpserver.Fail(c, http.StatusBadRequest, "name, cron_expression, and job_type are required")
 		return
 	}
 
 	if err := h.scheduler.CreateSchedule(ctx, &req); err != nil {
 		if errors.Is(err, sync.ErrInvalidCron) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -599,7 +600,7 @@ func (h *SyncHandler) listSchedulesHandler(c *gin.Context) {
 
 	schedules, err := h.scheduler.ListSchedules(ctx, activeOnly)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -612,17 +613,17 @@ func (h *SyncHandler) getScheduleHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid schedule ID"})
+		httpserver.Fail(c, http.StatusBadRequest, "invalid schedule ID")
 		return
 	}
 
 	schedule, err := h.scheduler.GetSchedule(ctx, id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 	if schedule == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "schedule not found"})
+		httpserver.Fail(c, http.StatusNotFound, "schedule not found")
 		return
 	}
 
@@ -635,23 +636,23 @@ func (h *SyncHandler) updateScheduleHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid schedule ID"})
+		httpserver.Fail(c, http.StatusBadRequest, "invalid schedule ID")
 		return
 	}
 
 	var req sync.Schedule
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 	req.ID = id
 
 	if err := h.scheduler.UpdateSchedule(ctx, &req); err != nil {
 		if errors.Is(err, sync.ErrInvalidCron) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -664,12 +665,12 @@ func (h *SyncHandler) deleteScheduleHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid schedule ID"})
+		httpserver.Fail(c, http.StatusBadRequest, "invalid schedule ID")
 		return
 	}
 
 	if err := h.scheduler.DeleteSchedule(ctx, id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -682,7 +683,7 @@ func (h *SyncHandler) toggleScheduleHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid schedule ID"})
+		httpserver.Fail(c, http.StatusBadRequest, "invalid schedule ID")
 		return
 	}
 
@@ -690,12 +691,12 @@ func (h *SyncHandler) toggleScheduleHandler(c *gin.Context) {
 		Active bool `json:"active"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.scheduler.ToggleSchedule(ctx, id, req.Active); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -708,13 +709,13 @@ func (h *SyncHandler) runScheduleNowHandler(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid schedule ID"})
+		httpserver.Fail(c, http.StatusBadRequest, "invalid schedule ID")
 		return
 	}
 
 	job, err := h.scheduler.RunScheduleNow(ctx, id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 

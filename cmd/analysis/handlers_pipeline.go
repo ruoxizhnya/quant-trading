@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -135,7 +136,7 @@ func (h *PipelineHandler) RegisterPipelineRoutes(router *gin.RouterGroup) {
 func (h *PipelineHandler) RunPipeline(c *gin.Context) {
 	var req RunPipelineRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -181,7 +182,7 @@ func (h *PipelineHandler) GetPipelineJob(c *gin.Context) {
 	jobID := c.Param("id")
 	result := h.pipeline.GetJob(jobID)
 	if result == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		httpserver.Fail(c, http.StatusNotFound, "job not found")
 		return
 	}
 

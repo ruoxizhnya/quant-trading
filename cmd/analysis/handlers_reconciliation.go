@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"errors"
 	"net/http"
@@ -56,12 +57,12 @@ func (h *ReconciliationHandler) RegisterRoutes(router *gin.Engine) {
 // no cycle has run yet.
 func (h *ReconciliationHandler) latest(c *gin.Context) {
 	if h.worker == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "reconciliation worker is not enabled"})
+		httpserver.Fail(c, http.StatusServiceUnavailable, "reconciliation worker is not enabled")
 		return
 	}
 	rep := h.worker.History().Latest()
 	if rep == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no reconciliation report yet"})
+		httpserver.Fail(c, http.StatusNotFound, "no reconciliation report yet")
 		return
 	}
 	c.JSON(http.StatusOK, rep)
@@ -71,13 +72,13 @@ func (h *ReconciliationHandler) latest(c *gin.Context) {
 // optional ?limit=N caps the response (default 20, max 100).
 func (h *ReconciliationHandler) history(c *gin.Context) {
 	if h.worker == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "reconciliation worker is not enabled"})
+		httpserver.Fail(c, http.StatusServiceUnavailable, "reconciliation worker is not enabled")
 		return
 	}
 	limit := 20
 	if v := c.Query("limit"); v != "" {
 		if _, err := parseIntQuery(v, &limit); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be a positive integer"})
+			httpserver.Fail(c, http.StatusBadRequest, "limit must be a positive integer")
 			return
 		}
 	}
@@ -109,7 +110,7 @@ type runRequest struct {
 // also calls ReconcileOnce on its interval.
 func (h *ReconciliationHandler) run(c *gin.Context) {
 	if h.worker == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "reconciliation worker is not enabled"})
+		httpserver.Fail(c, http.StatusServiceUnavailable, "reconciliation worker is not enabled")
 		return
 	}
 	var req runRequest
@@ -121,7 +122,7 @@ func (h *ReconciliationHandler) run(c *gin.Context) {
 	rep, err := h.worker.ReconcileOnce(ctx, req.AccountID)
 	if err != nil {
 		h.logger.Warn().Err(err).Str("account_id", req.AccountID).Msg("forced reconciliation failed")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, rep)
@@ -131,7 +132,7 @@ func (h *ReconciliationHandler) run(c *gin.Context) {
 // field is rendered as a human-readable string for UI display.
 func (h *ReconciliationHandler) config(c *gin.Context) {
 	if h.worker == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "reconciliation worker is not enabled"})
+		httpserver.Fail(c, http.StatusServiceUnavailable, "reconciliation worker is not enabled")
 		return
 	}
 	cfg := h.worker.Config()

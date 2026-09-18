@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"encoding/json"
 	"log"
@@ -166,7 +167,7 @@ func registerExploreRoutes(router *gin.Engine, runner pipeline.BacktestRunner, s
 func (h *ExploreHandler) Start(c *gin.Context) {
 	var req StartExploreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 	if req.MaxTries <= 0 {
@@ -305,7 +306,7 @@ func (h *ExploreHandler) Status(c *gin.Context) {
 	run, ok := h.runs[c.Param("runID")]
 	h.mu.Unlock()
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		httpserver.Fail(c, http.StatusNotFound, "run not found")
 		return
 	}
 
@@ -353,7 +354,7 @@ func (h *ExploreHandler) Stop(c *gin.Context) {
 	run, ok := h.runs[c.Param("runID")]
 	h.mu.Unlock()
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		httpserver.Fail(c, http.StatusNotFound, "run not found")
 		return
 	}
 

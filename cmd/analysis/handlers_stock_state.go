@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"net/http"
 	"time"
@@ -61,7 +62,7 @@ func (h *StockStateHandler) RegisterRoutes(router *gin.Engine) {
 // list returns all records (or filtered by ?state=...).
 func (h *StockStateHandler) list(c *gin.Context) {
 	if h.registry == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "stock state registry is not enabled"})
+		httpserver.Fail(c, http.StatusServiceUnavailable, "stock state registry is not enabled")
 		return
 	}
 	state := stockstate.StockState(c.Query("state"))
@@ -70,7 +71,7 @@ func (h *StockStateHandler) list(c *gin.Context) {
 		case stockstate.StockStateListed, stockstate.StockStateSuspended,
 			stockstate.StockStateDelisting, stockstate.StockStateDelisted:
 		default:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid state filter"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid state filter")
 			return
 		}
 	}
@@ -85,13 +86,13 @@ func (h *StockStateHandler) list(c *gin.Context) {
 // get returns a single record by symbol.
 func (h *StockStateHandler) get(c *gin.Context) {
 	if h.registry == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "stock state registry is not enabled"})
+		httpserver.Fail(c, http.StatusServiceUnavailable, "stock state registry is not enabled")
 		return
 	}
 	symbol := c.Param("symbol")
 	rec, ok := h.registry.GetState(symbol)
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "symbol not found: " + symbol})
+		httpserver.Failf(c, http.StatusNotFound, "symbol not found: %s", symbol)
 		return
 	}
 	c.JSON(http.StatusOK, rec)
@@ -111,22 +112,22 @@ type setRequest struct {
 // Returns 400 on illegal transition / invalid state, 200 on success.
 func (h *StockStateHandler) set(c *gin.Context) {
 	if h.registry == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "stock state registry is not enabled"})
+		httpserver.Fail(c, http.StatusServiceUnavailable, "stock state registry is not enabled")
 		return
 	}
 	symbol := c.Param("symbol")
 	var req setRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 	state := stockstate.StockState(req.State)
 	if state == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "state is required"})
+		httpserver.Fail(c, http.StatusBadRequest, "state is required")
 		return
 	}
 	if err := h.registry.SetState(symbol, state, req.Reason, req.DelistedDate); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 	rec, _ := h.registry.GetState(symbol)
@@ -136,7 +137,7 @@ func (h *StockStateHandler) set(c *gin.Context) {
 // delete removes a record.
 func (h *StockStateHandler) delete(c *gin.Context) {
 	if h.registry == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "stock state registry is not enabled"})
+		httpserver.Fail(c, http.StatusServiceUnavailable, "stock state registry is not enabled")
 		return
 	}
 	symbol := c.Param("symbol")
@@ -162,11 +163,11 @@ func (h *StockStateHandler) scanGET(c *gin.Context) {
 // registry is wired correctly and dry-run the actions.
 func (h *StockStateHandler) scan(c *gin.Context) {
 	if h.registry == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "stock state registry is not enabled"})
+		httpserver.Fail(c, http.StatusServiceUnavailable, "stock state registry is not enabled")
 		return
 	}
 	if h.liquidator == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "forced liquidator is not enabled (LiquidationWindow < 0?)"})
+		httpserver.Fail(c, http.StatusServiceUnavailable, "forced liquidator is not enabled (LiquidationWindow < 0?)")
 		return
 	}
 	// The forced liquidator requires a LiveTrader instance. The handler

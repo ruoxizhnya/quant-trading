@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"log"
 	"net/http"
@@ -50,7 +51,7 @@ func main() {
 				Topic string `json:"topic" binding:"required"`
 			}
 			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusBadRequest, err)
 				return
 			}
 
@@ -72,13 +73,13 @@ func main() {
 				Formula string `json:"formula" binding:"required"`
 			}
 			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusBadRequest, err)
 				return
 			}
 
 			expr, err := researchAgent.ValidateFormula(req.Formula)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusBadRequest, err)
 				return
 			}
 

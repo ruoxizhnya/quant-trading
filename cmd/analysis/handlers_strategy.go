@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"encoding/json"
 	"net/http"
 
@@ -16,7 +17,7 @@ func registerStrategyRoutes(router *gin.Engine, strategyDB *strategy.StrategyDB)
 		if strategyType != "" || activeOnly {
 			configs, err := strategyDB.List(c.Request.Context(), strategyType, activeOnly)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusInternalServerError, err)
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"strategies": configs})
@@ -24,7 +25,7 @@ func registerStrategyRoutes(router *gin.Engine, strategyDB *strategy.StrategyDB)
 		}
 		infos, err := strategyDB.ListWithDB(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"strategies": infos})
@@ -39,7 +40,7 @@ func registerStrategyRoutes(router *gin.Engine, strategyDB *strategy.StrategyDB)
 			Params       any    `json:"params"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 		paramsJSON := "{}"
@@ -56,7 +57,7 @@ func registerStrategyRoutes(router *gin.Engine, strategyDB *strategy.StrategyDB)
 			IsActive:     true,
 		}
 		if err := strategyDB.Create(c.Request.Context(), cfg); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "strategy saved", "strategy_id": req.StrategyID})
@@ -66,11 +67,11 @@ func registerStrategyRoutes(router *gin.Engine, strategyDB *strategy.StrategyDB)
 		id := c.Param("id")
 		cfg, err := strategyDB.Get(c.Request.Context(), id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		if cfg == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "strategy not found"})
+			httpserver.Fail(c, http.StatusNotFound, "strategy not found")
 			return
 		}
 		c.JSON(http.StatusOK, cfg)
@@ -86,16 +87,16 @@ func registerStrategyRoutes(router *gin.Engine, strategyDB *strategy.StrategyDB)
 			IsActive     *bool  `json:"is_active"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 		cfg, err := strategyDB.Get(c.Request.Context(), id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		if cfg == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "strategy not found"})
+			httpserver.Fail(c, http.StatusNotFound, "strategy not found")
 			return
 		}
 		if req.Name != "" {
@@ -115,7 +116,7 @@ func registerStrategyRoutes(router *gin.Engine, strategyDB *strategy.StrategyDB)
 			cfg.IsActive = *req.IsActive
 		}
 		if err := strategyDB.Create(c.Request.Context(), cfg); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "strategy updated", "strategy_id": id})
@@ -124,7 +125,7 @@ func registerStrategyRoutes(router *gin.Engine, strategyDB *strategy.StrategyDB)
 	router.DELETE("/api/strategies/:id", func(c *gin.Context) {
 		id := c.Param("id")
 		if err := strategyDB.Delete(c.Request.Context(), id); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "strategy deleted", "strategy_id": id})

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -54,7 +55,7 @@ func registerProxyRoutes(router *gin.Engine, httpClient *http.Client, v *viper.V
 		default:
 			req, reqErr := http.NewRequestWithContext(c.Request.Context(), method, targetURL, body)
 			if reqErr != nil {
-				c.JSON(http.StatusBadGateway, gin.H{"error": "failed to create proxy request"})
+				httpserver.Fail(c, http.StatusBadGateway, "failed to create proxy request")
 				return
 			}
 			if body != nil {
@@ -63,13 +64,13 @@ func registerProxyRoutes(router *gin.Engine, httpClient *http.Client, v *viper.V
 			resp, err = httpClient.Do(req)
 		}
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "data service unavailable: " + err.Error()})
+			httpserver.Wrap(c, http.StatusBadGateway, err, "data service unavailable: ")
 			return
 		}
 		defer resp.Body.Close()
 		var result map[string]interface{}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "invalid response from data service"})
+			httpserver.Fail(c, http.StatusBadGateway, "invalid response from data service")
 			return
 		}
 		c.JSON(resp.StatusCode, result)
@@ -80,7 +81,7 @@ func registerProxyRoutes(router *gin.Engine, httpClient *http.Client, v *viper.V
 		startDate := c.Query("start_date")
 		endDate := c.Query("end_date")
 		if startDate == "" || endDate == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date required (YYYYMMDD)"})
+			httpserver.Fail(c, http.StatusBadRequest, "start_date and end_date required (YYYYMMDD)")
 			return
 		}
 		dataURL := fmt.Sprintf("%s/ohlcv/%s?start_date=%s&end_date=%s", dataServiceURL, symbol, startDate, endDate)
@@ -90,7 +91,7 @@ func registerProxyRoutes(router *gin.Engine, httpClient *http.Client, v *viper.V
 	router.POST("/api/screen", func(c *gin.Context) {
 		var reqBody map[string]interface{}
 		if err := json.NewDecoder(c.Request.Body).Decode(&reqBody); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid request body")
 			return
 		}
 		bodyBytes, _ := json.Marshal(reqBody)

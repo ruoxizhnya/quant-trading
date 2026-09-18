@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"net/http"
 	"time"
@@ -87,7 +88,7 @@ type calculatePositionResponse struct {
 func (h *RiskHandler) calculatePosition(c *gin.Context) {
 	var req calculatePositionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
@@ -96,7 +97,7 @@ func (h *RiskHandler) calculatePosition(c *gin.Context) {
 	ps, err := h.manager.CalculatePosition(ctx, req.Signal, &req.Portfolio, req.Regime, req.CurrentPrice, req.OHLCV)
 	if err != nil {
 		h.logger.Warn().Err(err).Str("symbol", req.Signal.Symbol).Msg("calculate_position failed")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, calculatePositionResponse{
@@ -123,7 +124,7 @@ func (h *RiskHandler) detectRegime(c *gin.Context) {
 	if err := c.ShouldBindJSON(&dataReq); err == nil && len(dataReq.Data) > 0 {
 		regime, err := h.manager.DetectRegime(ctx, dataReq.Data)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, regime)
@@ -149,7 +150,7 @@ type checkStopLossRequest struct {
 func (h *RiskHandler) checkStopLoss(c *gin.Context) {
 	var req checkStopLossRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
@@ -157,7 +158,7 @@ func (h *RiskHandler) checkStopLoss(c *gin.Context) {
 
 	events, err := h.manager.CheckStopLoss(ctx, req.Positions, req.Prices)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -33,19 +34,19 @@ type saveRequest struct {
 func generateStrategyHandler(c *gin.Context) {
 	var req copilotRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
 	if req.Description == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "description is required"})
+		httpserver.Fail(c, http.StatusBadRequest, "description is required")
 		return
 	}
 
 	apiKey := os.Getenv("AI_API_KEY")
 	apiURL := os.Getenv("AI_API_URL")
 	if apiKey == "" || apiURL == "" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI API not configured (set AI_API_KEY and AI_API_URL)"})
+		httpserver.Fail(c, http.StatusServiceUnavailable, "AI API not configured (set AI_API_KEY and AI_API_URL)")
 		return
 	}
 
@@ -83,7 +84,7 @@ Generate ONLY the Go code, no explanations. Use package "plugins".`, req.Descrip
 	jsonBody, _ := json.Marshal(aiReqBody)
 	httpReq, err := http.NewRequestWithContext(c.Request.Context(), "POST", apiURL, strings.NewReader(string(jsonBody)))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create AI request"})
+		httpserver.Fail(c, http.StatusInternalServerError, "failed to create AI request")
 		return
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -91,14 +92,14 @@ Generate ONLY the Go code, no explanations. Use package "plugins".`, req.Descrip
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "AI API request failed: " + err.Error()})
+		httpserver.Wrap(c, http.StatusBadGateway, err, "AI API request failed: ")
 		return
 	}
 	defer resp.Body.Close()
 
 	var aiResp map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&aiResp); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse AI response"})
+		httpserver.Fail(c, http.StatusInternalServerError, "failed to parse AI response")
 		return
 	}
 
@@ -173,20 +174,20 @@ func extractDescription(code string) string {
 func saveStrategyHandler(c *gin.Context) {
 	var req saveRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
 	filename := fmt.Sprintf("strategy_%s.go", req.StrategyName)
 	dir := "./pkg/strategy/plugins"
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create directory"})
+		httpserver.Fail(c, http.StatusInternalServerError, "failed to create directory")
 		return
 	}
 
 	filePath := fmt.Sprintf("%s/%s", dir, filename)
 	if err := os.WriteFile(filePath, []byte(req.Code), 0644); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save strategy: " + err.Error()})
+		httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to save strategy: ")
 		return
 	}
 
@@ -202,12 +203,12 @@ func registerCopilotRoutes(router *gin.Engine, copilotService *strategy.CopilotS
 	{
 		copilot.POST("/generate", func(c *gin.Context) {
 			if !copilotService.IsConfigured() {
-				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI not configured (set AI_API_KEY and AI_API_URL)"})
+				httpserver.Fail(c, http.StatusServiceUnavailable, "AI not configured (set AI_API_KEY and AI_API_URL)")
 				return
 			}
 			var req strategy.GenerateParams
 			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+				httpserver.Wrap(c, http.StatusBadRequest, err, "invalid request: ")
 				return
 			}
 			result := copilotService.Generate(c.Request.Context(), req, copilotRunner)
@@ -229,7 +230,7 @@ func registerCopilotRoutes(router *gin.Engine, copilotService *strategy.CopilotS
 			jobID := c.Param("job_id")
 			result := copilotService.GetJob(jobID)
 			if result == nil {
-				c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+				httpserver.Fail(c, http.StatusNotFound, "job not found")
 				return
 			}
 			result.Lock()

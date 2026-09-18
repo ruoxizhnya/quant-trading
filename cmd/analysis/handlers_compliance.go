@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"net/http"
 	"time"
@@ -148,7 +149,7 @@ type checkResponse struct {
 func (h *ComplianceHandler) check(c *gin.Context) {
 	var req checkRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -259,7 +260,7 @@ type abnormalRunResponse struct {
 func (h *ComplianceHandler) abnormalRun(c *gin.Context) {
 	var req abnormalRunRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 	alerts := h.abnormalDetector.RunAll(req.AccountID, req.Orders, req.Trades, h.now())
@@ -300,14 +301,14 @@ type reportDailyResponse struct {
 func (h *ComplianceHandler) reportDaily(c *gin.Context) {
 	var req reportDailyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 	day := h.now()
 	if req.TradingDate != "" {
 		t, err := time.Parse("2006-01-02", req.TradingDate)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "trading_date must be YYYY-MM-DD"})
+			httpserver.Fail(c, http.StatusBadRequest, "trading_date must be YYYY-MM-DD")
 			return
 		}
 		day = t
@@ -319,13 +320,13 @@ func (h *ComplianceHandler) reportDaily(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
-		c.JSON(http.StatusRequestTimeout, gin.H{"error": "request cancelled"})
+		httpserver.Fail(c, http.StatusRequestTimeout, "request cancelled")
 		return
 	}
 	path, err := h.reporter.WriteReport(report)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("write large-trade report failed")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 	h.logger.Info().
@@ -363,7 +364,7 @@ type divestmentCheckRequest struct {
 func (h *ComplianceHandler) divestmentCheck(c *gin.Context) {
 	var req divestmentCheckRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 	result := h.divestmentChecker.Check(req.Profile, req.Plan, req.Recent)

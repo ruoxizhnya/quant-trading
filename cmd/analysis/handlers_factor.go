@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"net/http"
 	"time"
 
@@ -18,31 +18,31 @@ func registerFactorRoutes(router *gin.Engine, factorAttributor *data.FactorAttri
 			factorStr := c.Param("factor")
 			factorType, ok := domain.ParseFactorType(factorStr)
 			if !ok {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid factor type: %s", factorStr)})
+				httpserver.Failf(c, http.StatusBadRequest, "invalid factor type: %s", factorStr)
 				return
 			}
 
 			startDateStr := c.Query("start_date")
 			endDateStr := c.Query("end_date")
 			if startDateStr == "" || endDateStr == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date required (YYYY-MM-DD)"})
+				httpserver.Fail(c, http.StatusBadRequest, "start_date and end_date required (YYYY-MM-DD)")
 				return
 			}
 
 			startDate, err := time.Parse("2006-01-02", startDateStr)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format"})
+				httpserver.Fail(c, http.StatusBadRequest, "invalid start_date format")
 				return
 			}
 			endDate, err := time.Parse("2006-01-02", endDateStr)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format"})
+				httpserver.Fail(c, http.StatusBadRequest, "invalid end_date format")
 				return
 			}
 
 			returns, err := factorAttributor.GetFactorReturnsTimeSeries(c.Request.Context(), factorType, startDate, endDate)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusInternalServerError, err)
 				return
 			}
 
@@ -59,31 +59,31 @@ func registerFactorRoutes(router *gin.Engine, factorAttributor *data.FactorAttri
 			factorStr := c.Param("factor")
 			factorType, ok := domain.ParseFactorType(factorStr)
 			if !ok {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid factor type: %s", factorStr)})
+				httpserver.Failf(c, http.StatusBadRequest, "invalid factor type: %s", factorStr)
 				return
 			}
 
 			startDateStr := c.Query("start_date")
 			endDateStr := c.Query("end_date")
 			if startDateStr == "" || endDateStr == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date required (YYYY-MM-DD)"})
+				httpserver.Fail(c, http.StatusBadRequest, "start_date and end_date required (YYYY-MM-DD)")
 				return
 			}
 
 			startDate, err := time.Parse("2006-01-02", startDateStr)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start_date format"})
+				httpserver.Fail(c, http.StatusBadRequest, "invalid start_date format")
 				return
 			}
 			endDate, err := time.Parse("2006-01-02", endDateStr)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end_date format"})
+				httpserver.Fail(c, http.StatusBadRequest, "invalid end_date format")
 				return
 			}
 
 			icEntries, err := factorAttributor.GetICTimeSeries(c.Request.Context(), factorType, startDate, endDate)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusInternalServerError, err)
 				return
 			}
 
@@ -102,19 +102,19 @@ func registerFactorRoutes(router *gin.Engine, factorAttributor *data.FactorAttri
 				TradeDate string `json:"trade_date" binding:"required"`
 			}
 			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusBadRequest, err)
 				return
 			}
 
 			factorType, ok := domain.ParseFactorType(req.Factor)
 			if !ok {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid factor type: %s", req.Factor)})
+				httpserver.Failf(c, http.StatusBadRequest, "invalid factor type: %s", req.Factor)
 				return
 			}
 
 			tradeDate, err := time.Parse("2006-01-02", req.TradeDate)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid trade_date format (YYYY-MM-DD)"})
+				httpserver.Fail(c, http.StatusBadRequest, "invalid trade_date format (YYYY-MM-DD)")
 				return
 			}
 
@@ -125,7 +125,7 @@ func registerFactorRoutes(router *gin.Engine, factorAttributor *data.FactorAttri
 
 			if err := factorAttributor.ComputeFactorReturns(c.Request.Context(), factorType, tradeDate); err != nil {
 				logger.Error().Err(err).Msg("Failed to compute factor returns")
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusInternalServerError, err)
 				return
 			}
 
@@ -143,19 +143,19 @@ func registerFactorRoutes(router *gin.Engine, factorAttributor *data.FactorAttri
 				ForwardDays int    `json:"forward_days"`
 			}
 			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusBadRequest, err)
 				return
 			}
 
 			factorType, ok := domain.ParseFactorType(req.Factor)
 			if !ok {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid factor type: %s", req.Factor)})
+				httpserver.Failf(c, http.StatusBadRequest, "invalid factor type: %s", req.Factor)
 				return
 			}
 
 			tradeDate, err := time.Parse("2006-01-02", req.TradeDate)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid trade_date format (YYYY-MM-DD)"})
+				httpserver.Fail(c, http.StatusBadRequest, "invalid trade_date format (YYYY-MM-DD)")
 				return
 			}
 
@@ -173,7 +173,7 @@ func registerFactorRoutes(router *gin.Engine, factorAttributor *data.FactorAttri
 			icEntry, err := factorAttributor.ComputeIC(c.Request.Context(), factorType, tradeDate, forwardDays)
 			if err != nil {
 				logger.Error().Err(err).Msg("Failed to compute IC")
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusInternalServerError, err)
 				return
 			}
 

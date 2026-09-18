@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"net/http"
 	"time"
@@ -75,7 +76,7 @@ type StartPaperTradingRequest struct {
 func (h *PaperTradingHandler) StartPaperTrading(c *gin.Context) {
 	var req StartPaperTradingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -85,7 +86,7 @@ func (h *PaperTradingHandler) StartPaperTrading(c *gin.Context) {
 
 	ctx := context.Background()
 	if err := h.engine.Start(ctx, req.Symbols); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -109,7 +110,7 @@ func (h *PaperTradingHandler) StartPaperTrading(c *gin.Context) {
 func (h *PaperTradingHandler) StopPaperTrading(c *gin.Context) {
 	// Get current symbols from engine
 	if err := h.engine.Stop([]string{}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -160,7 +161,7 @@ type SubmitOrderRequest struct {
 func (h *PaperTradingHandler) SubmitOrder(c *gin.Context) {
 	var req SubmitOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -176,7 +177,7 @@ func (h *PaperTradingHandler) SubmitOrder(c *gin.Context) {
 	// Use order manager directly through engine
 	orderID, err := h.engine.SubmitOrder(order)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -214,7 +215,7 @@ func (h *PaperTradingHandler) GetOrder(c *gin.Context) {
 	// Access order manager through engine
 	order, found := h.engine.GetOrder(orderID)
 	if !found {
-		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		httpserver.Fail(c, http.StatusNotFound, "order not found")
 		return
 	}
 	c.JSON(http.StatusOK, order)
@@ -234,7 +235,7 @@ func (h *PaperTradingHandler) GetOrder(c *gin.Context) {
 func (h *PaperTradingHandler) CancelOrder(c *gin.Context) {
 	orderID := c.Param("id")
 	if err := h.engine.CancelOrder(orderID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "cancelled", "order_id": orderID})

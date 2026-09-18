@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,7 +27,7 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 			}
 			jobs, err := jobService.ListJobs(c.Request.Context(), limit)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusInternalServerError, err)
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"jobs": jobs, "total": len(jobs)})
@@ -35,7 +36,7 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 		api.POST("", func(c *gin.Context) {
 			bodyBytes, err := io.ReadAll(c.Request.Body)
 			if err != nil || len(bodyBytes) == 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "empty request body"})
+				httpserver.Fail(c, http.StatusBadRequest, "empty request body")
 				return
 			}
 
@@ -51,7 +52,7 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 				job, err := jobService.CreateJob(c.Request.Context(), jobReq)
 				if err != nil {
 					logger.Error().Err(err).Msg("Failed to create job")
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create job", "details": err.Error()})
+					httpserver.FailCause(c, http.StatusInternalServerError, "failed to create job", err)
 					return
 				}
 				c.JSON(http.StatusAccepted, gin.H{"job_id": job.ID, "status": job.Status})
@@ -64,7 +65,7 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 				defer cancel()
 				result, err := engine.RunBacktest(ctx, req)
 				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "backtest failed", "details": err.Error()})
+					httpserver.FailCause(c, http.StatusInternalServerError, "backtest failed", err)
 					return
 				}
 				if saveErr := jobService.SaveSyncResult(c.Request.Context(), result); saveErr != nil {
@@ -74,18 +75,18 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 				return
 			}
 
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: must provide strategy+stock_pool (old format) or strategy_id+universe (new format)"})
+			httpserver.Fail(c, http.StatusBadRequest, "invalid request body: must provide strategy+stock_pool (old format) or strategy_id+universe (new format)")
 		})
 
 		api.GET("/:id", func(c *gin.Context) {
 			jobID := c.Param("id")
 			job, err := jobService.GetJob(c.Request.Context(), jobID)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusInternalServerError, err)
 				return
 			}
 			if job == nil {
-				c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+				httpserver.Fail(c, http.StatusNotFound, "job not found")
 				return
 			}
 			c.JSON(http.StatusOK, job)
@@ -128,16 +129,16 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 
 			job, err := jobService.GetJob(c.Request.Context(), backtestID)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusInternalServerError, err)
 				return
 			}
 			if job == nil || job.Status != "completed" {
-				c.JSON(http.StatusNotFound, gin.H{"error": "backtest not found or not completed"})
+				httpserver.Fail(c, http.StatusNotFound, "backtest not found or not completed")
 				return
 			}
 			var report map[string]any
 			if err := json.Unmarshal(job.Result, &report); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse stored result"})
+				httpserver.Fail(c, http.StatusInternalServerError, "failed to parse stored result")
 				return
 			}
 			c.JSON(http.StatusOK, report)
@@ -157,16 +158,16 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 
 			job, err := jobService.GetJob(c.Request.Context(), backtestID)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusInternalServerError, err)
 				return
 			}
 			if job == nil || job.Status != "completed" {
-				c.JSON(http.StatusNotFound, gin.H{"error": "backtest not found or not completed"})
+				httpserver.Fail(c, http.StatusNotFound, "backtest not found or not completed")
 				return
 			}
 			var stored backtest.BacktestResponse
 			if err := json.Unmarshal(job.Result, &stored); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse stored result"})
+				httpserver.Fail(c, http.StatusInternalServerError, "failed to parse stored result")
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{
@@ -190,16 +191,16 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 
 			job, err := jobService.GetJob(c.Request.Context(), backtestID)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				httpserver.Error(c, http.StatusInternalServerError, err)
 				return
 			}
 			if job == nil || job.Status != "completed" {
-				c.JSON(http.StatusNotFound, gin.H{"error": "backtest not found or not completed"})
+				httpserver.Fail(c, http.StatusNotFound, "backtest not found or not completed")
 				return
 			}
 			var stored backtest.BacktestResponse
 			if err := json.Unmarshal(job.Result, &stored); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse stored result"})
+				httpserver.Fail(c, http.StatusInternalServerError, "failed to parse stored result")
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{
@@ -213,7 +214,7 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 			backtestID := c.Param("id")
 			format := c.Param("format")
 			if format != "html" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported format, only 'html' is supported (use browser Print → PDF for PDF export)"})
+				httpserver.Fail(c, http.StatusBadRequest, "unsupported format, only 'html' is supported (use browser Print → PDF for PDF export)")
 				return
 			}
 
@@ -232,7 +233,7 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 			body, contentType, err := reporting.RenderHTML(resp, opts)
 			if err != nil {
 				logger.Error().Err(err).Str("backtest_id", backtestID).Msg("Failed to render HTML report")
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to render report"})
+				httpserver.Fail(c, http.StatusInternalServerError, "failed to render report")
 				return
 			}
 
@@ -267,11 +268,11 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 				// Min/Max count errors are user-facing (400).
 				// Anything else is an internal failure (500).
 				if strings.Contains(err.Error(), "at least") || strings.Contains(err.Error(), "at most") || strings.Contains(err.Error(), "distinct") {
-					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					httpserver.Error(c, http.StatusBadRequest, err)
 					return
 				}
 				logger.Error().Err(err).Strs("ids", ids).Msg("Compare failed")
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "compare failed", "details": err.Error()})
+				httpserver.FailCause(c, http.StatusInternalServerError, "compare failed", err)
 				return
 			}
 			// Partial-resolution is not an error — the payload itself
@@ -323,16 +324,16 @@ func lookupBacktestResponse(c *gin.Context, backtestID string, engine *backtest.
 	job, err := jobService.GetJob(c.Request.Context(), backtestID)
 	if err != nil {
 		logger.Error().Err(err).Str("backtest_id", backtestID).Msg("Failed to load backtest job")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		httpserver.Error(c, http.StatusInternalServerError, err)
 		return backtest.BacktestResponse{}, err
 	}
 	if job == nil || job.Status != "completed" {
-		c.JSON(http.StatusNotFound, gin.H{"error": "backtest not found or not completed"})
+		httpserver.Fail(c, http.StatusNotFound, "backtest not found or not completed")
 		return backtest.BacktestResponse{}, err
 	}
 	var stored backtest.BacktestResponse
 	if err := json.Unmarshal(job.Result, &stored); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse stored result"})
+		httpserver.Fail(c, http.StatusInternalServerError, "failed to parse stored result")
 		return backtest.BacktestResponse{}, err
 	}
 	if stored.ID == "" {

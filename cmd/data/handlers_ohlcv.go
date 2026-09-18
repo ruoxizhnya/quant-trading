@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"net/http"
 	"sync"
@@ -18,14 +19,14 @@ func getOHLCVHandler(dc *data.DataCache) gin.HandlerFunc {
 		endDateStr := c.Query("end_date")
 
 		if startDateStr == "" || endDateStr == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date query params required (YYYYMMDD)"})
+			httpserver.Fail(c, http.StatusBadRequest, "start_date and end_date query params required (YYYYMMDD)")
 			return
 		}
 
 		// Use DataCache for cache-aside access — same key format as cache warm endpoint
 		ohlcv, err := dc.GetOHLCV(ctx, symbol, startDateStr, endDateStr)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -43,11 +44,11 @@ func bulkOHLCVHandler(dc *data.DataCache) gin.HandlerFunc {
 			EndDate   string   `json:"end_date"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+			httpserver.Wrap(c, http.StatusBadRequest, err, "invalid request body: ")
 			return
 		}
 		if len(req.Symbols) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "symbols is required"})
+			httpserver.Fail(c, http.StatusBadRequest, "symbols is required")
 			return
 		}
 
@@ -86,25 +87,25 @@ func warmCacheHandler(dc *data.DataCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req warmCacheRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusBadRequest, err)
 			return
 		}
 		if len(req.Symbols) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "symbols array is required"})
+			httpserver.Fail(c, http.StatusBadRequest, "symbols array is required")
 			return
 		}
 		if req.StartDate == "" || req.EndDate == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "start_date and end_date are required (YYYYMMDD)"})
+			httpserver.Fail(c, http.StatusBadRequest, "start_date and end_date are required (YYYYMMDD)")
 			return
 		}
 
 		ctx := c.Request.Context()
 		if err := dc.WarmCache(ctx, req.Symbols, req.StartDate, req.EndDate); err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
-				c.JSON(http.StatusGatewayTimeout, gin.H{"error": "cache warm-up timed out"})
+				httpserver.Fail(c, http.StatusGatewayTimeout, "cache warm-up timed out")
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
