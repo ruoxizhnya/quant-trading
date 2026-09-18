@@ -24,6 +24,23 @@ type FactorAware interface {
 	SetFactorCache(reader FactorZScoreReader)
 }
 
+// FundamentalSeries 是一只股票的财务记录序列，**按可用日升序**。
+//
+// 每条记录的 Date 必须是「可用日」（= COALESCE(ann_date, trade_date)），
+// 不是报告期截止日。对齐发生在可用日上，才有 PIT 语义 —— 详见
+// storage.GetFundamentalsPIT。
+type FundamentalSeries = []domain.Fundamental
+
+// FundamentalAware 是可选能力接口（P2-12），范式同 FactorAware。
+//
+// GenerateSignals 的签名里没有基本面参数，改签名要动所有策略实现，所以
+// 走「引擎识别得了就注入、识别不了就跳过」这条路。策略如果没拿到基本面
+// 却在表达式里用了 pe/pb，会**明确报错**而不是拿到一串 0 —— 见
+// pkg/strategy/expression 的 OHLCVDataProvider。
+type FundamentalAware interface {
+	SetFundamentals(records map[string]FundamentalSeries)
+}
+
 type Signal struct {
 	Symbol     string                 `json:"symbol"`
 	Action     string                 `json:"action"`

@@ -264,9 +264,13 @@ func (g *Generator) intentToConfig(i *intent.Intent) Config {
 //  3. AI 调的是旋钮（窗口、阈值、权重），不是重新发明一个策略 ——
 //     这符合 ADR-023：AI 是操作仪器的实验员，不是造仪器的生成器。
 //
-// 只覆盖能用价量表达的意图。value / quality 要的是 PE / PB / ROE，而
-// 表达式引擎目前只暴露 OHLCV，映射不了：返回 ok=false，让调用方明确
-// 失败，而不是套一个无关的价格表达式产出答非所问的回测数字。
+// lookup 窗口只用于价量类意图；value / quality 用的是财报数据（季度频），
+// 不看回看窗口。
+//
+// ADR-024 落地时这条注释写着「value / quality 映射不了，返回 ok=false」。
+// P2-12 把 PE / PB / ROE / ROA 接进了表达式引擎，这两类现在能给出诚实的
+// 表达式了 —— 但前提仍然是数据到位：没有财报时表达式会明确报错，绝不会
+// 静默退化成用价格糊弄。
 // defaultLookback 是意图没指定窗口时用的默认值（沿用此前写死的值）。
 const defaultLookback = 20
 
@@ -288,8 +292,23 @@ func defaultSignalExpression(i *intent.Intent) (string, bool) {
 	case intent.StrategyTypeMultiFactor:
 		// 动量 + 低波，两个横截面排名各占一半，取最高的 20%。
 		return fmt.Sprintf("cs_rank(ts_pct_change(close, %d)) + cs_rank(neg(ts_std(close, %d))) > 1.6", lb, lb), true
+	case intent.StrategyTypeValue:
+		// 低 PE + 低 PB：两个「越便宜分越高」的排名各占一半。
+		//
+		// 前提是表达式引擎能拿到 pe / pb（P2-12）。拿不到时这个表达式会
+		// **明确报错**，不会静默产出答非所问的回测数字 —— 这正是当初宁可
+		// 返回 ok=false 也不给默认值的原因。
+		//
+		// PE/PB 为负（亏损 / 净资产为负）的数据在 OHLCVDataProvider 里就
+		// 被折成 NaN，cs_rank 会把它们排除掉，所以「负值 = 最便宜」这个
+		// 经典价值陷阱在这里不成立。
+		return "cs_rank(neg(pe)) + cs_rank(neg(pb)) > 1.6", true
+	case intent.StrategyTypeQuality:
+		// 高 ROE + 高 ROA。与 value 不同，盈利率为负是**有意义**的差，
+		// 原样参与排名（会自然排到末位），不做 NaN 处理。
+		return "cs_rank(roe) + cs_rank(roa) > 1.6", true
 	default:
-		// value / quality / custom：给不出诚实的表达式，交给调用方报错。
+		// custom：给不出诚实的表达式，交给调用方报错。
 		return "", false
 	}
 }

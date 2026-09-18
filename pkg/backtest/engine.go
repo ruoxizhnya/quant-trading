@@ -120,6 +120,15 @@ type Engine struct {
 	// eliminating per-symbol-per-day HTTP/DB queries for multi-factor strategies.
 	store *storage.PostgresStore
 
+	// L1 基本面缓存（P2-12）：symbol → 按可用日升序的财报序列。
+	//
+	// 只在策略声明需要（strategy.FundamentalAware）时预热一次，回测期间只读。
+	// 前视偏差不由这里挡 —— 由 OHLCVDataProvider 按每根 K 线的日期切，
+	// 所以缓存里存着 asOf 之后的期数也不会泄漏未来。
+	//
+	// 受 e.mu 保护：Engine 实例是共享的，多个回测可以并发跑。
+	fundamentals map[string]strategy.FundamentalSeries
+
 	// liveBridge 桥接 backtest 信号到 live/paper trading (P1-17 ADR-020)。
 	// 取代旧 `liveTrader live.LiveTrader` 字段；旧 SetLiveTrader /
 	// GetLiveTrader / ExecuteSignalViaLiveTrader 等方法保留为
@@ -581,6 +590,11 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		logger.Info().Msg("Factor cache warm-up completed")
 	}
 
+	// P2-12：只有声明了要财报的策略才会真的去查。
+	if err := e.warmFundamentalsIfNeeded(ctx, params.StrategyName, params.StockPool, params.EndDate); err != nil {
+		logger.Warn().Err(err).Msg("Fundamentals warm-up failed — 用了 pe/pb/roe 的表达式会明确失败（不会静默当 0）")
+	}
+
 	tradingDays, err := e.getTradingDays(ctx, params.StartDate, params.EndDate)
 	if err != nil {
 		return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, "failed to get trading days", "RunBacktest")
@@ -740,6 +754,68 @@ func (e *Engine) warmFactorCache(ctx context.Context, start, end time.Time) erro
 	return e.factor.Warm(ctx, start, end, store)
 }
 
+// SetFundamentals 让调用方直接注入财报数据，跳过预热（P2-12）。
+//
+// 给测试和「没有 Postgres 也想跑估值策略」的场景留的门：数据从哪来由调用
+// 方负责，格式要求见 strategy.FundamentalSeries（Date 必须是可用日）。
+func (e *Engine) SetFundamentals(records map[string]strategy.FundamentalSeries) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.fundamentals = records
+}
+
+// fundamentalsSnapshot 返回当前缓存的财报（并发安全）。
+//
+// 不复制：回测期间每个交易日都要对齐一次，几万条记录复制一遍不值得。
+// 调用方只读。
+func (e *Engine) fundamentalsSnapshot() map[string]strategy.FundamentalSeries {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.fundamentals
+}
+
+// warmFundamentals 预热基本面数据（P2-12）。
+//
+// 三个「不」：
+//  1. 策略不要就不查 —— 只有实现了 strategy.FundamentalAware 的策略才预热，
+//     纯价量策略不该为估值数据付查询成本。
+//  2. 只查一次 —— 一次 bulk 查询覆盖回测终点之前的所有期数；每根 K 线的
+//     可见性由 OHLCVDataProvider 在对齐时切，不需要按日重查。
+//  3. 失败不阻断 —— 没有财报数据只是让估值表达式跑不起来（明确报错），
+//     不是回测本身失败。
+func (e *Engine) warmFundamentalsIfNeeded(ctx context.Context, strategyName string, symbols []string, asOf time.Time) error {
+	strat, err := strategy.DefaultRegistry.Get(strategyName)
+	if err != nil {
+		return nil // 走外部 strategy-service，跟本地基本面无关
+	}
+	if _, ok := strat.(strategy.FundamentalAware); !ok {
+		return nil // 价量策略：不付这份查询成本
+	}
+
+	e.mu.RLock()
+	store := e.store
+	e.mu.RUnlock()
+	if store == nil {
+		return nil // 没有 DB：策略会在用到 pe/pb 时明确报错
+	}
+
+	records, err := store.GetFundamentalsPITBulk(ctx, symbols, asOf)
+	if err != nil {
+		return err
+	}
+
+	e.mu.Lock()
+	e.fundamentals = records
+	e.mu.Unlock()
+
+	e.logger.Info().
+		Int("symbols", len(symbols)).
+		Int("stocks_with_fundamentals", len(records)).
+		Time("as_of", asOf).
+		Msg("Fundamentals warm-up completed")
+	return nil
+}
+
 // getTradingDays retrieves trading days from data service.
 func (e *Engine) getTradingDays(ctx context.Context, start, end time.Time) ([]time.Time, error) {
 	days, err := e.effectiveProvider().GetTradingDays(ctx, start, end)
@@ -857,6 +933,10 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 func (e *Engine) getSignalsFromLocalStrategy(ctx context.Context, strat strategy.Strategy, strategyName string, marketData map[string][]domain.OHLCV, date time.Time, tracker *Tracker) ([]domain.Signal, error) {
 	if fa, ok := strat.(strategy.FactorAware); ok {
 		fa.SetFactorCache(e.GetFactorZScore)
+	}
+	// P2-12：基本面数据。nil = 没预热成功，策略用到 pe/pb 时会明确报错。
+	if fu, ok := strat.(strategy.FundamentalAware); ok {
+		fu.SetFundamentals(e.fundamentalsSnapshot())
 	}
 
 	prices := extractLatestPrices(marketData)

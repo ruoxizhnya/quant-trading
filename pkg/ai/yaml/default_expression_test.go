@@ -62,24 +62,63 @@ func TestGenerate_PriceExpressibleTypesProduceLoadableStrategy(t *testing.T) {
 	}
 }
 
-// TestGenerate_FundamentalTypesDoNotFakeAnExpression：value / quality
-// 要的是 PE / PB / ROE，而表达式引擎只有 OHLCV（open/high/low/close/
-// volume/turnover）。给它们套一个无关的价格表达式，会跑出一堆看起来
-// 像样、实则答非所问的回测数字 —— 那比直接失败更糟。
-func TestGenerate_FundamentalTypesDoNotFakeAnExpression(t *testing.T) {
-	for _, typ := range []intent.StrategyType{intent.StrategyTypeValue, intent.StrategyTypeQuality} {
-		t.Run(string(typ), func(t *testing.T) {
+// TestGenerate_FundamentalTypesProduceRealExpressions：P2-12 之后，
+// pe / pb / ps / roe / roa 进了表达式引擎，value / quality 终于能给出
+// 诚实表达式了 —— 不再需要「明确失败」这条退路。
+//
+// 「绝不拿价格糊弄」的保证没有消失，只是挪了地方：现在由
+// OHLCVDataProvider 守着 —— 没有财报数据时用 pe 会报错，而不是返回 0
+// （见 expression 包的 TestGetField_FundamentalField_Error
+// 与 TestExpressionStrategy_ValueExprFailsWithoutFundamentals）。
+func TestGenerate_FundamentalTypesProduceRealExpressions(t *testing.T) {
+	cases := []struct {
+		typ      intent.StrategyType
+		wantRefs []string // 表达式里必须出现的字段
+		mustNot  string   // 绝不能用这个糊弄
+	}{
+		{intent.StrategyTypeValue, []string{"pe", "pb"}, ""},
+		{intent.StrategyTypeQuality, []string{"roe", "roa"}, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(string(tc.typ), func(t *testing.T) {
 			i := &intent.Intent{
-				StrategyName: "test_" + string(typ),
-				StrategyType: typ,
+				StrategyName: "test_" + string(tc.typ),
+				StrategyType: tc.typ,
 				Universe:     "csi300",
 				Timeframe:    "1d",
 			}
-			_, err := LoadStrategy(NewGenerator().Generate(i))
-			require.Error(t, err, "缺基本面数据时必须明确失败，而不是给假数字")
-			assert.Contains(t, err.Error(), string(typ), "错误信息要说清是哪个类型")
+			yamlStr := NewGenerator().Generate(i)
+
+			s, err := LoadStrategy(yamlStr)
+			require.NoError(t, err, "value/quality 现在必须能加载成策略")
+
+			cfg, err := ParseConfig(yamlStr)
+			require.NoError(t, err)
+			expr := cfg.Expression.Signal.Expression
+			require.NotEmpty(t, expr)
+
+			for _, ref := range tc.wantRefs {
+				assert.Contains(t, expr, ref, "表达式要真的用到 %s，不能拿价格糊弄", ref)
+			}
+			_, err = expression.NewParser().Parse(expr)
+			assert.NoError(t, err, "默认表达式必须能被表达式引擎解析")
+			_ = s
 		})
 	}
+}
+
+// TestGenerate_CustomStillFailsExplicitly：custom 依然无解 —— 它没有语义，
+// 编不出诚实表达式，宁可报错也不给默认值。
+func TestGenerate_CustomStillFailsExplicitly(t *testing.T) {
+	i := &intent.Intent{
+		StrategyName: "test_custom",
+		StrategyType: intent.StrategyTypeCustom,
+		Universe:     "csi300",
+		Timeframe:    "1d",
+	}
+	_, err := LoadStrategy(NewGenerator().Generate(i))
+	require.Error(t, err, "custom 没有语义，必须明确失败而不是随便给个表达式")
 }
 
 // series 造一段价格序列。默认表达式用的是 20 日窗口，所以期数要够。

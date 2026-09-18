@@ -134,6 +134,27 @@ func (e *Evaluator) evaluateFunction(n *FunctionNode, lookback int) (map[string]
 		argResults[i] = res
 	}
 
+	// 一元算子（neg / abs / log / sqrt / sign / exp）走逐元素，不是时序。
+	//
+	// 此前这里无条件走 applyTimeSeriesOp，于是 `neg(x)` 会报
+	// "unknown time-series operator: neg" —— 解析得过、跑不起来。受影响的
+	// 不止新加的估值表达式，multi_factor 的默认表达式
+	// `cs_rank(neg(ts_std(close, 20)))` 一直是坏的（P2-12 时才被发现）。
+	if isUnaryOp(n.Name) {
+		if len(argResults) != 1 {
+			return nil, fmt.Errorf("%s requires 1 argument, got %d", n.Name, len(argResults))
+		}
+		result := make(map[string][]float64)
+		for symbol, vals := range argResults[0] {
+			out := make([]float64, len(vals))
+			for i, v := range vals {
+				out[i] = applyUnaryOp(n.Name, v)
+			}
+			result[symbol] = out
+		}
+		return result, nil
+	}
+
 	result := make(map[string][]float64)
 	for _, symbol := range e.provider.GetSymbols() {
 		// Collect arguments for this symbol
@@ -150,6 +171,16 @@ func (e *Evaluator) evaluateFunction(n *FunctionNode, lookback int) (map[string]
 	}
 
 	return result, nil
+}
+
+// isUnaryOp reports whether name is an element-wise unary operator
+// (handled by applyUnaryOp) rather than a time-series operator.
+func isUnaryOp(name string) bool {
+	switch name {
+	case "neg", "abs", "log", "sqrt", "sign", "exp":
+		return true
+	}
+	return false
 }
 
 func (e *Evaluator) evaluateCrossSectional(n *CrossSectionalNode, lookback int) (map[string][]float64, error) {

@@ -84,7 +84,24 @@ type ExpressionStrategy struct {
 	sizer     *PositionSizer
 	riskCtl   *RiskController
 	cfg       ExpressionStrategyConfig
+
+	// fundamentals 由引擎在回测开始前注入（strategy.FundamentalAware）。
+	// nil = 这一路没拿到财报，表达式用了 pe/pb 会明确失败。
+	fundamentals map[string]strategy.FundamentalSeries
 }
+
+// SetFundamentals 让引擎把基本面数据塞进来（strategy.FundamentalAware，P2-12）。
+//
+// 传进来的 map 由引擎持有，本策略只读，不复制（回测期间每根 K 线都要对齐一次，
+// 复制几万条记录不值得）。
+func (s *ExpressionStrategy) SetFundamentals(records map[string]strategy.FundamentalSeries) {
+	s.Lock()
+	defer s.Unlock()
+	s.fundamentals = records
+}
+
+// Compile-time check: 引擎靠这个断言决定要不要去预热财报数据。
+var _ strategy.FundamentalAware = (*ExpressionStrategy)(nil)
 
 // NewExpressionStrategy constructs a strategy with the given name and
 // config. Zero-value fields in cfg are filled with defaults from
@@ -252,14 +269,15 @@ func (s *ExpressionStrategy) GenerateSignals(ctx context.Context, bars map[strin
 	signalGen := s.signalGen
 	sizer := s.sizer
 	riskCtl := s.riskCtl
+	fundamentals := s.fundamentals
 	s.RUnlock()
 
 	if signalGen == nil {
 		return nil, fmt.Errorf("expression strategy: signal generator not initialized")
 	}
 
-	// 1. Build evaluator from bars.
-	provider := NewOHLCVDataProvider(bars)
+	// 1. Build evaluator from bars (+ 注入的财报，P2-12)。
+	provider := NewOHLCVDataProviderWithFundamentals(bars, fundamentals)
 	evaluator := aiexpr.NewEvaluator(provider)
 
 	// 2. Generate raw signals.

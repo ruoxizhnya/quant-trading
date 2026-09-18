@@ -12,6 +12,21 @@ Your task is to generate a complete trading strategy based on the user's descrip
    - 10% daily limit (ST stocks 5%)
    - No short selling for most stocks
 
+## Available data fields (factor expression DSL)
+
+Price/volume: `open`, `high`, `low`, `close`, `volume`, `turnover`
+
+Fundamentals (PIT — each bar sees only what was already disclosed that day):
+`pe`, `pb`, `ps`, `roe`, `roa`
+
+Two things to keep in mind when using the fundamental fields:
+- They are only available when the backtest engine was given financial
+  reports. Without them the expression fails loudly (it does NOT silently
+  substitute zeros).
+- `pe` / `pb` / `ps` are NaN when non-positive — a negative P/E means the
+  company is losing money, not that it is cheap. Ranking on `neg(pe)`
+  therefore never rewards loss-makers.
+
 ## Output Format
 
 Return ONLY valid JSON:

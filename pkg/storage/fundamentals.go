@@ -67,6 +67,98 @@ func (s *PostgresStore) GetFundamentalsSnapshot(ctx context.Context, cutoffDate 
 	return results, nil
 }
 
+// GetFundamentalsPIT 取一只股票在 asOf 之前**已可用**的全部财务记录，
+// 每条记录的 Date 是它的可用日（= COALESCE(ann_date, trade_date)）。
+//
+// 为什么不能直接用 GetFundamentals：那个查询 SELECT 的是 trade_date，而
+// fina_indicator 路径把报告期截止日（end_date）写进了 trade_date 列 ——
+// 拿它去和 K 线日期对齐，等于在报告期结束当天就用上了还没披露的财报
+// （三季报 9/30 截止、10/25 披露，会在 9/30 就被看见）。这就是 P0-1 修的
+// 那个前视偏差，换个入口又犯一次。
+//
+// 表达式引擎（P2-12）要按每根 K 线的日期取 PE/PB/ROE，对齐必须发生在
+// 可用日上，所以这个入口返回的是可用日而不是报告期。
+func (s *PostgresStore) GetFundamentalsPIT(ctx context.Context, symbol string, asOf time.Time) ([]domain.Fundamental, error) {
+	query := `
+		SELECT ts_code, COALESCE(ann_date, trade_date),
+			pe, pb, ps, roe, roa, debt_to_equity,
+			gross_margin, net_margin,
+			revenue, net_profit, total_assets, total_liab
+		FROM stock_fundamentals
+		WHERE ts_code = $1 AND COALESCE(ann_date, trade_date) <= $2
+		ORDER BY COALESCE(ann_date, trade_date) ASC, end_date DESC
+	`
+	rows, err := s.pool.Query(ctx, query, symbol, asOf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query fundamentals (PIT): %w", err)
+	}
+	defer rows.Close()
+
+	var records []domain.Fundamental
+	for rows.Next() {
+		var f domain.Fundamental
+		if err := rows.Scan(
+			&f.Symbol, &f.Date, &f.PE, &f.PB, &f.PS, &f.ROE, &f.ROA, &f.DebtToEquity,
+			&f.GrossMargin, &f.NetMargin, &f.Revenue, &f.NetProfit, &f.TotalAssets, &f.TotalLiab,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan fundamental row: %w", err)
+		}
+		records = append(records, f)
+	}
+	return records, rows.Err()
+}
+
+// GetFundamentalsPITBulk 一次取多只股票的 PIT 财报，返回 symbol → 记录列表
+// （每只股票内部按可用日升序）。
+//
+// 回测预热时用它做**一次**查询，而不是每只股票查一次（N 只股票 × 数千个
+// 交易日，逐票逐日查会把回测拖成不可用）。
+//
+// 为什么敢一次性把 asOf 之前的全取回来：前视偏差的防线不在这里，在
+// OHLCVDataProvider —— 它按每根 K 线的日期自己切一刀，只让「当天已披露」
+// 的期数可见。这里多取一点只是多取，不会泄漏未来。
+func (s *PostgresStore) GetFundamentalsPITBulk(ctx context.Context, symbols []string, asOf time.Time) (map[string][]domain.Fundamental, error) {
+	out := make(map[string][]domain.Fundamental, len(symbols))
+	if len(symbols) == 0 {
+		return out, nil
+	}
+
+	query := `
+		SELECT ts_code, COALESCE(ann_date, trade_date),
+			pe, pb, ps, roe, roa, debt_to_equity,
+			gross_margin, net_margin,
+			revenue, net_profit, total_assets, total_liab
+		FROM stock_fundamentals
+		WHERE ts_code = ANY($1) AND COALESCE(ann_date, trade_date) <= $2
+		ORDER BY ts_code, COALESCE(ann_date, trade_date) ASC, end_date DESC
+	`
+	rows, err := s.pool.Query(ctx, query, symbols, asOf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query fundamentals (PIT bulk): %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var f domain.Fundamental
+		if err := rows.Scan(
+			&f.Symbol, &f.Date, &f.PE, &f.PB, &f.PS, &f.ROE, &f.ROA, &f.DebtToEquity,
+			&f.GrossMargin, &f.NetMargin, &f.Revenue, &f.NetProfit, &f.TotalAssets, &f.TotalLiab,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan fundamental row: %w", err)
+		}
+		out[f.Symbol] = append(out[f.Symbol], f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.logger.Debug().
+		Int("symbols", len(symbols)).
+		Int("stocks_with_data", len(out)).
+		Time("as_of", asOf).
+		Msg("Fundamentals (PIT bulk) loaded")
+	return out, nil
+}
+
 // SaveFundamental saves or updates fundamental data.
 //
 // Targets stock_fundamentals since migration 025 (EQD-P3-1) dropped the
