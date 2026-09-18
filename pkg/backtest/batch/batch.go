@@ -17,6 +17,7 @@ import (
 
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/walkforward"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/workers"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
@@ -166,17 +167,11 @@ func (b *BatchEngine) Run(ctx context.Context, tasks []BatchTask) (*BatchReport,
 		Results:    make([]*BatchResult, len(tasks)),
 	}
 
-	sem := make(chan struct{}, b.config.Concurrency)
-	var wg sync.WaitGroup
+	// P1-6：固定 worker pool，goroutine 数与任务数解耦。
+	// 此前是「每任务一个 goroutine + 信号量限并发」，goroutine 数 = 任务数。
 	var mu sync.Mutex
-
-	for i, task := range tasks {
-		wg.Add(1)
-		go func(idx int, t BatchTask) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
+	workers.RunWorkers(ctx, b.config.Concurrency, tasks,
+		func(ctx context.Context, idx int, t BatchTask) {
 			result := b.runSingleTask(ctx, t)
 
 			mu.Lock()
@@ -187,9 +182,7 @@ func (b *BatchEngine) Run(ctx context.Context, tasks []BatchTask) (*BatchReport,
 				report.Failed++
 			}
 			mu.Unlock()
-		}(i, task)
-	}
-	wg.Wait()
+		})
 
 	report.CompletedAt = time.Now()
 	report.DurationMs = report.CompletedAt.Sub(startTime).Milliseconds()

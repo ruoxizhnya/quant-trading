@@ -63,3 +63,8 @@ jobs:
       # 默认跳过 archive/（只读历史），只守护常青层与活跃层。
       - name: Check internal doc links
         run: python tools/check_doc_links.py
+
+      # P1-8：本地 compose 与生产 k8s 两套配置独立维护，改一边忘另一边
+      # 会静默漂移（服务起得来，只在跨服务调用时才炸）。这里守住关键项。
+      - name: Check deploy consistency (compose ↔ k8s)
+        run: python tools/check_deploy_consistency.py

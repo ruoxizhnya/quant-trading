@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/workers"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
@@ -146,23 +147,17 @@ func (wf *WalkForwardEngine) runWindowsParallel(
 	var mu sync.Mutex
 	results := make([]*domain.WalkForwardResult, len(windows))
 
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4)
-
-	for i, win := range windows {
-		wg.Add(1)
-		go func(idx int, w wfWindow) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
+	// P1-6：固定 worker pool。此前是「每窗口一个 goroutine + 信号量限并发」，
+	// goroutine 数 = 窗口数（长回测可以轻松上千）。
+	// 窗口之间互不共享状态，train + test 的先后在 runSingleWindow 内部保证。
+	const wfConcurrency = 4
+	workers.RunWorkers(ctx, wfConcurrency, windows,
+		func(ctx context.Context, idx int, w wfWindow) {
 			r := wf.runSingleWindow(ctx, req, idx, w)
 			mu.Lock()
 			results[idx] = r
 			mu.Unlock()
-		}(i, win)
-	}
-	wg.Wait()
+		})
 
 	valid := make([]*domain.WalkForwardResult, 0, len(results))
 	for _, r := range results {

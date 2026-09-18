@@ -110,6 +110,38 @@ func (s *PostgresStore) GetOHLCV(ctx context.Context, symbol string, startDate, 
 	return results, nil
 }
 
+// GetClosesOn 一次取多只票在**某一天**的收盘价（P1-7）。
+//
+// 存在的理由：因子归因要对几百只票取两个日期的收盘价，逐票调用
+// GetOHLCV 就是 2 × N 次 DB 往返（300 只票 = 600 次）。这里一次查询解决。
+//
+// 返回 map 里**只包含那天有行情的票** —— 查不到就是查不到（停牌、未上市、
+// 已退市），调用方必须按缺失处理，不能拿 0 当价格（0 会被读成"白送"）。
+func (s *PostgresStore) GetClosesOn(ctx context.Context, symbols []string, date time.Time) (map[string]float64, error) {
+	out := make(map[string]float64, len(symbols))
+	if len(symbols) == 0 {
+		return out, nil
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT symbol, close FROM ohlcv_daily_qfq
+		 WHERE symbol = ANY($1) AND trade_date = $2`, symbols, date)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query closes: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var sym string
+		var close float64
+		if err := rows.Scan(&sym, &close); err != nil {
+			return nil, fmt.Errorf("failed to scan close row: %w", err)
+		}
+		out[sym] = close
+	}
+	return out, rows.Err()
+}
+
 // GetTradingDays returns distinct trading days within a date range.
 func (s *PostgresStore) GetTradingDays(ctx context.Context, startDate, endDate time.Time) ([]time.Time, error) {
 	query := `

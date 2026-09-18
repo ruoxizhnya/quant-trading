@@ -7,11 +7,22 @@ metadata:
     app.kubernetes.io/name: quant-trading
     app.kubernetes.io/part-of: quant-trading
 data:
-  # Service ports (per AGENTS.md service topology)
-  ANALYSIS_PORT: "8085"
-  DATA_PORT: "8081"
+  # 服务发现（P1-8）
+  #
+  # 服务端口来自各服务自己的 config/*.yaml（`server.port`），不由环境变量
+  # 提供 —— 所以这里**不写** ANALYSIS_PORT / DATA_PORT：它们曾长期存在但
+  # 从未被读取（死配置，与已删的 AI_PORT 同类，见 P2-7）。改端口要动
+  # 对应 deployment 的 containerPort + config/*.yaml 的 server.port。
+  #
   # AI_PORT 已移除：cmd/ai 于 2026-09-18 删除（TASKS P2-5），它零调用方
   # 且建在待废弃的 pkg/ai/agents 上。AI 能力走 cmd/analysis 的 MCP 工具层。
+  #
+  # DATA_SERVICE_URL 是真正会被读取的一项（cmd/analysis/handlers_proxy.go
+  # 读 viper 的 `data_service.url`，AutomaticEnv + "."→"_" 替换）。此前
+  # k8s 缺这一项，全靠代码里的默认值碰巧能用 —— Service 一旦改名或换端口
+  # 就会静默失效。显式写出来，并由 tools/check_deploy_consistency.py
+  # 校验它与 docker-compose.yml 里的一致。
+  DATA_SERVICE_URL: "http://data-service:8081"
   # Database (PostgreSQL)
   POSTGRES_HOST: "postgres"
   POSTGRES_PORT: "5432"

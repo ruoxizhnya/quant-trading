@@ -17,6 +17,9 @@ type AttributionStore interface {
 	GetFactorCacheRange(ctx context.Context, factor domain.FactorType, startDate, endDate time.Time) ([]*domain.FactorCacheEntry, error)
 	GetTradingDays(ctx context.Context, startDate, endDate time.Time) ([]time.Time, error)
 	GetOHLCV(ctx context.Context, symbol string, startDate, endDate time.Time) ([]domain.OHLCV, error)
+	// GetClosesOn 批量取收盘价（P1-7）。用于替代逐票调 GetOHLCV 的
+	// N+1 模式 —— 后者在几百只票上会产生上千次往返。
+	GetClosesOn(ctx context.Context, symbols []string, date time.Time) (map[string]float64, error)
 	SaveFactorReturnBatch(ctx context.Context, records []*domain.FactorReturn) error
 	SaveICEntryBatch(ctx context.Context, entries []*domain.ICEntry) error
 	GetFactorReturns(ctx context.Context, factor domain.FactorType, startDate, endDate time.Time) ([]*domain.FactorReturn, error)
@@ -79,42 +82,16 @@ func (f *FactorAttributor) ComputeFactorReturns(ctx context.Context, factor doma
 	currentDay := tradingDays[0]
 	forwardDay := tradingDays[defaultForwardDays]
 
-	// Get close prices for current day
-	type priceEntry struct {
-		symbol string
-		close  float64
+	// P1-7：两个日期各**一次**查询，取代此前的 2 × N 次往返
+	//（300 只票 = 600 次）。缺失的票不出现在 map 里 —— 停牌 / 未上市 /
+	// 已退市的票本来就取不到价格，跳过它们而不是塞 0。
+	currentPriceMap, err := f.store.GetClosesOn(ctx, symbols, currentDay)
+	if err != nil {
+		return fmt.Errorf("failed to get current-day closes: %w", err)
 	}
-	var currentPrices []priceEntry
-	for _, sym := range symbols {
-		ohlcv, err := f.store.GetOHLCV(ctx, sym, currentDay, currentDay)
-		if err != nil || len(ohlcv) == 0 {
-			continue
-		}
-		currentPrices = append(currentPrices, priceEntry{sym, ohlcv[0].Close})
-	}
-
-	// Get close prices for forward day
-	type forwardPriceEntry struct {
-		symbol string
-		close  float64
-	}
-	var forwardPrices []forwardPriceEntry
-	for _, sym := range symbols {
-		ohlcv, err := f.store.GetOHLCV(ctx, sym, forwardDay, forwardDay)
-		if err != nil || len(ohlcv) == 0 {
-			continue
-		}
-		forwardPrices = append(forwardPrices, forwardPriceEntry{sym, ohlcv[0].Close})
-	}
-
-	// Build price maps
-	currentPriceMap := make(map[string]float64)
-	for _, p := range currentPrices {
-		currentPriceMap[p.symbol] = p.close
-	}
-	forwardPriceMap := make(map[string]float64)
-	for _, p := range forwardPrices {
-		forwardPriceMap[p.symbol] = p.close
+	forwardPriceMap, err := f.store.GetClosesOn(ctx, symbols, forwardDay)
+	if err != nil {
+		return fmt.Errorf("failed to get forward-day closes: %w", err)
 	}
 
 	// Assign stocks to quintiles and compute returns
