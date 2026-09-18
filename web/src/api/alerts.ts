@@ -50,13 +50,13 @@ export async function getAlertHistory(params?: {
   if (params?.limit) search.set('limit', String(params.limit))
   if (params?.severity) search.set('severity', params.severity)
   const qs = search.toString()
-  return api.get<AlertHistoryResponse>(`/alerts/history${qs ? '?' + qs : ''}`)
+  return api.get<AlertHistoryResponse>(`/api/alerts/history${qs ? '?' + qs : ''}`)
 }
 
 export async function forceCheckAlerts(): Promise<ForceCheckResponse> {
-  return api.post<ForceCheckResponse>('/alerts/force-check', {})
+  return api.post<ForceCheckResponse>('/api/alerts/force-check', {})
 }
 
 export async function getAlertStats(): Promise<AlertStatsResponse> {
-  return api.get<AlertStatsResponse>('/alerts/stats')
+  return api.get<AlertStatsResponse>('/api/alerts/stats')
 }

@@ -59,46 +59,46 @@ export interface Trade {
 }
 
 export async function startPaperTrading(symbols: string[], initialCapital?: number) {
-  return api.post('/paper/start', {
+  return api.post('/api/paper/start', {
     symbols,
     initial_capital: initialCapital,
   })
 }
 
 export async function stopPaperTrading() {
-  return api.post('/paper/stop')
+  return api.post('/api/paper/stop')
 }
 
 export async function getPaperTradingStatus() {
-  return api.get<PaperTradingStatus>('/paper/status')
+  return api.get<PaperTradingStatus>('/api/paper/status')
 }
 
 export async function submitOrder(order: SubmitOrderRequest) {
-  return api.post<OrderResponse>('/paper/orders', order)
+  return api.post<OrderResponse>('/api/paper/orders', order)
 }
 
 export async function getOrders(): Promise<Order[]> {
-  return api.get<Order[]>('/paper/orders')
+  return api.get<Order[]>('/api/paper/orders')
 }
 
 export async function getOrder(orderId: string) {
-  return api.get(`/paper/orders/${orderId}`)
+  return api.get(`/api/paper/orders/${orderId}`)
 }
 
 export async function cancelOrder(orderId: string) {
-  return api.delete(`/paper/orders/${orderId}`)
+  return api.delete(`/api/paper/orders/${orderId}`)
 }
 
 export async function getPositions() {
-  return api.get<Position[]>('/paper/positions')
+  return api.get<Position[]>('/api/paper/positions')
 }
 
 export async function getPortfolio() {
-  return api.get<Portfolio>('/paper/portfolio')
+  return api.get<Portfolio>('/api/paper/portfolio')
 }
 
 export async function getTrades() {
-  return api.get<Trade[]>('/paper/trades')
+  return api.get<Trade[]>('/api/paper/trades')
 }
 
 // ── Emergency Flatten (P2-3, ODR-026) ──────────────────────────────
@@ -143,7 +143,7 @@ export async function emergencyFlatten(
   reason: string,
 ): Promise<EmergencyFlattenResult> {
   return api.post<EmergencyFlattenResult>(
-    '/execution/emergency-flatten',
+    '/api/execution/emergency-flatten',
     { reason, confirmation_token: token },
     {
       headers: { Authorization: `Bearer ${token}` },

@@ -14,7 +14,7 @@ export function getStockCount(): Promise<StockCount> {
 }
 
 export function getHealth(): Promise<HealthStatus> {
-  return api.get<HealthStatus>('/health')
+  return api.get<HealthStatus>('/api/health')
 }
 
 export function screenStocks(params: Record<string, number>): Promise<ScreenResult> {

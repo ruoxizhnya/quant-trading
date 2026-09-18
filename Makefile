@@ -46,28 +46,23 @@ build-strategy:
 		-t ${REGISTRY}/quant-trading-strategy:latest \
 		-f cmd/strategy/Dockerfile .
 
-build-execution:
-	@echo "🔨 Building execution-service:${VERSION}..."
+build-ai:
+	@echo "🔨 Building ai-service:${VERSION}..."
 	docker build \
 		--build-arg BUILD_VERSION=${VERSION} \
 		--build-arg BUILD_COMMIT=${COMMIT} \
 		--build-arg BUILD_TIME=${BUILD_TIME} \
-		-t ${REGISTRY}/quant-trading-execution:${VERSION} \
-		-t ${REGISTRY}/quant-trading-execution:latest \
-		-f cmd/execution/Dockerfile .
-
-build-risk:
-	@echo "🔨 Building risk-service:${VERSION}..."
-	docker build \
-		--build-arg BUILD_VERSION=${VERSION} \
-		--build-arg BUILD_COMMIT=${COMMIT} \
-		--build-arg BUILD_TIME=${BUILD_TIME} \
-		-t ${REGISTRY}/quant-trading-risk:${VERSION} \
-		-t ${REGISTRY}/quant-trading-risk:latest \
-		-f cmd/risk/Dockerfile .
+		-t ${REGISTRY}/quant-trading-ai:${VERSION} \
+		-t ${REGISTRY}/quant-trading-ai:latest \
+		-f cmd/ai/Dockerfile .
 
 # Build all services
-build: build-analysis build-data build-strategy build-execution build-risk
+#
+# 曾经这里还有 build-execution / build-risk —— 那两个服务在 ODR-021
+# （P1-15）里已并进 analysis（in-process 的 risk.RiskManager + live.MockTrader），
+# 目录也删了，于是 `make build` 一定失败在找不到的 Dockerfile 上。
+# 留着死目标比删掉更糟：它看起来还能用，只在动手时才炸。
+build: build-analysis build-data build-strategy build-ai
 	@echo ""
 	@echo "✅ All services built successfully!"
 	@echo "   Version: ${VERSION}"
@@ -88,33 +83,34 @@ push-strategy: build-strategy
 	docker push ${REGISTRY}/quant-trading-strategy:${VERSION}
 	docker push ${REGISTRY}/quant-trading-strategy:latest
 
-push-execution: build-execution
-	docker push ${REGISTRY}/quant-trading-execution:${VERSION}
-	docker push ${REGISTRY}/quant-trading-execution:latest
+push-ai: build-ai
+	docker push ${REGISTRY}/quant-trading-ai:${VERSION}
+	docker push ${REGISTRY}/quant-trading-ai:latest
 
-push-risk: build-risk
-	docker push ${REGISTRY}/quant-trading-risk:${VERSION}
-	docker push ${REGISTRY}/quant-trading-risk:latest
-
-push: push-analysis push-data push-strategy push-execution push-risk
+push: push-analysis push-data push-strategy push-ai
 
 # ============================================================
 # Docker Compose targets
+#
+# 用根目录的 docker-compose.yml，不是 docker-compose.services.yml：
+# 后者是两份 compose 互相漂移留下的那一份（P1-8 / P2-7），它引用了 ODR-021
+# 删掉的 cmd/execution 与 cmd/risk 的 Dockerfile，docker compose 一读就炸。
+# 现已删除；维护中的那份是根 compose（postgres/redis/data/strategy/analysis）。
 # ============================================================
 up:
-	docker compose -f docker-compose.services.yml up -d
+	docker compose up -d
 
 down:
-	docker compose -f docker-compose.services.yml down
+	docker compose down
 
 restart:
-	docker compose -f docker-compose.services.yml restart
+	docker compose restart
 
 logs:
-	docker compose -f docker-compose.services.yml logs -f
+	docker compose logs -f
 
 ps:
-	docker compose -f docker-compose.services.yml ps
+	docker compose ps
 
 # ============================================================
 # Utility targets
@@ -152,8 +148,7 @@ help:
 	@echo "  build-analysis     Build analysis service only"
 	@echo "  build-data         Build data service only"
 	@echo "  build-strategy     Build strategy service only"
-	@echo "  build-execution    Build execution service only"
-	@echo "  build-risk         Build risk service only"
+	@echo "  build-ai           Build AI research service only"
 	@echo ""
 	@echo "Push Targets:"
 	@echo "  push               Push all services to registry"

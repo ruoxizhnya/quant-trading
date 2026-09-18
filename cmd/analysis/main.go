@@ -284,13 +284,19 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 		c.File("./cmd/analysis/static/index.html")
 	})
 
-	router.GET("/health", func(c *gin.Context) {
+	healthHandler := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":    "healthy",
 			"service":   "analysis-service",
 			"timestamp": time.Now().Format(time.RFC3339),
 		})
-	})
+	}
+	router.GET("/health", healthHandler)
+	// /api/health 是同一个探针的 /api 版本。它必须存在：Dockerfile 的
+	// HEALTHCHECK 打的就是这个路径，而在此之前后端只注册了 /health ——
+	// 探针一直 404，容器从启动起就被判 unhealthy。
+	// 另外前端在 dev 下只代理 /api（vite proxy），不挂这个别名前端也探不到。
+	router.GET("/api/health", healthHandler)
 
 	// Sprint 6 P0-3: /metrics endpoint exposing the four ADR-017 §1
 	// core metrics + Go runtime collectors. Unauthenticated by

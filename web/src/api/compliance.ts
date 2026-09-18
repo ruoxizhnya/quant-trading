@@ -101,7 +101,7 @@ export interface BoardsResponse {
  * Throws only on transport / 5xx failures.
  */
 export async function checkSuitability(req: CheckRequest): Promise<CheckResponse> {
-  return api.post<CheckResponse>('/compliance/check', req)
+  return api.post<CheckResponse>('/api/compliance/check', req)
 }
 
 /**
@@ -110,7 +110,7 @@ export async function checkSuitability(req: CheckRequest): Promise<CheckResponse
  * in the SPA bundle.
  */
 export async function getRequirements(): Promise<RequirementsResponse> {
-  return api.get<RequirementsResponse>('/compliance/requirements')
+  return api.get<RequirementsResponse>('/api/compliance/requirements')
 }
 
 /**
@@ -120,5 +120,5 @@ export async function getRequirements(): Promise<RequirementsResponse> {
  * round-trip and submit directly.
  */
 export async function getBoards(): Promise<BoardsResponse> {
-  return api.get<BoardsResponse>('/compliance/boards')
+  return api.get<BoardsResponse>('/api/compliance/boards')
 }
