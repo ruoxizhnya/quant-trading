@@ -66,11 +66,14 @@ verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复�
 **P0-1 ~ P0-6 已于 2026-09-17 全部完成**（明细见上方「已完成」）。
 S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 
-**2026-09-21 全栈审查（[ODR-065](archive/odr/odr-065-fullstack-static-review.md)）新增 5 项 Critical** — 证据行号、代码示意与 15 commits 修复方案见 [审查报告 §4/§16](archive/reports-2026-Q3/review-report-20260921.md)。**前置**：推送 main 领先 origin 的 51 提交并恢复 feature branch + PR（P2 区 AUD-L1）；每任务一个原子 commit，测试先行。
+**2026-09-21 全栈审查（[ODR-065](archive/odr/odr-065-fullstack-static-review.md)）新增 5 项 Critical** — 证据行号、代码示意与 15 commits 修复方案见 [审查报告 §4/§16](archive/reports-2026-Q3/review-report-20260921.md)。每任务一个原子 commit，测试先行。
+
+**已完成 4 项**：AUD-03（C1 日收益率）、AUD-04（C2 窗口隔离）、AUD-05（C5 DDL 断层）、AUD-01（C3 save 端点 —— **裁决为删除而非加固**：零生产调用方 + 用途与 ADR-024 冲突，攻击面归零优于加固后仍存在。护栏 `cmd/analysis/handlers_copilot_test.go` 断言该路由返回 404，已故意加回端点验证过它会变红）。
+
+> 原「前置：推送 main 领先 origin 的 51 提交」（P2 区 AUD-L1）经复核为**误报**，已作废 —— 实测 `git rev-parse main` == `git ls-remote origin refs/heads/main`。
 
 | ID | 任务 | 位置 | 验收 |
 |----|------|------|------|
-| AUD-01 | 加固 `/api/copilot/save`（报告 D-1 默认加固，删除为备选需裁决）：`StrategyName` 正则白名单 `^[A-Za-z][A-Za-z0-9_]{0,63}$` + 写盘前 `staticcheck.CheckOrError(req.Code)`（复用 generate 路径同款闸）+ `fmt.Sprintf` 拼路径改 `filepath.Join` | cmd/analysis/handlers_copilot.go#L174-199 | 遍历名 400 / 含 `exec.Command` 代码 422 / 合名合法码 200 落 plugins；测试先行先红后绿 |
 | AUD-02 | RBAC 接线：`/api/execution` 三动作端点 **与 legacy 根路径两处都** 挂 `RequireRole(trader, admin)`；`/api/tools` 增副作用分级 map（fail-closed：未登记 = admin）；先验证 auth disabled 时 RequireRole 放行路径（setup.go#L626 只在 Enabled 时挂 Middleware） | cmd/analysis/handlers_execution.go / handlers_tools.go / pkg/auth | viewer 下单 403 / trader 200 / 只读工具 viewer 200 / auth disabled 全放行 / legacy 与 `/api` 行为一致 |
 
 ---

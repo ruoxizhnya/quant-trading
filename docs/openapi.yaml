@@ -1203,37 +1203,12 @@ paths:
                   acceptance_rate:
                     type: number
 
-  /api/copilot/save:
-    post:
-      tags: [Copilot]
-      summary: Save generated strategy to disk
-      operationId: saveStrategy
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [code, strategy_name]
-              properties:
-                code:
-                  type: string
-                strategy_name:
-                  type: string
-      responses:
-        '200':
-          description: Strategy saved
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                  strategy_name:
-                    type: string
-                  file_path:
-                    type: string
+  # /api/copilot/save 已于 AUD-01 (ODR-065 C3) 删除，不是加固。
+  # 原因：零生产调用方（前端 S7-P2-7 已删 saveStrategy stub），且其用途
+  # （把 LLM 生成的 Go 源码写进插件目录）与 ADR-024「生成的 Go 只是可审阅
+  # artifact，不加载不执行」冲突。原实现存在路径遍历（StrategyName 无校验
+  # → 可写任意 .go 文件，构成构建投毒）。删除后攻击面归零。
+  # 回归护栏：cmd/analysis/handlers_copilot_test.go 断言该路由返回 404。
 
   # ============================================================
   # AI Pipeline

@@ -249,11 +249,16 @@ test.describe('P1-30: AI Copilot E2E', () => {
     }
   });
 
-  test('API: POST /api/copilot/save 缺 code 返回 400', async ({ request }) => {
+  // AUD-01 (ODR-065 C3): POST /api/copilot/save 已删除，不是加固。
+  // 该端点零生产调用方（前端 S7-P2-7 已删 saveStrategy stub），且其用途与
+  // ADR-024 冲突；原实现有路径遍历（StrategyName 无校验 → 可写任意 .go 文件）。
+  // 这里断言 404 而不是「坏输入被拒」——后者在端点被重新加回来时依然会通过。
+  // 单测版护栏见 cmd/analysis/handlers_copilot_test.go。
+  test('API: POST /api/copilot/save 已删除，应返回 404', async ({ request }) => {
     const response = await request.post(`${BACKEND}/api/copilot/save`, {
-      data: { strategy_name: 'TestStrategy' },
+      data: { code: 'package plugins', strategy_name: 'TestStrategy' },
     });
-    expect([400, 500]).toContain(response.status());
+    expect(response.status()).toBe(404);
   });
 
   test('API: GET /api/copilot/stats 返回统计信息', async ({ request }) => {
