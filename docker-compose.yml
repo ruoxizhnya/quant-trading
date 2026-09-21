@@ -14,6 +14,10 @@ version: '3.9'
 #   - strategy-service (8082) — strategy registry (standby per ADR-012)
 #   - analysis-service (8085) — backtest + risk + execution + auth
 #
+# 端口绑定约定（AUD-13）：**postgres / redis 只绑 127.0.0.1** —— 数据库与
+# 缓存不该出现在局域网上（Redis 还没有密码）。应用服务保持 0.0.0.0，它们
+# 本来就是要被访问的。这条约定由 tools/check_deploy_consistency.py 守护。
+#
 # (ai-service 已删除：2026-09-18，TASKS P2-5。它零调用方且建在待废弃的
 # pkg/ai/agents 上；AI 能力现在走 cmd/analysis 的 MCP 工具层。)
 
@@ -25,7 +29,12 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       POSTGRES_DB: quant_trading
     ports:
-      - "5432:5432"
+      # AUD-13：数据库只绑回环，不暴露到局域网。
+      # 容器之间走 compose 网络的服务名（postgres:5432），与本映射无关；
+      # 宿主机上的 psql 与测试 DSN（localhost:5432）照旧通 —— localhost 就是
+      # 127.0.0.1，所以这是「收紧到本机」而不是「关掉」。
+      # 应用服务的端口有意保持 0.0.0.0（见文件头）：它们本来就是要被访问的。
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -37,7 +46,11 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      # AUD-13：同上，只绑回环。⚠️ 本服务的 Redis **没有 requirepass**，
+      # 绑到 0.0.0.0 等于把无鉴权缓存交给整个局域网；绑回环是当前唯一
+      # 有效的访问控制。（给 Redis 加密码要动全部服务的 REDIS_URL，
+      # 是另一件事 —— 见 TASKS.md「AUD-13 落地说明」。）
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:

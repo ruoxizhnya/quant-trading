@@ -9,6 +9,8 @@
   1. 服务名 → 端口（公共服务必须一致）
   2. DATA_SERVICE_URL：compose 的 environment 与 k8s configmap 必须一致，
      且它指向的 host:port 要真的等于 data-service 的端口
+  3. postgres / redis 的端口必须**只绑回环**（AUD-13）。这条不是「两边一致」
+     而是「单边不该有的暴露」，但它同属部署配置的护栏，放这里比另起脚本划算。
 
 刻意不做的事：
   - 不做「一份源生成两份」。那要引入 Kompose / Helm 之类的工具，为了
@@ -39,10 +41,34 @@ ALLOWED_MISSING_IN_K8S = {
 # 两边都可能不配的最小集合（比如只在本地跑的辅助容器）
 IGNORED_SERVICES = {"equitydeep-research"}
 
+# AUD-13：只该绑回环的服务 —— 数据库与缓存不该出现在局域网上。
+# 应用服务（data / strategy / analysis）**有意不在**此列：它们本来就是要被
+# 访问的（analysis 另有 JWT fail-closed 兜底）。
+LOOPBACK_ONLY = {"postgres", "redis"}
 
-def parse_compose(path: Path) -> dict[str, int]:
-    """抓 docker-compose 的 service → 宿主端口（取第一处 "A:B" 的 A）。"""
-    services: dict[str, int] = {}
+# 可接受的「回环」写法。写成 0.0.0.0 / 具体网卡 IP / 干脆不写宿主地址，
+# 都算暴露到局域网。
+LOOPBACK_BINDS = {"127.0.0.1", "::1", "localhost"}
+
+
+# 端口映射的三种写法都要认：
+#   "5432"                  → 只暴露容器端口，宿主端口随机（本仓未用）
+#   "5432:5432"             → 绑所有网卡
+#   "127.0.0.1:5432:5432"   → 只绑回环
+#
+# ⚠️ AUD-13 之前这个正则只认两段式。加上回环前缀后若不改它，postgres / redis
+# 会**静默**从 compose_svc 里消失 —— 而两者都在 ALLOWED_MISSING_IN_K8S 里，
+# 只出 note 不报错，护栏就此失效（「两个机制各自对、接起来就错」）。
+# 以后再改端口写法，务必同时验这条正则还认不认。
+_PORT_LINE = re.compile(r'^\s*-\s*"?((?:[\w.\-]+):)?(\d+):(\d+)"?\s*$')
+
+
+def parse_compose_ports(path: Path) -> dict[str, list[tuple[str | None, int]]]:
+    """抓 docker-compose 的 service → [(宿主绑定地址 or None, 宿主端口)]。
+
+    绑定地址为 None 表示端口映射没写宿主地址，等价于绑 0.0.0.0。
+    """
+    bindings: dict[str, list[tuple[str | None, int]]] = {}
     current: str | None = None
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
@@ -51,10 +77,11 @@ def parse_compose(path: Path) -> dict[str, int]:
         if m:
             current = m.group(1)
             continue
-        m = re.match(r'^\s*-\s*"?(\d+):(\d+)"?\s*$', line)
-        if m and current and current not in services:
-            services[current] = int(m.group(1))
-    return services
+        m = _PORT_LINE.match(line)
+        if m and current:
+            bind = m.group(1).rstrip(":") if m.group(1) else None
+            bindings.setdefault(current, []).append((bind, int(m.group(2))))
+    return bindings
 
 
 def parse_k8s_ports() -> dict[str, int]:
@@ -83,7 +110,11 @@ def main() -> int:
         return 1
 
     compose_text = COMPOSE.read_text(encoding="utf-8")
-    compose_svc = parse_compose(COMPOSE)
+    compose_bindings = parse_compose_ports(COMPOSE)
+    # 一致性比对只关心宿主端口（每个服务的第一个映射），绑定地址由检查 3 管。
+    compose_svc = {
+        svc: ports[0][1] for svc, ports in compose_bindings.items() if ports
+    }
     k8s_svc = parse_k8s_ports()
 
     errors: list[str] = []
@@ -135,6 +166,18 @@ def main() -> int:
             errors.append(
                 f"{where}: DATA_SERVICE_URL 指向 {host}:{port}，而 {host} 实际端口是 {actual}")
 
+    # 3) 数据库 / 缓存必须只绑回环（AUD-13）
+    for svc in sorted(LOOPBACK_ONLY):
+        for bind, port in compose_bindings.get(svc, []):
+            if bind is None:
+                errors.append(
+                    f"{svc}:{port} 绑在 0.0.0.0（端口映射没写宿主地址）—— "
+                    f"数据库/缓存会暴露到局域网，改成 \"127.0.0.1:{port}:{port}\"")
+            elif bind not in LOOPBACK_BINDS:
+                errors.append(
+                    f"{svc}:{port} 绑在 {bind} —— 只允许回环地址 "
+                    f"（{', '.join(sorted(LOOPBACK_BINDS))}）")
+
     # 输出
     for n in notes:
         print(f"· {n}")
@@ -145,6 +188,7 @@ def main() -> int:
         return 1
 
     print("✓ 部署配置一致（compose ↔ k8s：服务端口 + DATA_SERVICE_URL）")
+    print("✓ 数据库/缓存只绑回环（postgres / redis）")
     return 0
 
 
