@@ -721,6 +721,111 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 			PRIMARY KEY (symbol, trade_date)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_global_ohlcv_source ON global_ohlcv (source, trade_date DESC)`,
+
+		// === Migration 044-047: 同步作业队列与基因池（C5 的漏网之鱼）===
+		//
+		// 上一批只补了 TableMapper 声明的 11 张写入目标表，但**代码直接 SQL 引用**
+		// 的表不止那些。这是真跑起来才暴露的：起服务后打 /sync/stocks，
+		// 直接 `relation "sync_jobs" does not exist` —— 同步链路自己的队列表压根
+		// 没建。静态清单式审查补不完，得拿真实库对一遍。
+		//
+		// 这四张同样来自不被执行的 migrations/012、013、023。
+
+		// Migration 044: sync_jobs (同步作业队列)
+		`CREATE TABLE IF NOT EXISTS sync_jobs (
+			id              VARCHAR(64) PRIMARY KEY,
+			job_type        VARCHAR(50) NOT NULL,
+			status          VARCHAR(20) NOT NULL DEFAULT 'pending',
+			params          JSONB NOT NULL DEFAULT '{}',
+			progress_percent INT NOT NULL DEFAULT 0,
+			total_items     INT NOT NULL DEFAULT 0,
+			processed_items INT NOT NULL DEFAULT 0,
+			failed_items    INT NOT NULL DEFAULT 0,
+			error_message   TEXT,
+			result          JSONB,
+			created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			started_at      TIMESTAMPTZ,
+			completed_at    TIMESTAMPTZ,
+			retry_count     INT NOT NULL DEFAULT 0,
+			max_retries     INT NOT NULL DEFAULT 3,
+			scheduled_at    TIMESTAMPTZ,
+			worker_id       VARCHAR(50)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sync_jobs_status ON sync_jobs(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_sync_jobs_type ON sync_jobs(job_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_sync_jobs_created_at ON sync_jobs(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_sync_jobs_scheduled_at ON sync_jobs(scheduled_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_created ON sync_jobs(status, created_at)`,
+
+		// Migration 045: sync_schedules (cron 定时同步)
+		`CREATE TABLE IF NOT EXISTS sync_schedules (
+			id              SERIAL PRIMARY KEY,
+			name            VARCHAR(100) NOT NULL UNIQUE,
+			description     TEXT,
+			job_type        VARCHAR(50) NOT NULL,
+			cron_expression VARCHAR(100) NOT NULL,
+			params          JSONB NOT NULL DEFAULT '{}',
+			is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+			last_run_at     TIMESTAMPTZ,
+			last_run_status VARCHAR(20),
+			last_run_job_id VARCHAR(64),
+			next_run_at     TIMESTAMPTZ,
+			created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			created_by      VARCHAR(50) DEFAULT 'system'
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sync_schedules_active ON sync_schedules(is_active)`,
+		`CREATE INDEX IF NOT EXISTS idx_sync_schedules_type ON sync_schedules(job_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_sync_schedules_next_run ON sync_schedules(next_run_at)`,
+
+		// Migration 046: factor_genes (AI 因子基因池)
+		`CREATE TABLE IF NOT EXISTS factor_genes (
+			id          VARCHAR(50) PRIMARY KEY,
+			name        VARCHAR(100) NOT NULL,
+			category    VARCHAR(30) NOT NULL,
+			formula     TEXT NOT NULL,
+			description TEXT,
+			rationale   TEXT,
+			ic          DOUBLE PRECISION DEFAULT 0,
+			ir          DOUBLE PRECISION DEFAULT 0,
+			turnover    DOUBLE PRECISION DEFAULT 0,
+			sharpe      DOUBLE PRECISION DEFAULT 0,
+			fitness     DOUBLE PRECISION DEFAULT 0,
+			generation  INTEGER DEFAULT 0,
+			parent_ids  JSONB DEFAULT '[]',
+			status      VARCHAR(20) DEFAULT 'pending',
+			created_at  TIMESTAMPTZ DEFAULT NOW(),
+			updated_at  TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_factor_genes_category ON factor_genes(category)`,
+		`CREATE INDEX IF NOT EXISTS idx_factor_genes_status ON factor_genes(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_factor_genes_fitness ON factor_genes(fitness DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_factor_genes_cat_status ON factor_genes(category, status)`,
+
+		// Migration 047: strategy_genes (AI 策略基因池)
+		`CREATE TABLE IF NOT EXISTS strategy_genes (
+			id            VARCHAR(50) PRIMARY KEY,
+			name          VARCHAR(100) NOT NULL,
+			description   TEXT,
+			strategy_type VARCHAR(30) NOT NULL,
+			code          TEXT,
+			params        JSONB DEFAULT '{}',
+			factor_ids    JSONB DEFAULT '[]',
+			parent_ids    JSONB DEFAULT '[]',
+			total_return  DOUBLE PRECISION DEFAULT 0,
+			sharpe        DOUBLE PRECISION DEFAULT 0,
+			max_drawdown  DOUBLE PRECISION DEFAULT 0,
+			win_rate      DOUBLE PRECISION DEFAULT 0,
+			fitness       DOUBLE PRECISION DEFAULT 0,
+			generation    INTEGER DEFAULT 0,
+			status        VARCHAR(20) DEFAULT 'pending',
+			created_at    TIMESTAMPTZ DEFAULT NOW(),
+			updated_at    TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_strategy_genes_type ON strategy_genes(strategy_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_strategy_genes_status ON strategy_genes(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_strategy_genes_fitness ON strategy_genes(fitness DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_strategy_genes_type_status ON strategy_genes(strategy_type, status)`,
 	}
 
 	for _, m := range migrations {

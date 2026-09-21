@@ -42,4 +42,22 @@ func TestTableMapper_TablesDeclaredInInlineDDL(t *testing.T) {
 				dataType, table)
 		}
 	}
+
+	// 代码直接 SQL 引用、但**不在 TableMapper 里**的表。
+	//
+	// 上一版断言只查了 TableMapper，把这四张漏了 —— 起服务后打 /sync/stocks
+	// 直接 `relation "sync_jobs" does not exist`。清单式审查补不全，所以这里
+	// 显式钉住：它们不是 ETL 的写入目标，却是同步队列与基因池自己要读写的表。
+	codeReferenced := map[string]string{
+		"sync_jobs":      "pkg/storage/sync_jobs.go（同步作业队列）",
+		"sync_schedules": "pkg/storage/sync_jobs.go（cron 定时同步）",
+		"factor_genes":   "pkg/ai/gene_pool/factor_pool.go（因子基因池）",
+		"strategy_genes": "pkg/ai/gene_pool/strategy_pool.go（策略基因池）",
+	}
+	for table, where := range codeReferenced {
+		if _, ok := declared[table]; !ok {
+			t.Errorf("表 %q 未在内联 DDL 中声明 —— %s 会在新环境 relation does not exist",
+				table, where)
+		}
+	}
 }
