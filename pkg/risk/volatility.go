@@ -205,7 +205,8 @@ func (vs *VolatilitySizer) CalculatePosition(ctx context.Context, signal domain.
 	// Calculate position size in shares
 	positionValue := portfolio.TotalValue * weight
 	latestPrice := ohlcv[len(ohlcv)-1].Close
-	size := math.Floor(positionValue / latestPrice)
+	// AUD-09: normalize to a board-legal order quantity.
+	size := NormalizeOrderQuantity(positionValue/latestPrice, signal.Symbol)
 
 	vs.logger.Info().
 		Str("symbol", signal.Symbol).

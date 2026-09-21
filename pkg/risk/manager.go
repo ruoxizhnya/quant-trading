@@ -3,7 +3,6 @@ package risk
 import (
 	"context"
 	"fmt"
-	"math"
 
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -121,7 +120,11 @@ func (rm *RiskManager) CalculatePosition(ctx context.Context, signal domain.Sign
 	if currentPrice <= 0 {
 		currentPrice = 100.0
 	}
-	size := math.Floor(positionValue / currentPrice)
+	// AUD-09: normalize to a quantity the exchange will accept.
+	// The raw quotient is a fractional share count (e.g. 5013.7) or
+	// a non-lot count (e.g. 5013), neither of which is orderable on
+	// the main board.
+	size := NormalizeOrderQuantity(positionValue/currentPrice, signal.Symbol)
 
 	riskScore := 1.0 - signal.CompositeScore
 
@@ -220,7 +223,9 @@ func (rm *RiskManager) CalculatePositionsBatch(
 			currentPrice = 100.0
 		}
 		positionValue := portfolio.TotalValue * weight
-		size := math.Floor(positionValue / currentPrice)
+		// AUD-09: same board-aware normalization as the single-signal
+		// path above — the two must not drift apart.
+		size := NormalizeOrderQuantity(positionValue/currentPrice, signal.Symbol)
 
 		riskScore := 1.0 - signal.CompositeScore
 
