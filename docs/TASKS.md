@@ -108,7 +108,7 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 | AUD-09 | 整手取整 LotSize=100：Weight→shares 换算处归一，<100 跳过；**先 grep 正向确认现状**（负向证据，已存在则关闭） | pkg/backtest 下单量换算处 | 下单量恒为 100 倍数 |
 | AUD-10 | MockTrader `GetPositions`/`GetAccount` 在 RLock 下经指针写共享对象 → 改值拷贝（`cp := *pos` 后写局部副本）；AUD-12 `-race` 门禁的前置 | `pkg/live/mock_trader.go#L44,301-338` | `go test ./pkg/live/... -race` 绿 |
 | AUD-11 | Windows 沙箱 fail-closed：无 rlimit 能力（windows）时拒绝执行并明确报错；runner_test 的 skip 改断言。Job Object 完整实现列后续增强 | `internal/sandbox/runner` | Windows 上死循环代码被拒绝执行 |
-| AUD-12 | CI 补门禁：Test 加 `-race`；新增 frontend job（lint/typecheck/test）。**在 AUD-04/AUD-10 合入后启用**，避免开门即红 | `.github/workflows/ci.yml#L47-48` | 含数据竞争的 PR → CI 红 |
+| AUD-12 | CI 补门禁：Test 加 `-race`；新增 frontend job（lint/typecheck/test）。**在 AUD-10 合入后启用**，避免开门即红。⚠️ `-race` 需 cgo+gcc，**本机（Windows）无 gcc → 无法本地预验**，只能先在 CI（Linux）上跑一次摸清存量竞争数量，再决定是否一次性开门禁；要本地验就得先装 mingw/TDM-GCC | `.github/workflows/ci.yml#L47-48` | 含数据竞争的 PR → CI 红 |
 | AUD-13 | docker-compose PG/Redis 端口绑 `127.0.0.1:`（Redis requirepass 涉及全部服务 REDIS_URL 联动，另立任务） | `docker-compose.yml#L27-28,39-40` | 宿主机外主机探测 5432/6379 不通 |
 
 ---
@@ -137,12 +137,20 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 | **P2-12** | ~~**表达式引擎只暴露 OHLCV**（open/high/low/close/volume/turnover），因此 `value` / `quality` 类意图表达不出 —— P0-5 中它们只能明确失败，而不是套一个无关的价格表达式产出误导性回测数字~~ | **✅ 2026-09-18** `pkg/strategy/expression/data_provider.go` + `strategy.go` + `pkg/strategy/strategy.go` + `pkg/storage/fundamentals.go` + `pkg/backtest/engine.go` + `pkg/ai/yaml/generator.go` | 新增 `pe/pb/ps/roe/roa` 五个字段，**按 PIT 对齐**（`GetFundamentalsPITBulk` 返回的 Date 是可用日 `COALESCE(ann_date, trade_date)`，不是报告期；`OHLCVDataProvider.fundamentalSeries` 按每根 K 线的日期切一刀，取不到填 NaN 不是 0）。注入走 `strategy.FundamentalAware` 可选接口（`GenerateSignals` 签名没有基本面参数，不动接口；范式同 `FactorAware`），且**只有声明要财报的策略才预热**——纯价量策略不付这份查询成本。`value` → `cs_rank(neg(pe)) + cs_rank(neg(pb)) > 1.6`，`quality` → `cs_rank(roe) + cs_rank(roa) > 1.6`；`custom` 仍明确失败。**估值倍数非正一律 NaN**：PE 为负不是"便宜"是亏损，`neg(pe)` 不该把亏得最狠的排成最便宜（经典价值陷阱）；ROE/ROA 为负是真实的差，原样保留。**顺手修掉一个潜伏 bug**：`neg(x)` 的函数形式此前从未接上（`evaluateFunction` 无条件走 `applyTimeSeriesOp`），`multi_factor` 的默认表达式 `cs_rank(neg(ts_std(close,20)))` 从落地起就是「解析得过、跑不起来」—— 它只被断言过能解析，从没被求值过 |
 | **P2-13** | **验证器链缺真实回测的端到端取证**（2026-09-17 已解决一半）。缺口只剩数据：本地库 `stocks` / `trading_calendar` / `ohlcv_daily_qfq` 均 0 行。~~引擎离线跑不了~~ —— 这是误判，引擎三处 HTTP（仓位 / 择时 / 止损）**都有 in-process 分支**，`cmd/analysis/main.go:160` 也已 `SetRiskManager`；取证时用 `marketdata.NewInMemoryProvider()` + `SetRiskManager` 即可完全离线（范式见 `pkg/validation/economic_integration_test.go`） | `pkg/validation/economic_integration_test.go` | 跑数据同步补齐行情后，用同一范式接真库 |
 
-**2026-09-21 全栈审查（ODR-065）新增 3 项**（Medium/Low + 流程前置）：
+**2026-09-21 全栈审查（ODR-065）新增 5 项**（Medium/Low）：
+
+> **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
+> M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、
+> L3（legacy HTML 残留）。原表只有 AUD-14/AUD-15 两行却写"新增 3 项"，那第 3 项
+> 是已被判定为误报的 AUD-L1。现补为 AUD-16/17/18，24 项全部有主。
 
 | ID | 任务 | 位置 |
 |----|------|------|
 | AUD-14 | AGENTS.md 校准：§1-3 按 ADR-023/024 现实重写（ADR-021/022 已入 superseded-adr）/ 表数口径改"内联 DDL 22 张（唯一执行路径）"/ `ingest.raw`·`research.*` 改"已落盘"/ Rule 2 的 `docs/odr/` → `docs/archive/odr/`（该目录已不存在）/ `pkg/tools/server.go` → `tool.go`；`migrations/` 与 `docs/migrations/` 目录首加 README"此目录不执行，加表改 postgres.go migrate() 数组"（是否物理移入 archive 另立 Cleanup ODR） | AGENTS.md + migrations/；`tools/check_doc_links.py` 增加 `--include-archive` 开关（现显式跳过 archive/，而 ODR 与报告全在该目录，其死链因此永不被告警——ODR-065 报告自身就有 2 处死链未被抓到） |
 | AUD-15 | 删 `e2e/tests/ai-research.spec.ts`（打已删除的 :8086/cmd-ai，恒失败）；`fundamentals_detail` 读取处加空集防御（行数 0 → 显式报错，杜绝纵向因子静默拿空集，待 EQD-P1-2 摄取补齐） | e2e/tests + 纵向因子读取处 |
+| AUD-16 | **补复核 L2**：live engine 组合状态更新路径"存在不触发场景"（D4 子代理报告，ODR-065 自标**未逐行复核**，复核也把它列进未覆盖项）—— 逐行读组合状态更新路径，确认是否真有分支导致状态不更新；坐实则升级为缺陷并定级，证伪则关闭 | `pkg/live/engine.go` |
+| AUD-17 | **M4 威胁模型声明**：`internal/sandbox/staticcheck` 是 14 条正则黑名单，经包别名 / 变量间接调用 / 反射 / 字符串拼接可绕过。注释里明示威胁模型（防 AI 生成代码的**无意**违规，**不防**有意攻击者），别让人误以为它是安全边界；中期评估 gosec / go-ast 分析替代 | `internal/sandbox/staticcheck/staticcheck.go` |
+| AUD-18 | **L3 legacy HTML 去留裁决**：`cmd/analysis/static/` 已标 deprecated 但无删除时间表 —— 无限期共存等于两套 UI 都要维护。给出裁决 + 时间表 | `cmd/analysis/static/` |
 
 ---
 
