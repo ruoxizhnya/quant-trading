@@ -1498,14 +1498,24 @@ func (e *Engine) getStock(ctx context.Context, symbol string) (domain.Stock, err
 	return e.effectiveProvider().GetStock(ctx, symbol)
 }
 
-// hasSTPrefix returns true if the stock name starts with an ST prefix (indicating special treatment).
-// Handles edge cases: names shorter than 2 chars cannot be ST stocks.
+// hasSTPrefix returns true if the stock name starts with an ST-family
+// risk-warning prefix ("ST", "*ST", "SST", "S*ST").
+//
+// AUD-08 (ODR-065 H3): this used to be a broken inline check —
+//
+//	prefix := name[:2]
+//	return prefix == "ST" || prefix == "*ST" || prefix == "SST" || prefix == "S*ST"
+//
+// — where the last three alternatives are 3–4 characters long and can
+// never equal a 2-character slice, so only "ST" ever matched. The
+// condition looked like it handled all four forms and in fact handled
+// one. The logic now lives in IsRiskWarningName (pricelimit.go), which
+// the price-limit resolver also uses.
+//
+// Kept as a thin wrapper because existing call sites and tests refer
+// to this name.
 func hasSTPrefix(name string) bool {
-	if len(name) < 2 {
-		return false
-	}
-	prefix := name[:2]
-	return prefix == "ST" || prefix == "*ST" || prefix == "SST" || prefix == "S*ST"
+	return IsRiskWarningName(name)
 }
 
 // SetLiveTrader injects a LiveTrader for bridging backtest signals to live/paper trading.

@@ -117,7 +117,8 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 
 **2026-09-21 全栈审查（ODR-065）新增 8 项 High** — 证据行号与修复代码示意见[审查报告 §5/§16](archive/reports-2026-Q3/review-report-20260921.md)：
 
-**已完成 1 项**：AUD-06（印花税 0.001→0.0005）。
+**已完成 3 项**：AUD-06（印花税）、AUD-07（涨跌停板块分档 + 分取整）、
+AUD-08（`*ST` 识别，与 AUD-07 同一 commit 合入）。
 
 > **AUD-06 落地说明（2026-09-21）**：`DefaultStampTaxRate` 由 `0.001` 改为 `0.0005`，
 > 沿革为 **2023-08-28 起 0.1% 减半至 0.05%**（财政部/税务总局 2023 年第 39 号公告），
@@ -133,11 +134,58 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 > `ExecuteTrade` 已有的 `timestamp` —— 回测窗口若横跨 2023-08-28，卖出费率全程用同一个值。
 > 这是加功能而非修 bug，单独决策。
 
+> **AUD-07 + AUD-08 落地说明（2026-09-21，同一 commit）**：两项共享同一段
+> `engine_daily.go` 的 if-else，故合并实施 —— 先抽纯函数，AUD-08 复用。
+>
+> **AUD-07**：新增 `pkg/backtest/pricelimit.go`，把内联分支抽成纯函数
+> `resolvePriceLimit(in, cfg)`，优先级 **新股 > ST（且 ST 受板块约束）> 板块**。
+> 上限/下限价经 `LimitPrices()` 做 `math.Round(x*100)/100`（分取整）后再比较。
+> 关键设计：**ST 不无条件用 ST 费率** —— 创业板/科创板（注册制）的风险警示股
+> 保持板块 ±20%，北交所保持 ±30%，只有主板 ST 走 5%/10% 档。
+> naive 的 `if isST { return stRate }` 会让创业板 ST 错用 5%。
+>
+> **审计报告漏掉的两处（本次新发现）**：
+> ① **主板 ST 已于 2026-07-06 从 ±5% 上调至 ±10%**（沪深北三所 2026-04 修订
+> 交易规则），故新增 `st_before` 配置 + `STBefore` 常量，按 `AsOf` 日期分段；
+> 创业板/科创板 ST 不受影响。② **`marketdata.ClassifySymbol` 不认 `301`
+> （创业板注册制新增段）和 `689`（科创板 CDR）** → 这两类票的涨跌停被当成
+> 主板 10%，而 `pkg/live/price_cage.go` 同样受影响。已在 `pkg/marketdata/board.go`
+> 根因处修复（`301xxx`/`689xxx` → 对应板块），而非在调用点打补丁。
+>
+> **AUD-08**：`hasSTPrefix` 原来的 `name[:2] == "ST"` **永远匹配不到 3 字符的
+> `*ST`**（`name[:2]` 是 `"*S"`）。改为前缀匹配四种模式（`*ST`/`S*ST`/`SST`/`ST`）。
+> 测试 `TestEngine_hasSTPrefix` 原先把 bug 写成了规格（`{"*STXYZ.SH", false}`），
+> 同步修正为真实股票名并补 `SST`/`S*ST`/空串/带空格用例 —— **故与实现同一 commit**。
+>
+> **配置覆盖陷阱（同 AUD-06）**：`config/analysis-service.yaml` 的
+> `price_limit.st` / `price_limit.new` 会覆盖 Go 常量，已同步改 `st: 0.10`、
+> 增 `st_before: 0.05`。
+>
+> **护栏五处实证**（每处故意破坏 → 确认变红 → 恢复）：
+> ① ST 判定退回 `name[:2]` → `TestEngine_hasSTPrefix` + `TestIsRiskWarningName` 精确变红；
+> ② `301`/`689` 退回 `BoardUnknown` → `pkg/marketdata` 与 `pkg/backtest` **两层**同时变红；
+> ③ ST 分支忽略板块（naive `if isST`）→ 4 个注册制 ST 用例变红（0.2 vs 0.1）；
+> ④ `roundToCent` 改 `math.Trunc` → 验收项 **10.05→11.06** 报出 `11.05`；
+> ⑤ 日期分段失效 → 两个 pre-change 用例变红（0.05 vs 0.10）。
+>
+> **过程中的一个方法学坑**：第 ③ 处破坏最初写成 `case A, B:` + 空 body，
+> 以为是 fall-through，**Go 的 case 并不 fall through** —— 空 body 直接退出 switch，
+> 等于没改，测试自然不红。**「护栏没变红」要先怀疑破坏本身无效，再怀疑护栏**。
+> （另有一次破坏写成 `return price` 导致 `math` 未使用**编译失败** ——
+> build failure 不是 test failure，不能算护栏生效。）
+>
+> **已知偏差（用户裁定保留，本次不修）**：新股档 `new_stock_days: 60` 不准 ——
+> 真实规则是「上市首日 + 前 5 个交易日无涨跌幅限制，其后按板块」，与「60 个
+> 交易日内一律 ±20%」不同。已在 `pricelimit.go` 的 `PriceLimitInput.TradeDays`
+> 注释里明确写出「这是历史（不正确）行为」。同批修复会让 AUD-07 过大，故单列。
+>
+> **`PriceLimitInput.TradeDays` 零值语义**：零值 = 「今天上市」（必然 < 阈值），
+> 没有 unset 哨兵值。写测试时必须显式传成熟交易日数（`matureTradeDays`），
+> 否则所有用例都会被 New 分支吞掉 —— 这个坑在开发时真实踩到过。
+
 | ID | 任务 | 位置 | 验收 |
 |----|------|------|------|
 | AUD-20 | **费率史按日期分段**（AUD-06 的延伸，非登记项）：`feeSchedule()` 不接收日期，回测跨费率变动日时全程用同一费率。需在 `Tracker.ExecuteTrade(timestamp)` 处按日期选档（2023-08-28 前后 0.1% / 0.05%），并考虑未来更多变动（佣金、过户费也有沿革）。**决策点**：是否值得做 —— 若曦的回测窗口是否常跨 2023-08-28 | `pkg/backtest/tracker/tracker.go#L110-117`、`pkg/fees/ashare.go` | 跨 2023-08-28 的窗口，前后卖出印花税分别为 0.1% / 0.05%；不跨的窗口行为不变 |
-| AUD-07 | 涨跌停板块分档 + 分取整：抽纯函数 `resolvePriceLimit`（新股→New / ST 系→ST / 300·301·688·689→20% / 8·4 开头北交所→30% / 其余 10%）；上下限价 `math.Round(x*100)/100` 后再比较；Config 增 Board20/Board30 | `pkg/backtest/engine_daily.go#L168-178` | 600/000/002/300/688/830 × {Normal,ST,*ST,新股} 表驱动；10.05→11.06 |
-| AUD-08 | `*ST` 识别修复（`name[:2]` 永匹配不到 3/4 字符前缀）改 `strings.HasPrefix` 多模式；**与下方测试断言修正同一 commit**（测试固化了 bug，分开提交会中途红灯） | `pkg/backtest/engine.go#L1502-1508` + `engine_accessors_test.go#L286-290` | *ST/SST/S*ST/ST 全 true、`平安银行` false |
 | AUD-09 | 整手取整 LotSize=100：Weight→shares 换算处归一，<100 跳过；**先 grep 正向确认现状**（负向证据，已存在则关闭） | pkg/backtest 下单量换算处 | 下单量恒为 100 倍数 |
 | AUD-10 | MockTrader `GetPositions`/`GetAccount` 在 RLock 下经指针写共享对象 → 改值拷贝（`cp := *pos` 后写局部副本）；AUD-12 `-race` 门禁的前置 | `pkg/live/mock_trader.go#L44,301-338` | `go test ./pkg/live/... -race` 绿 |
 | AUD-11 | Windows 沙箱 fail-closed：无 rlimit 能力（windows）时拒绝执行并明确报错；runner_test 的 skip 改断言。Job Object 完整实现列后续增强 | `internal/sandbox/runner` | Windows 上死循环代码被拒绝执行 |

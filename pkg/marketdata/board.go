@@ -13,9 +13,10 @@
 //     603xxx.SH, 605xxx.SH, 000xxx.SZ, 001xxx.SZ, 002xxx.SZ。
 //     涨跌幅 ±10%; 自 2023-08 起实施"价格笼子", 申报价偏离最优价 ±2%
 //     (但涨跌幅位置除外)。
-//   - 创业板 (ChiNext, 300xxx.SZ): 涨跌幅 ±20%; 2020-08 注册制改革后
-//     不再适用 2% 价格笼子 (但有 ±20% 笼子)。
-//   - 科创板 (STAR, 688xxx.SH): 涨跌幅 ±20%; 同 ChiNext, 仅有 ±20% 笼子。
+//   - 创业板 (ChiNext, 300xxx.SZ + 301xxx.SZ): 涨跌幅 ±20%; 2020-08 注册制改革后
+//     不再适用 2% 价格笼子 (但有 ±20% 笼子)。301 段为注册制后新增 (AUD-07 补)。
+//   - 科创板 (STAR, 688xxx.SH + 689xxx.SH): 涨跌幅 ±20%; 同 ChiNext, 仅有 ±20% 笼子。
+//     689 段为 CDR / 存托凭证 (AUD-07 补)。
 //   - 北交所 (BSE, 8xxxxx.BJ, 4xxxxx.BJ): 涨跌幅 ±30%; 注册制无 2% 笼子。
 //   - ETF (159xxx.SZ, 510xxx-588xxx.SH): 涨跌幅 ±10%。
 //   - LOF / closed-end fund: 涨跌幅 ±10%。
@@ -133,8 +134,11 @@ func ClassifySymbol(tsCode string) Board {
 }
 
 func classifySH(code, prefix3, prefix1 string) Board {
-	// 科创板 688xxx
-	if prefix3 == "688" {
+	// 科创板: 688xxx (2019 设立) + 689xxx (CDR / 存托凭证).
+	//
+	// AUD-07 (ODR-065): 689 was missing — CDR listings fell through
+	// to ±10%.
+	if prefix3 == "688" || prefix3 == "689" {
 		return BoardSTAR
 	}
 	// 上交所主板: 600/601/603/605
@@ -168,8 +172,14 @@ func classifySH(code, prefix3, prefix1 string) Board {
 }
 
 func classifySZ(code, prefix3, prefix1 string) Board {
-	// 创业板 300xxx
-	if prefix3 == "300" {
+	// 创业板: 300xxx (2009 设立) + 301xxx (2021 注册制后新增段).
+	//
+	// AUD-07 (ODR-065): 301 was missing, so 301xxx fell through to
+	// BoardUnknown and got a ±10% limit instead of ±20%. ChiNext
+	// registration-based listings — including the very active 301xxx
+	// cohort — were therefore mispriced by the backtest engine and
+	// mis-validated by the live price cage.
+	if prefix3 == "300" || prefix3 == "301" {
 		return BoardChiNext
 	}
 	// 深交所主板: 000xxx, 001xxx, 002xxx (002 原中小板, 2021 合并入主板)

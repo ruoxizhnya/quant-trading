@@ -43,15 +43,16 @@ type (
 // (contracts -> fees), preserving the single-source-of-truth invariant
 // from S7-P1-4.
 const (
-	DefaultStampTaxRate     = contracts.DefaultStampTaxRate
-	DefaultMinCommission    = contracts.DefaultMinCommission
-	DefaultTransferFeeRate  = contracts.DefaultTransferFeeRate
-	DefaultPriceLimitNormal = contracts.DefaultPriceLimitNormal
-	DefaultPriceLimitST     = contracts.DefaultPriceLimitST
-	DefaultPriceLimitNew    = contracts.DefaultPriceLimitNew
-	DefaultNewStockDays     = contracts.DefaultNewStockDays
-	DefaultShortSellingRate = contracts.DefaultShortSellingRate
-	TradingDaysPerYear      = contracts.TradingDaysPerYear
+	DefaultStampTaxRate       = contracts.DefaultStampTaxRate
+	DefaultMinCommission      = contracts.DefaultMinCommission
+	DefaultTransferFeeRate    = contracts.DefaultTransferFeeRate
+	DefaultPriceLimitNormal   = contracts.DefaultPriceLimitNormal
+	DefaultPriceLimitST       = contracts.DefaultPriceLimitST
+	DefaultPriceLimitSTBefore = contracts.DefaultPriceLimitSTBefore
+	DefaultPriceLimitNew      = contracts.DefaultPriceLimitNew
+	DefaultNewStockDays       = contracts.DefaultNewStockDays
+	DefaultShortSellingRate   = contracts.DefaultShortSellingRate
+	TradingDaysPerYear        = contracts.TradingDaysPerYear
 )
 
 // EngineRunner is re-exported so parent-package callers (and future

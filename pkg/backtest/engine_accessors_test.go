@@ -279,20 +279,36 @@ func TestEngine_LoadOHLCVInMemory(t *testing.T) {
 }
 
 func TestEngine_hasSTPrefix(t *testing.T) {
+	// AUD-08 (ODR-065 H4): this table previously asserted
+	// {"*STXYZ.SH", false} — i.e. it encoded the name[:2] bug as the
+	// specification. Fixing AUD-08 reddens that assertion, which is
+	// exactly the trap the audit called out ("would be mistaken for a
+	// regression and rolled back"). The expectations are corrected
+	// here, in the same commit as the fix.
+	//
+	// Note the inputs are stock NAMES, not ts_codes — the production
+	// call site passes stockName ("*ST某某"), and the old table's use
+	// of symbol-shaped strings ("*STXYZ.SH") obscured that.
 	tests := []struct {
-		symbol string
-		isST   bool
+		name string
+		isST bool
 	}{
-		{"STXYZ.SH", true},
-		{"*STXYZ.SH", false},
-		{"600000.SH", false},
-		{"stabc.SZ", false},
-		{"S TXYZ.SH", false},
+		{"ST某某", true},
+		{"*ST某某", true},  // was false — the bug
+		{"SST某某", true},  // was absent — also never matched
+		{"S*ST某某", true}, // was absent — also never matched
+		{"平安银行", false},
+		{"600000.SH", false}, // a ts_code is not a name; not ST
+		{"stabc", false},     // lowercase is not the exchange convention
+		{"ST", true},         // bare prefix
+		{"S", false},         // too short
+		{"", false},          // empty
+		{" ST某某", true},      // leading whitespace tolerated
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.symbol, func(t *testing.T) {
-			assert.Equal(t, tc.isST, hasSTPrefix(tc.symbol))
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.isST, hasSTPrefix(tc.name))
 		})
 	}
 }

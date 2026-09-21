@@ -165,15 +165,31 @@ func (e *Engine) processStockJob(
 			prevClose = ohlcvData[len(ohlcvData)-2].Close
 		}
 		if prevClose > 0 {
-			limitRate := e.config.Trading.PriceLimit.Normal
-			if tradeDays < e.config.Trading.NewStockDays {
-				limitRate = e.config.Trading.PriceLimit.New
-			} else if hasSTPrefix(stockName) {
-				limitRate = e.config.Trading.PriceLimit.ST
-			}
+			// AUD-07 (ODR-065 H2): board-aware, date-aware limit rate.
+			// The previous inline if/else knew only Normal/ST/New and
+			// applied 10% to ChiNext/STAR/BSE symbols. See
+			// pricelimit.go for the precedence rules.
+			limitRate := resolvePriceLimit(
+				PriceLimitInput{
+					Symbol:    job.symbol,
+					Name:      stockName,
+					TradeDays: tradeDays,
+					AsOf:      date,
+				},
+				PriceLimitConfigValues{
+					Normal:       e.config.Trading.PriceLimit.Normal,
+					ST:           e.config.Trading.PriceLimit.ST,
+					STBefore:     e.config.Trading.PriceLimit.STBefore,
+					New:          e.config.Trading.PriceLimit.New,
+					NewStockDays: e.config.Trading.NewStockDays,
+				},
+			)
 			todayBar := ohlcvData[len(ohlcvData)-1]
-			upperLimit := prevClose * (1 + limitRate)
-			lowerLimit := prevClose * (1 - limitRate)
+			// AUD-07: round the limit prices to the cent before
+			// comparing. Exchanges publish limit prices at 0.01 tick,
+			// so an unrounded bound can flip the verdict on a bar that
+			// closes exactly at the limit.
+			upperLimit, lowerLimit := LimitPrices(prevClose, limitRate)
 			limitUp = todayBar.Close >= upperLimit
 			limitDown = todayBar.Close <= lowerLimit
 			if limitUp {

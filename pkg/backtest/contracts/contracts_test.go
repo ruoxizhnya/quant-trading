@@ -56,13 +56,28 @@ func TestBacktestResponse_ZeroValue(t *testing.T) {
 	assert.Nil(t, resp.Trades)
 }
 
-// TestPriceLimitConfig_Fractions (S7-P2-1) documents the three
-// A-share price-limit fractions so a typo (e.g. 0.5 instead of 0.05)
-// is caught at the source.
+// TestPriceLimitConfig_Fractions (S7-P2-1) documents the A-share
+// price-limit fractions so a typo (e.g. 0.5 instead of 0.05) is caught
+// at the source.
+//
+// AUD-07 (ODR-065 H2): the ST assertion was 0.05. 沪深北交易所
+// 2026-04 修订交易规则，2026-07-06 起主板 ST/*ST 由 ±5% 上调至
+// ±10%。当前值因此是 0.10，而 0.05 成了「变动之前」的历史值，
+// 由 DefaultPriceLimitSTBefore 承载。两个常数都断言，这样把其中
+// 任何一个写成另一个的值都会被抓到 —— 单断言 0.10 无法发现
+// "历史值也被错改成 0.10"。
 func TestPriceLimitConfig_Fractions(t *testing.T) {
-	assert.Equal(t, 0.10, DefaultPriceLimitNormal, "normal stocks ±10%")
-	assert.Equal(t, 0.05, DefaultPriceLimitST, "ST stocks ±5%")
+	assert.Equal(t, 0.10, DefaultPriceLimitNormal, "main-board stocks ±10%")
+	assert.Equal(t, 0.10, DefaultPriceLimitST, "main-board ST for days on/after 2026-07-06 ±10%")
+	assert.Equal(t, 0.05, DefaultPriceLimitSTBefore, "main-board ST before 2026-07-06 ±5%")
 	assert.Equal(t, 0.20, DefaultPriceLimitNew, "new stocks ±20%")
+
+	// The board-driven rates are market structure, not constants: they
+	// come from pkg/marketdata. Assert the wiring here so a change to
+	// either side is noticed.
+	assert.Equal(t, DefaultPriceLimitNormal, DefaultTradingConfig().PriceLimit.Normal)
+	assert.Equal(t, DefaultPriceLimitST, DefaultTradingConfig().PriceLimit.ST)
+	assert.Equal(t, DefaultPriceLimitSTBefore, DefaultTradingConfig().PriceLimit.STBefore)
 }
 
 // TestTradingDaysPerYear (S7-P2-1) guards the 252 convention used by

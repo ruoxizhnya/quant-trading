@@ -40,10 +40,33 @@ type TradingConfig struct {
 }
 
 // PriceLimitConfig holds daily price-limit fractions by stock category.
+//
+// AUD-07 (ODR-065 H2): the board dimension (ChiNext/STAR 20%, BSE 30%)
+// is NOT configured here — it is derived from the symbol via
+// pkg/marketdata.ClassifySymbol, because it is market structure rather
+// than a tunable. The fields below are only the categories that vary
+// by stock status or by date.
 type PriceLimitConfig struct {
 	Normal float64 `mapstructure:"normal"`
-	ST     float64 `mapstructure:"st"`
-	New    float64 `mapstructure:"new"`
+	// ST is the MAIN-BOARD risk-warning limit (ST / *ST).
+	//
+	// 2026-07-06 起沪深主板 ST/*ST 由 ±5% 调整为 ±10%，与主板其他
+	// 股票一致（沪深北三所 2026-04 修订交易规则）。所以「当前值」
+	// 是 0.10，而 0.05 只适用于 2026-07-06 之前的交易日 —— 见
+	// STBefore。
+	//
+	// 注意：创业板/科创板的风险警示股不受此调整影响，仍适用其板块
+	// 档位（±20%）。该分支在 resolvePriceLimit 里，不看这个字段。
+	ST float64 `mapstructure:"st"`
+	// STBefore is the main-board risk-warning limit for trading days
+	// before 2026-07-06 (±5%). Zero falls back to the historical
+	// constant. Kept separate from ST so that a backtest spanning the
+	// rule change prices each day correctly instead of applying one
+	// rate to the whole window.
+	STBefore float64 `mapstructure:"st_before"`
+	// New is the limit applied to recently listed stocks. Known to be
+	// inaccurate — see PriceLimitInput.TradeDays.
+	New float64 `mapstructure:"new"`
 }
 
 // BacktestRequest represents the API request to start a backtest.
@@ -105,11 +128,25 @@ const (
 	// DefaultTransferFeeRate is the transfer fee rate (0.001%).
 	DefaultTransferFeeRate = fees.DefaultTransferFeeRate
 
-	// DefaultPriceLimitNormal is the daily price limit for normal stocks (±10%).
+	// DefaultPriceLimitNormal is the daily price limit for main-board
+	// stocks (±10%). ChiNext / STAR use ±20% and BSE ±30%, derived
+	// from the symbol at decision time — not from this constant.
 	DefaultPriceLimitNormal = 0.10
 
-	// DefaultPriceLimitST is the daily price limit for ST stocks (±5%).
-	DefaultPriceLimitST = 0.05
+	// DefaultPriceLimitST is the MAIN-BOARD risk-warning limit (ST /
+	// *ST) for trading days on or after 2026-07-06 (±10%).
+	//
+	// AUD-07 (ODR-065 H2): this was 0.05. 沪深北交易所 2026-04 修订
+	// 交易规则，2026-07-06 起主板 ST/*ST 由 ±5% 上调至 ±10%，与主板
+	// 其他股票一致。审计报告（2026-09-21）仍写作 ±5%，同样滞后于
+	// 该变化。创业板/科创板的风险警示股不受影响，仍按板块 ±20%。
+	DefaultPriceLimitST = 0.10
+
+	// DefaultPriceLimitSTBefore is the main-board risk-warning limit
+	// for trading days BEFORE 2026-07-06 (±5%). Kept as a separate
+	// constant so a backtest spanning the rule change prices each day
+	// under the rule in force on that day.
+	DefaultPriceLimitSTBefore = 0.05
 
 	// DefaultPriceLimitNew is the daily price limit for new stocks on listing day (±20% for ChiNext/STAR).
 	DefaultPriceLimitNew = 0.20
@@ -145,9 +182,10 @@ func DefaultTradingConfig() TradingConfig {
 		MinCommission:   DefaultMinCommission,
 		TransferFeeRate: DefaultTransferFeeRate,
 		PriceLimit: PriceLimitConfig{
-			Normal: DefaultPriceLimitNormal,
-			ST:     DefaultPriceLimitST,
-			New:    DefaultPriceLimitNew,
+			Normal:   DefaultPriceLimitNormal,
+			ST:       DefaultPriceLimitST,
+			STBefore: DefaultPriceLimitSTBefore,
+			New:      DefaultPriceLimitNew,
 		},
 		NewStockDays: DefaultNewStockDays,
 	}
