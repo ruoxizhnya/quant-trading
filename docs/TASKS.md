@@ -1,6 +1,6 @@
 ---
 status: active
-last-verified: 2026-09-18
+last-verified: 2026-09-21
 verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）
 ---
 
@@ -66,6 +66,16 @@ verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复�
 **P0-1 ~ P0-6 已于 2026-09-17 全部完成**（明细见上方「已完成」）。
 S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 
+**2026-09-21 全栈审查（[ODR-065](archive/odr/odr-065-fullstack-static-review.md)）新增 5 项 Critical** — 证据行号、代码示意与 15 commits 修复方案见 [审查报告 §4/§16](archive/reports-2026-Q3/review-report-20260921.md)。**前置**：推送 main 领先 origin 的 51 提交并恢复 feature branch + PR（P2 区 AUD-L1）；每任务一个原子 commit，测试先行。
+
+| ID | 任务 | 位置 | 验收 |
+|----|------|------|------|
+| AUD-01 | 加固 `/api/copilot/save`（报告 D-1 默认加固，删除为备选需裁决）：`StrategyName` 正则白名单 `^[A-Za-z][A-Za-z0-9_]{0,63}$` + 写盘前 `staticcheck.CheckOrError(req.Code)`（复用 generate 路径同款闸）+ `fmt.Sprintf` 拼路径改 `filepath.Join` | cmd/analysis/handlers_copilot.go#L174-199 | 遍历名 400 / 含 `exec.Command` 代码 422 / 合名合法码 200 落 plugins；测试先行先红后绿 |
+| AUD-02 | RBAC 接线：`/api/execution` 三动作端点 **与 legacy 根路径两处都** 挂 `RequireRole(trader, admin)`；`/api/tools` 增副作用分级 map（fail-closed：未登记 = admin）；先验证 auth disabled 时 RequireRole 放行路径（setup.go#L626 只在 Enabled 时挂 Middleware） | cmd/analysis/handlers_execution.go / handlers_tools.go / pkg/auth | viewer 下单 403 / trader 200 / 只读工具 viewer 200 / auth disabled 全放行 / legacy 与 `/api` 行为一致 |
+| AUD-03 | **日收益率公式**：`CalculateReturns` 删除 cashFlow 腿，改 `(curr - prev) / prev`（封闭回测无外部资金流；一次买卖往返现注入 ±10% 级假收益，污染 Sharpe/Sortino → walk-forward 门禁 → 基因池 fitness 全链路） | pkg/backtest/metrics/performance.go#L84-97 | 先红后绿：买入价格未动日收益 = 0 / 买入持有与标的逐日一致；grep 全部调用点；**合入后历史回测 + walk-forward 报告作废全量重跑** |
+| AUD-04 | **walk-forward 窗口隔离**：字段 `runner contracts.EngineRunner` 改 `runnerFactory func() (contracts.EngineRunner, error)`，每窗口独立构造（现共享单例致跨窗口前视 + 数据竞争）；setup.go 传工厂闭包 `NewEngine(v, provider, logger)`；更正"窗口互不共享状态"注释 | pkg/backtest/walkforward/walkforward.go#L19,142-160 + cmd/analysis/setup.go#L342 | stub 工厂断言每窗口独立实例；-race 绿；grep `NewWalkForwardEngine(` 其他调用点同步 |
+| AUD-05 | **11 张表 DDL 内联移植**（migrations/015~018 → postgres.go migrate() 数组末尾，编号注释续 Migration 028+，幂等 `IF NOT EXISTS`——补上 P1-4 约定的执行缺口）+ 一致性断言测试：静态读 postgres.go 提取 `CREATE TABLE IF NOT EXISTS (\S+)`，断言 ⊇ TableMapper 全部目标表（零 DB 依赖） | pkg/storage/postgres.go + 新 bulk_insert_ddl_test.go | mapper 13 映射目标表全部在 DDL 声明；新环境 `compose down -v && up` 后 13 类数据同步各落库 ≥1 行 |
+
 ---
 
 ## P1 — 地基与回路
@@ -90,6 +100,19 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 | **P1-13** | **稳健校验器把「稳定地不赚钱」判成稳健**：「邻域站得住」的阈值取中心的一半，中心 Sharpe 趋零时门槛也趋零 → 中心 0.031 也能拿到高原面积 1.00、概率 1.000。**已修（2026-09-17，随 cf2bbaa）**：按中心高度打折（`MinMeaningfulSharpe=0.5`），同一组数据给 0.248，并提示「别把稳定地不赚钱当成稳健」。单测发现不了 —— 手写的邻域数字都是「合理」的 | **✅** `pkg/validation/robustness.go` | 平坦性说的是结论稳不稳，有效性说的是值不值得做，两者不能互相替代 |
 | ~~**P1-14**~~ | ~~**回测不可复现**~~ → **已修（2026-09-17）**：同一份数据连跑两次，成交 122 vs 120 笔、收益 1.33 vs 1.31。四处非确定性来源：① momentum 遍历 `bars` map + `sort.Slice` 不稳定 → top-N 选谁每次不同（8 只动量相同的票选 3 只，200 次调用出 8 种组合）；② tracker 持仓求和顺序（浮点加法不满足结合律，差 1e-10，复利放大后变 38 元）；③ 止损 / 强平遍历持仓 map → 同日平仓顺序互换；④ regime 检测拼接行情顺序 → 仓位倍数不同。**现已 684 笔成交逐位一致** | **✅** `pkg/backtest/tracker/tracker.go`、`pkg/backtest/engine.go`（regime 拼接 + 止损定序）、`pkg/backtest/engine_daily.go`（强平定序）、`pkg/strategy/examples/momentum.go` | 回归测试：`pkg/backtest/engine_reproducibility_test.go`（跑两次逐位比对 + top-N 顺序无关性） |
 | ~~**P1-12**~~ | ~~**回测的「今天」取自 `time.Now()`**~~ → **已修（2026-09-17）**：两层都改了。① 引擎侧：`Tracker` 新增 `asOf`，主循环在生成信号**之前**调 `SetAsOf(date)`，`GetPortfolio` 用它填 `UpdatedAt`（零值才退回墙钟 —— 那是实时撮合场景）。② 策略侧：momentum 不再用 `time.Now()` 兜底，改为「组合快照 → 行情最新日期 → 直接报错」；`multi_factor` / `value_screen` 无日期时不发信号；`convertible_bond` 的纯债折现改用回放日期。取证：weekly 252 天 0 成交 → 114 笔 | **✅** `pkg/backtest/tracker/tracker.go`、`pkg/backtest/engine.go:625`、`pkg/strategy/utils.go`（新增 `LatestBarDate`）、`examples/momentum.go`、`plugins/{multi_factor,value_screen,convertible_bond}.go` | 回归测试：`pkg/backtest/engine_rebalance_date_test.go`（spy 盯契约 + weekly 盯后果 + tracker 单测） |
+
+**2026-09-21 全栈审查（ODR-065）新增 8 项 High** — 证据行号与修复代码示意见[审查报告 §5/§16](archive/reports-2026-Q3/review-report-20260921.md)：
+
+| ID | 任务 | 位置 | 验收 |
+|----|------|------|------|
+| AUD-06 | 印花税默认值 0.001→0.0005（注释史实修正：2023-08-28 起 0.1% 减半至 **0.05%**，非"0.2%→0.1%"）；存量断言 0.001 的测试此前固化错误值，一并修 | `pkg/fees/ashare.go#L49-53` | 卖出 10 万元收 50 元 |
+| AUD-07 | 涨跌停板块分档 + 分取整：抽纯函数 `resolvePriceLimit`（新股→New / ST 系→ST / 300·301·688·689→20% / 8·4 开头北交所→30% / 其余 10%）；上下限价 `math.Round(x*100)/100` 后再比较；Config 增 Board20/Board30 | `pkg/backtest/engine_daily.go#L168-178` | 600/000/002/300/688/830 × {Normal,ST,*ST,新股} 表驱动；10.05→11.06 |
+| AUD-08 | `*ST` 识别修复（`name[:2]` 永匹配不到 3/4 字符前缀）改 `strings.HasPrefix` 多模式；**与下方测试断言修正同一 commit**（测试固化了 bug，分开提交会中途红灯） | `pkg/backtest/engine.go#L1502-1508` + `engine_accessors_test.go#L286-290` | *ST/SST/S*ST/ST 全 true、`平安银行` false |
+| AUD-09 | 整手取整 LotSize=100：Weight→shares 换算处归一，<100 跳过；**先 grep 正向确认现状**（负向证据，已存在则关闭） | pkg/backtest 下单量换算处 | 下单量恒为 100 倍数 |
+| AUD-10 | MockTrader `GetPositions`/`GetAccount` 在 RLock 下经指针写共享对象 → 改值拷贝（`cp := *pos` 后写局部副本）；AUD-12 `-race` 门禁的前置 | `pkg/live/mock_trader.go#L44,301-338` | `go test ./pkg/live/... -race` 绿 |
+| AUD-11 | Windows 沙箱 fail-closed：无 rlimit 能力（windows）时拒绝执行并明确报错；runner_test 的 skip 改断言。Job Object 完整实现列后续增强 | `internal/sandbox/runner` | Windows 上死循环代码被拒绝执行 |
+| AUD-12 | CI 补门禁：Test 加 `-race`；新增 frontend job（lint/typecheck/test）。**在 AUD-04/AUD-10 合入后启用**，避免开门即红 | `.github/workflows/ci.yml#L47-48` | 含数据竞争的 PR → CI 红 |
+| AUD-13 | docker-compose PG/Redis 端口绑 `127.0.0.1:`（Redis requirepass 涉及全部服务 REDIS_URL 联动，另立任务） | `docker-compose.yml#L27-28,39-40` | 宿主机外主机探测 5432/6379 不通 |
 
 ---
 
@@ -116,6 +139,14 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 | **P2-11** | ~~Hermes Agent 系统设计文档遗失（原在 `.trae/documents/`，目录已删）。SPEC §6 与 hermes 验收测试均引用它~~ | **✅ 2026-09-18** `docs/hermes/system-design.md` | 遗失的是 `hermes-agent-integration-system-design.md`，代码里有 4 处引用（gate.go §6.2、factor_tools/gene_pool_tools/walkforward_tool §3.2）。**从代码反推补齐**：源码注释里逐条记了「设计说 X，我们做了 Y，原因 Z」，提炼出来就是 §3.2（工具参数契约 + 3 处已记录的偏离）与 §6.2（GateDecision 门控元数据）。**只有这两节是复原的**，其余章节代码没引用就不凭空补写，并在文档头部写明这是反推而非原件 |
 | **P2-12** | ~~**表达式引擎只暴露 OHLCV**（open/high/low/close/volume/turnover），因此 `value` / `quality` 类意图表达不出 —— P0-5 中它们只能明确失败，而不是套一个无关的价格表达式产出误导性回测数字~~ | **✅ 2026-09-18** `pkg/strategy/expression/data_provider.go` + `strategy.go` + `pkg/strategy/strategy.go` + `pkg/storage/fundamentals.go` + `pkg/backtest/engine.go` + `pkg/ai/yaml/generator.go` | 新增 `pe/pb/ps/roe/roa` 五个字段，**按 PIT 对齐**（`GetFundamentalsPITBulk` 返回的 Date 是可用日 `COALESCE(ann_date, trade_date)`，不是报告期；`OHLCVDataProvider.fundamentalSeries` 按每根 K 线的日期切一刀，取不到填 NaN 不是 0）。注入走 `strategy.FundamentalAware` 可选接口（`GenerateSignals` 签名没有基本面参数，不动接口；范式同 `FactorAware`），且**只有声明要财报的策略才预热**——纯价量策略不付这份查询成本。`value` → `cs_rank(neg(pe)) + cs_rank(neg(pb)) > 1.6`，`quality` → `cs_rank(roe) + cs_rank(roa) > 1.6`；`custom` 仍明确失败。**估值倍数非正一律 NaN**：PE 为负不是"便宜"是亏损，`neg(pe)` 不该把亏得最狠的排成最便宜（经典价值陷阱）；ROE/ROA 为负是真实的差，原样保留。**顺手修掉一个潜伏 bug**：`neg(x)` 的函数形式此前从未接上（`evaluateFunction` 无条件走 `applyTimeSeriesOp`），`multi_factor` 的默认表达式 `cs_rank(neg(ts_std(close,20)))` 从落地起就是「解析得过、跑不起来」—— 它只被断言过能解析，从没被求值过 |
 | **P2-13** | **验证器链缺真实回测的端到端取证**（2026-09-17 已解决一半）。缺口只剩数据：本地库 `stocks` / `trading_calendar` / `ohlcv_daily_qfq` 均 0 行。~~引擎离线跑不了~~ —— 这是误判，引擎三处 HTTP（仓位 / 择时 / 止损）**都有 in-process 分支**，`cmd/analysis/main.go:160` 也已 `SetRiskManager`；取证时用 `marketdata.NewInMemoryProvider()` + `SetRiskManager` 即可完全离线（范式见 `pkg/validation/economic_integration_test.go`） | `pkg/validation/economic_integration_test.go` | 跑数据同步补齐行情后，用同一范式接真库 |
+
+**2026-09-21 全栈审查（ODR-065）新增 3 项**（Medium/Low + 流程前置）：
+
+| ID | 任务 | 位置 |
+|----|------|------|
+| AUD-14 | AGENTS.md 校准：§1-3 按 ADR-023/024 现实重写（ADR-021/022 已入 superseded-adr）/ 表数口径改"内联 DDL 22 张（唯一执行路径）"/ `ingest.raw`·`research.*` 改"已落盘"/ Rule 2 的 `docs/odr/` → `docs/archive/odr/`（该目录已不存在）/ `pkg/tools/server.go` → `tool.go`；`migrations/` 与 `docs/migrations/` 目录首加 README"此目录不执行，加表改 postgres.go migrate() 数组"（是否物理移入 archive 另立 Cleanup ODR） | AGENTS.md + migrations/ |
+| AUD-15 | 删 `e2e/tests/ai-research.spec.ts`（打已删除的 :8086/cmd-ai，恒失败）；`fundamentals_detail` 读取处加空集防御（行数 0 → 显式报错，杜绝纵向因子静默拿空集，待 EQD-P1-2 摄取补齐） | e2e/tests + 纵向因子读取处 |
+| AUD-L1 | **推送 main 领先 origin 的 51 提交**并恢复 feature branch + PR 流程（AGENTS.md §8 规范 3）——全部 AUD 修复工作的前置 | git |
 
 ---
 
