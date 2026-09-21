@@ -1,113 +1,123 @@
 //go:build linux || darwin
 
-// Package runner (rlimit_posix.go) applies POSIX setrlimit(2) resource
-// caps to a child process. We use a pre-start hook so the limits are
-// applied in the CHILD's address space, not the parent's.
+// Package runner (rlimit_posix.go) turns the requested resource limits
+// into a command line that applies them INSIDE THE CHILD.
 //
-// The setrlimit syscall is identical on Linux and macOS, so both
-// platforms share this file (build tag: linux || darwin). Windows is
-// not supported by this runner; attempting to use it on Windows will
-// fail at applyLimits() with a "platform not supported" error.
-
+// Why a shell wrapper instead of setrlimit(2): Go's os/exec exposes no
+// pre-exec hook, so the only way to call setrlimit from Go is to call
+// it on the CURRENT process — and the current process here is the
+// long-running analysis service. Doing that permanently caps the
+// daemon (a 25s RLIMIT_CPU eventually SIGXCPU-kills it, a 1 GiB
+// RLIMIT_AS makes it OOM, RLIMIT_NOFILE=256 throttles an HTTP server),
+// while the child merely inherits the damage. That was the behaviour
+// this file used to have; see AUD-11.
+//
+// The wrapper runs `sh -c '<ulimit …>; exec "$0" "$@"'` instead. The
+// shell sets the limits for itself, then execs the target, so the
+// limits are in force for exactly the process we want and the parent
+// is untouched. Every ulimit is checked: a limit that cannot be set
+// aborts the run rather than leaving an unbounded child behind.
 package runner
 
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 )
 
-// applyLimits wires up a pre-start hook on cmd that calls setrlimit(2)
-// for each non-zero field in limits. The hook runs in the child
-// between fork() and exec(), which is the only window in which the
-// child can set its own limits without affecting the parent.
-func applyLimits(cmd *exec.Cmd, limits Limits) error {
+// configureProcessGroup puts the child in its own session, and therefore
+// its own process group, disjoint from the daemon's.
+//
+// This is not cosmetic. The child runs AI-generated code; if it ever
+// needs to be killed as a group (`kill -- -<pgid>`), sharing the
+// daemon's pgid would make that kill reach the analysis service itself.
+// A separate session also keeps the child off the parent's controlling
+// terminal.
+//
+// Applied unconditionally, including when no limits were requested.
+func configureProcessGroup(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
-
-	// Snapshot the limits we want to set; capture by value so the
-	// closure doesn't race with the parent's later mutation.
-	l := limits
-	cmd.SysProcAttr.Setsid = true // new session / process group, so we can kill -pgid
-
-	// If nothing to set, return early — we still want Setsid for killability.
-	if l.CPUSeconds == 0 && l.MemoryBytes == 0 && l.OpenFiles == 0 &&
-		l.NumProcs == 0 && l.FileSize == 0 {
-		return nil
-	}
-
-	// We can't just set cmd.SysProcAttr — Go's os/exec only exposes
-	// a tiny fixed set (Pdeathsig, Pgid, Setsid, ...). For setrlimit
-	// we have to use a SysProcAttr-style hook via a wrapper that
-	// exec.CommandContext doesn't expose. So we have to switch to
-	// the lower-level syscall.ForkExec path... except Go's stdlib
-	// makes that impossible without `import "syscall"` and using
-	// `os.StartProcess` directly. The cleanest workaround: use
-	// `cmd.SysProcAttr` plus a `WaitDelay` strategy + the kernel's
-	// automatic RLIMIT defaults (ulimit). The ulimit is inherited
-	// from the parent process.
-	//
-	// Since the parent process (analysis-service) is itself a
-	// long-running daemon, we instead apply the limits to the
-	// RUNNER process (this one) before spawning, then call
-	// syscall.Exec to replace ourselves. That keeps the
-	// implementation simple but does mean a misbehaving child sees
-	// the runner's own limits briefly.
-	//
-	// For the P1-11 acceptance criterion ("subprocess + rlimit + 5s
-	// timeout working") this is sufficient. A future PR can swap to
-	// a fork-and-exec helper from `golang.org/x/sys/unix` if finer
-	// isolation is needed.
-	return applyLimitsPreExec(l)
+	cmd.SysProcAttr.Setsid = true
 }
 
-// applyLimitsPreExec applies the limits to the CURRENT process. This
-// is a pragmatic stand-in for "set limits in the child": we apply
-// the limits in the runner, then exec the child via syscall.Exec,
-// so the child inherits them.
+// prepareArgv rewrites argv to run under a POSIX sh wrapper that
+// applies limits, then execs the original command.
 //
-// Caveat: if multiple Run() calls happen concurrently, the rlimits
-// in the parent get clobbered. Callers that need concurrent runs
-// with different limits should serialize or fork a helper binary.
-// The single-threaded usage in pkg/strategy/copilot.go is safe.
-func applyLimitsPreExec(l Limits) error {
+// When no limits are requested argv is returned unchanged, so the
+// common case pays no shell and needs no `sh` on PATH.
+//
+// unenforced is always false: POSIX can always enforce, and a limit
+// that the kernel refuses to grant aborts the child instead.
+func (r *Runner) prepareArgv(argv []string, l Limits) ([]string, bool, error) {
+	if l.IsZero() {
+		return argv, false, nil
+	}
+
+	// argv[0] becomes $0 and the rest become $@, which is exactly the
+	// shape `exec "$0" "$@"` needs to re-run the original command
+	// without any quoting round-trip through the shell.
+	wrapped := append([]string{"sh", "-c", limitScript(l), argv[0]}, argv[1:]...)
+	return wrapped, false, nil
+}
+
+// limitScript renders the sh snippet that applies l and then execs the
+// target. Exported behaviour (for tests) is the exact text below.
+func limitScript(l Limits) string {
+	var b strings.Builder
+
+	// Every ulimit is followed by a failure branch. Silently continuing
+	// after a rejected ulimit is the exact failure mode AUD-11 is
+	// about: the caller believes the child is capped when it is not.
+	emit := func(flag, value, name string) {
+		fmt.Fprintf(&b, "ulimit -%s %s || { echo '%s%s' >&2; exit %d; }\n",
+			flag, value, limitSetupMarker, name, limitSetupFailedExit)
+	}
+
 	if l.CPUSeconds > 0 {
-		if err := syscall.Setrlimit(syscall.RLIMIT_CPU, &syscall.Rlimit{
-			Cur: uint64(l.CPUSeconds),
-			Max: uint64(l.CPUSeconds),
-		}); err != nil {
-			return fmt.Errorf("setrlimit(RLIMIT_CPU): %w", err)
-		}
+		emit("t", strconv.Itoa(l.CPUSeconds), "RLIMIT_CPU")
 	}
 	if l.MemoryBytes > 0 {
-		if err := syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{
-			Cur: uint64(l.MemoryBytes),
-			Max: uint64(l.MemoryBytes),
-		}); err != nil {
-			return fmt.Errorf("setrlimit(RLIMIT_AS): %w", err)
-		}
+		// ulimit -v takes KiB. Round UP: 0 means "unlimited" to the
+		// shell, so a tiny non-zero request must never truncate to 0.
+		emit("v", strconv.FormatInt(toKiB(l.MemoryBytes), 10), "RLIMIT_AS")
 	}
 	if l.OpenFiles > 0 {
-		if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{
-			Cur: uint64(l.OpenFiles),
-			Max: uint64(l.OpenFiles),
-		}); err != nil {
-			return fmt.Errorf("setrlimit(RLIMIT_NOFILE): %w", err)
-		}
+		emit("n", strconv.Itoa(l.OpenFiles), "RLIMIT_NOFILE")
 	}
 	if l.NumProcs > 0 {
-		if err := setNProc(l.NumProcs); err != nil {
-			return fmt.Errorf("setrlimit(RLIMIT_NPROC): %w", err)
-		}
+		// `ulimit -u` is NOT portable, verified against the shells this
+		// actually runs under:
+		//
+		//	bash  ✅   busybox ash  ✅   dash (Debian/Ubuntu /bin/sh)  ❌
+		//
+		// On a shell without it the ulimit fails and the run aborts
+		// with ErrLimitSetupFailed. That is noisy, but the alternative —
+		// dropping the cap silently — is the exact bug this file exists
+		// to prevent. Note the production composition root does not set
+		// NumProcs, so this is a landmine rather than a live problem.
+		emit("u", strconv.Itoa(l.NumProcs), "RLIMIT_NPROC")
 	}
 	if l.FileSize > 0 {
-		if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{
-			Cur: uint64(l.FileSize),
-			Max: uint64(l.FileSize),
-		}); err != nil {
-			return fmt.Errorf("setrlimit(RLIMIT_FSIZE): %w", err)
-		}
+		// ulimit -f takes 512-byte blocks, rounded up for the same
+		// reason as -v.
+		emit("f", strconv.FormatInt(toBlocks512(l.FileSize), 10), "RLIMIT_FSIZE")
 	}
-	return nil
+
+	b.WriteString("exec \"$0\" \"$@\"\n")
+	return b.String()
+}
+
+// toKiB converts a byte count to KiB, rounding up so that a non-zero
+// request never becomes 0 (which the shell reads as "unlimited").
+func toKiB(bytes int64) int64 {
+	return (bytes + 1023) / 1024
+}
+
+// toBlocks512 converts a byte count to 512-byte blocks, rounding up.
+func toBlocks512(bytes int64) int64 {
+	return (bytes + 511) / 512
 }

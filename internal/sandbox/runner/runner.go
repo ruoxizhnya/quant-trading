@@ -17,18 +17,25 @@
 //     pre-cached" latency budget.
 //
 //  3. Resource limits: optional rlimit-style caps (max CPU seconds,
-//     max RSS, max open files, max subprocess count) are applied via
-//     SysProcAttr on POSIX systems. These map directly to the kernel's
-//     setrlimit(2) interface; a malicious child cannot escape them
-//     without root.
+//     max address space, max open files, max subprocess count, max
+//     file size). On POSIX they are applied INSIDE THE CHILD, by
+//     wrapping the command in `sh -c 'ulimit …; exec "$0" "$@"'`.
+//     The caps therefore belong to the child process and never touch
+//     the long-running parent.
+//
+//     On Windows there is no in-process equivalent (that needs a Job
+//     Object, not yet implemented), so Run REFUSES to start a child
+//     that asked for limits rather than silently dropping them — see
+//     ErrLimitsUnsupported and WithAllowUnenforcedLimits.
 //
 // Threat model — what this sandbox does and does NOT do:
 //
-//	✅  Wall-clock CPU bound (timeout)
-//	✅  Memory bound (RLIMIT_AS on POSIX)
-//	✅  File size / open file count bound
-//	✅  Subprocess count bound (RLIMIT_NPROC)
-//	✅  Process-group isolation (child in its own pgid, killable as group)
+//	✅  Wall-clock CPU bound (timeout) — all platforms
+//	✅  Memory bound (RLIMIT_AS) — POSIX only
+//	✅  File size / open file count bound — POSIX only
+//	✅  Subprocess count bound (RLIMIT_NPROC) — POSIX only
+//	✅  Process-group isolation (child in its own session/pgid, so a
+//	    group kill can never reach the daemon) — POSIX only
 //	❌  Network egress isolation (would need network namespaces / cgroups)
 //	❌  Filesystem chroot / bind-mount isolation (would need CAP_SYS_ADMIN)
 //	❌  Syscall filtering (would need seccomp-bpf / eBPF)
@@ -56,6 +63,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -63,6 +71,33 @@ import (
 
 // ErrTimeout is returned when the child exceeds the configured timeout.
 var ErrTimeout = errors.New("runner: child exceeded timeout and was killed")
+
+// ErrLimitsUnsupported is returned when the caller asked for resource
+// limits that this platform cannot enforce and the runner was not told
+// to proceed anyway.
+//
+// Refusing is deliberate. A sandbox that silently drops the caps it was
+// asked for is worse than no sandbox at all, because every caller that
+// budgeted on those caps being real (memory headroom, fd budget,
+// runaway-build protection) is now wrong without knowing it.
+var ErrLimitsUnsupported = errors.New("runner: resource limits are not supported on this platform")
+
+// ErrLimitSetupFailed is returned when the child could not be started
+// under the requested limits — the wrapper's ulimit call was rejected
+// by the shell. The child never ran, so this is not a failure of the
+// child itself and its exit status is meaningless.
+var ErrLimitSetupFailed = errors.New("runner: failed to apply resource limits in the child")
+
+// limitSetupFailedExit is the exit status the POSIX wrapper uses when
+// it cannot apply a limit. 125 is the conventional "the command could
+// not be invoked" status (used by GNU timeout, xargs, …).
+const limitSetupFailedExit = 125
+
+// limitSetupMarker is written to stderr by the POSIX wrapper before it
+// exits with limitSetupFailedExit. Run() requires BOTH the exit status
+// and this marker before reporting ErrLimitSetupFailed, so a child that
+// legitimately exits 125 on its own is not misreported.
+const limitSetupMarker = "runner: cannot set "
 
 // Limits captures the resource caps to apply to the child. Zero values
 // mean "leave that limit alone" (i.e. don't call setrlimit on it).
@@ -77,6 +112,42 @@ type Limits struct {
 	NumProcs int
 	// Max file size in bytes (RLIMIT_FSIZE). 0 = leave as default.
 	FileSize int64
+}
+
+// IsZero reports whether the caller asked for no limits at all.
+//
+// Zero means "leave that limit alone" (see Limits), so an all-zero
+// Limits is satisfiable on every platform — including ones with no
+// enforcement mechanism. That is what keeps the fail-closed path in
+// Run from blocking callers who never asked for limits in the first
+// place.
+func (l Limits) IsZero() bool {
+	return l.CPUSeconds == 0 && l.MemoryBytes == 0 && l.OpenFiles == 0 &&
+		l.NumProcs == 0 && l.FileSize == 0
+}
+
+// describe renders the requested limits for error messages and logs.
+func (l Limits) describe() string {
+	var parts []string
+	if l.CPUSeconds != 0 {
+		parts = append(parts, fmt.Sprintf("cpu=%ds", l.CPUSeconds))
+	}
+	if l.MemoryBytes != 0 {
+		parts = append(parts, fmt.Sprintf("mem=%dB", l.MemoryBytes))
+	}
+	if l.OpenFiles != 0 {
+		parts = append(parts, fmt.Sprintf("nofile=%d", l.OpenFiles))
+	}
+	if l.NumProcs != 0 {
+		parts = append(parts, fmt.Sprintf("nproc=%d", l.NumProcs))
+	}
+	if l.FileSize != 0 {
+		parts = append(parts, fmt.Sprintf("fsize=%dB", l.FileSize))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, " ")
 }
 
 // Options configures a single Run() invocation. Per-run overrides
@@ -105,12 +176,19 @@ const DefaultTimeout = 5 * time.Second
 type Runner struct {
 	timeout time.Duration
 	limits  Limits
+	// allowUnenforcedLimits lets Run proceed on platforms that cannot
+	// enforce the requested limits. Off by default (fail-closed).
+	allowUnenforcedLimits bool
 	// onTimeout is called once per timeout, with the cmd's argv for logging.
 	// Defaults to a no-op. Useful for metrics / alerting.
 	onTimeout func(argv []string)
 	// onOOM is called once per OOM kill (RLIMIT_AS exceeded).
 	onOOM func(argv []string)
-	// mu protects the two callback fields above.
+	// onUnenforcedLimits is called once per run that proceeds WITHOUT
+	// the requested limits actually being enforced. Only reachable when
+	// allowUnenforcedLimits is set. Defaults to a no-op.
+	onUnenforcedLimits func(argv []string)
+	// mu protects the three callback fields above.
 	mu sync.Mutex
 }
 
@@ -148,17 +226,69 @@ func WithOnOOM(fn func(argv []string)) Option {
 	return func(r *Runner) { r.onOOM = fn }
 }
 
+// WithAllowUnenforcedLimits makes Run proceed on a platform that cannot
+// enforce the requested limits (currently Windows) instead of returning
+// ErrLimitsUnsupported.
+//
+// This is an explicit opt-out and should stay off outside local
+// development. The whole point of the default is that a caller who
+// asked for a memory cap must not be handed a process without one
+// while believing otherwise.
+func WithAllowUnenforcedLimits() Option {
+	return func(r *Runner) { r.allowUnenforcedLimits = true }
+}
+
+// WithOnUnenforcedLimits installs a callback fired once per run that
+// proceeds with its limits NOT enforced. Wire it to a WARN log so the
+// degradation is visible; it is only reachable when
+// WithAllowUnenforcedLimits is set.
+func WithOnUnenforcedLimits(fn func(argv []string)) Option {
+	return func(r *Runner) { r.onUnenforcedLimits = fn }
+}
+
 // Run executes name with the given args, applying the runner's policy
 // and the per-run options. The returned bytes.Buffer values hold the
 // captured stdout and stderr; the err is one of:
 //   - exec.LookPath error (binary not found)
+//   - ErrLimitsUnsupported (limits requested, platform cannot enforce them)
+//   - ErrLimitSetupFailed (limits requested, the child's ulimit was rejected)
 //   - context.DeadlineExceeded wrapped in ErrTimeout (timed out)
 //   - the child's non-zero exit error (other failure)
 func (r *Runner) Run(ctx context.Context, name string, args []string, opts Options) (stdout, stderr *bytes.Buffer, err error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(timeoutCtx, name, args...)
+	limits := r.limits
+	if opts.Limits != nil {
+		limits = mergeLimits(r.limits, *opts.Limits)
+	}
+
+	// Resolve the limits into the command line BEFORE building the
+	// process. On POSIX this rewrites argv so the command runs under a
+	// `sh -c` wrapper that sets the limits in the child and then execs
+	// the target; on Windows it fails closed.
+	//
+	// This has to happen before exec.CommandContext, because the wrapper
+	// replaces argv[0] and LookPath must resolve the wrapper instead of
+	// the original binary.
+	argv := append([]string{name}, args...)
+	argv, unenforced, err := r.prepareArgv(argv, limits)
+	if err != nil {
+		return nil, nil, err
+	}
+	if unenforced {
+		r.mu.Lock()
+		fn := r.onUnenforcedLimits
+		r.mu.Unlock()
+		if fn != nil {
+			fn(argv)
+		}
+	}
+
+	cmd := exec.CommandContext(timeoutCtx, argv[0], argv[1:]...)
+	// Put the child in its own session/process group. Applied
+	// unconditionally, not only when limits were requested.
+	configureProcessGroup(cmd)
 	if opts.Dir != "" {
 		cmd.Dir = opts.Dir
 	}
@@ -179,18 +309,15 @@ func (r *Runner) Run(ctx context.Context, name string, args []string, opts Optio
 		cmd.Stdin = bytes.NewReader(nil)
 	}
 
-	// Apply resource limits. We do this via a pre-start hook so the
-	// limits are set in the CHILD process, not the parent.
-	limits := r.limits
-	if opts.Limits != nil {
-		limits = mergeLimits(r.limits, *opts.Limits)
-	}
-	if err := applyLimits(cmd, limits); err != nil {
-		return nil, nil, fmt.Errorf("runner: apply rlimits: %w", err)
-	}
-
 	runErr := cmd.Run()
 	if runErr != nil {
+		// The POSIX wrapper aborts with a marker on stderr when a limit
+		// could not be applied. The target never ran, so report the
+		// sandbox failure rather than the wrapper's exit status.
+		if isLimitSetupFailure(runErr, stderr) {
+			return stdout, stderr, fmt.Errorf("%w: %s",
+				ErrLimitSetupFailed, strings.TrimSpace(stderr.String()))
+		}
 		// Distinguish timeout from other failures.
 		if errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
 			r.mu.Lock()
@@ -212,6 +339,20 @@ func (r *Runner) Run(ctx context.Context, name string, args []string, opts Optio
 		}
 	}
 	return stdout, stderr, runErr
+}
+
+// isLimitSetupFailure reports whether runErr is the POSIX wrapper
+// giving up because it could not apply a limit.
+//
+// Both the exit status and the stderr marker must match: a child that
+// happens to exit 125 on its own business must not be misreported as a
+// sandbox setup failure.
+func isLimitSetupFailure(runErr error, stderr *bytes.Buffer) bool {
+	var ee *exec.ExitError
+	if !errors.As(runErr, &ee) || ee.ExitCode() != limitSetupFailedExit {
+		return false
+	}
+	return stderr != nil && strings.Contains(stderr.String(), limitSetupMarker)
 }
 
 // RunExitCode is a convenience wrapper that returns the child's exit

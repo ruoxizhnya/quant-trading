@@ -60,17 +60,45 @@ type sandboxRunnerAdapter struct {
 	r *runner.Runner
 }
 
-func newSandboxRunnerAdapter() *sandboxRunnerAdapter {
-	return &sandboxRunnerAdapter{
-		r: runner.New(
-			runner.WithTimeout(30*time.Second),
-			runner.WithLimits(runner.Limits{
-				MemoryBytes: 1 << 30, // 1 GiB
-				CPUSeconds:  25,
-				OpenFiles:   256,
-			}),
-		),
+// envAllowUnenforcedSandboxLimits is the escape hatch for running the
+// copilot build sandbox on a platform that cannot enforce resource
+// limits (currently Windows, which has no setrlimit(2)).
+//
+// Without it the runner FAILS CLOSED: a build that asked for the caps
+// below is refused outright rather than run unbounded. That is the
+// point — a silently uncapped child is worse than no child, because
+// nothing downstream knows the protection is missing.
+//
+// This must never be set in a deployed environment. On POSIX it is
+// unnecessary: the limits are enforced inside the child.
+const envAllowUnenforcedSandboxLimits = "SANDBOX_ALLOW_UNENFORCED_LIMITS"
+
+func newSandboxRunnerAdapter(logger zerolog.Logger) *sandboxRunnerAdapter {
+	opts := []runner.Option{
+		runner.WithTimeout(30 * time.Second),
+		runner.WithLimits(runner.Limits{
+			MemoryBytes: 1 << 30, // 1 GiB
+			CPUSeconds:  25,
+			OpenFiles:   256,
+		}),
 	}
+
+	if os.Getenv(envAllowUnenforcedSandboxLimits) != "" {
+		logger.Warn().
+			Str("env", envAllowUnenforcedSandboxLimits).
+			Msg("sandbox resource limits will NOT be enforced on this platform; " +
+				"unset this variable outside local development")
+		opts = append(opts,
+			runner.WithAllowUnenforcedLimits(),
+			runner.WithOnUnenforcedLimits(func(argv []string) {
+				logger.Warn().
+					Strs("argv", argv).
+					Msg("sandbox build ran WITHOUT resource limits")
+			}),
+		)
+	}
+
+	return &sandboxRunnerAdapter{r: runner.New(opts...)}
 }
 
 func (a *sandboxRunnerAdapter) Run(ctx context.Context, name string, args []string, workingDir string) (*bytes.Buffer, *bytes.Buffer, error) {

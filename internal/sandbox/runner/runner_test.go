@@ -3,7 +3,9 @@ package runner
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -58,18 +60,41 @@ func TestRun_BinaryNotFound(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestRun_Dir asserts Options.Dir is the child's working directory.
+//
+// This used to `t.Skip` on Windows because the original assertion
+// leaned on `pwd`'s output format. A skip meant the option went
+// untested on the one platform whose path handling differs most, so
+// each platform now gets a command that can actually report its cwd.
 func TestRun_Dir(t *testing.T) {
 	t.Parallel()
+
+	dir := t.TempDir()
+
+	name, args := "pwd", []string(nil)
 	if runtime.GOOS == "windows" {
-		t.Skip("Options.Dir 的断言依赖 POSIX 路径语义（/tmp 与 pwd 输出格式），Windows 下跳过")
+		name, args = "cmd", []string{"/c", "cd"}
 	}
+
 	r := New()
-	stdout, _, err := r.Run(context.Background(), "pwd", nil, Options{Dir: "/tmp"})
+	stdout, _, err := r.Run(context.Background(), name, args, Options{Dir: dir})
 	require.NoError(t, err)
-	// pwd prints with a trailing newline; on macOS this is /private/tmp.
+
 	got := strings.TrimSpace(stdout.String())
-	assert.True(t, got == "/tmp" || got == "/private/tmp",
-		"expected /tmp or /private/tmp, got %q", got)
+
+	if runtime.GOOS == "windows" {
+		// `cmd /c cd` echoes the path as the OS stored it; Windows
+		// paths compare case-insensitively.
+		assert.True(t, strings.EqualFold(got, dir), "cwd = %q, want %q", got, dir)
+		return
+	}
+
+	// On macOS t.TempDir() lives under /var, which is a symlink to
+	// /private/var; `pwd` reports whichever form the kernel resolved.
+	resolved, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+	assert.True(t, got == dir || got == resolved,
+		"cwd = %q, want %q or %q", got, dir, resolved)
 }
 
 func TestRunExitCode(t *testing.T) {
@@ -90,16 +115,116 @@ func TestMergeLimits(t *testing.T) {
 	assert.Equal(t, 50, merged.OpenFiles)
 }
 
-func TestApplyLimits_NoopWhenAllZero(t *testing.T) {
+// TestNoSetrlimitOnTheParent is a portable guard for the AUD-11
+// regression.
+//
+// The bug — calling setrlimit(2) on the long-running parent instead of
+// inside the child — can only be reproduced behaviourally on POSIX (see
+// TestRun_LimitsDoNotTouchTheParent in limits_posix_test.go). This test
+// runs on every platform, including the Windows dev machine, so the
+// invariant is checked before the change ever reaches CI.
+//
+// If a future change genuinely needs setrlimit (a fork-and-exec helper,
+// say), update this test deliberately instead of deleting it. The point
+// is that nobody reaches for setrlimit on the parent by accident: in
+// this package the only process Go can reach is the analysis service
+// itself, and capping that is how the daemon gets SIGXCPU-killed.
+func TestNoSetrlimitOnTheParent(t *testing.T) {
 	t.Parallel()
-	// Empty limits should not touch the runner at all.
+
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err)
+
+	checked := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(name)
+		require.NoError(t, err)
+		checked++
+
+		// Checked explicitly rather than with assert.NotContains so the
+		// failure message names the file instead of dumping it.
+		if strings.Contains(string(src), "Setrlimit") {
+			t.Errorf("%s calls setrlimit(2); in this package the only process it can reach is "+
+				"the parent (the long-running analysis service), so this would cap the daemon "+
+				"— see AUD-11", name)
+		}
+	}
+
+	require.NotZero(t, checked, "the guard scanned nothing; is the working directory the package dir?")
+}
+
+func TestLimits_IsZero(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, Limits{}.IsZero(), "all-zero limits request nothing")
+
+	// Every single field must count as "something was requested",
+	// otherwise a caller could ask for exactly one cap and be told
+	// nothing was asked for — and sail past the fail-closed check.
+	nonzero := []Limits{
+		{CPUSeconds: 1},
+		{MemoryBytes: 1},
+		{OpenFiles: 1},
+		{NumProcs: 1},
+		{FileSize: 1},
+	}
+	for _, l := range nonzero {
+		assert.False(t, l.IsZero(), "%+v must not count as zero", l)
+	}
+}
+
+func TestLimits_describe(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "none", Limits{}.describe())
+
+	got := Limits{CPUSeconds: 25, MemoryBytes: 1 << 30, OpenFiles: 256}.describe()
+	assert.Contains(t, got, "cpu=25s")
+	assert.Contains(t, got, "mem=1073741824B")
+	assert.Contains(t, got, "nofile=256")
+	// Fields that were not requested must not appear — the message is
+	// what an operator reads to decide whether the cap they wanted is
+	// missing.
+	assert.NotContains(t, got, "nproc")
+	assert.NotContains(t, got, "fsize")
+}
+
+// TestRun_ZeroLimitsAreNeverRefused pins the boundary of the
+// fail-closed path: a caller who asked for nothing must keep working on
+// every platform, including ones that cannot enforce anything.
+func TestRun_ZeroLimitsAreNeverRefused(t *testing.T) {
+	t.Parallel()
+
 	r := New()
 	stdout, _, err := r.Run(context.Background(), "echo", []string{"ok"}, Options{
 		Limits: &Limits{},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "ok\n", stdout.String())
-	_ = r
+}
+
+// TestRun_LimitsAreEnforcedOrRefused is the cross-platform contract:
+// asking for a limit must never result in a child that runs without it.
+// Either the platform enforces it, or the run is refused outright.
+func TestRun_LimitsAreEnforcedOrRefused(t *testing.T) {
+	t.Parallel()
+
+	r := New()
+	_, _, err := r.Run(context.Background(), "echo", []string{"ok"}, Options{
+		Limits: &Limits{OpenFiles: 256},
+	})
+
+	if runtime.GOOS == "windows" {
+		require.Error(t, err, "Windows cannot enforce rlimits; it must refuse")
+		assert.ErrorIs(t, err, ErrLimitsUnsupported)
+		return
+	}
+
+	require.NoError(t, err, "POSIX enforces rlimits in the child; the run must succeed")
 }
 
 func TestRun_StdinAndEnv(t *testing.T) {

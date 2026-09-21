@@ -7,22 +7,37 @@ import (
 	"os/exec"
 )
 
-// applyLimits is a no-op on Windows. The runner still works for
-// subprocess + timeout, but resource limits are silently skipped.
-// Windows-specific isolation (Job Objects, etc.) is out of scope for
-// P1-11; if/when we need it we'll add a rlimit_windows.go that
-// wraps CreateJobObject + SetInformationJobObject.
-func applyLimits(cmd *exec.Cmd, limits Limits) error {
-	return nil
-}
+// configureProcessGroup is a no-op on Windows.
+//
+// CREATE_NEW_PROCESS_GROUP would be the analogue, but it also changes
+// how Ctrl+C and console signals are delivered to the child, and
+// nothing here needs group-kill semantics yet. Left alone deliberately
+// rather than guessed at.
+func configureProcessGroup(cmd *exec.Cmd) {}
 
-func applyLimitsPreExec(l Limits) error {
-	// On Windows we don't apply rlimits; the noop pattern is fine
-	// because Run() never reaches the syscall.Exec branch.
-	return nil
-}
-
-// setNProc is a no-op on Windows.
-func setNProc(n int) error {
-	return fmt.Errorf("runner: RLIMIT_NPROC not supported on windows")
+// prepareArgv fails closed on Windows.
+//
+// Windows has no setrlimit(2). The equivalent caps live in Job Objects
+// (JOB_OBJECT_LIMIT_*), which are not wired up yet — the wall-clock
+// timeout is the only bound this runner can actually enforce here.
+//
+// Returning argv unchanged, as this file used to, silently dropped
+// every cap the caller asked for: the production composition root
+// requests 1 GiB / 25 CPU-seconds / 256 fds and got none of them while
+// the logs said nothing. Callers budget on those caps being real, so
+// the honest answer is to refuse.
+//
+// WithAllowUnenforcedLimits() is the documented opt-out for local
+// development; it is opt-in precisely so that the default cannot be
+// mistaken for enforcement.
+func (r *Runner) prepareArgv(argv []string, l Limits) ([]string, bool, error) {
+	if l.IsZero() {
+		return argv, false, nil
+	}
+	if r.allowUnenforcedLimits {
+		return argv, true, nil
+	}
+	return nil, false, fmt.Errorf(
+		"%w: requested %s; call WithAllowUnenforcedLimits() to run anyway",
+		ErrLimitsUnsupported, l.describe())
 }

@@ -117,9 +117,9 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 
 **2026-09-21 全栈审查（ODR-065）新增 8 项 High** — 证据行号与修复代码示意见[审查报告 §5/§16](archive/reports-2026-Q3/review-report-20260921.md)：
 
-**已完成 5 项**：AUD-06（印花税）、AUD-07（涨跌停板块分档 + 分取整）、
+**已完成 6 项**：AUD-06（印花税）、AUD-07（涨跌停板块分档 + 分取整）、
 AUD-08（`*ST` 识别，与 AUD-07 同一 commit 合入）、AUD-09（整手归一）、
-AUD-10（MockTrader 读路径写穿共享对象）。
+AUD-10（MockTrader 读路径写穿共享对象）、AUD-11（沙箱资源限制真正作用在子进程）。
 
 > **AUD-06 落地说明（2026-09-21）**：`DefaultStampTaxRate` 由 `0.001` 改为 `0.0005`，
 > 沿革为 **2023-08-28 起 0.1% 减半至 0.05%**（财政部/税务总局 2023 年第 39 号公告），
@@ -286,15 +286,105 @@ AUD-10（MockTrader 读路径写穿共享对象）。
 > —— 返回内部指针且**完全不加锁**，调用方可直接改写引擎状态。与 AUD-10 同族
 > （读访问器暴露/改写共享状态），但对象不同（引擎组合 vs 模拟盘持仓），单列。
 
+> **AUD-11 落地说明（2026-09-21）**：登记只说「Windows 无 rlimit 能力时 fail-closed」，
+> 勘察发现**真正危险的是 POSIX 侧** —— 而且审计报告 H7 的「生产 Linux 不受影响」
+> 这句判断是错的。
+>
+> **两个缺陷，同一处代码**：
+>
+> ① **Windows 静默 no-op**（登记项，属实）：`rlimit_windows.go` 的 `applyLimits`
+> 无条件 `return nil`，生产传的 `1 GiB / 25 CPU 秒 / 256 fd` **一个都没生效**，
+> 日志里也没有任何痕迹。这直接违背 ODR-020 自己写下的「不会静默忽略」设计目标。
+>
+> ② **POSIX 把限制打在守护进程身上**（本次新发现，Critical）：`rlimit_posix.go`
+> 的 `applyLimits` 最终调 `applyLimitsPreExec(l)` → `syscall.Setrlimit(...)`，
+> 而 `Run()` 里**并没有** `syscall.Exec`（注释写「then call syscall.Exec to
+> replace ourselves」，代码里根本没这回事）。于是限制落在**调用者自己**身上，
+> 而调用者就是 analysis-service 守护进程：
+>
+> | 生产值 | 对守护进程的实际后果 |
+> |--------|---------------------|
+> | `CPUSeconds: 25` | 累计 25 秒 CPU 后 **SIGXCPU 杀死守护进程**（Go 运行时不为 SIGXCPU 装 handler，默认动作即终止） |
+> | `MemoryBytes: 1<<30` | 守护进程地址空间被限 1 GiB，跑回测时极可能 OOM |
+> | `OpenFiles: 256` | 一个 HTTP 服务器被限 256 个 fd |
+>
+> 子进程只是**顺带继承**了这些限制。ODR-020 的作者明确写了「setrlimit 在父进程
+> 调用」，但只承认了「并发 Run() 会互相污染」，**没有意识到被限的是守护进程本身**。
+>
+> **为什么从没被发现**：全仓**没有任何测试传非零 limits** 走过
+> `applyLimitsPreExec` —— 这条路只在生产第一次 `go build` 时才第一次执行。
+> 又一次「测试全绿 = 没有测试」。
+>
+> **修复**：`applyLimits`/`applyLimitsPreExec` 删除，改为 `prepareArgv` 在
+> **命令行层面**把限制交给子进程：`sh -c '<ulimit …>; exec "$0" "$@"'`。
+> shell 给自己设限后 exec 目标，限制恰好落在目标进程上，父进程毫发无损。
+> 每个 `ulimit` 都带 `|| { echo 'runner: cannot set …' >&2; exit 125; }` ——
+> 设不上就**中止**，绝不留下一个「以为有限制、实际没有」的子进程。
+>
+> - **零 limits 时不做包装**：不付 shell 开销，也不要求 PATH 里有 `sh`。
+> - **参数走 `$0`/`$@` 而非字符串拼接**：shell 没有第二次解析机会
+>   （含空格/通配符/`$` 的参数原样抵达，已实测）。
+> - **`ulimit -v` 单位是 KiB、`-f` 是 512 字节块，且 0 = 不限** →
+>   字节数**向上取整**，1 字节的请求得到 `-v 1` 而不是 `-v 0`（零值陷阱的又一例）。
+> - **exit 125 必须配 stderr marker** 才算 setup failure —— 否则一个自己退出 125
+>   的子进程会被误报成沙箱故障。
+> - `rlimit_linux.go` / `rlimit_darwin.go` 的 `setNProc` 已无用途（NPROC 现在走
+>   `ulimit -u`），一并删除。
+>
+> **Windows 侧 fail-closed + 显式逃生阀**（用户裁定）：默认拒绝执行并报
+> `ErrLimitsUnsupported`（消息里带上「请求了哪些限制」和逃生阀名字）；
+> 本地开发可设 `SANDBOX_ALLOW_UNENFORCED_LIMITS=1` 打开，此时
+> `WithOnUnenforcedLimits` 回调会 WARN 一次「本次构建没有资源限制」——
+> **可降级，但必须可观测**。
+>
+> **护栏五处实证**（每处故意破坏 → 确认变红 → 恢复；POSIX 侧在
+> `golang:1.25-alpine` 容器里真跑，本机 Windows 无 Linux 能力）：
+>
+> | 破坏 | 变红 | 保持绿 |
+> |------|------|--------|
+> | ① 把 setrlimit 塞回父进程（原 bug） | `TestRun_LimitsDoNotTouchTheParent` 的 CPU/AS/NOFILE 三条断言 | 排除该测试后其余 4 条 limit 测试全绿 |
+> | ② Windows 恢复成静默 no-op | 4 例（拒绝契约 ×3 + 未生效回调 ×1） | 12 例，含全部零值路径 |
+> | ③ 删掉 `ulimit` 的 `\|\|` 失败分支 | 2 例（脚本结构守卫 + 行为级 fail-closed） | 19 例 |
+> | ④ `exec "$0" "$@"` 改成字符串拼接 | 2 例（参数保真 + `LimitsReachTheChild` 连带） | 19 例 |
+> | ⑤ 去掉 marker 校验（任何 125 都算） | 1 例（误报守卫） | 20 例 |
+>
+> ①②③⑤ 都是「只红该红的」。④ 的连带红本身是旁证：拼接会把
+> `sh -c "…"` 也拆词，说明拼接对真实命令同样有害。
+>
+> **①的连带现象值得记一笔**：串行跑时 `LimitsReachTheChild` 与
+> `WrapperPreservesArguments` 也会红 —— 因为父进程的 **hard limit 被降后无法再升回**
+> （非特权进程只能降不能升），后续测试的 `ulimit` 直接 EPERM。这不是测试脆弱，
+> 而是**原 bug 的爆炸半径本来就是进程级**的。
+>
+> **本机能力补充**：POSIX 测试在 Windows 上跑不了（build tag 排除），本机无 gcc、
+> WSL 被安全策略禁用。改用 **docker + `golang:1.25-alpine` 挂载宿主模块缓存**
+> 在真实 Linux 上执行 —— 这是本次唯一能真正验证 ① 的途径，也为 AUD-12 的
+> `-race` 验证提供了可复用的手法（见工作记忆）。
+>
+> **顺带实测**：
+> - 生产值 `RLIMIT_AS = 1 GiB` 对 `go build ./pkg/risk` **够用**（实测通过），
+>   所以修好之后不会立刻把构建打挂。
+> - `ulimit -u` 的可移植性：**bash ✅ / busybox ash ✅ / dash ❌**
+>   （Debian/Ubuntu 的 `/bin/sh` 报 "Illegal option -u"）。生产没设 `NumProcs`，
+>   故是地雷而非现患 → 新登记 **AUD-25**。
+> - 源码级守卫 `TestNoSetrlimitOnTheParent`：因为行为级护栏只在 POSIX 跑，
+>   加了一条**全平台可执行**的源码扫描（包内非测试文件不得出现 `Setrlimit`），
+>   让若曦在 Windows 本机 `go test` 就能发现回归。已单独破坏验证过会变红。
+>
+> **新登记**：AUD-24（Windows Job Object）、AUD-25（`ulimit -u` 在 dash 上不可用）、
+> AUD-26（runner 测试在 Windows 上依赖 PATH 里有 POSIX userland）。
+
 | ID | 任务 | 位置 | 验收 |
 |----|------|------|------|
 | AUD-20 | **费率史按日期分段**（AUD-06 的延伸，非登记项）：`feeSchedule()` 不接收日期，回测跨费率变动日时全程用同一费率。需在 `Tracker.ExecuteTrade(timestamp)` 处按日期选档（2023-08-28 前后 0.1% / 0.05%），并考虑未来更多变动（佣金、过户费也有沿革）。**决策点**：是否值得做 —— 若曦的回测窗口是否常跨 2023-08-28 | `pkg/backtest/tracker/tracker.go#L110-117`、`pkg/fees/ashare.go` | 跨 2023-08-28 的窗口，前后卖出印花税分别为 0.1% / 0.05%；不跨的窗口行为不变 |
-| AUD-11 | Windows 沙箱 fail-closed：无 rlimit 能力（windows）时拒绝执行并明确报错；runner_test 的 skip 改断言。Job Object 完整实现列后续增强 | `internal/sandbox/runner` | Windows 上死循环代码被拒绝执行 |
-| AUD-12 | CI 补门禁：Test 加 `-race`；新增 frontend job（lint/typecheck/test）。**在 AUD-10 合入后启用**，避免开门即红。⚠️ `-race` 需 cgo+gcc，**本机（Windows）无 gcc → 无法本地预验**，只能先在 CI（Linux）上跑一次摸清存量竞争数量，再决定是否一次性开门禁；要本地验就得先装 mingw/TDM-GCC | `.github/workflows/ci.yml#L47-48` | 含数据竞争的 PR → CI 红 |
+| AUD-12 | CI 补门禁：Test 加 `-race`；新增 frontend job（lint/typecheck/test）。**在 AUD-10 合入后启用**，避免开门即红。⚠️ `-race` 需 cgo+gcc，**本机（Windows）无 gcc → 无法本地预验**；AUD-11 已验证「docker + `golang:1.25-alpine` 挂宿主模块缓存」可以在本机跑真实 Linux 测试，`-race` 可用同样手法先摸清存量竞争数量，再决定是否一次性开门禁 | `.github/workflows/ci.yml#L47-48` | 含数据竞争的 PR → CI 红 |
 | AUD-13 | docker-compose PG/Redis 端口绑 `127.0.0.1:`（Redis requirepass 涉及全部服务 REDIS_URL 联动，另立任务） | `docker-compose.yml#L27-28,39-40` | 宿主机外主机探测 5432/6379 不通 |
 | AUD-21 | **XTP 整手检查对科创板/北交所过严**（AUD-09 的实盘侧延伸，非登记项）：`int(quantity)%100 != 0` 一律报错，但科创板允许「≥200 股、1 股递增」、北交所「≥100 股」，617 股在科创板是合法单却被拒。**待查证**：XTP 柜台是否支持科创板 1 股递增 —— 若券商柜台本身只收 100 倍数，则这是券商限制而非本仓 bug，应改为注释说明；若支持，则需按板块放宽 | `pkg/live/broker/xtp/xtp.go#L373-375` | 科创板/北交所合法单不被本地拒单；或明确记录为券商限制 |
 | AUD-22 | **北交所风险警示股当日买入上限**（非登记项）：北交所《交易规则》4.5.4 —— 投资者当日累计买入单只风险警示股票**不得超过 20 万股**（竞价 + 大宗 + 盘后固定价格合并计算）。当前引擎无此约束，回测会允许超限买入。沪深是否有同类上限需一并查证 | 下单量校验处（与 AUD-09 同域） | 单日累计买入 ST 股超 20 万股时被拒 |
 | AUD-23 | **`LiveEngine.GetPortfolio()` 无锁返回内部指针**（非登记项，AUD-10 顺带发现）：返回 `e.portfolio` 本体，调用方既能读到半更新状态，也能直接改写引擎组合。需裁决：改为返回值拷贝 / 加锁 + 文档化「只读」契约 / 保持现状但在 godoc 明示不可变约定。**先勘察调用方是否真的写它** —— 若无人写，可能只需文档化 | `pkg/live/engine.go#L173-176` | 并发调用 `GetPortfolio` + 组合更新时无竞争；外部改动不回流引擎 |
+| AUD-24 | **Windows Job Object 实现**（AUD-11 的后续增强）：`CreateJobObject` + `SetInformationJobObject`（`JOB_OBJECT_LIMIT_PROCESS_MEMORY` / `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` / `JOB_OBJECT_LIMIT_JOB_MEMORY`）+ `AssignProcessToJobObject`。做完之后 Windows 才能真正执行受限子进程，`ErrLimitsUnsupported` 就不再是常态。**注意**：Job Object 需要 `cmd.SysProcAttr.CreationFlags` 里加 `CREATE_SUSPENDED` 才能在 exec 前挂载 | `internal/sandbox/runner/rlimit_windows.go` | Windows 上 `Limits{MemoryBytes: …}` 真正生效；不需要逃生阀即可构建 |
+| AUD-25 | **`ulimit -u` 在 dash 上不可用**（AUD-11 顺带发现，非登记项）：`ulimit -u` 的可移植性是 **bash ✅ / busybox ash ✅ / dash ❌**（Debian/Ubuntu 的 `/bin/sh` 报 "Illegal option -u"）。故 `Limits.NumProcs` 在 Debian/Ubuntu 上会让构建 fail-closed 报 `ErrLimitSetupFailed`。生产组合根没设 `NumProcs`，所以是地雷不是现患。**决策点**：① 探测 shell 能力并在缺失时报 `ErrLimitsUnsupported`（语义更准）；② 改走 cgroup `pids.max`；③ 把 `NumProcs` 从 API 移除，只留平台原生实现 | `internal/sandbox/runner/rlimit_posix.go` | Debian/Ubuntu 上设 `NumProcs` 时给出「本平台不支持」而非含糊的 setup 失败 |
+| AUD-26 | **runner 测试在 Windows 上依赖 PATH 里有 POSIX userland**（AUD-11 顺带发现，非登记项）：`TestRun_ExitZero` 用 `echo`、`TestRun_Timeout` 用 `sleep`、`TestRun_StdinAndEnv` 用 `sh`、`TestRun_NonZeroExit` 用 `false`、`TestRunExitCode` 用 `sh -c`。本机因为装了 Git for Windows 才全绿，**裸 Windows（无 Git Bash）会失败**。CI 跑 Linux 故不影响门禁，但会让「本机全绿」这个信号在裸 Windows 上失真。修法：改成用 `os.Executable()` 自举（测试二进制支持 `-test.run=TestHelperProcess` 模式）或按平台选命令 | `internal/sandbox/runner/runner_test.go` | 裸 Windows 上 `go test ./internal/sandbox/runner/` 也全绿 |
 
 ---
 

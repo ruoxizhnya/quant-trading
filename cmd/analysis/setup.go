@@ -395,7 +395,7 @@ func buildCopilot(v *viper.Viper, engine *backtest.Engine, logger zerolog.Logger
 	copilotService := strategy.NewCopilotService().
 		WithLLMClient(ai.NewClient()).
 		WithCodeChecker(staticCheckAdapter{}).
-		WithBuildExecutor(newSandboxRunnerAdapter()).
+		WithBuildExecutor(newSandboxRunnerAdapter(logger)).
 		WithLogger(logger.With().Str("component", "copilot").Logger()).
 		WithWorkingDir(v.GetString("copilot.working_dir"))
 	logger.Info().
