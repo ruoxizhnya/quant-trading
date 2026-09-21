@@ -59,7 +59,15 @@ echo "→ 同步区间：${START_DATE} .. ${END_DATE}（YEARS=${YEARS}）"
 # ── 1. 起依赖 + data-service ───────────────────────────────────────────
 # Redis 是 data-service 的强依赖（连不上直接 Fatal），所以一并起。
 echo "→ 启动 postgres / redis / data-service"
-TUSHARE_TOKEN="${TUSHARE_TOKEN:-}" ${DC} up -d postgres redis data-service
+# ⚠️ 不要写成 `TUSHARE_TOKEN="${TUSHARE_TOKEN:-}" ${DC} up -d`。
+# compose 读变量的优先级是「shell 环境 > .env」，而且**空串也算"已设置"** ——
+# 实测：shell 里 `TUSHARE_TOKEN=` 会让 .env 里的值被解析成空串。写成那样就等于
+# 把「token 写进 .env」这条路径彻底废掉，症状是明明配了却一直 40101。
+# 所以：shell 里为空时必须 unset，把决定权交回 .env。
+if [ -z "${TUSHARE_TOKEN:-}" ]; then
+	unset TUSHARE_TOKEN
+fi
+${DC} up -d postgres redis data-service
 
 echo "→ 等 data-service 就绪 (:${PORT})"
 for _ in $(seq 1 90); do
@@ -73,6 +81,22 @@ if ! curl -sf "http://localhost:${PORT}/health" >/dev/null 2>&1; then
 	${DC} logs --tail=25 data-service
 	exit 1
 fi
+
+# ── 1b. 断言 token 真的进了容器 ────────────────────────────────────────
+# 只检查"shell/.env 里有值"是不够的：值可能在最后一跳丢掉。不查这一下，
+# 症状是同步接口全部成功受理、然后在几十秒后以 40101 静默失败 —— 很难查。
+# 这里把"没拿到 token"变成一个立刻可见的硬失败。
+TOKEN_LEN="$(${DC} exec -T data-service sh -c 'echo ${#TUSHARE_TOKEN}' 2>/dev/null | tr -d '\r\n' || echo 0)"
+if [ "${TOKEN_LEN:-0}" = "0" ]; then
+	echo "✗ data-service 容器里的 TUSHARE_TOKEN 是空的，Tushare 会返回 40101。"
+	echo "  两个常见原因："
+	echo "    1) 只在当前 shell 里设了变量但没 export 给 docker compose"
+	echo "       → 写成 .env 里的 TUSHARE_TOKEN=<token>（最稳，compose 自动读）"
+	echo "    2) .env 里那行是 'TUSHARE_TOKEN=' —— 等号后面是空的"
+	echo "  改完直接重跑本脚本即可，compose 检测到环境变量变化会自动重建容器。"
+	exit 1
+fi
+echo "→ data-service 已拿到 token（长度 ${TOKEN_LEN}）"
 
 post() {
 	local path="$1" body="$2" label="$3"
