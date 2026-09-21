@@ -14,8 +14,6 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/compliance"
 )
 
-func init() { gin.SetMode(gin.TestMode) }
-
 // newTestComplianceHandler constructs a ComplianceHandler for handler
 // tests. The `t.TempDir()` output path keeps the on-disk report
 // isolated from other tests.

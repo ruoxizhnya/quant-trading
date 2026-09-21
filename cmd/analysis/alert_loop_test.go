@@ -100,7 +100,6 @@ func (s *stubRiskManager) CurrentRegime() interface{}        { return nil }
 // underlying manager for inspection.
 func newTestLoop(t *testing.T, cfg PeriodicAlertConfig, trader *stubLiveTrader, cfgAlert alert.AlertManagerConfig) (*PeriodicAlertLoop, *AlertHistory, *alert.AlertManager) {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	logger := zerolog.New(nil)
 	am := alert.NewAlertManager(cfgAlert, logger)
 	history := NewAlertHistory(cfg.HistoryLimit)
@@ -313,7 +312,6 @@ func TestAlertsHistoryHandler_Empty(t *testing.T) {
 	trader := &stubLiveTrader{}
 	loop, _, _ := newTestLoop(t, PeriodicAlertConfig{HistoryLimit: 10}, trader, alert.AlertManagerConfig{})
 
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/api/alerts/history", alertsRecentHandler(loop))
 
@@ -339,7 +337,6 @@ func TestAlertsHistoryHandler_WithLimit(t *testing.T) {
 		}})
 	}
 
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/api/alerts/history", alertsRecentHandler(loop))
 
@@ -362,7 +359,6 @@ func TestAlertsHistoryHandler_FilterBySeverity(t *testing.T) {
 		{ID: "c1", Rule: "r", Severity: alert.SeverityCritical},
 	})
 
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/api/alerts/history", alertsRecentHandler(loop))
 
@@ -384,7 +380,6 @@ func TestAlertsForceCheckHandler_TriggersEvaluation(t *testing.T) {
 	cfgAlert := alert.AlertManagerConfig{MaxPositionWeight: 0.20}
 	loop, _, _ := newTestLoop(t, PeriodicAlertConfig{HistoryLimit: 10}, trader, cfgAlert)
 
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.POST("/api/alerts/force-check", alertsForceCheckHandler(loop))
 
@@ -407,7 +402,6 @@ func TestAlertsStatsHandler_ReportsState(t *testing.T) {
 		{Rule: "drawdown", Severity: alert.SeverityInfo},
 	})
 
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/api/alerts/stats", alertsStatsHandler(loop))
 
@@ -428,7 +422,6 @@ func TestRegisterAlertRoutes_MountsAllEndpoints(t *testing.T) {
 	trader := &stubLiveTrader{}
 	loop, _, _ := newTestLoop(t, PeriodicAlertConfig{HistoryLimit: 10}, trader, alert.AlertManagerConfig{})
 
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	registerAlertRoutes(r, loop)
 

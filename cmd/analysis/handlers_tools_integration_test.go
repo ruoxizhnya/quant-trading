@@ -97,7 +97,6 @@ func newIntegrationRegistry(t *testing.T) (*tools.Registry, *httpTestFactorPool)
 // and returns a gin engine with routes mounted, ready for httptest.
 func newIntegrationHandler(t *testing.T, reg *tools.Registry) *gin.Engine {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	h := NewToolsHandler(reg, zerolog.Nop())
 	h.RegisterRoutes(router)
@@ -451,7 +450,6 @@ func (m *httpTestResearchProfile) GetResearchProfile(_ context.Context, ticker s
 //  2. The ErrNotFound → 404 "NOT_FOUND" mapping added for the tool's
 //     "no_profile" outcome, distinct from 400 INVALID_ARGS.
 func TestIntegration_DottedToolName_RoutesThroughGin(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	newRouter := func(t *testing.T, client *httpTestResearchProfile) *gin.Engine {
 		t.Helper()

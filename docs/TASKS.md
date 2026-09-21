@@ -117,9 +117,10 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 
 **2026-09-21 全栈审查（ODR-065）新增 8 项 High** — 证据行号与修复代码示意见[审查报告 §5/§16](archive/reports-2026-Q3/review-report-20260921.md)：
 
-**已完成 6 项**：AUD-06（印花税）、AUD-07（涨跌停板块分档 + 分取整）、
+**已完成 7 项**：AUD-06（印花税）、AUD-07（涨跌停板块分档 + 分取整）、
 AUD-08（`*ST` 识别，与 AUD-07 同一 commit 合入）、AUD-09（整手归一）、
-AUD-10（MockTrader 读路径写穿共享对象）、AUD-11（沙箱资源限制真正作用在子进程）。
+AUD-10（MockTrader 读路径写穿共享对象）、AUD-11（沙箱资源限制真正作用在子进程）、
+AUD-12（CI 补 `-race` 门禁 + frontend job）。
 
 > **AUD-06 落地说明（2026-09-21）**：`DefaultStampTaxRate` 由 `0.001` 改为 `0.0005`，
 > 沿革为 **2023-08-28 起 0.1% 减半至 0.05%**（财政部/税务总局 2023 年第 39 号公告），
@@ -374,10 +375,56 @@ AUD-10（MockTrader 读路径写穿共享对象）、AUD-11（沙箱资源限制
 > **新登记**：AUD-24（Windows Job Object）、AUD-25（`ulimit -u` 在 dash 上不可用）、
 > AUD-26（runner 测试在 Windows 上依赖 PATH 里有 POSIX userland）。
 
+> **AUD-12 落地说明（2026-09-21）**：登记只要求「Test 加 `-race` + 新增 frontend
+> job」，但**开门前先实测了一次存量**，结果发现竞争，所以本次一并修掉 ——
+> 否则门禁上线即红，而那正是登记里担心的情形。
+>
+> **存量实测**（`go test -race ./...`，docker + `golang:1.25`，gcc 14.2）：
+> **17~18 处 `WARNING: DATA RACE`、16 个用例失败，全部集中在 `cmd/analysis`**。
+> 竞争地址只有两个，都是 gin 的包级全局：
+>
+> | 被写对象 | 写方 | 读方 |
+> |---------|------|------|
+> | `ginMode`（`mode.go:72`） | 测试助手 `rbacTestRouter` / `toolsRBACRouter` 里的 `gin.SetMode(gin.TestMode)` | 另一个并行测试注册路由时 `RouterGroup.handle` → `debugPrintRoute` → `IsDebugging()` |
+> | `modeName`（`mode.go:77`） | 同上 | 同上 |
+>
+> **生产代码无涉**：竞争栈里出现的 `handlers_execution.go:118` /
+> `handlers_tools.go:89` 只是**读受害者**（注册路由时读全局 mode）。元凶是测试在
+> `t.Parallel()` 下各自调 `gin.SetMode` —— 它用**普通赋值**写全局（不是原子操作），
+> 两个并行测试互相竞争，也与别的并行测试的读竞争。
+>
+> **修法（沿用仓内既有先例）**：`pkg/auth/middleware_test.go` 早在 S7-P0-14 /
+> ODR-043 就踩过同一个坑，并在那里写下「Individual tests must NOT call
+> `gin.SetMode()` themselves」+ `TestMain` 集中设置。本次把该先例推广到
+> `cmd/analysis`：新增 `cmd/analysis/main_test.go` 的 `TestMain`，删掉 15 个测试
+> 文件里的 **31 处**逐测试 `gin.SetMode` 调用（含 `handlers_compliance_test.go`
+> 的 `func init()` 变体）。**先例存在却没人推广，本身就是这次竞争能活下来的原因。**
+>
+> **护栏两向实证**：
+> - 把 `gin.SetMode(gin.TestMode)` 塞回 `toolsRBACRouter` → `-race` **变红**
+>   （EXIT=1、6 处竞争、10 个用例失败，栈指向 `handlers_rbac_test.go` 与 gin 全局）。
+> - **同一个破坏，不加 `-race` 时 `ok` / EXIT=0** —— 这正是 AUD-12 的意义：
+>   旧门禁对这类竞争**完全不可见**。
+> - 恢复后 `go build ./... && go vet ./... && go test ./... -count=1 -race` 全绿。
+>
+> **CI 改动**：`Test` 步骤 → `go test ./... -count=1 -race`（与 AGENTS.md §8 规范 1
+> 对齐 —— 该规范早已存在，缺的从来不是要求而是执法者）；新增 `frontend` job
+> （node 22 + `npm ci` + lint / typecheck / test，`working-directory: web`）。
+> 前端三项**开门前已实测全绿**：lint `0 errors`（820 warnings，退出码 0）、
+> typecheck 通过、vitest 15 files / 172 tests 全过；`npm ci --dry-run` 也验过
+> lockfile 同步，不会因 `npm ci` 本身失败。
+>
+> **没有加 `gofmt -l .` 检查**（报告里列为「可选」）：本仓 blob 里存的是 **CRLF**
+> 且无 `.gitattributes`，`gofmt -l .` 会在 CI 上列出**全部** Go 文件 → 开门即红。
+> 这是既有债，另立 AUD-27。
+>
+> **新登记**：AUD-27（`gofmt -l .` 在本仓恒失败）、AUD-28（其余 5 个包仍有
+> 「测试各自调 `gin.SetMode`」的模式）、AUD-29（`buildRouter` 运行期按日志格式写
+> gin 全局 mode）。
+
 | ID | 任务 | 位置 | 验收 |
 |----|------|------|------|
 | AUD-20 | **费率史按日期分段**（AUD-06 的延伸，非登记项）：`feeSchedule()` 不接收日期，回测跨费率变动日时全程用同一费率。需在 `Tracker.ExecuteTrade(timestamp)` 处按日期选档（2023-08-28 前后 0.1% / 0.05%），并考虑未来更多变动（佣金、过户费也有沿革）。**决策点**：是否值得做 —— 若曦的回测窗口是否常跨 2023-08-28 | `pkg/backtest/tracker/tracker.go#L110-117`、`pkg/fees/ashare.go` | 跨 2023-08-28 的窗口，前后卖出印花税分别为 0.1% / 0.05%；不跨的窗口行为不变 |
-| AUD-12 | CI 补门禁：Test 加 `-race`；新增 frontend job（lint/typecheck/test）。**在 AUD-10 合入后启用**，避免开门即红。⚠️ `-race` 需 cgo+gcc，**本机（Windows）无 gcc → 无法本地预验**；AUD-11 已验证「docker + `golang:1.25-alpine` 挂宿主模块缓存」可以在本机跑真实 Linux 测试，`-race` 可用同样手法先摸清存量竞争数量，再决定是否一次性开门禁 | `.github/workflows/ci.yml#L47-48` | 含数据竞争的 PR → CI 红 |
 | AUD-13 | docker-compose PG/Redis 端口绑 `127.0.0.1:`（Redis requirepass 涉及全部服务 REDIS_URL 联动，另立任务） | `docker-compose.yml#L27-28,39-40` | 宿主机外主机探测 5432/6379 不通 |
 | AUD-21 | **XTP 整手检查对科创板/北交所过严**（AUD-09 的实盘侧延伸，非登记项）：`int(quantity)%100 != 0` 一律报错，但科创板允许「≥200 股、1 股递增」、北交所「≥100 股」，617 股在科创板是合法单却被拒。**待查证**：XTP 柜台是否支持科创板 1 股递增 —— 若券商柜台本身只收 100 倍数，则这是券商限制而非本仓 bug，应改为注释说明；若支持，则需按板块放宽 | `pkg/live/broker/xtp/xtp.go#L373-375` | 科创板/北交所合法单不被本地拒单；或明确记录为券商限制 |
 | AUD-22 | **北交所风险警示股当日买入上限**（非登记项）：北交所《交易规则》4.5.4 —— 投资者当日累计买入单只风险警示股票**不得超过 20 万股**（竞价 + 大宗 + 盘后固定价格合并计算）。当前引擎无此约束，回测会允许超限买入。沪深是否有同类上限需一并查证 | 下单量校验处（与 AUD-09 同域） | 单日累计买入 ST 股超 20 万股时被拒 |
@@ -385,6 +432,9 @@ AUD-10（MockTrader 读路径写穿共享对象）、AUD-11（沙箱资源限制
 | AUD-24 | **Windows Job Object 实现**（AUD-11 的后续增强）：`CreateJobObject` + `SetInformationJobObject`（`JOB_OBJECT_LIMIT_PROCESS_MEMORY` / `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` / `JOB_OBJECT_LIMIT_JOB_MEMORY`）+ `AssignProcessToJobObject`。做完之后 Windows 才能真正执行受限子进程，`ErrLimitsUnsupported` 就不再是常态。**注意**：Job Object 需要 `cmd.SysProcAttr.CreationFlags` 里加 `CREATE_SUSPENDED` 才能在 exec 前挂载 | `internal/sandbox/runner/rlimit_windows.go` | Windows 上 `Limits{MemoryBytes: …}` 真正生效；不需要逃生阀即可构建 |
 | AUD-25 | **`ulimit -u` 在 dash 上不可用**（AUD-11 顺带发现，非登记项）：`ulimit -u` 的可移植性是 **bash ✅ / busybox ash ✅ / dash ❌**（Debian/Ubuntu 的 `/bin/sh` 报 "Illegal option -u"）。故 `Limits.NumProcs` 在 Debian/Ubuntu 上会让构建 fail-closed 报 `ErrLimitSetupFailed`。生产组合根没设 `NumProcs`，所以是地雷不是现患。**决策点**：① 探测 shell 能力并在缺失时报 `ErrLimitsUnsupported`（语义更准）；② 改走 cgroup `pids.max`；③ 把 `NumProcs` 从 API 移除，只留平台原生实现 | `internal/sandbox/runner/rlimit_posix.go` | Debian/Ubuntu 上设 `NumProcs` 时给出「本平台不支持」而非含糊的 setup 失败 |
 | AUD-26 | **runner 测试在 Windows 上依赖 PATH 里有 POSIX userland**（AUD-11 顺带发现，非登记项）：`TestRun_ExitZero` 用 `echo`、`TestRun_Timeout` 用 `sleep`、`TestRun_StdinAndEnv` 用 `sh`、`TestRun_NonZeroExit` 用 `false`、`TestRunExitCode` 用 `sh -c`。本机因为装了 Git for Windows 才全绿，**裸 Windows（无 Git Bash）会失败**。CI 跑 Linux 故不影响门禁，但会让「本机全绿」这个信号在裸 Windows 上失真。修法：改成用 `os.Executable()` 自举（测试二进制支持 `-test.run=TestHelperProcess` 模式）或按平台选命令 | `internal/sandbox/runner/runner_test.go` | 裸 Windows 上 `go test ./internal/sandbox/runner/` 也全绿 |
+| AUD-27 | **`gofmt -l .` 在本仓恒失败**（AUD-12 顺带发现，非登记项）：仓库 blob 里存的是 **CRLF**（实测 `git show HEAD:pkg/risk/lot.go` 有 99 行带 CR）、**没有 `.gitattributes`**、`core.autocrlf=true`。于是 `gofmt -l .` 在 Linux CI 与 Windows 本机都会列出**全部** Go 文件 —— AGENTS.md §8 的「`gofmt -l .` 无输出」检查项因此在**所有平台上都失效**（本机一直靠「只对本次改动的文件跑」绕过）。**修法（择一）**：① 加 `.gitattributes`（`*.go text eol=lf`）+ `git add --renormalize .` —— 一次性大 diff，但从此换行符一致；② 保留 CRLF，把检查改成「归一化后再 gofmt」（`tr -d '\r' \| gofmt -d`，每文件一个子进程，慢但可行）；③ 承认现状，把 AGENTS.md §8 那条删掉。**这也是 AUD-12 没有加 `gofmt` CI 步骤的原因** | `.gitattributes`（缺失）、`AGENTS.md#L449` | `gofmt -l .` 在 CI 与本机都无输出；或明确记录该检查项已作废 |
+| AUD-28 | **其余 5 个包仍有「测试各自调 `gin.SetMode`」的模式**（AUD-12 顺带发现，非登记项）：`cmd/data/handlers_ingest_test.go`、`cmd/data/setup_test.go`、`internal/httpserver/cors_test.go`、`internal/httpserver/errors_test.go`、`pkg/api/versioning_test.go`。**今天不报竞争** —— 实测这些包都没用 `t.Parallel()`，所以是**潜在雷**而非现患：一旦有人给这些测试加并行，就会复现 AUD-12 修掉的同类竞争。修法同 AUD-12（`TestMain` 集中设置 + 删掉逐测试调用） | 上述 5 个文件 | 这些包加 `t.Parallel()` 后 `-race` 仍绿 |
+| AUD-29 | **`buildRouter` 在运行期按日志格式写 gin 全局 mode**（AUD-12 顺带发现，非登记项）：`if v.GetString("logging.format") == "json" { gin.SetMode(gin.ReleaseMode) }`。两个问题：① **语义可疑** —— 日志格式与 gin 运行模式是两件事，用前者决定后者没有依据；② **运行期改进程级全局** —— 当前测试都用 `logging: level: info`，所以没触发；只要有人写一条 `format: json` 的测试并与并行测试共存，就会复现同类竞争，且这次栈里会出现**生产文件**。`cmd/data/setup.go:220`、`cmd/strategy/main.go:102` 同样写法。**决策点**：是否改由语义相符的配置项（如显式 `server.gin_mode`）决定，并在启动早期设置一次 | `cmd/analysis/setup.go#L638`、`cmd/data/setup.go#L220`、`cmd/strategy/main.go#L102` | gin mode 由语义相符的配置项决定，且在启动期设置一次 |
 
 ---
 

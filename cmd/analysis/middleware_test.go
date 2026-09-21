@@ -37,7 +37,6 @@ func routerWithProbe(t *testing.T, authSvc *auth.Service, yaml string) *gin.Engi
 }
 
 func TestBuildRouter_WiresCORSAllowlist(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	r := routerWithProbe(t, auth.NewService(nil, auth.Config{}), `
 server:
   host: 127.0.0.1
@@ -62,7 +61,6 @@ logging:
 }
 
 func TestBuildRouter_NoAllowlistFailsClosed(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	r := routerWithProbe(t, auth.NewService(nil, auth.Config{}), `
 server:
   host: 127.0.0.1
@@ -79,7 +77,6 @@ logging:
 }
 
 func TestBuildRouter_MountsAuthOnlyWhenEnabled(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	// 无密钥：open-access（仅 loopback + 显式豁免下才允许，见 decideAuthStartup）。
 	open := routerWithProbe(t, auth.NewService(nil, auth.Config{}), `

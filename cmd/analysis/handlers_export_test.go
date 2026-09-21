@@ -197,7 +197,6 @@ func TestRenderHTML_AllMetrics(t *testing.T) {
 // (already exhaustively tested) RenderHTML would only verify gin.
 
 func newExportTestRouter() (*gin.Engine, *stubBacktestStore) {
-	gin.SetMode(gin.TestMode)
 	store := &stubBacktestStore{jobs: map[string]json.RawMessage{}}
 	router := gin.New()
 	api := router.Group("/api/backtest")

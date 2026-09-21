@@ -28,7 +28,6 @@ func newEvidenceTestRouter(t *testing.T) (*gin.Engine, *storage.PostgresStore) {
 	if err != nil {
 		t.Skipf("skipping test: cannot connect to DB: %v", err)
 	}
-	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	NewEvidenceHandler(store, zerolog.Nop()).RegisterRoutes(router)
 	return router, store

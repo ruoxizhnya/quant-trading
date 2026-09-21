@@ -76,7 +76,6 @@ func (f *fakeExploreRunner) seen() []int {
 }
 
 func newExploreRouter(h *ExploreHandler) *gin.Engine {
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	h.RegisterExploreRoutes(r.Group("/api"))
 	return r

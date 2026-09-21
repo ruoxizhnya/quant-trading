@@ -35,7 +35,6 @@ func newProxyTestRouter(t *testing.T, upstream http.HandlerFunc) (*gin.Engine, *
 	v := viper.New()
 	v.Set("data_service.url", server.URL)
 
-	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	registerProxyRoutes(router, server.Client(), v, zerolog.Nop())
 	return router, received

@@ -15,7 +15,6 @@ import (
 // newCopilotTestRouter 只装 copilot 路由组，不需要 DB / config / 重装配。
 // 范式同 handlers_openapi_test.go 的 newOpenAPITestRouter。
 func newCopilotTestRouter() *gin.Engine {
-	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	registerCopilotRoutes(router, strategy.NewCopilotService(), nil)
 	return router

@@ -62,7 +62,6 @@ func newTestExecutionHandler(t *testing.T) *ExecutionHandler {
 }
 
 func setupRouter(rh *RiskHandler, eh *ExecutionHandler) *gin.Engine {
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	rh.RegisterRoutes(r)
 	eh.RegisterRoutes(r)

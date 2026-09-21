@@ -2,6 +2,14 @@ name: CI
 
 # 项目此前没有任何自动化门禁（见 TASKS P0-2），文档承诺与代码严重脱节。
 # 本 workflow 是最小可用门禁：构建 + 静态检查 + 测试 + 文档链接校验。
+#
+# AUD-12 补齐两处「规范说了但 CI 不查」的缺口：
+#   1. Test 步骤加 -race。AGENTS.md §8 规范 1 早已把
+#      `go test ./... -count=1 -race` 写成硬性验证标准，CI 却只跑 -count=1，
+#      于是数据竞争从未被门禁捕获。
+#   2. 新增 frontend job。AGENTS.md §6 的代码规范（shallowRef / any 禁令等）
+#      与 §8 的 `npm test` 要求此前全靠自觉。
+# 这两项都不是新增要求，只是让执法者与规范对齐。
 on:
   push:
     branches: [main, master]
@@ -44,10 +52,54 @@ jobs:
 
       # 存储层测试需要 Postgres；连不上会 t.Skip，因此这里显式提供服务容器，
       # 让 PIT 等回归测试真正被执行而不是被跳过。
+      #
+      # AUD-12：加 -race（需 cgo + gcc，ubuntu-latest 自带）。
+      # 开门前先实测过存量：`go test -race ./...` 报 17~18 处数据竞争、16 个
+      # 用例失败，全部集中在 cmd/analysis —— 测试助手在 t.Parallel() 下各自
+      # 调 gin.SetMode()，而它写的是 gin 的包级全局（ginMode / modeName），
+      # 与另一个并行测试注册路由时的 IsDebugging() 读相互竞争。生产代码无涉。
+      # 已按 pkg/auth 的既有先例（S7-P0-14 / ODR-043）集中到 TestMain 修掉，
+      # 修完 -race 全量绿。
       - name: Test
-        run: go test ./... -count=1
+        run: go test ./... -count=1 -race
         env:
           TUSHARE_TOKEN: ""
+
+  frontend:
+    name: Frontend (lint / typecheck / test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22：eslint 10 要求 ^20.19.0 || ^22.13.0 || >=24，vitest 4 要求
+      # >=20.19；用 22 这档 LTS 覆盖两者。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # 用 ci 而不是 install：lockfile 不同步时直接失败，而不是悄悄改依赖树。
+      - name: Install
+        run: npm ci
+
+      # eslint 目前是 0 error / 大量 warning，退出码 0；这里只守 error。
+      # 想升级成「warning 也拦」需要先把存量清掉，别在这里加 --max-warnings 0
+      # ——那会让 CI 开门即红。
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # `npm test` 内部先跑 lint:tests（vitest toBe(expected, "message") 误用的
+      # 静态扫描），再跑 vitest。
+      - name: Test
+        run: npm test
 
   docs:
     name: Doc link check

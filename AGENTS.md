@@ -421,6 +421,8 @@ Browser (Vue SPA :5173)
 - **审查方式**:
   - 自审：提交前自己通读 diff
   - 工具审：`go vet ./...` + `gofmt -l .` + `npm run typecheck`（若可用）
+    ⚠️ `gofmt -l .` 在本仓**恒列出全部 Go 文件**（blob 存 CRLF 且无 `.gitattributes`，
+    见 TASKS AUD-27）—— 只对本次改动的文件跑，不要拿整仓输出当结论。
   - 必要时使用 TRAE-code-review skill 执行结构化审查
 - **审查记录**: 审查发现的问题要么当场修复，要么记录为新任务到 `docs/TASKS.md`
 

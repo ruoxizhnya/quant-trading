@@ -89,7 +89,6 @@ func makeCompareResponse(id, strategy string, totalReturn, maxDD, sharpe float64
 // status-code mapping are byte-for-byte the production code, so any
 // drift in the contract would show up here.
 func newCompareTestRouter() (*gin.Engine, *compareStubStore) {
-	gin.SetMode(gin.TestMode)
 	store := &compareStubStore{jobs: map[string]json.RawMessage{}}
 	logger := zerolog.Nop()
 	router := gin.New()

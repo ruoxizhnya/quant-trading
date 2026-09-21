@@ -49,7 +49,6 @@ func newRBACTestTrader() live.LiveTrader {
 // handler wired for RBAC.
 func rbacTestRouter(t *testing.T, svc *auth.Service) *gin.Engine {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(svc.Middleware())
 	NewExecutionHandler(newRBACTestTrader(), zerolog.New(nil), "",
@@ -190,7 +189,6 @@ func TestExecution_AuthDisabled_OpenAccess(t *testing.T) {
 	svc := auth.NewService(nil, auth.Config{}) // no JWTSecret => disabled
 	require.False(t, svc.Enabled())
 
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(svc.Middleware())
 	NewExecutionHandler(newRBACTestTrader(), zerolog.New(nil), "",
@@ -205,7 +203,6 @@ func TestExecution_AuthDisabled_OpenAccess(t *testing.T) {
 
 func toolsRBACRouter(t *testing.T, svc *auth.Service) *gin.Engine {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(svc.Middleware())
 
@@ -301,7 +298,6 @@ func TestTools_UnclassifiedTool_FailsClosed(t *testing.T) {
 	t.Parallel()
 	svc := auth.NewService(nil, auth.Config{JWTSecret: []byte("test")})
 
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(svc.Middleware())
 	reg := tools.NewRegistry()
@@ -323,7 +319,6 @@ func TestTools_AuthDisabled_OpenAccess(t *testing.T) {
 	svc := auth.NewService(nil, auth.Config{})
 	require.False(t, svc.Enabled())
 
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(svc.Middleware())
 	reg := tools.NewRegistry()

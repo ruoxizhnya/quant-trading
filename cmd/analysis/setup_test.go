@@ -114,7 +114,6 @@ server:
 	v := loadConfig(logger)
 
 	// Create a minimal router.
-	gin.SetMode(gin.TestMode)
 	router := gin.New()
 
 	srv := startHTTPServer(router, v, logger)
@@ -167,7 +166,6 @@ func (stubResearchProfile) GetResearchProfile(_ context.Context, _ string) (*sto
 //
 // Reuses stubBacktestRunner from handlers_pipeline_test.go (same package).
 func TestBuildToolsRegistry_RegistersAll19Tools(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 
 	// Minimal viper config — only the keys buildToolsRegistry reads.
 	v := newTestViper(t)
@@ -224,7 +222,6 @@ func TestBuildToolsRegistry_RegistersAll19Tools(t *testing.T) {
 // TestBuildToolsRegistry_NoDuplicateNames ensures there are no accidental
 // name collisions in the registry (each tool name must be unique).
 func TestBuildToolsRegistry_NoDuplicateNames(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	v := newTestViper(t)
 	factorPool := gene_pool.NewFactorPool(nil)
 	strategyPool := gene_pool.NewStrategyPool(nil)

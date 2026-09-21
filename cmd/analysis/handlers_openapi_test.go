@@ -17,7 +17,6 @@ import (
 // OpenAPI routes registered. Keeping it isolated means the tests
 // don't need a database, config, or any of the heavy main.go wiring.
 func newOpenAPITestRouter() *gin.Engine {
-	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	registerOpenAPIRoutes(router)
 	return router

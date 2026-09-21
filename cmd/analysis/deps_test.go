@@ -142,7 +142,6 @@ func newMinimalDeps() *ServerDeps {
 // contract is: registration captures closures; services are only
 // dereferenced at request time.
 func TestRegisterRoutes_RegistersCoreEndpoints(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	deps := newMinimalDeps()
 
@@ -198,7 +197,6 @@ func TestRegisterRoutes_RegistersCoreEndpoints(t *testing.T) {
 // /metrics endpoint returns 503 instead of panicking. This is the
 // "loud at runtime, not silent" contract from handler.go:19.
 func TestRegisterRoutes_NilMetricsReturns503(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	deps := newMinimalDeps()
 	deps.Metrics = nil // simulate misconfigured wire-up
