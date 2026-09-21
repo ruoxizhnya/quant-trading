@@ -1,6 +1,8 @@
 package backtest
 
 import (
+	"fmt"
+
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/batch"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/cache"
@@ -141,11 +143,30 @@ type (
 	WalkForwardRequest = walkforward.WalkForwardRequest
 )
 
-// NewWalkForwardEngine wrapper preserves the original signature
-// (engine *Engine, store) by extracting engine.logger internally,
-// so cmd/analysis/setup.go and all external callers compile unchanged.
-func NewWalkForwardEngine(engine *Engine, store *storage.PostgresStore) *WalkForwardEngine {
-	return walkforward.NewWalkForwardEngine(engine, store, engine.logger)
+// NewWalkForwardEngine 构造 walk-forward 引擎。
+//
+// engineFactory 必须为**每个窗口**返回一个全新构造的 Engine。共享同一个 Engine
+// 实例会让引擎级缓存（OHLCV / 因子 / 基本面 / 上市日历）跨窗口污染 —— 因子缓存
+// 是「整体替换」语义，并发窗口 B 的 Warm 会覆盖窗口 A 正在读取的缓存。
+//
+// 旧签名 `(engine *Engine, store)` 注入的正是那个共享实例，已废弃。
+func NewWalkForwardEngine(
+	engineFactory func() (*Engine, error),
+	store *storage.PostgresStore,
+	logger zerolog.Logger,
+) *WalkForwardEngine {
+	return walkforward.NewWalkForwardEngine(func() (contracts.EngineRunner, error) {
+		eng, err := engineFactory()
+		if err != nil {
+			return nil, err
+		}
+		// typed-nil 陷阱：*Engine(nil) 转成接口后 != nil，会让下游以为拿到了
+		// 一个可用的 runner 而 panic。必须显式挡掉。
+		if eng == nil {
+			return nil, fmt.Errorf("walk-forward: engine factory returned a nil engine")
+		}
+		return eng, nil
+	}, store, logger)
 }
 
 // --- batch/ subpackage re-exports (S7-P2-1 Commit 7) ---

@@ -331,7 +331,18 @@ type dataServices struct {
 // buildDataServices constructs the data adapter, job/walk-forward/batch
 // engines, and factor attributor from the store and engine. The HTTP
 // provider is reused for the DataAdapter fallback path.
-func buildDataServices(store *storage.PostgresStore, engine *backtest.Engine, httpProvider marketdata.Provider, logger zerolog.Logger) *dataServices {
+//
+// newEngine 为每个 walk-forward 窗口构造一个独立的 Engine。引擎级缓存
+// （OHLCV / 因子 / 基本面 / 上市日历）是 per-instance 的，共享单例会让并发
+// 窗口互相污染 —— 因子缓存是「整体替换」语义，窗口 B 的 Warm 会覆盖窗口 A
+// 正在读取的缓存。传 nil 则退回共享 engine（仅应急，不推荐）。
+func buildDataServices(
+	store *storage.PostgresStore,
+	engine *backtest.Engine,
+	httpProvider marketdata.Provider,
+	logger zerolog.Logger,
+	newEngine func() (*backtest.Engine, error),
+) *dataServices {
 	pgProvider := marketdata.NewPostgresProvider(store, logger)
 	dataAdapter := marketdata.NewDataAdapter(nil, pgProvider, httpProvider, logger)
 	engine.SetDataAdapter(dataAdapter)
@@ -339,7 +350,19 @@ func buildDataServices(store *storage.PostgresStore, engine *backtest.Engine, ht
 	jobService := backtest.NewJobService(store, engine)
 	logger.Info().Msg("Job service initialized")
 
-	wfEngine := backtest.NewWalkForwardEngine(engine, store)
+	wfEngine := backtest.NewWalkForwardEngine(func() (*backtest.Engine, error) {
+		if newEngine == nil {
+			return engine, nil
+		}
+		eng, err := newEngine()
+		if err != nil {
+			return nil, err
+		}
+		// 新引擎必须挂上 dataAdapter，否则多源回退路径不生效。
+		eng.SetDataAdapter(dataAdapter)
+		eng.SetStore(store)
+		return eng, nil
+	}, store, logger)
 	logger.Info().Msg("Walk-forward engine initialized")
 
 	batchEngine := backtest.NewBatchEngine(engine, wfEngine, backtest.DefaultBatchConfig(), logger)

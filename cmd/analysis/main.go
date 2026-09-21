@@ -169,7 +169,22 @@ func main() {
 
 	authSvc := initAuth(v, store, logger)
 
-	ds := buildDataServices(store, engine, httpProvider, logger)
+	// walk-forward 的每个窗口必须拿到**独立**的 Engine 实例：引擎级缓存
+	// （OHLCV / 因子 / 基本面 / 上市日历）是 per-instance 的，共享单例会让并发
+	// 窗口互相污染 —— 因子缓存是「整体替换」语义，窗口 B 的 Warm 会直接覆盖
+	// 窗口 A 正在读取的缓存。这里复用主 engine 的全部装配参数，只换掉实例。
+	newEngine := func() (*backtest.Engine, error) {
+		eng, err := backtest.NewEngine(v, httpProvider, logger)
+		if err != nil {
+			return nil, err
+		}
+		eng.SetRiskManager(riskManager)
+		eng.SetLiveTrader(executionTrader)
+		eng.SetStore(store)
+		return eng, nil
+	}
+
+	ds := buildDataServices(store, engine, httpProvider, logger, newEngine)
 	copilotService, copilotRunner := buildCopilot(v, engine, logger)
 	strategyDB, pluginLoader := initStrategyAndPlugins(v, store, logger)
 

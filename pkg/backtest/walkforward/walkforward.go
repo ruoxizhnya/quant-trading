@@ -17,17 +17,28 @@ import (
 
 // WalkForwardEngine runs walk-forward validation for a strategy.
 type WalkForwardEngine struct {
-	runner contracts.EngineRunner
-	store  *storage.PostgresStore
-	logger zerolog.Logger
+	// runnerFactory 为每个窗口构造一个**独立的**执行引擎。
+	//
+	// 此前这里存的是一个共享的 runner 实例，所有窗口复用同一个 Engine。
+	// 而 Engine 持有引擎级缓存（OHLCV / 因子 / 基本面 / 上市日历），并发窗口
+	// 因此互相污染 —— 因子缓存尤其危险：它是「整体替换」语义
+	// （f.cache = combined），窗口 B 的 Warm 会直接覆盖窗口 A 正在读取的缓存，
+	// 窗口 A 于是读到别的窗口日期区间的因子。窗口之间本应互不共享状态，
+	// 现在由工厂保证。
+	runnerFactory func() (contracts.EngineRunner, error)
+	store         *storage.PostgresStore
+	logger        zerolog.Logger
 }
 
 // NewWalkForwardEngine creates a new WalkForwardEngine.
-func NewWalkForwardEngine(runner contracts.EngineRunner, store *storage.PostgresStore, logger zerolog.Logger) *WalkForwardEngine {
+//
+// runnerFactory 必须为**每个**窗口返回一个全新的 runner；传入一个复用同一实例的
+// 闭包会重新引入跨窗口污染（历史 bug）。工厂返回错误时该窗口被跳过，不影响其他窗口。
+func NewWalkForwardEngine(runnerFactory func() (contracts.EngineRunner, error), store *storage.PostgresStore, logger zerolog.Logger) *WalkForwardEngine {
 	return &WalkForwardEngine{
-		runner: runner,
-		store:  store,
-		logger: logger.With().Str("component", "walkforward").Logger(),
+		runnerFactory: runnerFactory,
+		store:         store,
+		logger:        logger.With().Str("component", "walkforward").Logger(),
 	}
 }
 
@@ -149,11 +160,21 @@ func (wf *WalkForwardEngine) runWindowsParallel(
 
 	// P1-6：固定 worker pool。此前是「每窗口一个 goroutine + 信号量限并发」，
 	// goroutine 数 = 窗口数（长回测可以轻松上千）。
-	// 窗口之间互不共享状态，train + test 的先后在 runSingleWindow 内部保证。
+	//
+	// 窗口之间互不共享状态：每个窗口通过 runnerFactory 拿到自己的引擎实例
+	// （共享单例会让引擎级缓存跨窗口污染）。train + test 的先后在
+	// runSingleWindow 内部保证，二者共用同一窗口的 runner 是刻意的 ——
+	// 它们属于同一次拟合/验证，且 OHLCV 缓存按日期区间合并而非替换。
 	const wfConcurrency = 4
 	workers.RunWorkers(ctx, wfConcurrency, windows,
 		func(ctx context.Context, idx int, w wfWindow) {
-			r := wf.runSingleWindow(ctx, req, idx, w)
+			runner, err := wf.runnerFactory()
+			if err != nil {
+				wf.logger.Warn().Err(err).Int("window", idx+1).
+					Msg("Failed to construct runner for window — skipping")
+				return
+			}
+			r := wf.runSingleWindow(ctx, req, idx, w, runner)
 			mu.Lock()
 			results[idx] = r
 			mu.Unlock()
@@ -174,6 +195,7 @@ func (wf *WalkForwardEngine) runSingleWindow(
 	req WalkForwardRequest,
 	windowIdx int,
 	win wfWindow,
+	runner contracts.EngineRunner,
 ) *domain.WalkForwardResult {
 	wf.logger.Info().
 		Int("window", windowIdx+1).
@@ -206,13 +228,19 @@ func (wf *WalkForwardEngine) runSingleWindow(
 		RiskFreeRate:   riskFree,
 	}
 
-	trainResp, err := wf.runner.RunBacktest(ctx, trainReq)
+	if runner == nil {
+		wf.logger.Warn().Int("window", windowIdx+1).
+			Msg("Runner factory returned a nil runner — skipping window")
+		return nil
+	}
+
+	trainResp, err := runner.RunBacktest(ctx, trainReq)
 	if err != nil {
 		wf.logger.Warn().Err(err).Int("window", windowIdx+1).Msg("Train backtest failed")
 		return nil
 	}
 
-	testResp, err := wf.runner.RunBacktest(ctx, testReq)
+	testResp, err := runner.RunBacktest(ctx, testReq)
 	if err != nil {
 		wf.logger.Warn().Err(err).Int("window", windowIdx+1).Msg("Test backtest failed")
 		return nil
