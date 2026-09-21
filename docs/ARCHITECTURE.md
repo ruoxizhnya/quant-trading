@@ -708,7 +708,10 @@ results := engine.ExecuteSignalsViaLiveTrader(ctx, signals, prices)
 
 ### 佣金计算规则
 - 买入：value × 0.0003（最低 5 元）+ value × 0.00001（过户费）
-- 卖出：value × 0.0003 + value × 0.00001 + value × 0.001（印花税）
+- 卖出：value × 0.0003 + value × 0.00001 + value × 0.0005（印花税，2023-08-28 起）
+
+> 印花税自 2023-08-28 从 0.1% 减半至 0.05%（财政部/税务总局 2023 年第 39 号
+> 公告）。AUD-06 修正前此处写 0.001，是减半前的旧税率。
 
 ### T+1 规则
 - `QuantityYesterday` — 昨日持仓（可今日卖出）

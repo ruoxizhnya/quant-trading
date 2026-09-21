@@ -30,7 +30,7 @@
 //
 // 4. **不变性** — 常量值按 2024-01 上交所/深交所公告：
 //   - 佣金：双边 0.03% 最低 5 元（券商可打折到 0.01%）
-//   - 印花税：仅卖出 0.1%（2023-08 起减半）
+//   - 印花税：仅卖出 0.05%（2023-08-28 起从 0.1% 减半）
 //   - 过户费：双边 0.001%
 //   - 滑点：默认假设 0.01%，无监管上限
 package fees
@@ -46,11 +46,23 @@ const (
 	// default used by every backtest fixture.
 	DefaultCommissionRate = 0.0003
 
-	// DefaultStampTaxRate is the stamp tax rate (0.1%)
-	// charged on the SELL side only. Halved from 0.2% to
-	// 0.1% effective 2023-08-28 (CSRC announcement
-	// [2023] No. 17).
-	DefaultStampTaxRate = 0.001
+	// DefaultStampTaxRate is the stamp tax rate (0.05%)
+	// charged on the SELL side only. Halved from 0.1% to
+	// 0.05% effective 2023-08-28 (财政部 / 税务总局公告
+	// 2023 年第 39 号, "关于减半征收证券交易印花税的公告").
+	//
+	// The pre-cut rate was 0.1%, itself unchanged since
+	// 2008-09-19 (when it became sell-side-only). A previous
+	// revision of this file stated the cut as "0.2% -> 0.1%",
+	// which was off by a factor of two in both directions; the
+	// value 0.001 was 2x the true post-cut rate.
+	//
+	// AUD-06 (ODR-065): corrected 0.001 -> 0.0005. This flows
+	// through pkg/backtest/contracts and pkg/backtest's alias
+	// constants, so every backtest P&L that includes a sell now
+	// pays half the stamp tax it used to — which is correct, and
+	// was previously overstating costs by ~5bp per round trip.
+	DefaultStampTaxRate = 0.0005
 
 	// DefaultTransferFeeRate is the per-side clearing-house
 	// transfer fee (0.001%). Charged on both buy and sell

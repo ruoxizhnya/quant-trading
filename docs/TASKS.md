@@ -117,9 +117,25 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 
 **2026-09-21 全栈审查（ODR-065）新增 8 项 High** — 证据行号与修复代码示意见[审查报告 §5/§16](archive/reports-2026-Q3/review-report-20260921.md)：
 
+**已完成 1 项**：AUD-06（印花税 0.001→0.0005）。
+
+> **AUD-06 落地说明（2026-09-21）**：`DefaultStampTaxRate` 由 `0.001` 改为 `0.0005`，
+> 沿革为 **2023-08-28 起 0.1% 减半至 0.05%**（财政部/税务总局 2023 年第 39 号公告），
+> 原注释写的「0.2% → 0.1%」两头都错 2 倍、方向一致，所以错误自洽难发现。
+> **波及面比登记的大**：除 `pkg/fees/ashare.go`，还必须在
+> ① `config/analysis-service.yaml`（`trading.stamp_tax_rate: 0.001` —— 这个值**覆盖**常量默认值，
+> 不改则等于没改）、② `docs/ARCHITECTURE.md` 费率示例、③ 三个固化旧值的测试
+> （`pkg/fees/ashare_test.go`、`pkg/portfolio/portfolio_test.go` 的 `26.2`、
+> `cmd/analysis/handlers_risk_execution_test.go` 的 fixture）同步修正。
+> 护栏三处实证：改回 `0.001` → 三条测试变红且报出金额（100 vs 50）；改成 `0.00025` →
+> 日期沿革测试也报红。
+> **顺带发现（新登记 AUD-20）**：`Tracker.feeSchedule()` 返回**固定**费率，不看
+> `ExecuteTrade` 已有的 `timestamp` —— 回测窗口若横跨 2023-08-28，卖出费率全程用同一个值。
+> 这是加功能而非修 bug，单独决策。
+
 | ID | 任务 | 位置 | 验收 |
 |----|------|------|------|
-| AUD-06 | 印花税默认值 0.001→0.0005（注释史实修正：2023-08-28 起 0.1% 减半至 **0.05%**，非"0.2%→0.1%"）；存量断言 0.001 的测试此前固化错误值，一并修 | `pkg/fees/ashare.go#L49-53` | 卖出 10 万元收 50 元 |
+| AUD-20 | **费率史按日期分段**（AUD-06 的延伸，非登记项）：`feeSchedule()` 不接收日期，回测跨费率变动日时全程用同一费率。需在 `Tracker.ExecuteTrade(timestamp)` 处按日期选档（2023-08-28 前后 0.1% / 0.05%），并考虑未来更多变动（佣金、过户费也有沿革）。**决策点**：是否值得做 —— 若曦的回测窗口是否常跨 2023-08-28 | `pkg/backtest/tracker/tracker.go#L110-117`、`pkg/fees/ashare.go` | 跨 2023-08-28 的窗口，前后卖出印花税分别为 0.1% / 0.05%；不跨的窗口行为不变 |
 | AUD-07 | 涨跌停板块分档 + 分取整：抽纯函数 `resolvePriceLimit`（新股→New / ST 系→ST / 300·301·688·689→20% / 8·4 开头北交所→30% / 其余 10%）；上下限价 `math.Round(x*100)/100` 后再比较；Config 增 Board20/Board30 | `pkg/backtest/engine_daily.go#L168-178` | 600/000/002/300/688/830 × {Normal,ST,*ST,新股} 表驱动；10.05→11.06 |
 | AUD-08 | `*ST` 识别修复（`name[:2]` 永匹配不到 3/4 字符前缀）改 `strings.HasPrefix` 多模式；**与下方测试断言修正同一 commit**（测试固化了 bug，分开提交会中途红灯） | `pkg/backtest/engine.go#L1502-1508` + `engine_accessors_test.go#L286-290` | *ST/SST/S*ST/ST 全 true、`平安银行` false |
 | AUD-09 | 整手取整 LotSize=100：Weight→shares 换算处归一，<100 跳过；**先 grep 正向确认现状**（负向证据，已存在则关闭） | pkg/backtest 下单量换算处 | 下单量恒为 100 倍数 |

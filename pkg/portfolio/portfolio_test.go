@@ -8,6 +8,29 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestComputeFees_Sell100k_StampTaxIs50Yuan is the AUD-06 acceptance
+// criterion stated in terms of money rather than rate, so it fails
+// loudly with a human-readable number if the rate regresses.
+//
+// 100,000 CNY sold => stamp tax 100000 * 0.05% = 50 CNY.
+// Before AUD-06 the rate was 0.1%, so this case charged 100 CNY and
+// every backtest that sold was overstating costs by 50 CNY per 100k
+// of turnover (~5bp per round trip).
+//
+// Deliberately computed through ComputeFees (the real fee function)
+// rather than asserting on the constant, so this guards the wiring as
+// well as the value.
+func TestComputeFees_Sell100k_StampTaxIs50Yuan(t *testing.T) {
+	f := fees.DefaultAShareFees()
+	fb := ComputeFees(100_000, true, f)
+
+	assert.InDelta(t, 50.0, fb.StampTax, 1e-9,
+		"selling 100,000 CNY must incur 50 CNY stamp tax (0.05%%)")
+	// And the buy side must still be exempt.
+	assert.Zero(t, ComputeFees(100_000, false, f).StampTax,
+		"buy must never incur stamp tax")
+}
+
 // TestComputeFees_Buy (S7-P1-1)
 // Buy trades must NOT charge stamp tax (stamp tax is sell-only).
 // Trade value large enough that commission % exceeds the ¥5 floor.
@@ -27,11 +50,18 @@ func TestComputeFees_Buy(t *testing.T) {
 func TestComputeFees_Sell(t *testing.T) {
 	f := fees.DefaultAShareFees()
 	// Sell 2000 shares @ 10.0 = tradeValue 20000; commission = 6.0 > 5.0 floor
-	fb := ComputeFees(20000, true, f)
-	assert.Equal(t, 20000*f.CommissionRate, fb.Commission)   // 6.0
-	assert.Equal(t, 20000*f.TransferFeeRate, fb.TransferFee) // 0.2
-	assert.Equal(t, 20000*f.StampTaxRate, fb.StampTax)       // 20.0
-	assert.InDelta(t, 26.2, fb.Total(), 0.001)
+	const tradeValue = 20000.0
+	fb := ComputeFees(tradeValue, true, f)
+	assert.Equal(t, tradeValue*f.CommissionRate, fb.Commission)   // 6.0
+	assert.Equal(t, tradeValue*f.TransferFeeRate, fb.TransferFee) // 0.2
+	assert.Equal(t, tradeValue*f.StampTaxRate, fb.StampTax)       // 10.0 after AUD-06
+	// AUD-06 (ODR-065): the total used to be hardcoded at 26.2, which
+	// baked in the pre-2023-08 stamp tax rate (20.0 instead of 10.0).
+	// Derived from the constants so a rate change cannot silently
+	// desynchronise this assertion from the others in the same test.
+	want := tradeValue * (f.CommissionRate + f.TransferFeeRate + f.StampTaxRate)
+	assert.InDelta(t, want, fb.Total(), 0.001)
+	assert.InDelta(t, 16.2, fb.Total(), 0.001, "6.0 commission + 0.2 transfer + 10.0 stamp tax")
 }
 
 // TestComputeFees_MinCommissionFloor (S7-P1-1)

@@ -9,14 +9,17 @@ import (
 // that the rest of the system assumes. If a regulator change
 // requires updating them, this test forces the developer to
 // acknowledge the change (e.g. the 2023-08 stamp tax cut from
-// 0.2% to 0.1% required a code change + AGENTS.md update).
+// 0.1% to 0.05% required a code change + AGENTS.md update).
 func TestDefaultAShareFees_RegulatoryValues(t *testing.T) {
 	got := DefaultAShareFees()
 	if got.CommissionRate != 0.0003 {
 		t.Errorf("CommissionRate = %f, want 0.0003 (regulatory ceiling)", got.CommissionRate)
 	}
-	if got.StampTaxRate != 0.001 {
-		t.Errorf("StampTaxRate = %f, want 0.001 (post 2023-08 cut)", got.StampTaxRate)
+	// AUD-06 (ODR-065): this assertion used to pin 0.001 and label it
+	// "post 2023-08 cut" — the label was right but the value was the
+	// pre-cut rate. The cut halved 0.1% to 0.05%, not 0.2% to 0.1%.
+	if got.StampTaxRate != 0.0005 {
+		t.Errorf("StampTaxRate = %f, want 0.0005 (0.1%% halved 2023-08-28)", got.StampTaxRate)
 	}
 	if got.TransferFeeRate != 0.00001 {
 		t.Errorf("TransferFeeRate = %f, want 0.00001", got.TransferFeeRate)
@@ -135,6 +138,43 @@ func TestValidate_AcceptsBoundary(t *testing.T) {
 // pkg/backtest/execution.go safely write
 // `fees.DefaultCommissionRate` instead of re-declaring
 // the literal 0.0003.
+// TestStampTaxRate_HistoricalTimeline encodes the rate history so that
+// a future change to the constant has to confront the direction of the
+// 2023 cut, not just its magnitude.
+//
+// AUD-06 (ODR-065): the bug being guarded was not a typo but a
+// misunderstanding — the comment said "halved from 0.2% to 0.1%" while
+// the true history is "halved from 0.1% to 0.05%". Both the before and
+// after values were wrong by 2x, in the same direction, which made the
+// error self-consistent and easy to miss. Spelling the timeline out
+// here makes the next reader check the anchor point (0.1% from
+// 2008-09-19) rather than trusting the comment.
+func TestStampTaxRate_HistoricalTimeline(t *testing.T) {
+	// Anchor: 2008-09-19 the rate became 0.1%, sell-side only
+	// (previously 0.3% bilateral, then 0.1% bilateral).
+	const pre2023CutRate = 0.001
+	// 2023-08-28: 财政部/税务总局公告 2023 年第 39 号 halved it.
+	const post2023CutRate = 0.0005
+
+	if DefaultStampTaxRate != post2023CutRate {
+		t.Errorf("DefaultStampTaxRate = %f, want %f (post 2023-08-28)",
+			DefaultStampTaxRate, post2023CutRate)
+	}
+	if DefaultStampTaxRate != pre2023CutRate/2 {
+		t.Errorf("the 2023-08-28 change was a HALVING of %f, so the new rate must be %f; got %f",
+			pre2023CutRate, pre2023CutRate/2, DefaultStampTaxRate)
+	}
+
+	// The acceptance criterion from the audit: 100,000 CNY sold => 50 CNY.
+	const sellValue = 100_000.0
+	if got := sellValue * DefaultStampTaxRate; got != 50.0 {
+		t.Errorf("selling %.0f CNY must incur 50 CNY stamp tax; got %.2f", sellValue, got)
+	}
+}
+
+// TestConstantsAreWiredToAShareFees (existing) verifies the re-export
+// chain — kept separate from the value assertions above so a wiring
+// break and a value regression are distinguishable.
 func TestConstantsAreWiredToAShareFees(t *testing.T) {
 	d := DefaultAShareFees()
 	if d.CommissionRate != DefaultCommissionRate {

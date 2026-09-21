@@ -52,8 +52,11 @@ func newTestExecutionHandler(t *testing.T) *ExecutionHandler {
 	trader := live.NewMockTrader(live.MockTraderConfig{
 		InitialCash:    1_000_000,
 		CommissionRate: 0.0003,
-		StampTaxRate:   0.001,
-		SlippageRate:   0.0001,
+		// AUD-06 (ODR-065): was 0.001 (the pre-2023-08 rate). Not
+		// asserted anywhere, but it is the value people copy from
+		// when writing new fixtures, so it must not be wrong.
+		StampTaxRate: 0.0005,
+		SlippageRate: 0.0001,
 	}, zerolog.New(nil))
 	return NewExecutionHandler(trader, zerolog.New(nil), "")
 }

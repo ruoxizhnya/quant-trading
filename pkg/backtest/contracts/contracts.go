@@ -95,7 +95,8 @@ type BacktestResponse struct {
 // window, short-selling rate, trading-days convention) are A-share
 // market rules with no upstream source.
 const (
-	// DefaultStampTaxRate is the stamp tax rate for selling A-shares (0.1%).
+	// DefaultStampTaxRate is the stamp tax rate for selling A-shares
+	// (0.05% since 2023-08-28; it was 0.1% before).
 	DefaultStampTaxRate = fees.DefaultStampTaxRate
 
 	// DefaultMinCommission is the minimum commission per transaction (¥5).
