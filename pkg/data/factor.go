@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -267,6 +268,39 @@ func (f *FactorComputer) ComputeQualityFactor(ctx context.Context, date time.Tim
 	return nil
 }
 
+// SkippedFactor records one factor a batch run did not compute, and why.
+type SkippedFactor struct {
+	Name   string
+	Reason error
+}
+
+// FactorBatchReport is what one ComputeAllFactors run actually did.
+//
+// AUD-15: "which factors ran" cannot be inferred from the error alone. An empty
+// fundamentals_detail makes all five vertical factors return
+// ErrNoFundamentalsDetail; that is a property of the data source, not of the
+// cross-sectional factors, so the run as a whole succeeds and the vertical
+// factors are reported as skipped instead. Without the report, "no error" would
+// be read as "eight factors cached" — the same lie that loadStatementBook's
+// empty book used to tell, one level up.
+type FactorBatchReport struct {
+	Computed []string
+	Skipped  []SkippedFactor
+}
+
+// LogFields renders the report for a structured log line. Skipped factors are
+// named rather than counted: a count of 5 says nothing about which.
+func (r FactorBatchReport) LogFields() []any {
+	names := make([]string, 0, len(r.Skipped))
+	for _, s := range r.Skipped {
+		names = append(names, s.Name)
+	}
+	return []any{
+		"computed", r.Computed,
+		"skipped", names,
+	}
+}
+
 // ComputeAllFactors runs all factor computations for a single date: the three
 // cross-sectional factors (momentum / value / quality) plus the five 桥 B1
 // vertical fundamentals factors (factor_equitydeep.go).
@@ -274,7 +308,15 @@ func (f *FactorComputer) ComputeQualityFactor(ctx context.Context, date time.Tim
 // When parallel=true they are computed concurrently using goroutines. The list
 // is built once and walked by both branches so that adding a factor cannot make
 // the two paths disagree.
-func (f *FactorComputer) ComputeAllFactors(ctx context.Context, date time.Time, momentumLookback int, parallel bool) error {
+//
+// A factor that fails with ErrNoFundamentalsDetail is skipped and recorded in
+// the report rather than failing the run: an empty fundamentals_detail is one
+// source being empty, not a reason to withhold momentum / value / quality.
+// Any other error still fails the run at the first offender in list order —
+// including in the parallel path, where results are re-ordered by list position
+// so the reported cause does not depend on which goroutine happened to finish
+// first.
+func (f *FactorComputer) ComputeAllFactors(ctx context.Context, date time.Time, momentumLookback int, parallel bool) (FactorBatchReport, error) {
 	computations := []struct {
 		name string
 		run  func() error
@@ -289,38 +331,60 @@ func (f *FactorComputer) ComputeAllFactors(ctx context.Context, date time.Time, 
 		{"inventory_turnover_delta", func() error { return f.ComputeInventoryTurnoverDeltaFactor(ctx, date) }},
 	}
 
+	type outcome struct {
+		index int
+		name  string
+		err   error
+	}
+
+	var outcomes []outcome
+
 	if !parallel {
-		for _, c := range computations {
-			if err := c.run(); err != nil {
-				return fmt.Errorf("%s: %w", c.name, err)
-			}
+		for i, c := range computations {
+			outcomes = append(outcomes, outcome{index: i, name: c.name, err: c.run()})
 		}
-		return nil
+	} else {
+		// Parallel execution: compute every factor concurrently. The channel is
+		// buffered to len(computations) so no goroutine can block after wg.Wait
+		// returns.
+		var wg sync.WaitGroup
+		outCh := make(chan outcome, len(computations))
+		for i, c := range computations {
+			wg.Add(1)
+			go func(idx int, name string, run func() error) {
+				defer wg.Done()
+				outCh <- outcome{index: idx, name: name, err: run()}
+			}(i, c.name, c.run)
+		}
+		wg.Wait()
+		close(outCh)
+		for o := range outCh {
+			outcomes = append(outcomes, o)
+		}
+		// Restore list order: which goroutine finished first is not a property
+		// of the data, and letting it decide the reported error makes failures
+		// irreproducible.
+		sort.Slice(outcomes, func(i, j int) bool { return outcomes[i].index < outcomes[j].index })
 	}
 
-	// Parallel execution: compute every factor concurrently. The channel is
-	// buffered to len(computations) so no goroutine can block after wg.Wait
-	// returns; only the first error is reported, matching the sequential path.
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(computations))
-	for _, c := range computations {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := c.run(); err != nil {
-				errCh <- fmt.Errorf("%s: %w", c.name, err)
-			}
-		}()
+	report := FactorBatchReport{}
+	for _, o := range outcomes {
+		if o.err == nil {
+			report.Computed = append(report.Computed, o.name)
+			continue
+		}
+		if errors.Is(o.err, ErrNoFundamentalsDetail) {
+			report.Skipped = append(report.Skipped, SkippedFactor{Name: o.name, Reason: o.err})
+			f.logger.Warn().
+				Time("date", date).
+				Str("factor", o.name).
+				Err(o.err).
+				Msg("Vertical factor skipped: fundamentals_detail is empty")
+			continue
+		}
+		return report, fmt.Errorf("%s: %w", o.name, o.err)
 	}
-
-	wg.Wait()
-	close(errCh)
-
-	// Return the first error if any
-	for err := range errCh {
-		return err
-	}
-	return nil
+	return report, nil
 }
 
 // ComputeFactorsForRange computes all factors for every trading day in [startDate, endDate].
@@ -348,9 +412,18 @@ func (f *FactorComputer) ComputeFactorsForRange(ctx context.Context, startDate, 
 			return count, ctx.Err()
 		default:
 		}
-		if err := f.ComputeAllFactors(ctx, day, momentumLookback, false); err != nil {
+		report, err := f.ComputeAllFactors(ctx, day, momentumLookback, false)
+		if err != nil {
 			f.logger.Warn().Time("date", day).Err(err).Msg("Skipping date due to error")
 			continue
+		}
+		// AUD-15: dates whose vertical factors were skipped still count as
+		// processed — the cross-sectional factors did run — but the skip is
+		// logged per date so an empty fundamentals_detail cannot hide behind a
+		// batch that "completed".
+		if len(report.Skipped) > 0 {
+			f.logger.Warn().Time("date", day).Fields(report.LogFields()).
+				Msg("Some factors skipped for this date")
 		}
 		count++
 	}

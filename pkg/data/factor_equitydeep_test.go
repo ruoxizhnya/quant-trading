@@ -981,11 +981,11 @@ func TestComputeAllFactors_SequentialAndParallelAgree(t *testing.T) {
 
 	ctx := context.Background()
 	sequential := &eqdMockStore{rows: eqdAllFactorRows()}
-	if err := NewFactorComputer(sequential).ComputeAllFactors(ctx, eqdAsOf, 20, false); err != nil {
+	if _, err := NewFactorComputer(sequential).ComputeAllFactors(ctx, eqdAsOf, 20, false); err != nil {
 		t.Fatalf("sequential: unexpected error: %v", err)
 	}
 	parallel := &eqdMockStore{rows: eqdAllFactorRows()}
-	if err := NewFactorComputer(parallel).ComputeAllFactors(ctx, eqdAsOf, 20, true); err != nil {
+	if _, err := NewFactorComputer(parallel).ComputeAllFactors(ctx, eqdAsOf, 20, true); err != nil {
 		t.Fatalf("parallel: unexpected error: %v", err)
 	}
 
@@ -1031,7 +1031,7 @@ func TestComputeAllFactors_PropagatesError(t *testing.T) {
 
 	t.Run("sequential reports the first factor in list order", func(t *testing.T) {
 		store := &eqdMockStore{rows: eqdFixtureRows(), detailErr: boom}
-		err := NewFactorComputer(store).ComputeAllFactors(ctx, eqdAsOf, 20, false)
+		_, err := NewFactorComputer(store).ComputeAllFactors(ctx, eqdAsOf, 20, false)
 		if !errors.Is(err, boom) {
 			t.Fatalf("err = %v, want wrapped %v", err, boom)
 		}
@@ -1042,18 +1042,134 @@ func TestComputeAllFactors_PropagatesError(t *testing.T) {
 		}
 	})
 
-	t.Run("parallel reports a vertical factor", func(t *testing.T) {
+	t.Run("parallel reports the same factor as sequential", func(t *testing.T) {
 		store := &eqdMockStore{rows: eqdFixtureRows(), detailErr: boom}
-		err := NewFactorComputer(store).ComputeAllFactors(ctx, eqdAsOf, 20, true)
+		_, err := NewFactorComputer(store).ComputeAllFactors(ctx, eqdAsOf, 20, true)
 		if !errors.Is(err, boom) {
 			t.Fatalf("err = %v, want wrapped %v", err, boom)
 		}
-		// Which goroutine wins is not deterministic, but it must be one of the
-		// five vertical factors.
-		if !eqdNamesAnyVerticalFactor(err.Error()) {
-			t.Errorf("err = %v, want a vertical-factor context", err)
+		// Which goroutine wins is not a property of the data, so outcomes are
+		// re-ordered by list position before the error is chosen: the parallel
+		// path must name the same first offender as the sequential one, not
+		// whichever factor happened to finish first.
+		if !strings.Contains(err.Error(), "gross_margin_trend") {
+			t.Errorf("err = %v, want the gross_margin_trend context (list order)", err)
 		}
 	})
+}
+
+// AUD-15: an empty fundamentals_detail must not look like a successful run.
+//
+// Before the fix this was the failure mode: loadStatementBook returned an empty
+// book, every formula skipped every symbol, saveVerticalFactor warned and
+// returned nil, and POST /sync/factors/:name answered 200 "factor computed and
+// cached" for a factor that had computed nothing.
+func TestVerticalFactorsReportEmptyFundamentals(t *testing.T) {
+	ctx := context.Background()
+
+	computations := []struct {
+		name string
+		run  func(*FactorComputer) error
+	}{
+		{"gross_margin_trend", func(fc *FactorComputer) error { return fc.ComputeGrossMarginTrendFactor(ctx, eqdAsOf) }},
+		{"contract_liability_ratio", func(fc *FactorComputer) error { return fc.ComputeContractLiabilityRatioFactor(ctx, eqdAsOf) }},
+		{"ocf_to_net_profit", func(fc *FactorComputer) error { return fc.ComputeOCFToNetProfitFactor(ctx, eqdAsOf) }},
+		{"roe_dupont_leverage", func(fc *FactorComputer) error { return fc.ComputeROEDuPontLeverageFactor(ctx, eqdAsOf) }},
+		{"inventory_turnover_delta", func(fc *FactorComputer) error { return fc.ComputeInventoryTurnoverDeltaFactor(ctx, eqdAsOf) }},
+	}
+
+	for _, c := range computations {
+		t.Run(c.name, func(t *testing.T) {
+			store := &eqdMockStore{} // no rows at all: the table is not being fed
+			fc := NewFactorComputer(store)
+			err := c.run(fc)
+			if !errors.Is(err, ErrNoFundamentalsDetail) {
+				t.Fatalf("err = %v, want wrapped %v", err, ErrNoFundamentalsDetail)
+			}
+			// An empty source must not be written to factor_cache as an empty
+			// result set: a later read would find no rows and cannot tell
+			// "computed, nothing qualified" from "never computed".
+			if len(store.saved) != 0 {
+				t.Errorf("saved %d entries, want 0 (nothing may be written for an empty source)", len(store.saved))
+			}
+		})
+	}
+}
+
+// The boundary the sentinel draws: no rows at all is an error, rows that all
+// fail the filters is not. The second case means the source works and this
+// date simply has no symbol with enough history — a data-availability outcome,
+// which is exactly what the existing "drops rows without a value" and "drops
+// periods that are not quarter ends" cases pin.
+func TestLoadStatementBook_EmptyVersusUnusable(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("zero rows is a sentinel error", func(t *testing.T) {
+		fc := NewFactorComputer(&eqdMockStore{})
+		if _, err := fc.loadStatementBook(ctx, eqdAsOf, equitydeep.FieldTotalRevenue); !errors.Is(err, ErrNoFundamentalsDetail) {
+			t.Errorf("err = %v, want wrapped %v", err, ErrNoFundamentalsDetail)
+		}
+	})
+
+	t.Run("rows that all fail the filters stay a no-op", func(t *testing.T) {
+		row := eqdRow("000009.SZ", eqdPeriod(2024, 4), equitydeep.FieldTotalRevenue, 100)
+		row.Value = nil
+		fc := NewFactorComputer(&eqdMockStore{rows: []domain.FundamentalsDetailRow{row}})
+		book, err := fc.loadStatementBook(ctx, eqdAsOf, equitydeep.FieldTotalRevenue)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(book.fields) != 0 {
+			t.Errorf("book.fields = %d, want 0", len(book.fields))
+		}
+	})
+}
+
+// A batch run must not let an empty fundamentals_detail take the cross-
+// sectional factors down with it — but it must also not report success without
+// saying which factors did not run.
+func TestComputeAllFactors_SkipsEmptyVerticalFactors(t *testing.T) {
+	ctx := context.Background()
+
+	wantComputed := []string{"momentum", "value", "quality"}
+	wantSkipped := []string{
+		"gross_margin_trend", "contract_liability_ratio", "ocf_to_net_profit",
+		"roe_dupont_leverage", "inventory_turnover_delta",
+	}
+
+	for _, parallel := range []bool{false, true} {
+		name := "sequential"
+		if parallel {
+			name = "parallel"
+		}
+		t.Run(name, func(t *testing.T) {
+			store := &eqdMockStore{} // empty fundamentals_detail, nothing else either
+			report, err := NewFactorComputer(store).ComputeAllFactors(ctx, eqdAsOf, 20, parallel)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(report.Computed) != len(wantComputed) {
+				t.Fatalf("computed = %v, want %v", report.Computed, wantComputed)
+			}
+			for i, want := range wantComputed {
+				if report.Computed[i] != want {
+					t.Errorf("computed[%d] = %q, want %q", i, report.Computed[i], want)
+				}
+			}
+			if len(report.Skipped) != len(wantSkipped) {
+				t.Fatalf("skipped = %d, want %d (%v)", len(report.Skipped), len(wantSkipped), report.Skipped)
+			}
+			for i, want := range wantSkipped {
+				s := report.Skipped[i]
+				if s.Name != want {
+					t.Errorf("skipped[%d].Name = %q, want %q", i, s.Name, want)
+				}
+				if !errors.Is(s.Reason, ErrNoFundamentalsDetail) {
+					t.Errorf("skipped[%d].Reason = %v, want wrapped %v", i, s.Reason, ErrNoFundamentalsDetail)
+				}
+			}
+		})
+	}
 }
 
 func eqdNamesAnyVerticalFactor(msg string) bool {

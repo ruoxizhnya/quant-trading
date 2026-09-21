@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -41,6 +42,29 @@ import (
 // grossMarginTrendQuarters is the window RESEARCH.md §3.4 prescribes for
 // gross_margin_trend ("毛利率 4 季线性斜率").
 const grossMarginTrendQuarters = 4
+
+// ErrNoFundamentalsDetail reports that fundamentals_detail returned no rows at
+// all for a vertical factor's field codes as of the evaluation date.
+//
+// AUD-15: until EQD-P1-2 lands the ingestion, the table is empty, and an empty
+// read used to be indistinguishable from "this stock has no usable history":
+// loadStatementBook built an empty book, every formula skipped every symbol,
+// and saveVerticalFactor logged a warning and returned nil — so
+// POST /sync/factors/:name answered 200 "factor computed and cached" for a
+// factor that had computed nothing. That response is not an approximation of
+// the truth, it is its opposite.
+//
+// The distinction this sentinel draws:
+//
+//	no rows at all        → the source is not feeding us          → this error
+//	rows, but unusable    → the source works, this date has no    → not an error
+//	                        symbol with a complete enough history    (see below)
+//
+// Callers that run many factors at once (ComputeAllFactors) use errors.Is on
+// this sentinel to skip the vertical factors and report them, rather than
+// failing the whole batch — otherwise an empty table would take the cross-
+// sectional factors down with it.
+var ErrNoFundamentalsDetail = errors.New("no fundamentals_detail rows")
 
 // reportPeriod is a fiscal period coordinate. The fiscal year is the calendar
 // year (A-share convention) and contract end_date is always a quarter end, so
@@ -243,10 +267,20 @@ func citationJSON(hashes []string) json.RawMessage {
 // from a non-archived source supersedes the earlier batch — the reading's hash
 // is dropped rather than kept, so the citation never names a batch whose value
 // is no longer in use.
+//
+// AUD-15 — zero rows is an error, not an empty book. An empty read means the
+// table is not being fed at all, which is a different failure from "the rows
+// came back but no symbol survives the filters below"; the latter is a
+// data-availability outcome and stays a no-op (saveVerticalFactor warns).
+// Conflating them is what let an empty table answer 200 "computed and cached".
 func (f *FactorComputer) loadStatementBook(ctx context.Context, asOf time.Time, fieldCodes ...string) (statementBook, error) {
 	rows, err := f.store.GetFundamentalsDetailAsOf(ctx, fieldCodes, asOf)
 	if err != nil {
 		return statementBook{}, fmt.Errorf("load fundamentals_detail: %w", err)
+	}
+	if len(rows) == 0 {
+		return statementBook{}, fmt.Errorf("%w: %d field code(s) as of %s",
+			ErrNoFundamentalsDetail, len(fieldCodes), asOf.Format("2006-01-02"))
 	}
 	book := statementBook{
 		fields: make(map[string]map[string]statementField, len(rows)),

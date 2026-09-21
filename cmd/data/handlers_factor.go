@@ -4,6 +4,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -189,14 +190,31 @@ func syncAllFactorsHandler(fc *data.FactorComputer) gin.HandlerFunc {
 			return
 		}
 
-		if err := fc.ComputeAllFactors(ctx, date, 20, true); err != nil {
+		report, err := fc.ComputeAllFactors(ctx, date, 20, true)
+		if err != nil {
 			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
+		// AUD-15: the response names what was computed and what was skipped.
+		// Returning a flat "all factors computed and cached" while five of them
+		// produced nothing is how an empty fundamentals_detail went unnoticed:
+		// the count matters as much as the error.
+		skipped := make([]gin.H, 0, len(report.Skipped))
+		for _, s := range report.Skipped {
+			skipped = append(skipped, gin.H{"factor": s.Name, "reason": s.Reason.Error()})
+		}
+		message := "all factors computed and cached"
+		if len(skipped) > 0 {
+			message = fmt.Sprintf("%d of %d factors computed, %d skipped",
+				len(report.Computed), len(report.Computed)+len(skipped), len(skipped))
+		}
+
 		c.JSON(http.StatusOK, gin.H{
-			"message": "all factors computed and cached",
-			"date":    req.Date,
+			"message":  message,
+			"date":     req.Date,
+			"computed": report.Computed,
+			"skipped":  skipped,
 		})
 	}
 }

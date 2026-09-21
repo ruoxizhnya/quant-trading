@@ -521,7 +521,7 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | **P2-12** | ~~**表达式引擎只暴露 OHLCV**（open/high/low/close/volume/turnover），因此 `value` / `quality` 类意图表达不出 —— P0-5 中它们只能明确失败，而不是套一个无关的价格表达式产出误导性回测数字~~ | **✅ 2026-09-18** `pkg/strategy/expression/data_provider.go` + `strategy.go` + `pkg/strategy/strategy.go` + `pkg/storage/fundamentals.go` + `pkg/backtest/engine.go` + `pkg/ai/yaml/generator.go` | 新增 `pe/pb/ps/roe/roa` 五个字段，**按 PIT 对齐**（`GetFundamentalsPITBulk` 返回的 Date 是可用日 `COALESCE(ann_date, trade_date)`，不是报告期；`OHLCVDataProvider.fundamentalSeries` 按每根 K 线的日期切一刀，取不到填 NaN 不是 0）。注入走 `strategy.FundamentalAware` 可选接口（`GenerateSignals` 签名没有基本面参数，不动接口；范式同 `FactorAware`），且**只有声明要财报的策略才预热**——纯价量策略不付这份查询成本。`value` → `cs_rank(neg(pe)) + cs_rank(neg(pb)) > 1.6`，`quality` → `cs_rank(roe) + cs_rank(roa) > 1.6`；`custom` 仍明确失败。**估值倍数非正一律 NaN**：PE 为负不是"便宜"是亏损，`neg(pe)` 不该把亏得最狠的排成最便宜（经典价值陷阱）；ROE/ROA 为负是真实的差，原样保留。**顺手修掉一个潜伏 bug**：`neg(x)` 的函数形式此前从未接上（`evaluateFunction` 无条件走 `applyTimeSeriesOp`），`multi_factor` 的默认表达式 `cs_rank(neg(ts_std(close,20)))` 从落地起就是「解析得过、跑不起来」—— 它只被断言过能解析，从没被求值过 |
 | **P2-13** | **验证器链缺真实回测的端到端取证**（2026-09-17 已解决一半）。缺口只剩数据：本地库 `stocks` / `trading_calendar` / `ohlcv_daily_qfq` 均 0 行。~~引擎离线跑不了~~ —— 这是误判，引擎三处 HTTP（仓位 / 择时 / 止损）**都有 in-process 分支**，`cmd/analysis/main.go:160` 也已 `SetRiskManager`；取证时用 `marketdata.NewInMemoryProvider()` + `SetRiskManager` 即可完全离线（范式见 `pkg/validation/economic_integration_test.go`） | `pkg/validation/economic_integration_test.go` | 跑数据同步补齐行情后，用同一范式接真库 |
 
-**2026-09-21 全栈审查（ODR-065）新增 5 项**（Medium/Low）—— **AUD-14 已完成，剩 4 项**：
+**2026-09-21 全栈审查（ODR-065）新增 5 项**（Medium/Low）—— **AUD-14 / AUD-15 已完成，剩 3 项**：
 
 > **AUD-14 落地说明（2026-09-21）**：AGENTS.md 从 v3.3 升到 **v3.4**，顶层叙述整体
 > 从 ADR-022（双对等工作面 + 飞轮闭环，从未实施）切换到 **ADR-023/024 的现实**
@@ -562,6 +562,64 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 >
 > **新登记**：**AUD-30**（`docs/SPEC.md` 仍按 ADR-022 定版，未反映 ADR-023/024）。
 
+> **AUD-15 落地说明（2026-09-21）**：两项。
+>
+> **① 删 `e2e/tests/ai-research.spec.ts`**。它是全仓**唯一**打 `:8086` 的 spec
+> （3 处），前端早已没有 `/ai-research` 路由，`cmd/ai` 也于 2026-09-18 删除。
+> **CI 不跑 e2e**，所以它不红在 CI，只污染本机「全绿」这个信号 —— 每次本地跑
+> playwright 都看到失败，久了就没人再信这个套件。其余 spec 打的是 `:8085`
+> （analysis service，存活），`waitForBackendReady` helper 也走 8085，本次只删
+> 这一个。
+>
+> **② `fundamentals_detail` 空集防御**。原行为：读到 0 行 → 空 book → 每个公式
+> 跳过每只股票 → `saveVerticalFactor` 记一条 Warn 后返回 nil →
+> `POST /sync/factors/:name` 回答 **200 "factor computed and cached"**，而实际
+> 一行都没算。**这个响应不是对真值的近似，是它的反面。**
+>
+> 新增哨兵 `ErrNoFundamentalsDetail`，`loadStatementBook` 读到 **0 行**即返回它
+> （包在 `%w` 里，可 `errors.Is`）。边界是刻意画的：
+>
+> | 情形 | 判定 | 理由 |
+> |---|---|---|
+> | 0 行 | **错误** | 源根本没在喂数据（EQD-P1-2 未落地就是这状态） |
+> | 有行、但全被过滤（nil value / 非季末） | **不是错误** | 源是好的，只是这一天没有股票历史够长；现有 `drops rows without a value`、`drops periods that are not quarter ends` 两个用例钉住了它 |
+>
+> 「0 行就硬报错」不能一路往上传：`ComputeAllFactors` 若照单全收，
+> `POST /sync/factors/all` 与 `ComputeFactorsForRange` 的日期循环会**整体失败**，
+> 而 `fundamentals_detail` 现在就是空的 —— 等于横截面因子天天跟着陪葬。
+> 故 `ComputeAllFactors` 认得这个哨兵：**跳过并记进报告，不失败**。
+> 签名随之 `error` → **`(FactorBatchReport, error)`**，报告里是 `Computed` 与
+> `Skipped`（含每个被跳因子的原因）。少了报告，「没报错」会被读成
+> 「八个因子都缓存好了」—— 正是 `loadStatementBook` 那个空 book 说过的谎，
+> 往上一层。端点据此返回：
+>
+> ```
+> {"message":"3 of 8 factors computed, 5 skipped","computed":[...],"skipped":[{"factor":...,"reason":...}]}
+> ```
+>
+> 顺带把并行路径的报错次序定下来：原来「channel 里第一个到的错误」胜出，
+> 哪个 goroutine 先跑完不是数据的属性，失败原因因此不可复现。现在结果按
+> **列表序重排**再挑选，并行与串行报同一个因子。
+>
+> **护栏三向破坏验证**（都做到「只红该红的」）：
+>
+> | 破坏 | 红了什么 | 仍然绿 |
+> |---|---|---|
+> | 删掉 0 行哨兵检查 | 5 个新用例（含 2 个 handler 用例） | 全部存量用例 |
+> | 批量路径不认哨兵（`errors.Is` 永不成立） | 仅 2 个批量用例 | 单因子哨兵、真实错误传播 |
+> | 去掉并行结果排序 | 并行确定性断言（`-count=30` 必红） | 其余 |
+>
+> **新增测试**：`pkg/data` 3 个（五个纵向因子逐个验哨兵 + 不写库、
+> 「0 行 vs 全被过滤」的边界对、批量跳过报告串行/并行一致）；
+> `cmd/data/handlers_factor_test.go` 2 个 —— 单因子端点 500，
+> 并**配对照组**（`momentum` 同一空 store 仍 200），否则 500 什么也证明不了
+> （可能只是所有请求都挂）。
+>
+> **有意不改**：`saveVerticalFactor` 的「有数据但算不出 0 值」仍是 Warn + nil ——
+> 那是数据可得性，不是源断流，改它会把「这一天没有合格股票」变成故障。
+> handler 路由注册在 `main.go`（不在 `buildRouter`），测试用手写 router，
+> 钉的是 handler 不是 wiring。
+
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、
 > L3（legacy HTML 残留）。原表只有 AUD-14/AUD-15 两行却写"新增 3 项"，那第 3 项
@@ -569,7 +627,6 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 
 | ID | 任务 | 位置 |
 |----|------|------|
-| AUD-15 | 删 `e2e/tests/ai-research.spec.ts`（打已删除的 :8086/cmd-ai，恒失败）；`fundamentals_detail` 读取处加空集防御（行数 0 → 显式报错，杜绝纵向因子静默拿空集，待 EQD-P1-2 摄取补齐） | e2e/tests + 纵向因子读取处 |
 | AUD-16 | **补复核 L2**：live engine 组合状态更新路径"存在不触发场景"（D4 子代理报告，ODR-065 自标**未逐行复核**，复核也把它列进未覆盖项）—— 逐行读组合状态更新路径，确认是否真有分支导致状态不更新；坐实则升级为缺陷并定级，证伪则关闭 | `pkg/live/engine.go` |
 | AUD-17 | **M4 威胁模型声明**：`internal/sandbox/staticcheck` 是 14 条正则黑名单，经包别名 / 变量间接调用 / 反射 / 字符串拼接可绕过。注释里明示威胁模型（防 AI 生成代码的**无意**违规，**不防**有意攻击者），别让人误以为它是安全边界；中期评估 gosec / go-ast 分析替代 | `internal/sandbox/staticcheck/staticcheck.go` |
 | AUD-18 | **L3 legacy HTML 去留裁决**：`cmd/analysis/static/` 已标 deprecated 但无删除时间表 —— 无限期共存等于两套 UI 都要维护。给出裁决 + 时间表 | `cmd/analysis/static/` |
