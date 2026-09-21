@@ -298,18 +298,39 @@ func (m *MockTrader) GetOrder(_ context.Context, orderID string) (*OrderResult, 
 	return &copy, nil
 }
 
+// snapshot returns a value copy of pos with CurrentPrice refreshed
+// from the configured PriceProvider.
+//
+// The positions map stores *PositionInfo, so the range variable is a
+// pointer into shared state. Writing through it — as this code used to
+// do — mutates a position while only a read lock is held: two
+// concurrent readers (the periodic alert loop and an HTTP handler,
+// say) race on the same field, and the stored position ends up holding
+// whatever price the last reader happened to fetch. Always copy first,
+// then compute on the copy.
+//
+// PositionInfo is a flat value type (no pointers, slices or maps), so
+// the struct copy is a full deep copy.
+func (m *MockTrader) snapshot(pos *PositionInfo) PositionInfo {
+	cp := *pos
+	if m.config.PriceProvider != nil {
+		cp.CurrentPrice = m.config.PriceProvider(cp.Symbol)
+	}
+	return cp
+}
+
 func (m *MockTrader) GetPositions(_ context.Context) ([]PositionInfo, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	result := make([]PositionInfo, 0, len(m.positions))
 	for _, pos := range m.positions {
+		cp := m.snapshot(pos)
 		if m.config.PriceProvider != nil {
-			pos.CurrentPrice = m.config.PriceProvider(pos.Symbol)
-			pos.MarketValue = pos.Quantity * pos.CurrentPrice
-			pos.UnrealizedPnL = (pos.CurrentPrice - pos.AvgCost) * pos.Quantity
+			cp.MarketValue = cp.Quantity * cp.CurrentPrice
+			cp.UnrealizedPnL = (cp.CurrentPrice - cp.AvgCost) * cp.Quantity
 		}
-		result = append(result, *pos)
+		result = append(result, cp)
 	}
 	return result, nil
 }
@@ -321,11 +342,9 @@ func (m *MockTrader) GetAccount(_ context.Context) (*AccountInfo, error) {
 	var marketValue float64
 	var unrealizedPnL float64
 	for _, pos := range m.positions {
-		if m.config.PriceProvider != nil {
-			pos.CurrentPrice = m.config.PriceProvider(pos.Symbol)
-		}
-		marketValue += pos.Quantity * pos.CurrentPrice
-		unrealizedPnL += (pos.CurrentPrice - pos.AvgCost) * pos.Quantity
+		cp := m.snapshot(pos)
+		marketValue += cp.Quantity * cp.CurrentPrice
+		unrealizedPnL += (cp.CurrentPrice - cp.AvgCost) * cp.Quantity
 	}
 
 	return &AccountInfo{

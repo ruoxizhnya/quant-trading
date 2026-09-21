@@ -117,8 +117,9 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 
 **2026-09-21 全栈审查（ODR-065）新增 8 项 High** — 证据行号与修复代码示意见[审查报告 §5/§16](archive/reports-2026-Q3/review-report-20260921.md)：
 
-**已完成 4 项**：AUD-06（印花税）、AUD-07（涨跌停板块分档 + 分取整）、
-AUD-08（`*ST` 识别，与 AUD-07 同一 commit 合入）、AUD-09（整手归一）。
+**已完成 5 项**：AUD-06（印花税）、AUD-07（涨跌停板块分档 + 分取整）、
+AUD-08（`*ST` 识别，与 AUD-07 同一 commit 合入）、AUD-09（整手归一）、
+AUD-10（MockTrader 读路径写穿共享对象）。
 
 > **AUD-06 落地说明（2026-09-21）**：`DefaultStampTaxRate` 由 `0.001` 改为 `0.0005`，
 > 沿革为 **2023-08-28 起 0.1% 减半至 0.05%**（财政部/税务总局 2023 年第 39 号公告），
@@ -241,15 +242,59 @@ AUD-08（`*ST` 识别，与 AUD-07 同一 commit 合入）、AUD-09（整手归�
 > 过程中一处破坏写成 `_ = symbol` 导致 `marketdata` 未使用 → **编译失败**，
 > 按既有规矩不计入（build failure ≠ test failure），已改成行为有效的破坏。
 
+> **AUD-10 落地说明（2026-09-21）**：`GetPositions` / `GetAccount` 在 `RLock` 下
+> 经 `range` 拿到的 `*PositionInfo` **写回了刷新价**。`positions` 是
+> `map[string]*PositionInfo`，range 变量是**共享对象的指针**，读锁下写它
+> 既是数据竞争，也把「谁最后读谁说了算」的临时价格**固化**进了持仓记录。
+>
+> **并发场景是真实的、不是理论风险**：`cmd/analysis/alert_loop.go` 的后台
+> 周期任务调 `GetAccount`，而 `handlers_execution.go` / `handlers_paper_trading.go`
+> 的 HTTP handler 同时读 —— 两个 reader 打同一个字段。
+>
+> **实现**：新增 `snapshot(pos) PositionInfo` helper，先 `cp := *pos` 再在副本上
+> 取价；两处调用点改为在副本上算 `MarketValue` / `UnrealizedPnL`。
+> `PositionInfo` 是**扁平值类型**（无指针/切片/map），故结构体拷贝即深拷贝。
+> `GetOrder` 早已是这个写法（`copy := *order`），本项是把它补齐到另两处。
+>
+> **已核实不会破坏紧急平仓**：`flattenPosition` 用 `pos.CurrentPrice` 只是
+> **feed 挂掉时的回落价** —— 它在第 464-468 行自己调 `PriceProvider`，
+> 只有取到 `<= 0` 才用 stored price。修复不动这条路径。
+>
+> **护栏四处实证**（每处故意破坏 → 确认变红 → 恢复）：
+> ① `GetPositions` 改回写 `pos.` → 红 2 例（`GetPositions_DoesNotWriteThrough`
+> + `ConcurrentReads`），**`GetAccount` 用例保持绿**；
+> ② `GetAccount` 同理 → 红 2 例，**`GetPositions` 保持绿**；
+> ③ 把 bug 塞进 `snapshot` helper 内部（未来重构最可能重新引入的位置）→ 红 3 例；
+> ④ 删掉 `snapshot` 里的取价 → 红 5 例，而 `NoPriceProviderLeavesStoredValuesAlone`
+> 与 `ReadsAreRepeatable` **保持绿**（本就不依赖取价）。
+> ①② 的「只红该红的」是这组护栏有区分度的证据。
+>
+> **测试无法依赖 `-race`**：本机无 gcc，`-race` 跑不起来。故断言
+> **直接检查 `mt.positions[...]` 的存储态**（同包可见），不靠竞争检测器；
+> `TestMockTrader_ConcurrentReads` 作为第二道防线，等 AUD-12 的 CI `-race` 生效。
+>
+> **过程中的两个坑（都是「零值不是没填」的变体）**：
+> ① `MockTraderConfig` 用 `<= 0` 判「未设置」，测试传 `SlippageRate: 0`
+> 被替换成 `pkg/fees` 默认值 `0.0001`，成交价不是 `10.0` 而是 `10.0001`；
+> ② `SubmitOrder` 对**市价单**用 `PriceProvider` 定价（忽略传入 price），
+> 而测试恰恰要构造「provider 价 ≠ 成交价」才能区分「已刷新」与「未刷新」。
+> 解法：改用**限价单**建仓，并从 `mt.positions[sym].CurrentPrice` **读回**真实
+> 成交价（不假设），再用 `math.Abs(fillPrice - marketPrice) > 1e-6` 做前置断言。
+>
+> **顺带发现（新登记 AUD-23）**：`pkg/live/engine.go:173-176`
+> `func (e *LiveEngine) GetPortfolio() *domain.Portfolio { return e.portfolio }`
+> —— 返回内部指针且**完全不加锁**，调用方可直接改写引擎状态。与 AUD-10 同族
+> （读访问器暴露/改写共享状态），但对象不同（引擎组合 vs 模拟盘持仓），单列。
+
 | ID | 任务 | 位置 | 验收 |
 |----|------|------|------|
 | AUD-20 | **费率史按日期分段**（AUD-06 的延伸，非登记项）：`feeSchedule()` 不接收日期，回测跨费率变动日时全程用同一费率。需在 `Tracker.ExecuteTrade(timestamp)` 处按日期选档（2023-08-28 前后 0.1% / 0.05%），并考虑未来更多变动（佣金、过户费也有沿革）。**决策点**：是否值得做 —— 若曦的回测窗口是否常跨 2023-08-28 | `pkg/backtest/tracker/tracker.go#L110-117`、`pkg/fees/ashare.go` | 跨 2023-08-28 的窗口，前后卖出印花税分别为 0.1% / 0.05%；不跨的窗口行为不变 |
-| AUD-10 | MockTrader `GetPositions`/`GetAccount` 在 RLock 下经指针写共享对象 → 改值拷贝（`cp := *pos` 后写局部副本）；AUD-12 `-race` 门禁的前置 | `pkg/live/mock_trader.go#L44,301-338` | `go test ./pkg/live/... -race` 绿 |
 | AUD-11 | Windows 沙箱 fail-closed：无 rlimit 能力（windows）时拒绝执行并明确报错；runner_test 的 skip 改断言。Job Object 完整实现列后续增强 | `internal/sandbox/runner` | Windows 上死循环代码被拒绝执行 |
 | AUD-12 | CI 补门禁：Test 加 `-race`；新增 frontend job（lint/typecheck/test）。**在 AUD-10 合入后启用**，避免开门即红。⚠️ `-race` 需 cgo+gcc，**本机（Windows）无 gcc → 无法本地预验**，只能先在 CI（Linux）上跑一次摸清存量竞争数量，再决定是否一次性开门禁；要本地验就得先装 mingw/TDM-GCC | `.github/workflows/ci.yml#L47-48` | 含数据竞争的 PR → CI 红 |
 | AUD-13 | docker-compose PG/Redis 端口绑 `127.0.0.1:`（Redis requirepass 涉及全部服务 REDIS_URL 联动，另立任务） | `docker-compose.yml#L27-28,39-40` | 宿主机外主机探测 5432/6379 不通 |
 | AUD-21 | **XTP 整手检查对科创板/北交所过严**（AUD-09 的实盘侧延伸，非登记项）：`int(quantity)%100 != 0` 一律报错，但科创板允许「≥200 股、1 股递增」、北交所「≥100 股」，617 股在科创板是合法单却被拒。**待查证**：XTP 柜台是否支持科创板 1 股递增 —— 若券商柜台本身只收 100 倍数，则这是券商限制而非本仓 bug，应改为注释说明；若支持，则需按板块放宽 | `pkg/live/broker/xtp/xtp.go#L373-375` | 科创板/北交所合法单不被本地拒单；或明确记录为券商限制 |
 | AUD-22 | **北交所风险警示股当日买入上限**（非登记项）：北交所《交易规则》4.5.4 —— 投资者当日累计买入单只风险警示股票**不得超过 20 万股**（竞价 + 大宗 + 盘后固定价格合并计算）。当前引擎无此约束，回测会允许超限买入。沪深是否有同类上限需一并查证 | 下单量校验处（与 AUD-09 同域） | 单日累计买入 ST 股超 20 万股时被拒 |
+| AUD-23 | **`LiveEngine.GetPortfolio()` 无锁返回内部指针**（非登记项，AUD-10 顺带发现）：返回 `e.portfolio` 本体，调用方既能读到半更新状态，也能直接改写引擎组合。需裁决：改为返回值拷贝 / 加锁 + 文档化「只读」契约 / 保持现状但在 godoc 明示不可变约定。**先勘察调用方是否真的写它** —— 若无人写，可能只需文档化 | `pkg/live/engine.go#L173-176` | 并发调用 `GetPortfolio` + 组合更新时无竞争；外部改动不回流引擎 |
 
 ---
 
