@@ -52,6 +52,47 @@ func TestCalculateReturns_SingleValue(t *testing.T) {
 	}
 }
 
+// 回归：CalculateReturns 此前把 Cash 的变化当作「外部资金流」做 TWR 修正。
+// 但回测是**封闭系统** —— 现金的变化 100% 来自买卖，不存在申购赎回。
+// 代数上该式等价于「持仓市值变动 / 总资产」：无交易日恰好正确，但每个交易日
+// 都会凭空注入 ±成交额/总资产 的脉冲（实测满仓买入且价格未动 → +100%）。
+// 污染沿 Sharpe/Sortino/波动率 → walk-forward 门禁 → 基因池 fitness 传播。
+func TestCalculateReturns_BuyWithoutPriceChange_IsZero(t *testing.T) {
+	baseDate := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	pvs := []domain.PortfolioValue{
+		{Date: baseDate, TotalValue: 100000, Cash: 100000},             // 全现金
+		{Date: baseDate.AddDate(0, 0, 1), TotalValue: 100000, Cash: 0}, // 全仓买入，价格未动
+		{Date: baseDate.AddDate(0, 0, 2), TotalValue: 100000, Cash: 0}, // 价格仍未动
+	}
+
+	returns := CalculateReturns(pvs)
+	if len(returns) != 2 {
+		t.Fatalf("expected 2 returns, got %d", len(returns))
+	}
+	if abs(returns[0]) > 1e-9 {
+		t.Errorf("买入而价格未动的当日收益必须为 0，实际 %.6f", returns[0])
+	}
+	if abs(returns[1]) > 1e-9 {
+		t.Errorf("次日价格仍未动的收益必须为 0，实际 %.6f", returns[1])
+	}
+}
+
+func TestCalculateReturns_SellWithoutPriceChange_IsZero(t *testing.T) {
+	baseDate := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	pvs := []domain.PortfolioValue{
+		{Date: baseDate, TotalValue: 100000, Cash: 0},                       // 全仓
+		{Date: baseDate.AddDate(0, 0, 1), TotalValue: 100000, Cash: 100000}, // 全部卖出，价格未动
+	}
+
+	returns := CalculateReturns(pvs)
+	if len(returns) != 1 {
+		t.Fatalf("expected 1 return, got %d", len(returns))
+	}
+	if abs(returns[0]) > 1e-9 {
+		t.Errorf("卖出而价格未动的当日收益必须为 0，实际 %.6f", returns[0])
+	}
+}
+
 func TestCalculateSharpeRatio(t *testing.T) {
 	returns := []float64{0.01, 0.02, -0.01, 0.015, 0.005, -0.005, 0.02, 0.01, -0.015, 0.008}
 	sharpe := CalculateSharpeRatio(returns, 0.03)

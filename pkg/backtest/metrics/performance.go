@@ -74,7 +74,19 @@ func CalculateTradeMetrics(trades []domain.Trade, portfolioValues []domain.Portf
 }
 
 // CalculateReturns calculates daily returns from portfolio values.
-// Daily return = (today_value - yesterday_value - new_inflow) / yesterday_value
+//
+// Daily return = (today_value - yesterday_value) / yesterday_value
+//
+// 回测是**封闭系统**：现金的变化 100% 来自买卖，不存在申购赎回这类外部资金流。
+//
+// 此前这里把 Cash 的变化当作外部资金流做 TWR 修正（netValue = curr - cashFlow），
+// 代数上等价于「持仓市值变动 / 总资产」。无交易日恰好正确，但每个交易日都会
+// 凭空注入 ±成交额/总资产 的脉冲 —— 满仓买入且价格未动时实测得到 +100%，
+// 卖出注入反向脉冲。Sharpe / Sortino / 波动率由此失真，并沿 walk-forward
+// 门禁 → 基因池 fitness 全链路传播。
+//
+// 若未来真要支持申赎，应引入按交易日核算的、带外部流的时间加权收益率，
+// 而不是把本式的 cashFlow 加回来。
 func CalculateReturns(portfolioValues []domain.PortfolioValue) []float64 {
 	if len(portfolioValues) < 2 {
 		return nil
@@ -85,13 +97,8 @@ func CalculateReturns(portfolioValues []domain.PortfolioValue) []float64 {
 		prevValue := portfolioValues[i-1].TotalValue
 		currValue := portfolioValues[i].TotalValue
 
-		// Calculate cash flow (new inflow/outflow)
-		// This is simplified; in a real system we'd track actual cash flows
-		cashFlow := portfolioValues[i].Cash - portfolioValues[i-1].Cash
-
 		if prevValue > 0 {
-			netValue := currValue - cashFlow
-			dailyReturn := (netValue - prevValue) / prevValue
+			dailyReturn := (currValue - prevValue) / prevValue
 			returns = append(returns, dailyReturn)
 		}
 	}
