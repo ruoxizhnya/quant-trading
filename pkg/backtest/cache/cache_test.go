@@ -133,19 +133,84 @@ func TestCacheManager_Warm_FastPathSkipsBulkFetch(t *testing.T) {
 	cm := newTestCacheManager()
 	provider := newFakeProvider()
 
-	// Pre-populate L1
+	// Pre-populate L1 covering [d1, d31]
 	d1 := time.Date(2023, 1, 3, 0, 0, 0, 0, time.UTC)
+	d31 := d1.AddDate(0, 0, 30)
 	cm.Load(map[string][]domain.OHLCV{
-		"600000.SH": makeBars("600000.SH", d1),
+		"600000.SH": makeBars("600000.SH", d1, d31),
 	})
 
+	// 请求区间落在已 warm 范围内 → 跳过拉取
 	err := cm.Warm(context.Background(),
 		[]string{"600000.SH"},
-		d1, d1.AddDate(0, 0, 30),
+		d1.AddDate(0, 0, 5), d1.AddDate(0, 0, 10),
 		func() marketdata.Provider { return provider },
 	)
 	require.NoError(t, err)
-	assert.Empty(t, provider.bulkCalls, "fast path must NOT call BulkLoadOHLCV")
+	assert.Empty(t, provider.bulkCalls, "fast path must NOT call BulkLoadOHLCV when the range is already covered")
+}
+
+// 回归：Warm 的 fast-path 此前只检查 symbol 在不在缓存里，**完全不看日期范围**，
+// 于是后续任何不同区间的请求都会命中 fast-path 而复用旧区间的数据。
+// walk-forward 的 train→test（同一 runner 连续两次不同区间）与窗口之间（共享
+// runner）都会踩到：拿到的不是"偏乐观"，而是错位数据或空集。
+func TestCacheManager_Warm_DifferentRangeRefetches(t *testing.T) {
+	cm := newTestCacheManager()
+	provider := newFakeProvider()
+
+	d1 := time.Date(2023, 1, 3, 0, 0, 0, 0, time.UTC)
+	d10 := d1.AddDate(0, 0, 9)
+	d11 := d1.AddDate(0, 0, 10)
+	d20 := d1.AddDate(0, 0, 19)
+
+	// 第一次：warm [d1, d10]
+	provider.bulkData["600000.SH"] = makeBars("600000.SH", d1, d10)
+	require.NoError(t, cm.Warm(context.Background(), []string{"600000.SH"}, d1, d10,
+		func() marketdata.Provider { return provider }))
+	require.Len(t, provider.bulkCalls, 1)
+
+	// 第二次：请求 [d11, d20]，与已 warm 区间不重叠 → 必须重新拉取
+	provider.bulkData["600000.SH"] = makeBars("600000.SH", d11, d20)
+	require.NoError(t, cm.Warm(context.Background(), []string{"600000.SH"}, d11, d20,
+		func() marketdata.Provider { return provider }))
+	assert.Len(t, provider.bulkCalls, 2, "range outside the warmed window MUST refetch")
+
+	// 两个区间合并后都可用
+	snap := cm.inMemoryOHLCVAtomic.Load()
+	require.NotNil(t, snap)
+	bars := (*snap)["600000.SH"]
+	require.Len(t, bars, 4, "merged cache must contain both ranges (2 + 2 bars)")
+	for i := 0; i < len(bars)-1; i++ {
+		assert.True(t, bars[i].Date.Before(bars[i+1].Date), "merged bars must stay ascending")
+	}
+
+	// 且能按新区间正确取回，而不是拿回过期的 [d1, d10]
+	got, err := cm.Get(context.Background(), "600000.SH", d11, d20,
+		func() marketdata.Provider { return provider })
+	require.NoError(t, err)
+	require.Len(t, got, 2, "must return the d11-d20 bars, not the stale d1-d10 ones")
+	assert.Equal(t, d11, got[0].Date)
+}
+
+// 回归：此前 Store(&cm.inMemoryOHLCV) 发布的是**同一个 map 字段的地址**，
+// 快照没有任何隔离效果 —— 写者在 mu.Lock 内改这个 map，读者 lock-free 读的
+// 还是同一个 map，构成并发 map 读写。后果不止 -race 报警，Go runtime 可能
+// 直接 fatal (concurrent map read and map write)，且不可 recover。
+func TestCacheManager_PublishedSnapshotIsIsolatedCopy(t *testing.T) {
+	cm := newTestCacheManager()
+
+	d1 := time.Date(2023, 1, 3, 0, 0, 0, 0, time.UTC)
+	cm.Load(map[string][]domain.OHLCV{"600000.SH": makeBars("600000.SH", d1)})
+	snap1 := cm.inMemoryOHLCVAtomic.Load()
+
+	d2 := time.Date(2023, 1, 4, 0, 0, 0, 0, time.UTC)
+	cm.Load(map[string][]domain.OHLCV{"600001.SH": makeBars("600001.SH", d2)})
+	snap2 := cm.inMemoryOHLCVAtomic.Load()
+
+	assert.Len(t, *snap1, 1, "previously published snapshot must not be mutated by later writes")
+	assert.Contains(t, *snap1, "600000.SH")
+	assert.Len(t, *snap2, 1)
+	assert.Contains(t, *snap2, "600001.SH")
 }
 
 func TestCacheManager_Warm_SlowPathFetchesAndSorts(t *testing.T) {
