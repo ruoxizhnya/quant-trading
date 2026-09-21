@@ -493,6 +493,7 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | AUD-27 | **`gofmt -l .` 在本仓恒失败**（AUD-12 顺带发现，非登记项）：仓库 blob 里存的是 **CRLF**（实测 `git show HEAD:pkg/risk/lot.go` 有 99 行带 CR）、**没有 `.gitattributes`**、`core.autocrlf=true`。于是 `gofmt -l .` 在 Linux CI 与 Windows 本机都会列出**全部** Go 文件 —— AGENTS.md §8 的「`gofmt -l .` 无输出」检查项因此在**所有平台上都失效**（本机一直靠「只对本次改动的文件跑」绕过）。**修法（择一）**：① 加 `.gitattributes`（`*.go text eol=lf`）+ `git add --renormalize .` —— 一次性大 diff，但从此换行符一致；② 保留 CRLF，把检查改成「归一化后再 gofmt」（`tr -d '\r' \| gofmt -d`，每文件一个子进程，慢但可行）；③ 承认现状，把 AGENTS.md §8 那条删掉。**这也是 AUD-12 没有加 `gofmt` CI 步骤的原因** | `.gitattributes`（缺失）、`AGENTS.md#L449` | `gofmt -l .` 在 CI 与本机都无输出；或明确记录该检查项已作废 |
 | AUD-28 | **其余 5 个包仍有「测试各自调 `gin.SetMode`」的模式**（AUD-12 顺带发现，非登记项）：`cmd/data/handlers_ingest_test.go`、`cmd/data/setup_test.go`、`internal/httpserver/cors_test.go`、`internal/httpserver/errors_test.go`、`pkg/api/versioning_test.go`。**今天不报竞争** —— 实测这些包都没用 `t.Parallel()`，所以是**潜在雷**而非现患：一旦有人给这些测试加并行，就会复现 AUD-12 修掉的同类竞争。修法同 AUD-12（`TestMain` 集中设置 + 删掉逐测试调用） | 上述 5 个文件 | 这些包加 `t.Parallel()` 后 `-race` 仍绿 |
 | AUD-29 | **`buildRouter` 在运行期按日志格式写 gin 全局 mode**（AUD-12 顺带发现，非登记项）：`if v.GetString("logging.format") == "json" { gin.SetMode(gin.ReleaseMode) }`。两个问题：① **语义可疑** —— 日志格式与 gin 运行模式是两件事，用前者决定后者没有依据；② **运行期改进程级全局** —— 当前测试都用 `logging: level: info`，所以没触发；只要有人写一条 `format: json` 的测试并与并行测试共存，就会复现同类竞争，且这次栈里会出现**生产文件**。`cmd/data/setup.go:220`、`cmd/strategy/main.go:102` 同样写法。**决策点**：是否改由语义相符的配置项（如显式 `server.gin_mode`）决定，并在启动早期设置一次 | `cmd/analysis/setup.go#L638`、`cmd/data/setup.go#L220`、`cmd/strategy/main.go#L102` | gin mode 由语义相符的配置项决定，且在启动期设置一次 |
+| AUD-30 | **`docs/SPEC.md` 仍按 ADR-022 定版，未反映 ADR-023/024**（AUD-14 顺带发现，非登记项）：文件头 `Version: 1.5.0 (Unified Research Platform — ADR-022)`、`Last Updated: 2026-09-15`；正文有独立的 `## Unified Research Platform (ADR-022, Proposed)` 章节（四层架构 L0-L3 / 双对等工作面 / 飞轮闭环），全文 7 处引用 ADR-022。**与 AGENTS.md 校准前的状态是同一批漂移**，但 SPEC.md 是 1660 行的 Canonical 规格、那节是独立章节不是散落引用，改动量明显更大 —— 故本次不扩大改动，单独立项。修法同 AUD-14：定位陈述切到 ADR-023/024，并核对 § 里对 API/数据模型**有约束力**的部分是否随定位变了 （ADR-024 影响策略执行载体：YAML → ExpressionStrategy，不是编译产物） | `docs/SPEC.md` 头部 + 第 70 行起的 Unified Research Platform 章节 | SPEC.md 里不再有按 ADR-022 陈述的现行定位；ADR-023/024 对 API/数据模型的约束已体现；`docs/ADR.md` 与 AGENTS.md §11 对 SPEC 的描述一致 |
 
 ---
 
@@ -520,7 +521,46 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | **P2-12** | ~~**表达式引擎只暴露 OHLCV**（open/high/low/close/volume/turnover），因此 `value` / `quality` 类意图表达不出 —— P0-5 中它们只能明确失败，而不是套一个无关的价格表达式产出误导性回测数字~~ | **✅ 2026-09-18** `pkg/strategy/expression/data_provider.go` + `strategy.go` + `pkg/strategy/strategy.go` + `pkg/storage/fundamentals.go` + `pkg/backtest/engine.go` + `pkg/ai/yaml/generator.go` | 新增 `pe/pb/ps/roe/roa` 五个字段，**按 PIT 对齐**（`GetFundamentalsPITBulk` 返回的 Date 是可用日 `COALESCE(ann_date, trade_date)`，不是报告期；`OHLCVDataProvider.fundamentalSeries` 按每根 K 线的日期切一刀，取不到填 NaN 不是 0）。注入走 `strategy.FundamentalAware` 可选接口（`GenerateSignals` 签名没有基本面参数，不动接口；范式同 `FactorAware`），且**只有声明要财报的策略才预热**——纯价量策略不付这份查询成本。`value` → `cs_rank(neg(pe)) + cs_rank(neg(pb)) > 1.6`，`quality` → `cs_rank(roe) + cs_rank(roa) > 1.6`；`custom` 仍明确失败。**估值倍数非正一律 NaN**：PE 为负不是"便宜"是亏损，`neg(pe)` 不该把亏得最狠的排成最便宜（经典价值陷阱）；ROE/ROA 为负是真实的差，原样保留。**顺手修掉一个潜伏 bug**：`neg(x)` 的函数形式此前从未接上（`evaluateFunction` 无条件走 `applyTimeSeriesOp`），`multi_factor` 的默认表达式 `cs_rank(neg(ts_std(close,20)))` 从落地起就是「解析得过、跑不起来」—— 它只被断言过能解析，从没被求值过 |
 | **P2-13** | **验证器链缺真实回测的端到端取证**（2026-09-17 已解决一半）。缺口只剩数据：本地库 `stocks` / `trading_calendar` / `ohlcv_daily_qfq` 均 0 行。~~引擎离线跑不了~~ —— 这是误判，引擎三处 HTTP（仓位 / 择时 / 止损）**都有 in-process 分支**，`cmd/analysis/main.go:160` 也已 `SetRiskManager`；取证时用 `marketdata.NewInMemoryProvider()` + `SetRiskManager` 即可完全离线（范式见 `pkg/validation/economic_integration_test.go`） | `pkg/validation/economic_integration_test.go` | 跑数据同步补齐行情后，用同一范式接真库 |
 
-**2026-09-21 全栈审查（ODR-065）新增 5 项**（Medium/Low）：
+**2026-09-21 全栈审查（ODR-065）新增 5 项**（Medium/Low）—— **AUD-14 已完成，剩 4 项**：
+
+> **AUD-14 落地说明（2026-09-21）**：AGENTS.md 从 v3.3 升到 **v3.4**，顶层叙述整体
+> 从 ADR-022（双对等工作面 + 飞轮闭环，从未实施）切换到 **ADR-023/024 的现实**
+> （一间单人自托管实验室：三角色 + 三层模型 L1/L2/L3 + 执行载体是表达式）。
+>
+> **⚠️ 登记里的「内联 DDL 22 张」是审查时点的数字，照抄会写错。**
+> 实测演变：`06e9945`（审查时）= 22 → C5 补 11 张多源目标表（`a1ef447`）= 33 →
+> 再补 4 张代码直接引用的表（`02640bb`）= **37**。已按现值写成
+> 「**内联 DDL 37 张（唯一执行路径）**」，并把 `32 → 38 → 39 → 22 → 37`
+> 这条快照链写进文档，注明**数表就 grep 源码，别引用文档里的数**。
+> 同时删掉「内联 N + 迁移 M = 总数」这个口径 —— `migrations/` 与
+> `docs/migrations/` **不被执行**（`migration_manager.go` 已于 2026-09-18 删除），
+> 那一半从来不参与建表，加进去只是把两个不相干的数拼成看起来合理的数。
+>
+> **`--include-archive` 开关早就有了，但零调用方** —— 又一个「零件已存在、没接上」：
+> CI 跑的是默认模式（跳过 archive/），而 ODR 与报告全在 archive/，死链永不被告警。
+> 已接进 CI（新增一个 step），并修好它立刻暴露的 **7 条坏链**：
+> `odr-044`→ADR-020 文件名已改、`odr-065`→ODR-043 文件名顺序错、
+> `FINAL_VERIFICATION_REPORT`→`CLAUDE.md`（工具适配层已删，改为去链接 + 加注）、
+> `review-report` 与 `meta-review` 归档时相对层级没同步（各 2 条）。
+>
+> **顺带修了检查器本身的一个误报**：`[x](y.md)` 出现在**代码块 / 行内代码**里时是
+> **引文**（meta-review 在表格里引用坏链当证据），不是导航链接。原来照样告警，
+> 修好它反而等于抹掉证据。已让检查器跳过代码段，7 条 → 5 条真死链。
+> 护栏双向验证：破坏 archive 里一条真链接 → 退出码 1 且指名文件；往行内代码里塞一条
+> 死链接 → 仍为 0。
+>
+> **波及面比登记的大**（`docs/ARCHITECTURE.md` 有同一处 M2 缺陷，而 AGENTS.md §11
+> 正是引用它给表数，不改会造出新的不一致）：表数段落整段重写为 37 张；
+> 顺带修了 3 处会被读者照着行动的事实错误 —— `ai-research-service :8086` 标
+> 「✅ 运行中」（2026-09-18 已删除）、`equitydeep-research` 标「Proposed」（ADR-023
+> 已取消）、`fundamentals_detail` 标「未落地」（表已建，是**数据**没摄取）；
+> 并标注 `data_source_registry` / `data_fallback_chain` **从来不是表**（内存态）。
+>
+> **有意不改**：`docs/AGENTS_TEMPLATE.md` 里的 `docs/odr/` 与 `docs/decisions/`
+> 是**通用模板的占位约定**（文件头写着「适用场景：任何项目」，正文用 `[ProjectName]`），
+> 不是本仓声明 —— 改它反而把模板特化成本仓结构。
+>
+> **新登记**：**AUD-30**（`docs/SPEC.md` 仍按 ADR-022 定版，未反映 ADR-023/024）。
 
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、
@@ -529,7 +569,6 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 
 | ID | 任务 | 位置 |
 |----|------|------|
-| AUD-14 | AGENTS.md 校准：§1-3 按 ADR-023/024 现实重写（ADR-021/022 已入 superseded-adr）/ 表数口径改"内联 DDL 22 张（唯一执行路径）"/ `ingest.raw`·`research.*` 改"已落盘"/ Rule 2 的 `docs/odr/` → `docs/archive/odr/`（该目录已不存在）/ `pkg/tools/server.go` → `tool.go`；`migrations/` 与 `docs/migrations/` 目录首加 README"此目录不执行，加表改 postgres.go migrate() 数组"（是否物理移入 archive 另立 Cleanup ODR） | AGENTS.md + migrations/；`tools/check_doc_links.py` 增加 `--include-archive` 开关（现显式跳过 archive/，而 ODR 与报告全在该目录，其死链因此永不被告警——ODR-065 报告自身就有 2 处死链未被抓到） |
 | AUD-15 | 删 `e2e/tests/ai-research.spec.ts`（打已删除的 :8086/cmd-ai，恒失败）；`fundamentals_detail` 读取处加空集防御（行数 0 → 显式报错，杜绝纵向因子静默拿空集，待 EQD-P1-2 摄取补齐） | e2e/tests + 纵向因子读取处 |
 | AUD-16 | **补复核 L2**：live engine 组合状态更新路径"存在不触发场景"（D4 子代理报告，ODR-065 自标**未逐行复核**，复核也把它列进未覆盖项）—— 逐行读组合状态更新路径，确认是否真有分支导致状态不更新；坐实则升级为缺陷并定级，证伪则关闭 | `pkg/live/engine.go` |
 | AUD-17 | **M4 威胁模型声明**：`internal/sandbox/staticcheck` 是 14 条正则黑名单，经包别名 / 变量间接调用 / 反射 / 字符串拼接可绕过。注释里明示威胁模型（防 AI 生成代码的**无意**违规，**不防**有意攻击者），别让人误以为它是安全边界；中期评估 gosec / go-ast 分析替代 | `internal/sandbox/staticcheck/staticcheck.go` |

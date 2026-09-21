@@ -10,6 +10,11 @@
 
 退出码：
     0 = 无坏链；1 = 发现坏链（CI 应据此失败）
+
+⚠️ 归档层（archive/）为什么也要查（AUD-14）：
+ODR 与审计报告几乎全在 `docs/archive/`，而那恰恰是**相对层级最深、改名最频繁**
+的地方。只查活跃层等于「元检查的盲区正好落在最需要它的区域」—— 事实上
+ODR-065 报告归档时相对层级没同步，2 条死链就这么躺在里面没人发现。
 """
 
 from __future__ import annotations
@@ -22,6 +27,21 @@ from pathlib import Path
 # 匹配 Markdown 行内链接，排除 http(s):// 与 mailto: 等外部协议。
 # 例：[PRODUCT.md](PRODUCT.md) / [ADR](adr/adr-001.md#decision)
 LINK_RE = re.compile(r"\]\((?!https?://|mailto:|#)([^)]+?\.md)(#[^)]*)?\)")
+
+# 代码块与行内代码：里面的 `[x](y.md)` 是**引文**（例如审计报告在表格里引用
+# 一条坏链作为证据），不是导航链接。渲染出来也不是链接，不该被当成坏链告警 ——
+# 否则修好它反而等于抹掉证据。
+_FENCE_RE = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+
+
+def strip_code(text: str) -> str:
+    """把围栏代码块与行内代码替换成等长空白，保持行号/偏移不变。"""
+
+    def blank(m: re.Match[str]) -> str:
+        return re.sub(r"[^\n]", " ", m.group(0))
+
+    return _INLINE_CODE_RE.sub(blank, _FENCE_RE.sub(blank, text))
 
 
 def find_markdown_files(root: Path, include_archive: bool) -> list[Path]:
@@ -38,7 +58,7 @@ def check(root: Path, include_archive: bool) -> list[tuple[Path, str]]:
             text = md.read_text(encoding="utf-8")
         except OSError:
             continue
-        for match in LINK_RE.finditer(text):
+        for match in LINK_RE.finditer(strip_code(text)):
             target = match.group(1)
             resolved = (md.parent / target).resolve()
             if not resolved.exists():

@@ -16,8 +16,13 @@
 | 阶段 | 目标文件 | 验证重点 |
 |------|---------|---------|
 | **Phase 1** | [AGENTS.md](../../../AGENTS.md) | AI Agent 唯一事实来源 (SSOT) |
-| **Phase 2** | [CLAUDE.md](../CLAUDE.md) + [.cursorrules](../.cursorrules) + [.windsurfrules](../.windsurfrules) | 工具适配层配置 |
+| **Phase 2** | `CLAUDE.md` + `.cursorrules` + `.windsurfrules` | 工具适配层配置 |
 | **Phase 3** | [.session/](../.session/) 目录 + [task-current.md.template](../.session/task-current.md.template) + [.gitignore](../.gitignore) 更新 | 会话级动态文档机制 |
+
+> ⚠️ **链接修正（2026-09-21，AUD-14）**：Phase 2 的三个工具适配层文件
+> （`CLAUDE.md` / `.cursorrules` / `.windsurfrules`）已删除，统一收敛到
+> [AGENTS.md](../../../AGENTS.md)。本表保留**当时的验证记录**，故只去掉已失效的
+> 导航链接、不改写历史结论。
 
 ### 1.2 验证标准
 

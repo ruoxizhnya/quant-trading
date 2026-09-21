@@ -112,9 +112,16 @@ jobs:
           python-version: "3.12"
 
       # 文档治理规则 R5：文档必须可被自动验证。
-      # 默认跳过 archive/（只读历史），只守护常青层与活跃层。
+      # 常青层 + 活跃层：坏链即失败。
       - name: Check internal doc links
         run: python tools/check_doc_links.py
+
+      # AUD-14：归档层也要查。ODR 与审计报告几乎全在 docs/archive/，而那里
+      # 恰恰是**相对层级最深、改名最频繁**的地方 —— 只查活跃层等于把元检查的
+      # 盲区放在最需要它的区域（ODR-065 报告归档时层级没同步，2 条死链就是这么
+      # 躺进去的）。代码块/行内代码里的链接是**引文**不是导航，检查器会跳过。
+      - name: Check internal doc links (incl. archive)
+        run: python tools/check_doc_links.py --include-archive
 
       # P1-8：本地 compose 与生产 k8s 两套配置独立维护，改一边忘另一边
       # 会静默漂移（服务起得来，只在跨服务调用时才炸）。这里守住关键项。

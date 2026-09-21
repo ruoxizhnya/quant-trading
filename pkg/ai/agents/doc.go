@@ -23,8 +23,8 @@
 // docs/hermes/skills/autonomous_factor_mining.md。
 //
 // References:
-//   - docs/odr/odr-045-frontend-ai-component-deprecation.md
-//   - docs/odr/odr-046-hermes-agent-integration-decision.md
+//   - docs/archive/odr/odr-045-frontend-ai-component-deprecation.md
+//   - docs/archive/odr/odr-046-hermes-agent-integration-decision.md
 //   - docs/hermes/skills/autonomous_factor_mining.md
 //   - docs/hermes/config/hermes.yaml
 package agents

@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADR) & Operational Decision Records (ODR)
 
-> **Location:** `docs/adr/` — architectural ADR files | `docs/odr/` — operational ODR files
+> **Location:** `docs/adr/` — architectural ADR files | `docs/archive/odr/` — operational ODR files
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Version:** 3.21.0
 > **Created:** 2026-03-24

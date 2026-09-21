@@ -3,7 +3,7 @@
 > **Status**: Completed
 > **Date**: 2026-07-01
 > **Category**: Migration
-> **Related ADRs**: [ADR-015](../../adr/adr-015-ai-agent-architecture.md), [ADR-020](../adr/adr-020-strategy-framework-unification.md)
+> **Related ADRs**: [ADR-015](../../adr/adr-015-ai-agent-architecture.md), [ADR-020](../../adr/adr-020-engine-decomposition.md)
 > **Supersedes**: N/A
 
 ## Context

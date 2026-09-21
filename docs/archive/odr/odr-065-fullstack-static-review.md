@@ -4,7 +4,7 @@
 > **Date**: 2026-09-21
 > **Category**: Audit
 > **Related ADRs**: n/a（发现项的修复将另行决策）
-> **Supersedes**: n/a（上一轮系统级审计为 [ODR-043](odr-043-2026-06-29-comprehensive-audit.md)，本轮为其后的全量复检）
+> **Supersedes**: n/a（上一轮系统级审计为 [ODR-043](odr-043-comprehensive-audit-2026-06-29.md)，本轮为其后的全量复检）
 
 ---
 
