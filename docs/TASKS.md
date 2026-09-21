@@ -406,6 +406,15 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）。
 > - **同一个破坏，不加 `-race` 时 `ok` / EXIT=0** —— 这正是 AUD-12 的意义：
 >   旧门禁对这类竞争**完全不可见**。
 > - 恢复后 `go build ./... && go vet ./... && go test ./... -count=1 -race` 全绿。
+> - **CI 等价复验（含 Postgres）**：本机裸跑时 `pkg/storage` 的 DB 测试是 `t.Skip` 的
+>   （DSN 硬编码 `postgres://postgres:postgres@localhost:5432/quant_trading`），而 CI
+>   有 postgres service 容器 —— **两边的实际测试集并不相同**，只按本机结果宣布
+>   「CI 不会红」是站不住的。为关掉这个缺口，用「PG 容器与 Go 容器**共享网络命名空间**」
+>   （`docker run --network container:<go容器>`，这样容器内的 `localhost:5432` 才落到
+>   PG 上）在本地复现了 CI 环境：`-race ./...` 仍全绿（EXIT=0、0 竞争），且
+>   `pkg/storage` **76 PASS / 5 SKIP（缺种子数据）/ 0 FAIL** —— 证明 DB 测试真的执行了。
+>   （`pkg/storage/integration_test.go` 有 `//go:build integration` 标签，默认
+>   `go test ./...` 不编译它，CI 也没带 `-tags=integration`，故不在本次范围内。）
 >
 > **CI 改动**：`Test` 步骤 → `go test ./... -count=1 -race`（与 AGENTS.md §8 规范 1
 > 对齐 —— 该规范早已存在，缺的从来不是要求而是执法者）；新增 `frontend` job
