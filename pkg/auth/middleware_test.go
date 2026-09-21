@@ -205,6 +205,70 @@ func TestRequireRole_NoUser_401(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
+// TestServiceRequireRole_Disabled_AllowsEverything pins the short-circuit
+// that makes Service.RequireRole usable behind Service.Middleware().
+//
+// This is the regression guard for AUD-02: if someone "simplifies"
+// Service.RequireRole back to auth.RequireRole at a call site, the
+// disabled-mode request below turns 401 and this test goes red.
+func TestServiceRequireRole_Disabled_AllowsEverything(t *testing.T) {
+	t.Parallel()
+	// No JWTSecret => Enabled()==false => open access mode.
+	s := NewService(nil, Config{})
+	require.False(t, s.Enabled())
+
+	r := gin.New()
+	r.Use(s.Middleware())
+	r.POST("/order", s.RequireRole(RoleTrader, RoleAdmin), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/order", nil)
+	// Deliberately no Authorization header — open mode must not need one.
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code,
+		"auth disabled must stay open: RequireRole has to no-op when Enabled()==false")
+}
+
+// TestServiceRequireRole_Enabled_StillEnforces is the counter-test:
+// the short-circuit must not turn into "always allow".
+func TestServiceRequireRole_Enabled_StillEnforces(t *testing.T) {
+	t.Parallel()
+	s := NewService(nil, Config{JWTSecret: []byte("test")})
+	require.True(t, s.Enabled())
+
+	r := gin.New()
+	r.Use(s.Middleware())
+	r.POST("/order", s.RequireRole(RoleTrader, RoleAdmin), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	// viewer => 403
+	viewer, _, err := s.IssueTokens(&User{ID: 1, Username: "v", Role: RoleViewer})
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/order", nil)
+	req.Header.Set("Authorization", "Bearer "+viewer)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+
+	// trader => 200
+	trader, _, err := s.IssueTokens(&User{ID: 2, Username: "t", Role: RoleTrader})
+	require.NoError(t, err)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/order", nil)
+	req.Header.Set("Authorization", "Bearer "+trader)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// no token => 401
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/order", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
 func TestAuditMiddleware_RecordsMutating(t *testing.T) {
 	// We can't easily wire the audit middleware without a real DB, but
 	// we can verify the helper `isMutating` matches the documented set.

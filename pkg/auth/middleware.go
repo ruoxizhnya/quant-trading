@@ -80,8 +80,38 @@ func (s *Service) Middleware() gin.HandlerFunc {
 	}
 }
 
+// RequireRole is the auth-aware variant of the package-level
+// RequireRole: it short-circuits to a no-op when the Service is not
+// enabled.
+//
+// This matters because Middleware() is itself a no-op when
+// Enabled()==false — it never sets CtxRole. Chaining the package-level
+// RequireRole behind a disabled Middleware would therefore 401 every
+// request (RoleFromContext returns ok=false), silently breaking the
+// documented "auth disabled => open access" mode that dev / CI / e2e
+// rely on.
+//
+// Rule: whenever a route group is guarded by s.Middleware(), guard it
+// with s.RequireRole(...) — not auth.RequireRole(...). The two
+// decisions (is auth on? what role is needed?) must agree, and only
+// the Service knows the first answer.
+//
+// Place AFTER s.Middleware().
+func (s *Service) RequireRole(allowed ...Role) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !s.Enabled() {
+			c.Next()
+			return
+		}
+		RequireRole(allowed...)(c)
+	}
+}
+
 // RequireRole returns a middleware that aborts with 403 if the caller's
 // role is not in the allowed set. Place AFTER Middleware().
+//
+// Prefer Service.RequireRole for route groups guarded by
+// Service.Middleware() — see its doc comment for why.
 func RequireRole(allowed ...Role) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, ok := RoleFromContext(c)

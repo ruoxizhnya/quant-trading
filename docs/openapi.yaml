@@ -1544,7 +1544,12 @@ paths:
     post:
       tags: [Execution]
       summary: Submit an order
-      description: Submits a paper-trading order to the in-process MockTrader.
+      description: |
+        Submits a paper-trading order to the in-process MockTrader.
+
+        AUD-02 (ODR-065 H5): requires role `trader` or `admin`. A `viewer`
+        token gets 403. The legacy root path `POST /orders` carries the
+        same requirement — the two are the same handler on two paths.
       operationId: createOrder
       requestBody:
         required: true
@@ -1561,6 +1566,10 @@ paths:
                 $ref: '#/components/schemas/OrderResult'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Authenticated but role is not trader/admin
     get:
       tags: [Execution]
       summary: List orders
@@ -1605,6 +1614,9 @@ paths:
     post:
       tags: [Execution]
       summary: Cancel an order
+      description: |
+        AUD-02 (ODR-065 H5): requires role `trader` or `admin`. The legacy
+        root path `POST /orders/{id}/cancel` carries the same requirement.
       operationId: cancelOrder
       parameters:
         - name: id
@@ -1626,6 +1638,10 @@ paths:
                     type: string
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Authenticated but role is not trader/admin
 
   /api/execution/positions:
     get:

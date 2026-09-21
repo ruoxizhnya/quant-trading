@@ -374,7 +374,13 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 	// P2-3 (ODR-026): pass the emergency-flatten bearer token
 	// through to the execution handler. Empty token disables the
 	// kill-switch endpoint (returns 503 instead of 404).
-	NewExecutionHandler(deps.ExecutionTrader, deps.Logger, deps.EmergencyToken).RegisterRoutes(router)
+	//
+	// AUD-02 (ODR-065 H5): WithExecutionAuth gates the order-mutating
+	// endpoints (POST /orders, POST /orders/:id/cancel) behind
+	// RequireRole(trader, admin) — on both /api/execution/* and the
+	// legacy root paths.
+	NewExecutionHandler(deps.ExecutionTrader, deps.Logger, deps.EmergencyToken,
+		WithExecutionAuth(deps.AuthSvc)).RegisterRoutes(router)
 
 	// P2-4 (ODR-028): investor suitability (compliance) endpoints.
 	// The handler is read-only — it does not block order submission
@@ -399,7 +405,14 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 	// factor / data / strategy capabilities as discoverable Tools over
 	// /api/tools/* so external agent services can call without reading
 	// SPEC.md.
-	NewToolsHandler(deps.ToolsRegistry, deps.Logger).RegisterRoutes(router)
+	//
+	// AUD-02 (ODR-065 H5): WithToolsAuth applies per-tool RBAC on
+	// POST /api/tools/:name, keyed off the tool's audited side-effect
+	// class (pkg/tools/sideeffect.go). save_factor / save_strategy
+	// mutate the gene pool and now require trader-or-admin; everything
+	// unclassified requires admin (fail-closed).
+	NewToolsHandler(deps.ToolsRegistry, deps.Logger,
+		WithToolsAuth(deps.AuthSvc)).RegisterRoutes(router)
 
 	// L0-3 (ADR-022 §5): read-only Evidence API. Resolves a citation's
 	// content_hash to its unique archived source response in `ingest.raw`

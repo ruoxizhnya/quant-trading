@@ -68,13 +68,27 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 
 **2026-09-21 全栈审查（[ODR-065](archive/odr/odr-065-fullstack-static-review.md)）新增 5 项 Critical** — 证据行号、代码示意与 15 commits 修复方案见 [审查报告 §4/§16](archive/reports-2026-Q3/review-report-20260921.md)。每任务一个原子 commit，测试先行。
 
-**已完成 4 项**：AUD-03（C1 日收益率）、AUD-04（C2 窗口隔离）、AUD-05（C5 DDL 断层）、AUD-01（C3 save 端点 —— **裁决为删除而非加固**：零生产调用方 + 用途与 ADR-024 冲突，攻击面归零优于加固后仍存在。护栏 `cmd/analysis/handlers_copilot_test.go` 断言该路由返回 404，已故意加回端点验证过它会变红）。
+**已完成 5 项**：AUD-03（C1 日收益率）、AUD-04（C2 窗口隔离）、AUD-05（C5 DDL 断层）、AUD-01（C3 save 端点 —— **裁决为删除而非加固**：零生产调用方 + 用途与 ADR-024 冲突，攻击面归零优于加固后仍存在。护栏 `cmd/analysis/handlers_copilot_test.go` 断言该路由返回 404，已故意加回端点验证过它会变红）、AUD-02（H5 RBAC 接线）。
 
 > 原「前置：推送 main 领先 origin 的 51 提交」（P2 区 AUD-L1）经复核为**误报**，已作废 —— 实测 `git rev-parse main` == `git ls-remote origin refs/heads/main`。
 
+### AUD-02 落地说明（2026-09-21）
+
+三项决策由若曦裁定：① **纳入 paper**；② legacy 根路径**一并挂同角色**；③ 豁免模式用**服务层短路**。
+
+- **`pkg/auth` 新增 `Service.RequireRole`**（非包级 `RequireRole`）。根因：`Middleware()` 在 `!Enabled()` 时是纯 no-op、**不设 CtxRole**，包级 `RequireRole` 跟在它后面会让豁免模式下**所有请求 401**。规矩写进 doc comment：凡由 `s.Middleware()` 保护的分组，必须配 `s.RequireRole(...)`，两个决定（auth 是否开、要什么角色）必须一致，且只有 Service 知道第一个答案。
+- **`pkg/tools/sideeffect.go`（新）**：21 个工具的副作用登记表（19 读 / 2 写）。选集中表而非给 `ToolCore` 加方法 —— 加方法会在编译期打断所有现有实现，且分类散落到各工具里更容易写不一致。**fail-closed**：未登记 = admin。两条漂移测试钉住「登记表 == setup.go 实际注册集」，双向都查（漏登记 / 陈旧行各一条）。
+- **`/api/tools/:name` 的角色判定在 handler 内**：路由是通配路径，per-route 中间件表达不了「按工具决定角色」。检查在**读 body 之前**做 —— 无权调用的工具，不该让调用方能区分「body 错」和「你没权限」。
+- **`/emergency-flatten` 不加 RBAC**（有意）：它已有服务端配置的 bearer token + confirmation_token 双因子；再加 JWT 依赖会在「auth 服务本身挂了」时锁死平仓路径，而那正是最需要它的时刻。
+- **护栏经三处故意破坏实证**（记忆里的铁律：假护栏比没护栏更糟）：
+  1. 拆掉 legacy 根路径的 `requireTrader()` → 只 `TestExecution_LegacyPath_SameAuthorityAsAPIPath` 变红，其余 10 项仍绿；
+  2. 把 `s.RequireRole` 换回包级 `RequireRole` → `pkg/auth` 与 `cmd/analysis` **两层**同时变红；
+  3. 把 `Classify` 的兜底改成 `SideEffectRead`（fail-open）→ `TestClassify_FailClosed` + `TestTools_UnclassifiedTool_FailsClosed` 同时变红。
+- **顺带发现（新登记 AUD-19）**：`/api/paper/*` 全部 10 个端点**是死代码** —— `registerPaperTradingRoutes` **零调用方**，全仓无前端/文档引用。原本担心它是「第二处无鉴权写端点」，实为「根本没挂上」。**给不可达代码加 RBAC 是纯装饰**，故不在 AUD-02 内处理，改走 AUD-19（裁决：删除）。这也修正了本次勘察初期的判断。
+
 | ID | 任务 | 位置 | 验收 |
 |----|------|------|------|
-| AUD-02 | RBAC 接线：`/api/execution` 三动作端点 **与 legacy 根路径两处都** 挂 `RequireRole(trader, admin)`；`/api/tools` 增副作用分级 map（fail-closed：未登记 = admin）；先验证 auth disabled 时 RequireRole 放行路径（setup.go#L626 只在 Enabled 时挂 Middleware） | cmd/analysis/handlers_execution.go / handlers_tools.go / pkg/auth | viewer 下单 403 / trader 200 / 只读工具 viewer 200 / auth disabled 全放行 / legacy 与 `/api` 行为一致 |
+| AUD-19 | **删除 `/api/paper/*` 死代码**：`registerPaperTradingRoutes` 零调用方，10 个端点（含 POST `/paper/start`、POST `/paper/orders`、DELETE `/paper/orders/:id`）从未挂上任何 router，全仓无引用 | cmd/analysis/handlers_paper_trading.go（整文件，约 300+ 行）+ `live.NewSimulatedBroker`/`NewSimulatedDataFeed` 若因此零调用则一并裁决 | 删前 grep 正向确认零调用方；删后 build 全绿；若 backend 确有规划用途则改为「登记到 main.go 并接 RBAC」，二选一须写明理由 |
 
 ---
 

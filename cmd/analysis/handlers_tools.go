@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 )
 
@@ -25,6 +26,17 @@ import (
 type ToolsHandler struct {
 	registry *tools.Registry
 	logger   zerolog.Logger
+
+	// authSvc, when non-nil, enables per-tool RBAC on POST
+	// /api/tools/:name. nil means "no role enforcement" — used by
+	// tests and by deployments that run with auth disabled.
+	//
+	// AUD-02 (ODR-065 H5): this must be a *Service, not a bare
+	// gin.HandlerFunc, because the role requirement depends on the
+	// tool being called — and the tool name is only known inside the
+	// handler (the route is /api/tools/:name, a wildcard, so no
+	// per-route middleware can express it).
+	authSvc *auth.Service
 }
 
 // ToolsHandlerOption configures a ToolsHandler.
@@ -33,6 +45,24 @@ type ToolsHandlerOption func(*ToolsHandler)
 // WithToolsLogger overrides the default logger.
 func WithToolsLogger(l zerolog.Logger) ToolsHandlerOption {
 	return func(h *ToolsHandler) { h.logger = l }
+}
+
+// WithToolsAuth enables per-tool RBAC using svc. When set, POST
+// /api/tools/:name requires a role derived from the tool's class:
+//
+//	read  -> viewer, trader, admin
+//	write -> trader, admin
+//	admin -> admin
+//
+// When svc is disabled (no JWT secret), svc.RequireRole short-circuits
+// and nothing is enforced — matching the documented open-access mode.
+//
+// When this option is not passed at all (authSvc == nil), no RBAC is
+// applied either. That is intentionally the same behaviour as a
+// disabled service so the existing test constructors keep working;
+// production wiring in cmd/analysis/main.go always passes it.
+func WithToolsAuth(svc *auth.Service) ToolsHandlerOption {
+	return func(h *ToolsHandler) { h.authSvc = svc }
 }
 
 // NewToolsHandler constructs a ToolsHandler backed by reg. Panics if
@@ -109,6 +139,19 @@ type executeResponse struct {
 func (h *ToolsHandler) handleExecute(c *gin.Context) {
 	name := c.Param("name")
 
+	// AUD-02 (ODR-065 H5): per-tool RBAC. The route is a wildcard
+	// (/api/tools/:name), so the role requirement cannot be expressed
+	// as per-route middleware — it is resolved here from the tool's
+	// audited side-effect class.
+	//
+	// Checked BEFORE the Tool runs, and before body validation: an
+	// unauthorized caller should not be able to distinguish "bad
+	// request body" from "you may not call this" on a tool they
+	// cannot call at all.
+	if !h.authorizeTool(c, name) {
+		return
+	}
+
 	var req executeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -125,6 +168,67 @@ func (h *ToolsHandler) handleExecute(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, executeResponse{Result: result})
+}
+
+// authorizeTool enforces the role requirement for the named tool.
+// Returns true if the request may proceed; on false it has already
+// written the error response.
+//
+// Fail-closed: tools classified SideEffectAdmin (which includes every
+// tool missing from the classification table) require admin.
+func (h *ToolsHandler) authorizeTool(c *gin.Context, name string) bool {
+	if h.authSvc == nil || !h.authSvc.Enabled() {
+		// Auth not wired or not enabled — open-access mode, same
+		// semantics as Service.Middleware().
+		return true
+	}
+
+	var allowed []auth.Role
+	switch tools.Classify(name) {
+	case tools.SideEffectRead:
+		allowed = []auth.Role{auth.RoleViewer, auth.RoleTrader, auth.RoleAdmin}
+	case tools.SideEffectWrite:
+		allowed = []auth.Role{auth.RoleTrader, auth.RoleAdmin}
+	default: // SideEffectAdmin
+		allowed = []auth.Role{auth.RoleAdmin}
+	}
+
+	role, ok := auth.RoleFromContext(c)
+	if !ok {
+		// No identity on the context. Either the global Middleware
+		// didn't run or the request bypassed it; either way we cannot
+		// authorize.
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"error": "no authenticated user",
+			"code":  "UNAUTHENTICATED",
+		})
+		return false
+	}
+	for _, r := range allowed {
+		if r == role {
+			return true
+		}
+	}
+
+	h.logger.Warn().
+		Str("tool", name).
+		Str("effect", tools.Classify(name).String()).
+		Str("have", string(role)).
+		Msg("tool execution denied by RBAC")
+
+	need := make([]string, len(allowed))
+	for i, r := range allowed {
+		need[i] = string(r)
+	}
+	c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+		"error":  "insufficient role for tool " + name,
+		"code":   "INSUFFICIENT_ROLE",
+		"tool":   name,
+		"effect": tools.Classify(name).String(),
+		"have":   string(role),
+		"need":   need,
+	})
+	return false
 }
 
 // respondToolError maps a tools error to an appropriate HTTP status

@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"context"
 	"crypto/subtle"
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"net/http"
 	"strings"
 	"sync"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/live"
 )
@@ -40,8 +41,29 @@ type ExecutionHandler struct {
 	// service config; see config/analysis-service.yaml.
 	emergencyToken string
 
+	// authSvc, when non-nil and enabled, gates the order-mutating
+	// endpoints behind RequireRole(trader, admin). AUD-02 (ODR-065 H5).
+	//
+	// Note this is NOT applied to /emergency-flatten — see
+	// RegisterRoutes for why that endpoint keeps its token-only gate.
+	authSvc *auth.Service
+
 	mu     sync.RWMutex
 	orders map[string]*live.OrderResult
+}
+
+// ExecutionHandlerOption configures an ExecutionHandler.
+type ExecutionHandlerOption func(*ExecutionHandler)
+
+// WithExecutionAuth enables RBAC on the order-mutating execution
+// endpoints (POST /orders, POST /orders/:id/cancel).
+//
+// Requires trader or admin; viewer tokens get 403. Read endpoints
+// (GET orders/positions/account) stay open to any authenticated role.
+//
+// When svc is nil or disabled this is a no-op (open-access mode).
+func WithExecutionAuth(svc *auth.Service) ExecutionHandlerOption {
+	return func(h *ExecutionHandler) { h.authSvc = svc }
 }
 
 // NewExecutionHandler constructs an ExecutionHandler. The trader is
@@ -53,28 +75,55 @@ type ExecutionHandler struct {
 // emergency-flatten endpoint. Pass "" to disable the endpoint
 // entirely (returns 404). Tokens are compared using
 // crypto/subtle.ConstantTimeCompare to prevent timing attacks.
-func NewExecutionHandler(trader live.LiveTrader, logger zerolog.Logger, emergencyToken string) *ExecutionHandler {
-	return &ExecutionHandler{
+func NewExecutionHandler(trader live.LiveTrader, logger zerolog.Logger, emergencyToken string, opts ...ExecutionHandlerOption) *ExecutionHandler {
+	h := &ExecutionHandler{
 		trader:         trader,
 		logger:         logger.With().Str("component", "execution_handler").Logger(),
 		emergencyToken: emergencyToken,
 		orders:         make(map[string]*live.OrderResult),
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // RegisterRoutes wires the execution endpoints under /api/execution
 // on the supplied router. Legacy root-level paths
 // (/orders, /orders/:id, /orders/:id/cancel, /positions, /account)
 // are also registered for backward compat.
+//
+// RBAC (AUD-02, ODR-065 H5): the order-mutating endpoints are gated
+// behind RequireRole(trader, admin) — on BOTH the /api/execution
+// group and the legacy root paths. Guarding only the prefixed group
+// would leave /orders as an unauthenticated side door to the same
+// handler, which is exactly the kind of half-covered surface this
+// audit was about.
+//
+// The legacy paths are gated identically rather than more loosely:
+// same handler, same resource, same authority required. There is no
+// caller for which the legacy path should be a privilege escalation.
+//
+// /emergency-flatten is deliberately NOT gated by role. It already
+// requires a server-configured bearer token (constant-time compared)
+// plus a matching confirmation_token. Adding a JWT dependency would
+// make the kill switch unusable precisely when the auth service is
+// the thing that is broken — which is when an operator most needs to
+// flatten. Two independent gates, but the surviving one is the one
+// that does not depend on a working auth path.
 func (h *ExecutionHandler) RegisterRoutes(router *gin.Engine) {
 	execGroup := router.Group("/api/execution")
 	{
-		execGroup.POST("/orders", h.createOrder)
+		// Mutating: trader or admin.
+		execGroup.POST("/orders", h.requireTrader(), h.createOrder)
+		execGroup.POST("/orders/:id/cancel", h.requireTrader(), h.cancelOrder)
+
+		// Read-only: any authenticated role (viewer included).
 		execGroup.GET("/orders", h.listOrders)
 		execGroup.GET("/orders/:id", h.getOrder)
-		execGroup.POST("/orders/:id/cancel", h.cancelOrder)
 		execGroup.GET("/positions", h.getPositions)
 		execGroup.GET("/account", h.getAccount)
+
 		// P2-3 (ODR-026): kill-switch endpoint. The token is
 		// checked inline (see emergencyFlattenHandler); the route
 		// is registered even when the token is empty so a
@@ -83,12 +132,26 @@ func (h *ExecutionHandler) RegisterRoutes(router *gin.Engine) {
 	}
 
 	// Legacy compatibility routes (no /api/execution prefix).
-	router.POST("/orders", h.createOrder)
+	// Same authority as their /api/execution counterparts.
+	router.POST("/orders", h.requireTrader(), h.createOrder)
+	router.POST("/orders/:id/cancel", h.requireTrader(), h.cancelOrder)
 	router.GET("/orders", h.listOrders)
 	router.GET("/orders/:id", h.getOrder)
-	router.POST("/orders/:id/cancel", h.cancelOrder)
 	router.GET("/positions", h.getPositions)
 	router.GET("/account", h.getAccount)
+}
+
+// requireTrader returns the RBAC middleware for order-mutating
+// endpoints, or a no-op middleware when auth is not wired/enabled.
+//
+// Returning a handler (rather than passing nil) keeps the gin handler
+// chain shape identical across configurations, so a route registered
+// in dev mode has the same arity as one in prod mode.
+func (h *ExecutionHandler) requireTrader() gin.HandlerFunc {
+	if h.authSvc == nil {
+		return func(c *gin.Context) { c.Next() }
+	}
+	return h.authSvc.RequireRole(auth.RoleTrader, auth.RoleAdmin)
 }
 
 // createOrderRequest mirrors the original cmd/execution request body.
