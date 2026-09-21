@@ -16,10 +16,14 @@ RUN go mod download
 COPY . .
 
 # Build all services
+#
+# ODR-021 (P1-15) 已把 risk / execution 合并进 analysis，cmd/risk 与
+# cmd/execution 随之删除。这两行此前一直留着，docker build 会直接
+# `stat /app/cmd/risk: directory not found` 失败 —— 也就是说 compose 这条
+# 链路从服务合并那天起就没能构建成功过（本地一直是 go run，CI 也不构建镜像，
+# 所以没人撞到）。
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/data-service ./cmd/data && \
     CGO_ENABLED=0 GOOS=linux go build -o /app/strategy-service ./cmd/strategy && \
-    CGO_ENABLED=0 GOOS=linux go build -o /app/risk-service ./cmd/risk && \
-    CGO_ENABLED=0 GOOS=linux go build -o /app/execution-service ./cmd/execution && \
     CGO_ENABLED=0 GOOS=linux go build -o /app/analysis-service ./cmd/analysis
 
 # Final stage
@@ -33,14 +37,13 @@ RUN apk add --no-cache ca-certificates curl
 # Copy binaries from builder
 COPY --from=builder /app/data-service /app/data-service
 COPY --from=builder /app/strategy-service /app/strategy-service
-COPY --from=builder /app/risk-service /app/risk-service
-COPY --from=builder /app/execution-service /app/execution-service
 COPY --from=builder /app/analysis-service /app/analysis-service
 
 # Copy config files
 COPY config /app/config
 COPY cmd/analysis/static /app/cmd/analysis/static
 
-EXPOSE 8081 8082 8083 8084 8085
+# 8083 (risk) / 8084 (execution) 已随 ODR-021 合并进 analysis 的 8085。
+EXPOSE 8081 8082 8085
 
 # No ENTRYPOINT - docker-compose CMD specifies which service to run
