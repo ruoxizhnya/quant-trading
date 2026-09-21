@@ -72,7 +72,6 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 |----|------|------|------|
 | AUD-01 | 加固 `/api/copilot/save`（报告 D-1 默认加固，删除为备选需裁决）：`StrategyName` 正则白名单 `^[A-Za-z][A-Za-z0-9_]{0,63}$` + 写盘前 `staticcheck.CheckOrError(req.Code)`（复用 generate 路径同款闸）+ `fmt.Sprintf` 拼路径改 `filepath.Join` | cmd/analysis/handlers_copilot.go#L174-199 | 遍历名 400 / 含 `exec.Command` 代码 422 / 合名合法码 200 落 plugins；测试先行先红后绿 |
 | AUD-02 | RBAC 接线：`/api/execution` 三动作端点 **与 legacy 根路径两处都** 挂 `RequireRole(trader, admin)`；`/api/tools` 增副作用分级 map（fail-closed：未登记 = admin）；先验证 auth disabled 时 RequireRole 放行路径（setup.go#L626 只在 Enabled 时挂 Middleware） | cmd/analysis/handlers_execution.go / handlers_tools.go / pkg/auth | viewer 下单 403 / trader 200 / 只读工具 viewer 200 / auth disabled 全放行 / legacy 与 `/api` 行为一致 |
-| AUD-05 | **11 张表 DDL 内联移植**（migrations/015~018 → postgres.go migrate() 数组末尾，编号注释续 Migration 028+，幂等 `IF NOT EXISTS`——补上 P1-4 约定的执行缺口）+ 一致性断言测试：静态读 postgres.go 提取 `CREATE TABLE IF NOT EXISTS (\S+)`，断言 ⊇ TableMapper 全部目标表（零 DB 依赖） | pkg/storage/postgres.go + 新 bulk_insert_ddl_test.go | mapper 13 映射目标表全部在 DDL 声明；新环境 `compose down -v && up` 后 13 类数据同步各落库 ≥1 行 |
 
 ---
 
@@ -144,7 +143,6 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
 |----|------|------|
 | AUD-14 | AGENTS.md 校准：§1-3 按 ADR-023/024 现实重写（ADR-021/022 已入 superseded-adr）/ 表数口径改"内联 DDL 22 张（唯一执行路径）"/ `ingest.raw`·`research.*` 改"已落盘"/ Rule 2 的 `docs/odr/` → `docs/archive/odr/`（该目录已不存在）/ `pkg/tools/server.go` → `tool.go`；`migrations/` 与 `docs/migrations/` 目录首加 README"此目录不执行，加表改 postgres.go migrate() 数组"（是否物理移入 archive 另立 Cleanup ODR） | AGENTS.md + migrations/；`tools/check_doc_links.py` 增加 `--include-archive` 开关（现显式跳过 archive/，而 ODR 与报告全在该目录，其死链因此永不被告警——ODR-065 报告自身就有 2 处死链未被抓到） |
 | AUD-15 | 删 `e2e/tests/ai-research.spec.ts`（打已删除的 :8086/cmd-ai，恒失败）；`fundamentals_detail` 读取处加空集防御（行数 0 → 显式报错，杜绝纵向因子静默拿空集，待 EQD-P1-2 摄取补齐） | e2e/tests + 纵向因子读取处 |
-| AUD-L1 | **推送 main 领先 origin 的 51 提交**并恢复 feature branch + PR 流程（AGENTS.md §8 规范 3）——全部 AUD 修复工作的前置 | git |
 
 ---
 
