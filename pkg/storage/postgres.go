@@ -501,6 +501,226 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 				DROP TABLE fundamentals;
 			END IF;
 		END $$`,
+
+		// === Migration 033-043: 多源数据面的 11 张目标表（C5 / ODR-065）===
+		//
+		// 这些表的 DDL 此前只存在于 migrations/015~018，而那个目录**不被任何代码
+		// 执行**（golang-migrate 封装已于 2026-09-18 删除，注释里写明了）。后果：
+		// ETL 的 TableMapper 声明 13 类数据，其中 11 类的目标表在全新库里根本不
+		// 存在，任一多源同步任务一跑就是 `relation does not exist` 硬失败 ——
+		// 多源数据面在干净环境开箱不可用，存量库全靠手工跑过 .sql 才活着。
+		//
+		// 逐字移植自 migrations/*.sql，但**不建 hypertable**：这一批的目标是
+		// 「表存在、能写入」，不该为此引入 TimescaleDB 硬依赖。源 SQL 里的
+		// create_hypertable / add_retention_policy 刻意省略，需要时单独加。
+		//
+		// data_source_registry / data_fallback_chain 不在这一批里 —— 数据源注册表
+		// 是内存态（pkg/data/source/registry.go 明确不写这两张表）。
+
+		// Migration 033: realtime_quote (mootdx 五档快照)
+		`CREATE TABLE IF NOT EXISTS realtime_quote (
+			symbol      VARCHAR(20) NOT NULL,
+			ts          TIMESTAMPTZ NOT NULL,
+			price       DOUBLE PRECISION,
+			open        DOUBLE PRECISION,
+			high        DOUBLE PRECISION,
+			low         DOUBLE PRECISION,
+			last_close  DOUBLE PRECISION,
+			volume      BIGINT,
+			amount      DOUBLE PRECISION,
+			bid1        DOUBLE PRECISION, ask1     DOUBLE PRECISION,
+			bid1_vol    INT, ask1_vol              INT,
+			bid2        DOUBLE PRECISION, ask2     DOUBLE PRECISION,
+			bid2_vol    INT, ask2_vol              INT,
+			bid3        DOUBLE PRECISION, ask3     DOUBLE PRECISION,
+			bid3_vol    INT, ask3_vol              INT,
+			bid4        DOUBLE PRECISION, ask4     DOUBLE PRECISION,
+			bid4_vol    INT, ask4_vol              INT,
+			bid5        DOUBLE PRECISION, ask5     DOUBLE PRECISION,
+			bid5_vol    INT, ask5_vol              INT,
+			source      VARCHAR(32) DEFAULT 'mootdx',
+			ingest_time TIMESTAMPTZ DEFAULT NOW(),
+			PRIMARY KEY (symbol, ts)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_realtime_quote_symbol_ts ON realtime_quote (symbol, ts DESC)`,
+
+		// Migration 034: ohlcv_minute (mootdx 1 分钟 K 线)
+		`CREATE TABLE IF NOT EXISTS ohlcv_minute (
+			symbol      VARCHAR(20) NOT NULL,
+			ts          TIMESTAMPTZ NOT NULL,
+			open        DOUBLE PRECISION NOT NULL,
+			high        DOUBLE PRECISION NOT NULL,
+			low         DOUBLE PRECISION NOT NULL,
+			close       DOUBLE PRECISION NOT NULL,
+			volume      BIGINT,
+			amount      DOUBLE PRECISION,
+			source      VARCHAR(32) DEFAULT 'mootdx',
+			ingest_time TIMESTAMPTZ DEFAULT NOW(),
+			PRIMARY KEY (symbol, ts)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ohlcv_minute_symbol_ts ON ohlcv_minute (symbol, ts DESC)`,
+
+		// Migration 035: capital_flow (东财 push2 资金流)
+		// UNIQUE (symbol, trade_date, period) 是 TableMapper 的冲突键，
+		// 缺了它 BulkInsert 的 ON CONFLICT 就没有目标约束。
+		`CREATE TABLE IF NOT EXISTS capital_flow (
+			id               BIGSERIAL PRIMARY KEY,
+			symbol           VARCHAR(20) NOT NULL,
+			trade_date       DATE NOT NULL,
+			period           VARCHAR(16) NOT NULL,
+			main_net         DOUBLE PRECISION,
+			main_buy_amount  DOUBLE PRECISION,
+			main_sell_amount DOUBLE PRECISION,
+			super_net        DOUBLE PRECISION,
+			large_net        DOUBLE PRECISION,
+			medium_net       DOUBLE PRECISION,
+			small_net        DOUBLE PRECISION,
+			main_net_ratio   DOUBLE PRECISION,
+			retail_net       DOUBLE PRECISION,
+			retail_net_ratio DOUBLE PRECISION,
+			close_price      DOUBLE PRECISION,
+			change_pct       DOUBLE PRECISION,
+			source           VARCHAR(32) DEFAULT 'eastmoney',
+			ingest_time      TIMESTAMPTZ DEFAULT NOW(),
+			UNIQUE (symbol, trade_date, period)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_cf_symbol_date ON capital_flow (symbol, trade_date DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_cf_date_main_net ON capital_flow (trade_date DESC, main_net DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_cf_symbol_period ON capital_flow (symbol, period, trade_date DESC)`,
+
+		// Migration 036: sectors (东财板块快照)
+		`CREATE TABLE IF NOT EXISTS sectors (
+			sector_code     VARCHAR(32) PRIMARY KEY,
+			sector_name     VARCHAR(64) NOT NULL,
+			category        VARCHAR(32) NOT NULL DEFAULT 'industry',
+			trade_date      DATE NOT NULL,
+			change_pct      DOUBLE PRECISION,
+			leading_symbol  VARCHAR(20),
+			leading_change  DOUBLE PRECISION,
+			source          VARCHAR(32) DEFAULT 'eastmoney',
+			ingest_time     TIMESTAMPTZ DEFAULT NOW(),
+			data_version    INT DEFAULT 1
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sectors_date ON sectors (trade_date DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_sectors_category ON sectors (category, trade_date DESC)`,
+
+		// Migration 037: stock_sector_map (个股 ↔ 板块，多对多)
+		`CREATE TABLE IF NOT EXISTS stock_sector_map (
+			symbol      VARCHAR(20) NOT NULL,
+			sector_code VARCHAR(32) NOT NULL,
+			sector_name VARCHAR(64) NOT NULL,
+			source      VARCHAR(32) DEFAULT 'eastmoney',
+			ingest_time TIMESTAMPTZ DEFAULT NOW(),
+			PRIMARY KEY (symbol, sector_code)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ssm_sector ON stock_sector_map (sector_code)`,
+
+		// Migration 038: top_list (龙虎榜)
+		`CREATE TABLE IF NOT EXISTS top_list (
+			id          BIGSERIAL PRIMARY KEY,
+			trade_date  DATE NOT NULL,
+			symbol      VARCHAR(20) NOT NULL,
+			name        VARCHAR(100) NOT NULL,
+			net_buy     DOUBLE PRECISION,
+			buy_amount  DOUBLE PRECISION,
+			sell_amount DOUBLE PRECISION,
+			turnover    DOUBLE PRECISION,
+			reason      TEXT,
+			explain     TEXT,
+			close_price DOUBLE PRECISION,
+			change_pct  DOUBLE PRECISION,
+			source      VARCHAR(32) DEFAULT 'eastmoney',
+			ingest_time TIMESTAMPTZ DEFAULT NOW(),
+			data_version INT DEFAULT 1,
+			UNIQUE (trade_date, symbol)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_top_list_date ON top_list (trade_date DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_top_list_symbol ON top_list (symbol, trade_date DESC)`,
+
+		// Migration 039: limit_up_pool (涨停池)
+		`CREATE TABLE IF NOT EXISTS limit_up_pool (
+			id          BIGSERIAL PRIMARY KEY,
+			trade_date  DATE NOT NULL,
+			symbol      VARCHAR(20) NOT NULL,
+			name        VARCHAR(100) NOT NULL,
+			limit_price DOUBLE PRECISION,
+			first_time  TIMESTAMPTZ,
+			last_time   TIMESTAMPTZ,
+			limit_times INT DEFAULT 1,
+			continuous  INT DEFAULT 1,
+			industry    VARCHAR(64),
+			concept     TEXT,
+			amount      DOUBLE PRECISION,
+			source      VARCHAR(32) DEFAULT 'eastmoney',
+			ingest_time TIMESTAMPTZ DEFAULT NOW(),
+			data_version INT DEFAULT 1,
+			UNIQUE (trade_date, symbol)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_limit_up_date ON limit_up_pool (trade_date DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_limit_up_symbol ON limit_up_pool (symbol, trade_date DESC)`,
+
+		// Migration 040: announcements (巨潮公告)
+		`CREATE TABLE IF NOT EXISTS announcements (
+			ann_id       VARCHAR(64) PRIMARY KEY,
+			symbol       VARCHAR(20) NOT NULL,
+			ann_title    TEXT NOT NULL,
+			ann_time     TIMESTAMPTZ NOT NULL,
+			ann_type     VARCHAR(64),
+			pdf_url      TEXT,
+			source       VARCHAR(32) DEFAULT 'juchao',
+			ingest_time  TIMESTAMPTZ DEFAULT NOW(),
+			data_version INT DEFAULT 1
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ann_symbol_time ON announcements (symbol, ann_time DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_ann_time ON announcements (ann_time DESC)`,
+
+		// Migration 041: news (个股新闻)
+		`CREATE TABLE IF NOT EXISTS news (
+			news_id      VARCHAR(64) PRIMARY KEY,
+			symbol       VARCHAR(20) NOT NULL,
+			title        TEXT NOT NULL,
+			content      TEXT,
+			publish_time TIMESTAMPTZ NOT NULL,
+			url          TEXT,
+			source_name  VARCHAR(64),
+			source       VARCHAR(32) DEFAULT 'eastmoney',
+			ingest_time  TIMESTAMPTZ DEFAULT NOW(),
+			data_version INT DEFAULT 1
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_news_symbol_time ON news (symbol, publish_time DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_news_time ON news (publish_time DESC)`,
+
+		// Migration 042: hot_search (雪球热门搜索)
+		`CREATE TABLE IF NOT EXISTS hot_search (
+			id            BIGSERIAL PRIMARY KEY,
+			rank          INT NOT NULL,
+			keyword       VARCHAR(128) NOT NULL,
+			snapshot_time TIMESTAMPTZ NOT NULL,
+			heat          DOUBLE PRECISION,
+			source        VARCHAR(32) DEFAULT 'xueqiu',
+			ingest_time   TIMESTAMPTZ DEFAULT NOW(),
+			data_version  INT DEFAULT 1,
+			UNIQUE (rank, snapshot_time)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_hot_search_time ON hot_search (snapshot_time DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_hot_search_keyword ON hot_search (keyword, snapshot_time DESC)`,
+
+		// Migration 043: global_ohlcv (美股 / 港股等非 A 股日线)
+		`CREATE TABLE IF NOT EXISTS global_ohlcv (
+			symbol       VARCHAR(20) NOT NULL,
+			trade_date   DATE NOT NULL,
+			open         DOUBLE PRECISION NOT NULL,
+			high         DOUBLE PRECISION NOT NULL,
+			low          DOUBLE PRECISION NOT NULL,
+			close        DOUBLE PRECISION NOT NULL,
+			volume       DOUBLE PRECISION,
+			adj_close    DOUBLE PRECISION,
+			source       VARCHAR(32) DEFAULT 'yahoo_finance',
+			ingest_time  TIMESTAMPTZ DEFAULT NOW(),
+			data_version INT DEFAULT 1,
+			PRIMARY KEY (symbol, trade_date)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_global_ohlcv_source ON global_ohlcv (source, trade_date DESC)`,
 	}
 
 	for _, m := range migrations {
