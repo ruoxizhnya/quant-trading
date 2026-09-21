@@ -34,10 +34,20 @@ else
 	exit 1
 fi
 
+# 别名兼容：代码 / config / compose / k8s 统一读 TUSHARE_TOKEN（那是单一真相），
+# 但如果用户设的是 TUSHARE_API_KEY，在入口这里归一一次，避免"明明配了却报未设置"。
+# 别名适配只发生在这一处 —— 不要把第二个名字扩散到配置里去。
+if [ -z "${TUSHARE_TOKEN:-}" ] && [ -n "${TUSHARE_API_KEY:-}" ]; then
+	TUSHARE_TOKEN="$TUSHARE_API_KEY"
+	export TUSHARE_TOKEN
+	echo "→ 检测到 TUSHARE_API_KEY，已归一为 TUSHARE_TOKEN"
+fi
+
 if [ -z "${TUSHARE_TOKEN:-}" ] && ! grep -q 'TUSHARE_TOKEN=.\+' .env 2>/dev/null; then
 	echo "✗ TUSHARE_TOKEN 未设置。"
 	echo "  写进 .env（该文件已被 git 忽略）后重跑，或："
 	echo "    export TUSHARE_TOKEN=... && ./tools/sync_all.sh"
+	echo "  （也接受 TUSHARE_API_KEY 作为别名）"
 	exit 1
 fi
 
