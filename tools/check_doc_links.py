@@ -13,9 +13,9 @@
 
 两项检查：
   1. **Markdown 链接**（`[x](y.md)`）指向的文件存在。
-  2. **反引号里的部署配置路径**（`` `config/*.yaml` `` / `` `deploy/**` ``）存在。
+  2. **文档里引用的部署配置路径**（`config/**` / `deploy/**` 的 yaml/yml/json）存在。
      检查 2 是 AUD-41 的教训：`docs/SPEC.md` 的 `## Configuration` 段整段描述了一个
-     并不存在的 `config/global.yaml`，而那种引用是**行内代码、不是 Markdown 链接** ——
+     并不存在的 `config/global.yaml`，而那种引用**不是 Markdown 链接** ——
      检查 1 根本看不见它，所以那段草稿烂了很久没人发现。
 
 ⚠️ 归档层（archive/）为什么也要查（AUD-14）：
@@ -59,39 +59,61 @@ def find_markdown_files(root: Path, include_archive: bool) -> list[Path]:
 
 
 # 反引号里的**仓库相对路径**引用。这些路径是相对仓库根解析的，不是相对文档。
+#
+# ⚠️ 反引号**不是必需的**：AUD-41 的原始形态就是 `### Global Config (config/global.yaml)`
+# —— 一个**没有反引号**的标题。只认反引号的第一版护栏实测对 `381e60a` 的 SPEC
+# **零命中**，即抓不住它要防的那个 bug。所以这里匹配裸路径。
+#
+# 前后 lookaround 排除「更长路径的一部分」（`docs/config/x.yaml` 不该被算成
+# `config/x.yaml`）。
 CONFIG_PATH_RE = re.compile(
-    r"`((?:config|deploy)/[A-Za-z0-9_./-]+\.(?:yaml|yml|json))`"
+    r"(?<![A-Za-z0-9_./-])((?:config|deploy)/[A-Za-z0-9_./-]+\.(?:yaml|yml|json))"
+    r"(?![A-Za-z0-9_./-])"
 )
 
-# 否定词豁免：**整行**出现这些词就跳过。历史行（「已删除 X」「X 从未被读取」）
-# 会合法地引用已删文件 —— TASKS.md 的「已完成」行几乎全是这个形状。
+# 否定词豁免窗口 = **当前行 + 上一行**。历史行（「已删除 X」「X 从未被读取」）
+# 会合法地引用已删文件 —— TASKS.md 的「已完成」行几乎全是这个形状。纳入上一行
+# 是因为散文会换行：否定词常常落在路径的**上一行**（AUD-41 的 changelog 就是）。
 #
-# ⚠️ 边界（这是启发式，不是语义分析）：一行里既说「A 不存在」又引用了真缺失的
-# B 会**漏报**。选整行而不是「引用之前」是因为「删 `cmd/ai/` + `config/ai-service.yaml`」
-# 这类句子里否定词在引用**之后**；首版用「引用之前」实测漏放 3 条历史行。
+# ⚠️ 边界（启发式，不是语义分析）：
+#   - 否定词落在**下一行**时不豁免 —— 写文档时把「不存在」放在路径同一行或上一行。
+#   - 窗口内既说「A 不存在」又引用了真缺失的 B 会**漏报**。
 _NEGATION_MARKERS = (
     "没有", "不存在", "并不存在", "已删除", "从未", "不许",
     "不再", "移除", "删", "废弃", "退役",
 )
 
 
+def _config_path_exists(target: str, md: Path, repo_root: Path) -> bool:
+    """按**仓库根**或**文档自身目录**解析。
+
+    两个基址都需要：`docs/hermes/system-design.md` 里的 `config/hermes.yaml`
+    指的是它自己的 `docs/hermes/config/hermes.yaml`，不是仓库根的 `config/`。
+    只按仓库根解析会把这类引用误报成缺失（实测 2 条）。
+    """
+    return (repo_root / target).exists() or (md.parent / target).exists()
+
+
 def check_config_path_refs(
     root: Path, repo_root: Path, include_archive: bool
 ) -> list[tuple[Path, int, str]]:
-    """行内代码里引用的部署配置路径必须真实存在（AUD-41）。"""
+    """文档里引用的部署配置路径必须真实存在（AUD-41）。"""
     missing: list[tuple[Path, int, str]] = []
     for md in find_markdown_files(root, include_archive):
         try:
             text = md.read_text(encoding="utf-8")
         except OSError:
             continue
-        for lineno, line in enumerate(text.splitlines(), 1):
-            if any(marker in line for marker in _NEGATION_MARKERS):
-                continue
+        lines = text.splitlines()
+        for idx, line in enumerate(lines):
+            window = line + (lines[idx - 1] if idx >= 1 else "")
             for match in CONFIG_PATH_RE.finditer(line):
                 target = match.group(1)
-                if not (repo_root / target).exists():
-                    missing.append((md, lineno, target))
+                if _config_path_exists(target, md, repo_root):
+                    continue
+                if any(marker in window for marker in _NEGATION_MARKERS):
+                    continue
+                missing.append((md, idx + 1, target))
     return missing
 
 
@@ -143,7 +165,7 @@ def main() -> int:
             print(f"  {md} -> {target}", file=sys.stderr)
 
     if not missing_paths:
-        print("✓ 行内代码引用的 config/ · deploy/ 路径都存在")
+        print("✓ 文档里引用的 config/ · deploy/ 路径都存在")
     else:
         print(f"✗ 发现 {len(missing_paths)} 条不存在的配置路径引用：", file=sys.stderr)
         for md, lineno, target in missing_paths:

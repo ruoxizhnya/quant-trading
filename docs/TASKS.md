@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-09-22
-verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）
+verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）；AUD-41/42 落地（SPEC 的 `## Configuration` 段整段订正 + doc 护栏第二项检查；`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓单实现结构护栏）+ 顺带登记 AUD-43 / AUD-44（2026-09-22）
 status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有未解除的前置）" —— 见下方「状态总览」
 ---
 
@@ -34,18 +34,17 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
 | AUD-19~38 | 20 | 20 | 0 | 0 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-28 / AUD-29 / AUD-30 / AUD-31 / AUD-32 / AUD-33 / AUD-20 / AUD-21 / AUD-22（2026-09-22）+ **AUD-34**（裁决：保留）+ **AUD-24 / AUD-25 / AUD-26 / AUD-38**（2026-09-22）+ **AUD-35 / AUD-36 / AUD-37**（2026-09-22，配置一致性三项） |
 | AUD-39~40 | 2 | 2 | 0 | 0 | 0 | ✅ **AUD-39**（k8s 的 `DATABASE_*`/`REDIS_URL` 口径 + 值对齐 + 消灭 `${...}` 字面量占位符 + 部署护栏检查 5~8）+ **AUD-40**（`v.Sub` 缺段返回 nil → panic 防护），2026-09-22 |
+| AUD-41~42 | 2 | 2 | 0 | 0 | 0 | ✅ **AUD-41**（`docs/SPEC.md` 的 `## Configuration` 段整段订正 —— 如实描述三份真实配置文件 + 策略 YAML 真实 schema；`tools/check_doc_links.py` 加第二项检查「文档里引用的 config/ · deploy/ 路径必须存在」，**第一版只认反引号、对目标形态是瞎的，已修正**）+ **AUD-42**（`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓「只有一处 DSN 拼装」结构护栏），2026-09-22 |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：**AUD-41**（`docs/SPEC.md` 的 Configuration 段描述了一个
-**不存在**的 `config/global.yaml`，键名也与实际不符 —— `database.name` vs
-`database.database`、`redis.host/port/password` vs `redis.url`；本批只消除了
-`${...}` 反例，整段订正另立）→ **AUD-42**（`pkg/testutil` 的
-`TestDBConfig.DSN()` 是第三处手写 DSN 拼装，未转义密码、未走共享的
-`storage.BuildDSN`）。
-**AUD-39 / AUD-40 已于 2026-09-22 全部关闭**，落地说明见本文件末尾。
+**下一批建议顺序**：**AUD-43**（`pkg/testutil` **全仓零导入者** —— 登记 AUD-42
+时写它是「测试基础设施」，那个前提不成立；去留待裁，与 AUD-34 `LiveEngine` 同型）
+→ **AUD-44**（`docs/SPEC.md` / `docs/TEST.md` / `docs/ADR.md` 三份常青文档用的是
+blockquote 式元数据，**不符合 `docs/README.md` R1**；其余 6 份常青文档都符合）。
+**AUD-41 / AUD-42 已于 2026-09-22 全部关闭**，落地说明见本文件末尾。
 
 ### 已完成（2026-09-16，已从下方列表移出）
 
@@ -522,8 +521,8 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > 落地说明见本文件末尾「AUD-35 / AUD-36 / AUD-37 落地说明」一节。三项同族：
 > **配置项看着有效，却没有读取点**。
 >
-| AUD-41 | ⬜ **`docs/SPEC.md` 的 Configuration 段描述了一个不存在的 `config/global.yaml`，且键名与实际不符**（AUD-39 顺带发现，非登记项）：SPEC.md 的「Global Config (config/global.yaml)」代码块是一份**设计草图** —— 该文件全仓不存在，实际是三份 `config/{analysis,data,strategy}-service.yaml`；键名也对不上（`database.name` vs 实际 `database.database`；`redis.host` / `redis.port` / `redis.password` vs 实际 `redis.url`；`app.env` / `services.*.port` 全无对应读取点）。本批只消除了段内的 `${...}` 反例并加了「这是草图、以文件为准」的提示，**整段订正未做**。⚠️ 订正时记住「改一段文档只改自己关心的行 → 那一段里往往还有别的错」：这一整段都要逐行对回 `config/*.yaml` | `docs/SPEC.md` 的 `## Configuration` 段 | SPEC 的配置段要么如实描述 `config/*.yaml` 的键，要么明确标注为设计草图 |
-| AUD-42 | ⬜ **`pkg/testutil` 是第三处手写 DSN 拼装，未转义密码、未走共享的 `storage.BuildDSN`**（AUD-39 顺带发现，非登记项）：`TestDBConfig.DSN()` 用 `fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", …)` 直接拼 —— 与 `cmd/analysis`（转义）和 `cmd/data`（不转义）曾经的三份实现同型。AUD-39 已把两个 cmd 收敛到 `storage.BuildDSN`，testutil 未动（它是测试基础设施，用独立的 `TEST_DB_*` env 命名空间与 `quant_trading_test` 库，且 `DSN()` 现在返回 `string` 无 error，改动要连签名一起考虑） | `pkg/testutil/testdb.go#L42-47` | 全仓只有一处 DSN 拼装实现；测试库密码含 `:` / `@` 时也能连上 |
+| AUD-43 | ⬜ **`pkg/testutil` 全仓零导入者**（AUD-42 前提核实顺带发现，非登记项）：`go list -f '{{.ImportPath}}|{{join .Imports " "}}|{{join .TestImports " "}}|{{join .XTestImports " "}}' ./...` 里只有它自己那条记录，`.TestImports` / `.XTestImports` 都是空的；Go / Markdown / yaml / sh 全扫也只有它自己。归档审查报告 `docs/archive/reports-2026-Q3/review-report-20260921.md` 把它列为「有 DB 环境下可选集成验证」的**设想**，但**从未接上**。⚠️ 登记 AUD-42 时写它是「测试基础设施」，那个前提不成立。**去留待裁**：删（与 AUD-19 `/api/paper/*`、AUD-33 legacy HTML 同型，需加「它不许回来」的断言）还是留（作为将来的集成测试底座）。若曦 2026-09-22 已裁决 **AUD-42 只做 DSN 收敛、零导入者另立本项** | `pkg/testutil/testdb.go`（唯一文件，242 行） | 要么删干净并留负向断言，要么明确写成「预留的集成测试底座」并给出接入计划 |
+| AUD-44 | ⬜ **`docs/SPEC.md` / `docs/TEST.md` / `docs/ADR.md` 三份常青文档不符合 `docs/README.md` R1**（AUD-41 顺带发现，非登记项）：R1 要求每份文档顶部写 `status` / `last-verified` / `verified-by` 三项 YAML frontmatter，**没有 `last-verified` 的文档 = 已腐烂**。实测 9 份常青文档里 6 份符合（README / TASKS / ARCHITECTURE / PRODUCT / VISION / ROADMAP），**3 份不符合** —— SPEC / TEST 用 blockquote 式 `> **Status**` / `> **Last Updated**`（**无 `verified-by`**），ADR 用 `> **Location**` / `> **Version**`（**连 `status` 都没有**）。⚠️ AUD-30 的落地说明里有「`Owner: 龙少 (Longshao)` 属独立议题、本次不动」，那说的是**署名行的值**，与**元数据格式是否符合 R1**是两件事 | `docs/SPEC.md` / `docs/TEST.md` / `docs/ADR.md` 的头部 | 三份文档的头部符合 R1；或把 R1 改成「blockquote 亦可」并说明理由（不能两边都不动） |
 
 ## P2 — 数据与清理
 
@@ -1447,6 +1446,102 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > `check_deploy_consistency.py` **七项全绿**。两个提交：`5e6da67`（AUD-39）/
 > `ceff12c`（AUD-40）。**新登记 AUD-41（SPEC 的 Configuration 草图）/ AUD-42
 > （testutil 第三处 DSN 拼装），本批未修。**
+
+> **AUD-42 落地说明（2026-09-22）**：`TestDBConfig.DSN()` 从手写 `fmt.Sprintf`
+> 改为委托 `storage.BuildDSN`，签名 `string` → `(string, error)`。三个调用点各自
+> 接住错误（`NewTestDB` / `SkipIfNoDB` 走 `t.Skipf` 保持「没有库就跳过」的既有语义，
+> `AssertDBAvailable` 返回 false）。
+>
+> **前提核实推翻了登记的一处**：登记写 testutil 是「测试基础设施」，暗示它有人用 ——
+> **实测全仓零导入者**（`go list -f` 含 `.Imports` / `.TestImports` / `.XTestImports`
+> 权威核实；Go / 文档 / yaml / sh 全扫只有它自己那条记录）。它是**从未接上的**集成
+> 测试底座（归档审查报告 `review-report-20260921.md` 曾把它列为「有 DB 环境下可选
+> 集成验证」的**设想**）。**另立 AUD-43** 记这件事，本项只做 DSN 收敛（若曦裁决）。
+>
+> **护栏两层**：
+> ① `pkg/testutil/testdb_test.go`（新增，5 条用例）—— 绝对值断言 + 推导式断言（必须
+> 等于 `storage.BuildDSN` 的结果）、密码含 `:` `@` `/` 时原样取回（**配对照组**：
+> 朴素 `fmt.Sprintf` 的结果与 BuildDSN 不同、且 userinfo 边界确实被 `@` 抢走）、
+> 空密码报 `ErrEmptyDBPassword`（含前置断言）、`TEST_DB_*` 命名空间 + 空串算「未设置」。
+> ② `pkg/storage/dsn_single_impl_test.go`（新增，全仓结构护栏）—— 任何**字符串字面量**
+> 里出现带 printf 动词的 postgres URL，必须在 `dsnAssemblyAllowlist` 里具名 + 写理由。
+> **用 `go/ast` 解析字面量而不是文本 grep**：文本 grep 分不清「调用」与「注释里的
+> 提到」，会护栏自己的文档误报（AUD-29 的教训）。
+>
+> **破坏验证 9/9 达标**（`.workbuddy-ai/tmp/aud42_sabotage.py`）：结构侧 S1 非允许清单
+> 文件塞字面量→红且指名 / S2 同一字面量塞进允许清单文件→绿（允许清单生效）/
+> S3 写成注释→绿（AST 不受注释干扰）/ S4 从允许清单删掉一条→红（允许清单承重）/
+> S5 扫描范围改成空目录→绿（说明「绿」本身不是证据）；行为侧 G1–G4 **各自只红一条**、
+> 其余 4 条保持绿。**两次 S5 打空都记下来了，都是破坏方式错不是护栏失效**：用 `^$`
+> 当「永不匹配」是错的 —— 它匹配**空字符串**，而仓里几乎每个 .go 都有 `""` 字面量
+> → 破坏变成「全红」；换 `zzz_never_matches_zzz` 也不行 —— 替换进去的那个字面量
+> **就是**新模式 → 自指命中，只红它自己。**正解是改扫描范围而不是改模式。**
+> 提交 `f1b9798`。
+
+> **AUD-41 落地说明（2026-09-22）**：`docs/SPEC.md` 的 `## Configuration` 段
+> **整段重写**（原 1487–1601 共 117 行草稿 → 新 154 行如实描述）。
+>
+> **登记只说对了一半**：登记写「描述了一个不存在的 `config/global.yaml`」，实测
+> **两份文件都不存在** —— `config/global.yaml` **和** `config/strategies/value_momentum.yaml`；
+> 后者实际是 Go 实现 `pkg/strategy/examples/value_momentum.go`（**Strategy Config 那
+> 半段同样要重写**，登记没提）。另外草稿里的 `app.*` / `database.name` /
+> `database.max_connections` / `redis.host|port|password|db` / `logging.output` /
+> `services.*.port` **逐条 grep 确认全无读取点**。
+>
+> 新版内容：① 三份真实配置文件 + 各自**定位方式**（analysis 走 `CONFIG_PATH` env，
+> data / strategy 走 viper `SetConfigName` + 三个搜索路径 —— 这个不统一是**有意保留
+> 的历史差异**，写进去免得下一个人当成 bug 去「统一」）；② 键名 → env 名规则
+> （`AutomaticEnv` + `.` → `_`，本仓唯一规则）；③ 主要配置段导航表（段 / 键 / 读到哪）；
+> ④ `${...}` 禁令 + 凭据字段三条语义（`password` 空 Fatal / `tushare.token` 空**不**
+> Fatal 且写明理由 / `database.url` 整串逃生口）；⑤ 策略 YAML 真实 schema
+> （`pkg/ai/yaml.Config`）+ `LoadStrategy` 的**加载条件**（三选一，否则报错）+
+> `expression.risk` 与顶层 `risk` 的**层次差异**（同名不同层）。
+>
+> **护栏 = `tools/check_doc_links.py` 新增的第二项检查**：文档里引用的
+> `config/` · `deploy/` 路径必须存在。**这类引用不是 Markdown 链接**，原来的检查
+> 根本看不见它 —— 这正是本段能烂掉而无人发现的原因（R5 的实现缺口）。
+>
+> ⚠️ **第一版护栏抓不住它要防的那个 bug —— 这一条是本项最重要的发现。**
+> 第一版只认**反引号里**的路径，而 AUD-41 的原始形态是
+> `### Global Config (config/global.yaml)` —— 一个**没有反引号**的标题。
+> 实测：把第一版对 `381e60a:docs/SPEC.md` 跑一遍，**零命中**。
+> 「护栏写好了、正常态是绿的」完全掩盖了「它对目标形态是瞎的」。
+> 修正后的检查：① **匹配裸路径**（反引号可有可无，用 lookaround 排除更长路径的
+> 片段）；② 路径按**仓库根或文档自身目录**双基址解析
+> （`docs/hermes/system-design.md` 里写的那个相对路径指的是它自己的
+> `docs/hermes/config/hermes.yaml` —— 只按仓库根解析实测误报 2 条）；
+> ③ 否定词豁免窗口 = **当前行 + 上一行**（散文会换行，否定词常落在路径的上一行；
+> 首版用「引用之前」实测漏放 3 条历史行 —— `删 \`cmd/ai/\` + \`config/ai-service.yaml\``
+> 这类句子里否定词在引用**之后**）。三条边界都写进了脚本注释。
+>
+> **破坏验证 10/10 达标**（`.workbuddy-ai/tmp/aud41_sabotage.py`）：
+> D1 注入**无反引号**的不存在路径→红且指名（不再依赖反引号）/
+> D2 注入存在的路径→绿 / D3 不存在的路径 + 同行否定词→绿 /
+> D3b 不存在的路径 + **上一行**否定词→绿（换行豁免）/
+> D4 坏 Markdown 链接→红（证明重构没把检查 1 改坏）/
+> D5 把**判定逻辑**置成恒真 + D1 的注入→绿（说明「绿」本身不是证据）/
+> D6 清空否定词表 + D3 的注入→红（豁免承重）/
+> **D7 历史版本 `381e60a:docs/SPEC.md`→红且指名那个**不存在**的 `config/global.yaml`
+> （最强的一条：护栏**本来就能**抓到那个 bug —— 规矩 15「对修复前的代码是红的」
+> 比「对修复后是绿的」有说服力）** /
+> D8a 在 `docs/hermes/` 的文档里写相对路径 `config/hermes.yaml`（仓库根下**没有**它，
+> 但文档目录下存在）→绿（双基址生效）/
+> D8b 同一路径写在 `SPEC.md`→红（D8a 的绿不是「无脑绿」）。
+>
+> **第三次踩「置空方式自指」**：D5 最初把正则换成 `zzz_never_matches_zzz`，
+> 结果护栏去扫 `.md` 时命中了 **`docs/TASKS.md` 里我写的那句散文**（描述 AUD-42
+> 同类踩坑时正好写了这个字符串）→ 破坏变成「红」而不是「绿」。
+> **「把检查置空」的替换文本本身可能出现在被扫描的语料里** —— 这是本会话第三次
+> 同一类踩空（前两次见 AUD-42 落地说明）。正解是改**判定逻辑**，不引入新字符串。
+> 提交 `c666076`（第一版）+ 后续提交（覆盖缺口修正）。
+
+> **AUD-41 / AUD-42 共同验证（2026-09-22）**：`gofmt -l`（本批改动文件）0 命中；
+> `go build ./...` / `go vet ./...` / `GOOS=windows go vet ./...` 全绿；
+> `go test ./... -count=1` **74 个包 ok、0 失败**（比上批 +1 —— `pkg/testutil`
+> 现在有测试了）；`check_doc_links.py` 52 文件、**两项检查**全绿；
+> `check_deploy_consistency.py` 七项全绿。两个提交：`f1b9798`（AUD-42）/
+> `c666076`（AUD-41）。**新登记 AUD-43（`pkg/testutil` 全仓零导入者，去留待裁）/
+> AUD-44（SPEC · TEST · ADR 三份常青文档不符合 R1 frontmatter 约定），本批未修。**
 
 ---
 

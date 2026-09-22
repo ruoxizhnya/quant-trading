@@ -32,12 +32,12 @@
 >   `app.env` / `services.*.port` 全无读取点）。现已改为**如实描述**：三份真实配置
 >   文件及其定位方式、键名 → env 名规则、主要配置段导航、`${...}` 禁令、
 >   策略 YAML 的真实 schema
-> - 「Strategy Config (`config/strategies/value_momentum.yaml`)」同属该段，那个文件
->   也不存在 —— `value_momentum` 是 Go 实现 `pkg/strategy/examples/value_momentum.go`。
+> - 该段还描述了另一个**不存在**的文件 `config/strategies/value_momentum.yaml`
+>   —— `value_momentum` 实际是 Go 实现 `pkg/strategy/examples/value_momentum.go`。
 >   已改为 `pkg/ai/yaml.Config` 的真实 schema + `LoadStrategy` 的加载条件
-> - `tools/check_doc_links.py` 新增第二项检查：行内代码里引用的 `config/` · `deploy/`
->   路径必须存在。这类引用**不是 Markdown 链接**，原检查看不见它 —— 这正是本段
->   能烂掉而无人发现的原因
+> - `tools/check_doc_links.py` 新增第二项检查：文档里引用的 `config/` · `deploy/`
+>   路径必须存在（按仓库根**或文档自身目录**解析）。这类引用**不是 Markdown 链接**，
+>   原检查看不见它 —— 这正是本段能烂掉而无人发现的原因
 >
 > **Changelog v1.6.0 (定位校准到 ADR-023/024, AUD-30, 2026-09-22):**
 > - 顶层定位从 ADR-022（Proposed，**从未实施**，已被 ADR-023 取代）切到
