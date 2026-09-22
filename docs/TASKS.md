@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-09-22
-verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）；AUD-41/42 落地（SPEC 的 `## Configuration` 段整段订正 + doc 护栏第二项检查；`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓单实现结构护栏）+ 顺带登记 AUD-43 / AUD-44（2026-09-22）
+verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）；AUD-41/42 落地（SPEC 的 `## Configuration` 段整段订正 + doc 护栏第二项检查；`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓单实现结构护栏）+ 顺带登记 AUD-43 / AUD-44（2026-09-22）；AUD-43/44/45 落地（AUD-43 前提订正后**裁决保留** `pkg/testutil` 并归并入 AUD-45；AUD-45 = 统一盘点 13 个零导入者包 + 新增 `internal/repoguard` 结构性护栏；AUD-44 = 三份入口文档补 R1 frontmatter + doc 护栏第三项检查）+ 顺带登记 AUD-46 / AUD-47（2026-09-22）
 status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有未解除的前置）" —— 见下方「状态总览」
 ---
 
@@ -35,16 +35,17 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | AUD-19~38 | 20 | 20 | 0 | 0 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-28 / AUD-29 / AUD-30 / AUD-31 / AUD-32 / AUD-33 / AUD-20 / AUD-21 / AUD-22（2026-09-22）+ **AUD-34**（裁决：保留）+ **AUD-24 / AUD-25 / AUD-26 / AUD-38**（2026-09-22）+ **AUD-35 / AUD-36 / AUD-37**（2026-09-22，配置一致性三项） |
 | AUD-39~40 | 2 | 2 | 0 | 0 | 0 | ✅ **AUD-39**（k8s 的 `DATABASE_*`/`REDIS_URL` 口径 + 值对齐 + 消灭 `${...}` 字面量占位符 + 部署护栏检查 5~8）+ **AUD-40**（`v.Sub` 缺段返回 nil → panic 防护），2026-09-22 |
 | AUD-41~42 | 2 | 2 | 0 | 0 | 0 | ✅ **AUD-41**（`docs/SPEC.md` 的 `## Configuration` 段整段订正 —— 如实描述三份真实配置文件 + 策略 YAML 真实 schema；`tools/check_doc_links.py` 加第二项检查「文档里引用的 config/ · deploy/ 路径必须存在」，**第一版只认反引号、对目标形态是瞎的，已修正**）+ **AUD-42**（`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓「只有一处 DSN 拼装」结构护栏），2026-09-22 |
+| AUD-43~45 | 3 | 3 | 0 | 0 | 0 | ✅ **AUD-43**（`pkg/testutil` 零导入者 —— 前提订正后裁决**保留**并归并入 AUD-45）+ **AUD-45**（统一盘点 **13 个**零导入者包 + 新增 `internal/repoguard` 结构性护栏「pkg/ internal/ 下的包必须有消费者，否则进白名单并写理由」，**范围从源码推导、白名单自带 stale 检测**）+ **AUD-44**（`docs/SPEC.md` / `docs/TEST.md` / `docs/ADR.md` 补 R1 frontmatter + `check_doc_links.py` 第三项检查「入口层文档必须带 R1 三字段」，**范围从 `docs/README.md` 的链接推导**），2026-09-22 |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：**AUD-43**（`pkg/testutil` **全仓零导入者** —— 登记 AUD-42
-时写它是「测试基础设施」，那个前提不成立；去留待裁，与 AUD-34 `LiveEngine` 同型）
-→ **AUD-44**（`docs/SPEC.md` / `docs/TEST.md` / `docs/ADR.md` 三份常青文档用的是
-blockquote 式元数据，**不符合 `docs/README.md` R1**；其余 6 份常青文档都符合）。
-**AUD-41 / AUD-42 已于 2026-09-22 全部关闭**，落地说明见本文件末尾。
+**下一批建议顺序**：**AUD-46**（13 个零导入者包里两个「疑似真死代码」待裁决 ——
+`pkg/metrics` 与 `pkg/observability` 重复实现、`pkg/decimal` 全仓零引用；两者已进
+`internal/repoguard` 白名单临时安置，白名单不是结论）→ **AUD-47**（`docs/TEST.md`
+§5–§7 的内容复核 —— AUD-44 只验了路径引用，`last-verified` 已如实写明这一点）。
+**AUD-43 / AUD-44 / AUD-45 已于 2026-09-22 全部关闭**，落地说明见本文件末尾。
 
 ### 已完成（2026-09-16，已从下方列表移出）
 
@@ -521,8 +522,9 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > 落地说明见本文件末尾「AUD-35 / AUD-36 / AUD-37 落地说明」一节。三项同族：
 > **配置项看着有效，却没有读取点**。
 >
-| AUD-43 | ⬜ **`pkg/testutil` 全仓零导入者**（AUD-42 前提核实顺带发现，非登记项）：`go list -f '{{.ImportPath}}|{{join .Imports " "}}|{{join .TestImports " "}}|{{join .XTestImports " "}}' ./...` 里只有它自己那条记录，`.TestImports` / `.XTestImports` 都是空的；Go / Markdown / yaml / sh 全扫也只有它自己。归档审查报告 `docs/archive/reports-2026-Q3/review-report-20260921.md` 把它列为「有 DB 环境下可选集成验证」的**设想**，但**从未接上**。⚠️ 登记 AUD-42 时写它是「测试基础设施」，那个前提不成立。**去留待裁**：删（与 AUD-19 `/api/paper/*`、AUD-33 legacy HTML 同型，需加「它不许回来」的断言）还是留（作为将来的集成测试底座）。若曦 2026-09-22 已裁决 **AUD-42 只做 DSN 收敛、零导入者另立本项** | `pkg/testutil/testdb.go`（唯一文件，242 行） | 要么删干净并留负向断言，要么明确写成「预留的集成测试底座」并给出接入计划 |
-| AUD-44 | ⬜ **`docs/SPEC.md` / `docs/TEST.md` / `docs/ADR.md` 三份常青文档不符合 `docs/README.md` R1**（AUD-41 顺带发现，非登记项）：R1 要求每份文档顶部写 `status` / `last-verified` / `verified-by` 三项 YAML frontmatter，**没有 `last-verified` 的文档 = 已腐烂**。实测 9 份常青文档里 6 份符合（README / TASKS / ARCHITECTURE / PRODUCT / VISION / ROADMAP），**3 份不符合** —— SPEC / TEST 用 blockquote 式 `> **Status**` / `> **Last Updated**`（**无 `verified-by`**），ADR 用 `> **Location**` / `> **Version**`（**连 `status` 都没有**）。⚠️ AUD-30 的落地说明里有「`Owner: 龙少 (Longshao)` 属独立议题、本次不动」，那说的是**署名行的值**，与**元数据格式是否符合 R1**是两件事 | `docs/SPEC.md` / `docs/TEST.md` / `docs/ADR.md` 的头部 | 三份文档的头部符合 R1；或把 R1 改成「blockquote 亦可」并说明理由（不能两边都不动） |
+
+| AUD-46 | ⬜ **13 个零导入者包里的两个「疑似真死代码」待裁决**（AUD-45 盘点顺带发现，非登记项）：① `pkg/metrics` 与 `pkg/observability` **重复实现** —— 两者都定义 `Metrics` / `NewMetrics`，服务实际用的是 `observability`（`cmd/analysis/main.go:319` → `observability.Handler(deps.Metrics)`），所以 `pkg/metrics` 是**重复**不是「待接线」；② `pkg/decimal` 定点小数工具库，**全仓零引用**（portfolio / 回测仍用 float64）—— 属「从未采用」。两者都已进 `internal/repoguard` 的白名单（理由写明「需裁决」），⚠️ **但白名单是临时安置，不是结论** | `pkg/metrics/metrics.go`（135 行）/ `pkg/decimal/decimal.go`（624 行） | 各自裁决：**删除**（并按 AUD-33 范式加负向断言）or **采用**（给出接线点） |
+| AUD-47 | ⬜ **`docs/TEST.md` §5–§7 的内容复核**（AUD-44 顺带发现，非登记项）：AUD-44 只修了**路径引用**（`pkg/tracker` → `pkg/backtest/tracker`、`docs/phase-gate-reviews.md` → `docs/archive/research-2026-Q2/`、§4 的 CLI 示例标注为非真实接口），`last-verified` 已如实写明「只验了路径」。**未逐条复核的**：§5 AI 演化验证的判据、§6 覆盖率目标（是否与实际 CI 门禁一致）、§7 前端测试（Vitest / Playwright 的文件与用例数是否还在跑） | `docs/TEST.md` §5–§7 | 逐条对齐当前实现，或删掉不再适用的条目 |
 
 ## P2 — 数据与清理
 
@@ -1544,6 +1546,82 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > AUD-44（SPEC · TEST · ADR 三份常青文档不符合 R1 frontmatter 约定），本批未修。**
 
 ---
+
+
+> **AUD-43 / AUD-45 落地说明（2026-09-22）**：**前提订正推翻了登记的判据。**
+>
+> 登记 AUD-43 时只发现 `pkg/testutil` 一个零导入者包。开工前用
+> `go list -f '{{.ImportPath}}|{{join .Imports " "}}|{{join .TestImports " "}}|{{join .XTestImports " "}}' ./...`
+> 权威核实，实测 **13 个**：`pkg/api` / `pkg/decimal` / `pkg/metrics` /
+> `pkg/ai/factor` / `pkg/backtest/auction` / `pkg/backtest/marketimpact` /
+> `pkg/alert/systemalert` / `internal/sandbox/wasm` / `pkg/live/margin` /
+> `pkg/strategy/options` / `pkg/data/source/hkex` / `pkg/live/broker/xtp` /
+> `pkg/testutil`。逐包 `grep` 双重确认（外部引用文件数全为 0）。
+>
+> **「零导入者」在本仓不是删除判据** —— 台账里已有明确立场：**P2-5「删的是服务
+> 不是能力」**（`pkg/ai/agents` 不能删，因为 `pkg/ai/pipeline` 在用）、
+> **P2-9wire「五片全写完时整包零调用（'5/6 片的零件 + 0 接线'）」**。那 12 个都是
+> **有实现、有测试的生产能力包**（Black-Scholes / 二叉树、融资融券、XTP 券商、
+> WASM 沙箱、港股源、集合竞价、市场冲击、系统告警、因子、定点小数、Prometheus
+> 指标、API 版本化），只是尚未被编排层接线。所以「零导入者 ⇒ 删除」与仓库既有
+> 立场冲突 → 按纪律**订正登记，不绕过**：若曦 2026-09-22 裁决 **AUD-43 保留
+> `pkg/testutil` 并归并入 AUD-45**。
+>
+> **AUD-45 = 统一盘点 + 结构性护栏**（`5e16fbe`）：新增
+> `internal/repoguard/package_wiring_test.go` —— 断言 **`pkg/**` 与 `internal/**`
+> 下每个包都至少有一个导入者**，例外必须进 `unwiredPackages` 白名单并写明理由。
+> 三条设计要点：① **范围从源码推导**（`go/ast` 扫全仓 `.go` 的 import），不是手写
+> 清单（PITFALLS §41）；② **白名单自带 stale 检测** —— 某个包一旦被接上，它的
+> 白名单条目会**报错要求删除**（白名单只该列「当前无人用」的包，否则它在替死代码
+> 打掩护）；③ **边界写进脚本**：只查 `pkg/` `internal/`（`cmd/` 是入口，天然无
+> 导入者）；只有 `_test.go` 的目录跳过（不可被导入，零导入者无意义）；import 收集
+> **不看 build tag**（平台门控的导入也算数 → 只会漏报、不会误报）；**不检测传递性
+> 死代码**。
+>
+> **破坏验证 5/5 达标**（`.workbuddy-ai/tmp/aud45_sabotage.py`）：S1 删白名单条目
+> （`pkg/decimal`）→ 红且**只指名它**；S2 新建无人导入的包 → 红指名它；S3 导入收集
+> 失效 → 红（报出全部候选包，证明收集是承重的）；S4 给白名单里的包接上导入 → 红并报
+> **stale**；**S5（保持绿对照）候选枚举失效 → 绿**，证明前面的红来自候选枚举而不是
+> 「恒红」。
+>
+> **AUD-44 落地说明（2026-09-22）**（`85cf38c`）：三份入口文档补 R1 frontmatter。
+> `docs/SPEC.md` / `docs/ADR.md` / `docs/TEST.md` 此前用的是**自创的 blockquote
+> 元数据**（SPEC/TEST 是 `> **Status**:` + `> **Last Updated:**`，ADR 连 `status`
+> 都没有）—— R1 的 `status` / `last-verified` / `verified-by` 一个都没有。改法：
+> 加 YAML frontmatter，并把 blockquote 里被 frontmatter 接管的那两行删掉
+> （**避免两处真相来源**）。
+>
+> ⚠️ **`docs/TEST.md` 不只是格式问题，它确实腐烂了**：`pkg/tracker` **已不存在**
+> （迁到 `pkg/backtest/tracker`）、`docs/phase-gate-reviews.md` **已归档**（现在在
+> `docs/archive/research-2026-Q2/`）、§4 的 `go run ./cmd/analysis/main.go --strategy ...`
+> **不是真实接口**（analysis-service 是 HTTP 服务，回测走 `POST /api/backtest`）。
+> 三处已修，但 **§5 / §6 / §7 的判据没有逐条复核** —— 所以 `last-verified` 的
+> `verified-by` **如实写明只验了路径引用**，剩下的事登记为 **AUD-47**。
+> **不盖一个自己没做过的章** —— 这正是 R1 存在的意义：`last-verified` 必须是真的。
+>
+> **护栏 = `tools/check_doc_links.py` 新增的第三项检查**：入口层文档必须带 R1 三字段。
+> 范围**从 `docs/README.md` 的链接推导**（README 是文档的唯一入口，被它链接的就是
+> 「新来的人会读的那几份」），不是手写清单 —— 加一份新入口文档时护栏会自动要求它。
+> 只认**文件开头**的 `---` frontmatter 块（散在正文里的 `status:` 不算数，那正是
+> SPEC/TEST 过去的形状）。
+>
+> **破坏验证 5/5 达标**（`.workbuddy-ai/tmp/aud44_sabotage.py`）：F1 删 SPEC 整个
+> frontmatter → 红指名它；F2 只删 ADR 的 `last-verified` → 红并说明缺哪个字段；
+> F3 把 frontmatter **挪出文件开头** → 红（证明「只认开头」）；F4 新增一份无
+> frontmatter 的文档并链进 README → 红指名它（证明范围确实是推导出来的）；
+> **F5（保持绿对照）检查恒返回空 → 绿**，证明前面的红来自检查本身。
+>
+> **顺带登记**：**AUD-46**（13 个零导入者包里 `pkg/metrics` 与 `pkg/observability`
+> **重复实现**、`pkg/decimal` **全仓零引用** —— 这两个是「疑似真死代码」不是
+> 「待接线」，需裁决删除还是采用；已临时进白名单，**白名单不是结论**）/
+> **AUD-47**（`docs/TEST.md` §5–§7 的内容复核）。
+>
+> **AUD-43 / AUD-44 / AUD-45 共同验证（2026-09-22）**：`gofmt -l`（本批改动文件）
+> 0 命中；`go build ./...` / `go vet ./...` / `GOOS=windows go vet ./...` 全绿；
+> `go test ./... -count=1` **75 个包 ok、0 失败**（比上批 +1 —— 新增
+> `internal/repoguard`）；`check_doc_links.py` 52 文件**三项检查**全绿；
+> `check_deploy_consistency.py` **七项**全绿。提交：`5e16fbe`（AUD-45）、
+> `85cf38c`（AUD-44）。
 
 ## 已冻结（本次定位重构后不再投入）
 
