@@ -137,11 +137,26 @@ copilot:
   working_dir: ""
 
 # A-share trading rules
+#
+# AUD-37：这一整块由**回测引擎**读取 —— pkg/backtest 的 NewEngine 现在读
+# 顶层 `trading` 键（v.UnmarshalKey("trading", ...)），同时 cmd/analysis
+# 的实盘执行路径也读其中的 stamp_tax_rate / min_commission。一个来源，
+# 引擎与实盘不会各用一套费率假设。
+#
+# 此前引擎读的是 `backtest.trading.*`，而这份文件里根本没有那个键 ——
+# 所以整块是**死的**：改了没有任何可观察效果（7 个键的值又恰好都等于
+# 代码里的默认值，所以一直没人发现）。新增或改名键时请跑 pkg/backtest 的
+# TestTradingBlockInServiceConfigHasNoDeadKeys，它会把没人读的键报出来。
 trading:
   # 印花税（仅卖出）：0.05%。2023-08-28 起从 0.1% 减半（财政部/税务总局
   # 2023 年第 39 号公告）。AUD-06 (ODR-065)：此前写 0.001（0.1%），
   # 是减半前的旧税率，会让每次卖出多算一倍的印花税。
   stamp_tax_rate: 0.0005
+  # 减半前的历史税率（仅卖出），适用于 2023-08-28 之前的交易日；跨该日期
+  # 的回测按**交易日**取档（fees.StampTaxRateFor）。与 price_limit 的
+  # st / st_before 是同一模式：当前值与历史值分开，否则整段窗口会被同一
+  # 个值定价。
+  stamp_tax_rate_before: 0.001
   min_commission: 5.0            # 最低佣金 5元
   transfer_fee_rate: 0.00001     # 过户费 0.001%
   price_limit:

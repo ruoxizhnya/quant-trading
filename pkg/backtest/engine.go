@@ -33,8 +33,15 @@ type Config struct {
 	RiskFreeRate   float64 `mapstructure:"risk_free_rate"`
 	Seed           int64   `mapstructure:"seed"` // Random seed for determinism; 0 = use time-based seed
 
-	// Trading rules loaded from config
-	Trading TradingConfig `mapstructure:"trading"`
+	// Trading rules.
+	//
+	// AUD-37: populated from the **top-level** `trading` key (see NewEngine),
+	// NOT from `backtest.trading`. The `-` tag is what keeps this field out
+	// of the `backtest:` unmarshal: leaving both paths open would make
+	// `backtest.trading` a silently-shadowed second entry for the same
+	// knobs, because the yaml's top-level block is always present. Go
+	// callers of NewEngineWithOptions still set it directly.
+	Trading TradingConfig `mapstructure:"-"`
 }
 
 // S7-P2-1: TradingConfig, PriceLimitConfig, and defaultTradingConfig()
@@ -173,6 +180,17 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 	if err := v.Sub("backtest").Unmarshal(&config); err != nil {
 		return nil, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "failed to unmarshal backtest config", "NewEngine")
 	}
+	// AUD-37: the A-share trading rules live at the TOP LEVEL of the service
+	// config (`trading:`), which is also the block cmd/analysis reads for the
+	// live execution path. Reading the same block here is what makes the
+	// engine and live trading share one source of truth instead of two sets
+	// of fee assumptions that happen to agree today.
+	//
+	// UnmarshalKey returns nil when the key is absent, so a config without a
+	// `trading:` block still boots on the defaults below.
+	if err := v.UnmarshalKey("trading", &config.Trading); err != nil {
+		return nil, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "failed to unmarshal trading config", "NewEngine")
+	}
 
 	strategyServiceURL := v.GetString("strategy_service.url")
 	if strategyServiceURL == "" {
@@ -197,10 +215,12 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 		config.RiskFreeRate = DefaultRiskFreeRate
 	}
 
-	// Load trading rules from config, use defaults if not set
-	if config.Trading.StampTaxRate == 0 {
-		config.Trading = defaultTradingConfig()
-	}
+	// AUD-37: fill each unset trading rule from its default — field by
+	// field, NOT all-or-nothing. The old guard keyed the whole struct off
+	// StampTaxRate, so a partial `trading:` block silently zeroed the rest
+	// (and zero is not "unset" for the fee knobs). See
+	// TradingConfig.WithDefaults.
+	config.Trading = config.Trading.WithDefaults()
 
 	// Initialize random seed for deterministic backtests.
 	//
@@ -292,9 +312,8 @@ func NewEngineWithOptions(cfg Config, provider marketdata.Provider, opts ...Engi
 	if cfg.RiskFreeRate == 0 {
 		cfg.RiskFreeRate = DefaultRiskFreeRate
 	}
-	if cfg.Trading.StampTaxRate == 0 {
-		cfg.Trading = defaultTradingConfig()
-	}
+	// AUD-37: field-by-field defaults, mirroring NewEngine.
+	cfg.Trading = cfg.Trading.WithDefaults()
 
 	// Initialize random seed (mirrors NewEngine; P0-5).
 	var rng *rand.Rand

@@ -54,13 +54,15 @@ func newTestEngine(t *testing.T) *Engine {
 	v.Set("backtest.commission_rate", 0.0003)
 	v.Set("backtest.slippage_rate", 0.0001)
 	v.Set("backtest.risk_free_rate", 0.03)
-	v.Set("backtest.trading.stamp_tax_rate", 0.001)
-	v.Set("backtest.trading.min_commission", 5.0)
-	v.Set("backtest.trading.transfer_fee_rate", 0.00001)
-	v.Set("backtest.trading.price_limit.normal", 0.10)
-	v.Set("backtest.trading.price_limit.st", 0.05)
-	v.Set("backtest.trading.price_limit.new", 0.20)
-	v.Set("backtest.trading.new_stock_days", 60)
+	// AUD-37: the trading rules are read from the TOP-LEVEL `trading` key,
+	// not `backtest.trading` (that key never existed in config/*.yaml).
+	v.Set("trading.stamp_tax_rate", 0.001)
+	v.Set("trading.min_commission", 5.0)
+	v.Set("trading.transfer_fee_rate", 0.00001)
+	v.Set("trading.price_limit.normal", 0.10)
+	v.Set("trading.price_limit.st", 0.05)
+	v.Set("trading.price_limit.new", 0.20)
+	v.Set("trading.new_stock_days", 60)
 
 	eng, err := NewEngine(v, nil, zerolog.Nop())
 	require.NoError(t, err)

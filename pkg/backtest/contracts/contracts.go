@@ -28,9 +28,21 @@ import (
 
 // --- DTOs (moved from engine.go) ---
 
-// TradingConfig holds A-share trading rules. Loaded from viper config
-// under `backtest.trading`; falls back to DefaultTradingConfig() when
-// StampTaxRate is zero.
+// TradingConfig holds A-share trading rules.
+//
+// AUD-37 (ODR-065): loaded from the **top-level** `trading` key of the
+// service config — the same block cmd/analysis reads for the live
+// execution path, so the engine and live trading cannot drift on fee
+// assumptions. This comment used to say "under `backtest.trading`";
+// nothing ever wrote that key (config/analysis-service.yaml puts the
+// block at the top level), so the engine's TradingConfig was always the
+// zero value and the old all-or-nothing guard in NewEngine replaced it
+// wholesale with defaults. Every key in the yaml block happened to equal
+// its default, which is why editing the yaml had no observable effect and
+// the gap went unnoticed.
+//
+// Zero-valued fields are filled **per field** by WithDefaults(); do not
+// reintroduce an all-or-nothing replacement.
 type TradingConfig struct {
 	StampTaxRate float64 `mapstructure:"stamp_tax_rate"`
 	// StampTaxRateBefore is the sell-side stamp tax rate in force
@@ -48,6 +60,64 @@ type TradingConfig struct {
 	TransferFeeRate    float64          `mapstructure:"transfer_fee_rate"`
 	PriceLimit         PriceLimitConfig `mapstructure:"price_limit"`
 	NewStockDays       int              `mapstructure:"new_stock_days"`
+}
+
+// WithDefaults returns a copy of c with every zero-valued field replaced by
+// its Default* constant.
+//
+// AUD-37: this replaces the previous all-or-nothing guard
+//
+//	if cfg.Trading.StampTaxRate == 0 {
+//		cfg.Trading = defaultTradingConfig()
+//	}
+//
+// which had two defects:
+//
+//  1. It keyed the whole struct off one field. Setting
+//     `trading.stamp_tax_rate` while forgetting `trading.min_commission`
+//     silently produced MinCommission = 0 — and zero is NOT "unset" on the
+//     fee path: portfolio.ComputeFees does not call
+//     fees.AShareFees.ApplyDefaults, so a zero minimum commission means
+//     "no floor" and a zero transfer fee means "no transfer fee". Both
+//     make fills silently cheaper, which inflates backtest returns.
+//  2. Because one field triggered it, removing that key from the yaml
+//     would reset every *other* key back to its default — the "I only
+//     changed one line" trap.
+//
+// Filling field by field makes a partial config mean "use the default for
+// what I did not specify", which is what an operator expects.
+//
+// Guarded by TestTradingConfig_WithDefaultsFillsOnlyZeroFields and
+// TestNewEngine_PartialTradingBlockDoesNotZeroTheRest.
+func (c TradingConfig) WithDefaults() TradingConfig {
+	if c.StampTaxRate == 0 {
+		c.StampTaxRate = DefaultStampTaxRate
+	}
+	if c.StampTaxRateBefore == 0 {
+		c.StampTaxRateBefore = DefaultStampTaxRateBefore
+	}
+	if c.MinCommission == 0 {
+		c.MinCommission = DefaultMinCommission
+	}
+	if c.TransferFeeRate == 0 {
+		c.TransferFeeRate = DefaultTransferFeeRate
+	}
+	if c.PriceLimit.Normal == 0 {
+		c.PriceLimit.Normal = DefaultPriceLimitNormal
+	}
+	if c.PriceLimit.ST == 0 {
+		c.PriceLimit.ST = DefaultPriceLimitST
+	}
+	if c.PriceLimit.STBefore == 0 {
+		c.PriceLimit.STBefore = DefaultPriceLimitSTBefore
+	}
+	if c.PriceLimit.New == 0 {
+		c.PriceLimit.New = DefaultPriceLimitNew
+	}
+	if c.NewStockDays == 0 {
+		c.NewStockDays = DefaultNewStockDays
+	}
+	return c
 }
 
 // PriceLimitConfig holds daily price-limit fractions by stock category.

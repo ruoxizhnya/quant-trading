@@ -105,3 +105,48 @@ func TestTradingDaysPerYear(t *testing.T) {
 	assert.Equal(t, 252, TradingDaysPerYear, "backtest uses 252 trading days/year")
 	assert.Equal(t, 0.106, DefaultShortSellingRate, "short-selling rate 10.6%/year per VISION.md")
 }
+
+// TestTradingConfig_WithDefaultsFillsOnlyZeroFields is the AUD-37 guard for
+// the field-by-field defaulting that replaced the all-or-nothing guard
+// (`if cfg.Trading.StampTaxRate == 0 { cfg.Trading = DefaultTradingConfig() }`).
+//
+// Three properties, all of which the old guard violated:
+//
+//  1. a field the caller DID set survives;
+//  2. a field the caller did NOT set becomes its default — not zero. Zero is
+//     not "unset" on the fee path: portfolio.ComputeFees does not call
+//     fees.AShareFees.ApplyDefaults, so a zero MinCommission means "no
+//     commission floor" and a zero TransferFeeRate means "no transfer fee",
+//     both of which silently make fills cheaper.
+//  3. a complete config is returned unchanged (no partial overwrite).
+func TestTradingConfig_WithDefaultsFillsOnlyZeroFields(t *testing.T) {
+	def := DefaultTradingConfig()
+
+	// (1) + (2): a partial config — only one field set.
+	partial := TradingConfig{StampTaxRate: 0.0009}
+	got := partial.WithDefaults()
+
+	assert.Equal(t, 0.0009, got.StampTaxRate, "an explicitly set field must survive")
+	assert.Equal(t, def.StampTaxRateBefore, got.StampTaxRateBefore)
+	assert.Equal(t, def.MinCommission, got.MinCommission)
+	assert.Equal(t, def.TransferFeeRate, got.TransferFeeRate)
+	assert.Equal(t, def.PriceLimit, got.PriceLimit)
+	assert.Equal(t, def.NewStockDays, got.NewStockDays)
+
+	// (3): a fully-specified config must come back untouched.
+	full := TradingConfig{
+		StampTaxRate:       0.0009,
+		StampTaxRateBefore: 0.002,
+		MinCommission:      7.5,
+		TransferFeeRate:    0.00003,
+		PriceLimit: PriceLimitConfig{
+			Normal: 0.09, ST: 0.11, STBefore: 0.06, New: 0.25,
+		},
+		NewStockDays: 45,
+	}
+	assert.Equal(t, full, full.WithDefaults(), "WithDefaults must be a no-op on a complete config")
+
+	// The zero value must expand to exactly the documented defaults, so the
+	// "boot with no config" path is the same set of values as before.
+	assert.Equal(t, def, TradingConfig{}.WithDefaults())
+}
