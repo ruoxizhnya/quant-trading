@@ -521,7 +521,7 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | **P2-12** | ~~**表达式引擎只暴露 OHLCV**（open/high/low/close/volume/turnover），因此 `value` / `quality` 类意图表达不出 —— P0-5 中它们只能明确失败，而不是套一个无关的价格表达式产出误导性回测数字~~ | **✅ 2026-09-18** `pkg/strategy/expression/data_provider.go` + `strategy.go` + `pkg/strategy/strategy.go` + `pkg/storage/fundamentals.go` + `pkg/backtest/engine.go` + `pkg/ai/yaml/generator.go` | 新增 `pe/pb/ps/roe/roa` 五个字段，**按 PIT 对齐**（`GetFundamentalsPITBulk` 返回的 Date 是可用日 `COALESCE(ann_date, trade_date)`，不是报告期；`OHLCVDataProvider.fundamentalSeries` 按每根 K 线的日期切一刀，取不到填 NaN 不是 0）。注入走 `strategy.FundamentalAware` 可选接口（`GenerateSignals` 签名没有基本面参数，不动接口；范式同 `FactorAware`），且**只有声明要财报的策略才预热**——纯价量策略不付这份查询成本。`value` → `cs_rank(neg(pe)) + cs_rank(neg(pb)) > 1.6`，`quality` → `cs_rank(roe) + cs_rank(roa) > 1.6`；`custom` 仍明确失败。**估值倍数非正一律 NaN**：PE 为负不是"便宜"是亏损，`neg(pe)` 不该把亏得最狠的排成最便宜（经典价值陷阱）；ROE/ROA 为负是真实的差，原样保留。**顺手修掉一个潜伏 bug**：`neg(x)` 的函数形式此前从未接上（`evaluateFunction` 无条件走 `applyTimeSeriesOp`），`multi_factor` 的默认表达式 `cs_rank(neg(ts_std(close,20)))` 从落地起就是「解析得过、跑不起来」—— 它只被断言过能解析，从没被求值过 |
 | **P2-13** | **验证器链缺真实回测的端到端取证**（2026-09-17 已解决一半）。缺口只剩数据：本地库 `stocks` / `trading_calendar` / `ohlcv_daily_qfq` 均 0 行。~~引擎离线跑不了~~ —— 这是误判，引擎三处 HTTP（仓位 / 择时 / 止损）**都有 in-process 分支**，`cmd/analysis/main.go:160` 也已 `SetRiskManager`；取证时用 `marketdata.NewInMemoryProvider()` + `SetRiskManager` 即可完全离线（范式见 `pkg/validation/economic_integration_test.go`） | `pkg/validation/economic_integration_test.go` | 跑数据同步补齐行情后，用同一范式接真库 |
 
-**2026-09-21 全栈审查（ODR-065）新增 5 项**（Medium/Low）—— **AUD-14 / AUD-15 / AUD-16 已完成，剩 2 项**：
+**2026-09-21 全栈审查（ODR-065）新增 5 项**（Medium/Low）—— **AUD-14 ~ AUD-17 已完成，剩 1 项**：
 
 > **AUD-14 落地说明（2026-09-21）**：AGENTS.md 从 v3.3 升到 **v3.4**，顶层叙述整体
 > 从 ADR-022（双对等工作面 + 飞轮闭环，从未实施）切换到 **ADR-023/024 的现实**
@@ -648,6 +648,47 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > 改动 —— 它与 AUD-19（删 paper 端点）/ AUD-23（`GetPortfolio()` 无锁）绑在一起，
 > 端点删了之后它可能直接变成零调用方死字段。
 
+> **AUD-17 落地说明（2026-09-22）**：登记只要求「注释声明威胁模型」。落地时发现
+> **这个包一个测试都没有** —— M4 的绕过说法（报告里也是转述 D4 子代理）从来没被
+> 验证过。所以先补测试把能力边界钉成可执行证据，再写注释。
+>
+> **实证：四种绕过全部成立**（都是合法 Go，不是假想）：
+>
+> | 绕过 | 例子 | 为什么过 |
+> |---|---|---|
+> | 别名导入 | `import fs "os"` → `fs.RemoveAll(...)` | 正则认的是字面量 `os.RemoveAll(` |
+> | 点导入 | `import . "os"` → `RemoveAll(...)` | 限定符整个没了 |
+> | 变量间接调用 | `rm := os.RemoveAll; rm(...)` | 标识符出现在赋值处，不在调用处 |
+> | 跨行拆分 | `rm := os.` ⏎ `RemoveAll` | **本实现特有**：为了 `Finding.Line` 精确而逐行扫描，副作用是跨行的选择器永远不成 token |
+>
+> 第四种是本次新发现的 —— 报告只列了「包别名 / 变量间接 / 反射 / 字符串拼接」，
+> 没提这个，而它是**为了让行号精确而付出的代价**，属于实现选择的副作用。
+>
+> 反方向也一并钉住：注释被剥离（提到 `os.RemoveAll` 的散文不误报），但
+> **字符串字面量不剥离** —— 写着「never call os.RemoveAll()」的合法策略会被拒。
+> fail-closed 下这个取舍是对的（误报代价是一次构建，漏报代价是一台主机），
+> 但应该被人知道，而不是被撞见。
+>
+> 威胁模型写成 **WHO / NOT WHO** + ✅❌ 清单，**沿用 `internal/sandbox/runner`
+> 已有的体例**（先例推广）：防的是「不知道沙箱约定的 LLM」（对手属性是粗心不是
+> 恶意），**不防**「知道这里有门禁的人」。并写明**真正的边界是 layer 2 的
+> runner**（子进程 + rlimit），本门禁只决定「要不要构建」—— 扫描干净 ≠ 可以跑。
+>
+> 顺手改了 runner 文档里那句「catches patterns that WOULD lead to those
+> escapes」：那会让人以为真能拦住，已改为「只是字面形式的便宜前置过滤」并指回
+> 本包文档。
+>
+> **护栏两向破坏验证**（证明这些测试真有约束力，不是恰好通过）：
+>
+> | 破坏 | 红了 |
+> |---|---|
+> | 正则去掉 `os.` 前缀 | 只有 `aliased_import` 红（其余三种绕过机制不同，不受影响 —— 「只红该红的」） |
+> | 去掉注释剥离 | `TestCheck_IgnoresComments` 红 |
+>
+> 测试里留了显式提示：将来若用 go/ast / gosec 补上这些绕过，
+> `TestCheck_DocumentedBypasses` 会失败 —— 那是**提醒你在同一次改动里更新威胁
+> 模型**，不是要你删测试。
+
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、
 > L3（legacy HTML 残留）。原表只有 AUD-14/AUD-15 两行却写"新增 3 项"，那第 3 项
@@ -655,7 +696,6 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 
 | ID | 任务 | 位置 |
 |----|------|------|
-| AUD-17 | **M4 威胁模型声明**：`internal/sandbox/staticcheck` 是 14 条正则黑名单，经包别名 / 变量间接调用 / 反射 / 字符串拼接可绕过。注释里明示威胁模型（防 AI 生成代码的**无意**违规，**不防**有意攻击者），别让人误以为它是安全边界；中期评估 gosec / go-ast 分析替代 | `internal/sandbox/staticcheck/staticcheck.go` |
 | AUD-18 | **L3 legacy HTML 去留裁决**：`cmd/analysis/static/` 已标 deprecated 但无删除时间表 —— 无限期共存等于两套 UI 都要维护。给出裁决 + 时间表 | `cmd/analysis/static/` |
 
 ---

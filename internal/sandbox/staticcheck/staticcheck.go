@@ -38,6 +38,54 @@
 //     `os.RemoveAll` at runtime). A real AST pass in Phase 2 will
 //     catch this; the regex gate does not, by design (false-positive
 //     rate would spike on legitimate reflection usage).
+//
+// ── Threat model: who this gate is against ────────────────────────────────
+//
+// M4 (ODR-065): this pass is a regex over source **text**, and that has to be
+// spelled out or it gets mistaken for a security boundary.
+//
+// WHO it defends against: **an LLM that does not know the sandbox contract.**
+// The adversarial property here is carelessness, not malice — a model that
+// writes `os.RemoveAll` because it wanted to clean up temp files, or reaches
+// for `exec.Command` because shelling out was the shortest path. Those come
+// out as the plain literal call, and that is exactly what the registry keys
+// on. Against that adversary the gate is effective and cheap (sub-ms).
+//
+// WHO it does NOT defend against: **anything that knows the gate is here.**
+// It is not a security boundary and must never be reasoned about as one.
+// Bypasses that are ordinary, legal Go — all four are pinned as executable
+// evidence in staticcheck_test.go (TestCheck_DocumentedBypasses), so this list
+// cannot quietly go stale:
+//
+//	❌  aliased import      `import fs "os"` → `fs.RemoveAll(...)`
+//	❌  dot import          `import . "os"`  → `RemoveAll(...)`
+//	❌  indirect call       `rm := os.RemoveAll; rm(...)`
+//	❌  split selector      `rm := os.` newline `RemoveAll` — the scan is
+//	    line-by-line (that is how Finding.Line stays exact), so a selector
+//	    broken across lines is never seen as one token
+//	❌  reflection / plugin / runtime string construction
+//	❌  build-tag or cgo-reachable code in a sibling file
+//
+// Where the real boundary is: **layer 2, internal/sandbox/runner** — the
+// subprocess with timeout + rlimits. That is what actually bounds CPU, memory
+// and process count. This gate is layer 1 and only decides *whether to build
+// at all*; a clean scan means "no obvious bad literal", not "safe to run".
+// The runner has its own gaps (no network namespace, no chroot, no seccomp —
+// see its package doc); neither layer is complete, which is why both exist.
+//
+// Two consequences for callers:
+//
+//  1. Fail-closed is about *findings*, not about safety: CheckOrError
+//     returning nil is a precondition for building, never a proof.
+//  2. A finding is not an accusation. The gate is text-level and rejects
+//     string literals that merely *mention* a forbidden call (comments are
+//     stripped, strings are not — see TestCheck_FalsePositiveOnStringLiterals).
+//     Rejecting one legitimate strategy is the cheaper error.
+//
+// Mid-term (registered in TASKS as part of AUD-17): replace or augment with a
+// go/ast pass (resolves aliases and dot imports by type-checking) or gosec.
+// When that lands, the ❌ list above and the test that pins it must be updated
+// in the same change.
 package staticcheck
 
 import (

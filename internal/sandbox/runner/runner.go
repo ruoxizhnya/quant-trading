@@ -41,8 +41,12 @@
 //	❌  Syscall filtering (would need seccomp-bpf / eBPF)
 //
 // The ❌ items are out of scope for Sprint 6 P1-11 — the regex
-// staticcheck gate (P0-4) is the cheap first filter that catches
-// patterns that WOULD lead to those escapes, and the ADR-007 §Future
+// staticcheck gate (P0-4) is the cheap first filter that catches the
+// plain-literal forms of those patterns. It is a regex over source
+// text, not a boundary: aliased / dot imports, indirect calls and
+// split selectors all walk straight through it, so "clean scan" means
+// "no obvious bad literal", never "safe to run" — see
+// internal/sandbox/staticcheck's package doc. The ADR-007 §Future
 // Phase 3 work items (gVisor / firecracker / user-mode Linux) are
 // reserved for later sprints. This runner is a defense-in-depth layer,
 // not a complete isolation primitive.
