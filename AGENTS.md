@@ -810,6 +810,7 @@ Please continue from where we left off.
 | Issue | Workaround |
 |-------|-----------|
 | **Legacy HTML UI 已退役** | **已删除（[AUD-33]，2026-09-22）** —— 6 个文件（`cmd/analysis/static/`，5 html + 1 css）+ `main.go` 的 10 条 HTML 路由与 `/static` 挂载 + 4 条裸镜像路由（`/ohlcv/:symbol`、`POST /screen`、`/stocks/count`、`/market/index`）全部移除。**analysis-service 现在只提供 API**：`:8085/` 返回 404 是**预期行为**，不是故障。前端只有 `web/`（Vue SPA），由 nginx 托管在**宿主 8080**（[AUD-32]），只通过 `/api/*` 打后端。**不要重新引入** catch-all `/` 或 `/static` 挂载 —— 那会让两个前端在同一端口上悄悄分叉，且 `cmd/analysis/deps_test.go` 的 `mustNotHave` 会立刻报错 |
+| **`LiveEngine` 生产零调用方**（[AUD-34]，裁决 2026-09-22：**保留**） | `pkg/live/engine.go` 的 `LiveEngine`（约 450 行完整的 Start/Stop/SubmitOrder/PositionManager 编排）**没有任何生产调用方** —— 唯一的生产消费者 `handlers_paper_trading.go` 已随 [AUD-33] 之前的 AUD-19 删除；活的 `/api/execution/*` 走 `MockTrader`，不经过它。**它只被测试覆盖**（`live_test.go` / `engine_test.go`），**从未被真实请求跑过**；`SimulatedBroker` 同样零调用方。**这是被明确接受的风险，不是已解决的问题** —— 一个从没被真实请求执行过的路径，等于把首次运行留给生产。**接线到实时行情 / 真实券商之前，先补一条从 HTTP 层真的接一次的集成测试**，不要直接上资金 |
 | `ChatbubbleEllipsisOutline` icon name doesn't exist | Correct name is `ChatbubbleEllipsesOutline` (with 'e' before 's') |
 | Trade markers may not render if portfolio_values is empty | Ensure backtest returns valid data before calling renderChart() |
 | **前端 AI 组件已删除** (ODR-045, 2026-07-02) | 9 个组件 P1-13 创建后 S7-P2-7 作为死代码删除; Hermes Agent 自然语言交互替代 (ODR-046). 不要重建 `web/src/components/ai/` — 使用 `pkg/tools/builtin/` MCP 工具层 |

@@ -32,17 +32,16 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | P1 | 16 | 16 | 0 | 0 | 0 | 含 P1-1 —— 子项 1a/1b/1c 均已完成 |
 | P2 | 19 | 15 | 0 | 2 | 2 | ⬜ P2-1 / P2-2；⛔ P2-8、P2-13（两者都卡在数据同步，见下） |
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
-| AUD-19~34 | 16 | 5 | 0 | 11 | 0 | ✅ AUD-19 / AUD-23 / AUD-31 / AUD-32 / AUD-33（2026-09-22）；**无阻塞项**（AUD-34 为 AUD-19 顺带发现的新登记） |
+| AUD-19~34 | 16 | 6 | 0 | 10 | 0 | ✅ AUD-19 / AUD-23 / AUD-31 / AUD-32 / AUD-33（2026-09-22）+ **AUD-34**（裁决：保留，见落地说明）；**无阻塞项** |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：**AUD-34**（`LiveEngine` 生产零调用方 —— 需要一次裁决：
-保留 / 删除 / 补集成测试，三者代价不同）→ **AUD-30**（`docs/SPEC.md` 仍按
-ADR-022 定版，纯文档）→ **AUD-27**（`gofmt -l .` 恒失败：blob 存 CRLF 且无
-`.gitattributes`）→ AUD-28 / AUD-29（`gin.SetMode` 的两处）→ 监管规则类
-AUD-20 / AUD-21 / AUD-22 → 沙箱跨平台 AUD-24 / AUD-25 / AUD-26。
+**下一批建议顺序**：**AUD-30**（`docs/SPEC.md` 仍按 ADR-022 定版，纯文档）→
+**AUD-27**（`gofmt -l .` 恒失败：blob 存 CRLF 且无 `.gitattributes`）→
+AUD-28 / AUD-29（`gin.SetMode` 的两处）→ 监管规则类 AUD-20 / AUD-21 / AUD-22 →
+沙箱跨平台 AUD-24 / AUD-25 / AUD-26。
 
 ### 已完成（2026-09-16，已从下方列表移出）
 
@@ -517,7 +516,6 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | AUD-28 | ⬜ **其余 5 个包仍有「测试各自调 `gin.SetMode`」的模式**（AUD-12 顺带发现，非登记项）：`cmd/data/handlers_ingest_test.go`、`cmd/data/setup_test.go`、`internal/httpserver/cors_test.go`、`internal/httpserver/errors_test.go`、`pkg/api/versioning_test.go`。**今天不报竞争** —— 实测这些包都没用 `t.Parallel()`，所以是**潜在雷**而非现患：一旦有人给这些测试加并行，就会复现 AUD-12 修掉的同类竞争。修法同 AUD-12（`TestMain` 集中设置 + 删掉逐测试调用） | 上述 5 个文件 | 这些包加 `t.Parallel()` 后 `-race` 仍绿 |
 | AUD-29 | ⬜ **`buildRouter` 在运行期按日志格式写 gin 全局 mode**（AUD-12 顺带发现，非登记项）：`if v.GetString("logging.format") == "json" { gin.SetMode(gin.ReleaseMode) }`。两个问题：① **语义可疑** —— 日志格式与 gin 运行模式是两件事，用前者决定后者没有依据；② **运行期改进程级全局** —— 当前测试都用 `logging: level: info`，所以没触发；只要有人写一条 `format: json` 的测试并与并行测试共存，就会复现同类竞争，且这次栈里会出现**生产文件**。`cmd/data/setup.go:220`、`cmd/strategy/main.go:102` 同样写法。**决策点**：是否改由语义相符的配置项（如显式 `server.gin_mode`）决定，并在启动早期设置一次 | `cmd/analysis/setup.go#L638`、`cmd/data/setup.go#L220`、`cmd/strategy/main.go#L102` | gin mode 由语义相符的配置项决定，且在启动期设置一次 |
 | AUD-30 | ⬜ **`docs/SPEC.md` 仍按 ADR-022 定版，未反映 ADR-023/024**（AUD-14 顺带发现，非登记项）：文件头 `Version: 1.5.0 (Unified Research Platform — ADR-022)`、`Last Updated: 2026-09-15`；正文有独立的 `## Unified Research Platform (ADR-022, Proposed)` 章节（四层架构 L0-L3 / 双对等工作面 / 飞轮闭环），全文 7 处引用 ADR-022。**与 AGENTS.md 校准前的状态是同一批漂移**，但 SPEC.md 是 1660 行的 Canonical 规格、那节是独立章节不是散落引用，改动量明显更大 —— 故本次不扩大改动，单独立项。修法同 AUD-14：定位陈述切到 ADR-023/024，并核对 § 里对 API/数据模型**有约束力**的部分是否随定位变了 （ADR-024 影响策略执行载体：YAML → ExpressionStrategy，不是编译产物） | `docs/SPEC.md` 头部 + 第 70 行起的 Unified Research Platform 章节 | SPEC.md 里不再有按 ADR-022 陈述的现行定位；ADR-023/024 对 API/数据模型的约束已体现；`docs/ADR.md` 与 AGENTS.md §11 对 SPEC 的描述一致 |
-| AUD-34 | ⬜ **`LiveEngine` 生产零调用方**（AUD-19 删除 paper handler 后暴露，非登记项）：`pkg/live/engine.go` 的 `LiveEngine` 现在**没有任何生产调用方** —— 唯一的生产消费者是刚被删掉的 `handlers_paper_trading.go`。活的 `/api/execution/*` 走的是 `MockTrader`（`live.LiveTrader` 的另一个实现），不经过 `LiveEngine`。剩下的调用方全在测试里（`live_test.go` / `engine_test.go`，含 AUD-16 新加的三例）。**决策点**：① 保留为「未来实盘引擎骨架」（它确实是完整的 Start/Stop/SubmitOrder/PositionManager 编排，约 450 行），但要接受「只被测试覆盖、从未被真实请求跑过」；② 删除 —— 会连带作废 AUD-16 的修复（那个修复本身是对的：`GetPositions()` 返回值拷贝导致 mark-to-market 算了就扔）与三个新测试；③ 折中：保留但补一条集成测试，从 HTTP 层真的接一次，让它至少被真实请求路径跑过一次。**注意**：`SimulatedBroker` 随本次删除已零调用方（只有 `SimulatedDataFeed` 还被测试用） | `pkg/live/engine.go`（+ `simulated_broker.go`） | 要么 `LiveEngine` 被真实请求路径跑过至少一次，要么删除并写明理由；不允许长期停在「只有测试在用」|\n---
 
 ## P2 — 数据与清理
 
@@ -893,6 +891,27 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > —— 也就是说此刻**两套 UI 对若曦的实际可用性都接近零**；③ 删除是 git 可逆的。
 > **若曦下次起整栈时，界面走 `http://localhost:8080`（不再是 `:8085`）** ——
 > `:8085/` 返回 404 是预期行为，不是故障。
+
+> **AUD-34 裁决（2026-09-22）**：若曦裁定 **保留 `LiveEngine`**，**本次不动代码**。
+>
+> 明确接受的状态：`LiveEngine`（`pkg/live/engine.go`，约 450 行的完整
+> Start/Stop/SubmitOrder/PositionManager 编排）**生产零调用方**，只被测试覆盖
+> （`live_test.go` / `engine_test.go`，含 AUD-16 新加的三例）。活的
+> `/api/execution/*` 走的是 `MockTrader`（`live.LiveTrader` 的另一个实现），
+> 不经过它。`SimulatedBroker` 同样零调用方。
+>
+> **⚠️ 这条裁决意味着一个已知风险被接受，不是被消除。** 登记的验收条件写的是
+> 「要么被真实请求路径跑过至少一次，要么删除并写明理由；**不允许长期停在
+> 『只有测试在用』**」—— 保留属于**第三条路**，所以它被记进 AGENTS.md §14 的
+> 已知问题表，而不是当作已解决。
+>
+> 风险的形状：**一个从没被真实请求执行过的路径，等于把首次运行留给生产**。
+> AUD-16 修的那个 bug 就是这类 —— `GetPositions()` 返回值拷贝导致
+> mark-to-market 算了就扔，三个字段恒为 0，而它在「功能是死的」模块里躺了很久，
+> 是逐行读才发现的，测试全绿也看不出来。
+>
+> **接线到实时行情 / 真实券商之前，第一件事是补一条从 HTTP 层真的接一次的
+> 集成测试**，而不是直接上资金。这条已写进 AGENTS.md §14 的 Workaround 列。
 
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、
