@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-09-22
-verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）
+verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）
 status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有未解除的前置）" —— 见下方「状态总览」
 ---
 
@@ -32,16 +32,16 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | P1 | 16 | 16 | 0 | 0 | 0 | 含 P1-1 —— 子项 1a/1b/1c 均已完成 |
 | P2 | 19 | 15 | 0 | 2 | 2 | ⬜ P2-1 / P2-2；⛔ P2-8、P2-13（两者都卡在数据同步，见下） |
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
-| AUD-19~37 | 19 | 13 | 0 | 6 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-28 / AUD-29 / AUD-30 / AUD-31 / AUD-32 / AUD-33 / **AUD-20 / AUD-21 / AUD-22**（2026-09-22）+ **AUD-34**（裁决：保留）；⬜ AUD-24~26 + **AUD-35 / AUD-36 / AUD-37**（AUD-28/29/20 顺带发现）；**无阻塞项** |
+| AUD-19~38 | 20 | 17 | 0 | 3 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-28 / AUD-29 / AUD-30 / AUD-31 / AUD-32 / AUD-33 / AUD-20 / AUD-21 / AUD-22（2026-09-22）+ **AUD-34**（裁决：保留）+ **AUD-24 / AUD-25 / AUD-26 / AUD-38**（2026-09-22）；⬜ **AUD-35 / AUD-36 / AUD-37**（AUD-28/29/20 顺带发现）；**无阻塞项** |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：沙箱跨平台 AUD-24 / AUD-25 / AUD-26 → 配置一致性
-**AUD-35 / AUD-36 / AUD-37**（分别由 AUD-29 / AUD-28-29 / AUD-20 顺带发现，
-三项同族：**配置项看着有效，却没有读取点**；AUD-37 是其中最实在的一条 ——
-`trading:` 块注释自称「A-share trading rules」，却是引擎读不到的死键）。
+**下一批建议顺序**：配置一致性 **AUD-35 / AUD-36 / AUD-37**（分别由 AUD-29 /
+AUD-28-29 / AUD-20 顺带发现，三项同族：**配置项看着有效，却没有读取点**；
+AUD-37 是其中最实在的一条 —— `trading:` 块注释自称「A-share trading rules」，
+却是引擎读不到的死键）。**沙箱跨平台一组（AUD-24/25/26/38）已于 2026-09-22 全部关闭。**
 
 ### 已完成（2026-09-16，已从下方列表移出）
 
@@ -506,9 +506,14 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 
 | ID | 任务 | 位置 | 验收 |
 |----|------|------|------|
-| AUD-24 | ⬜ **Windows Job Object 实现**（AUD-11 的后续增强）：`CreateJobObject` + `SetInformationJobObject`（`JOB_OBJECT_LIMIT_PROCESS_MEMORY` / `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` / `JOB_OBJECT_LIMIT_JOB_MEMORY`）+ `AssignProcessToJobObject`。做完之后 Windows 才能真正执行受限子进程，`ErrLimitsUnsupported` 就不再是常态。**注意**：Job Object 需要 `cmd.SysProcAttr.CreationFlags` 里加 `CREATE_SUSPENDED` 才能在 exec 前挂载 | `internal/sandbox/runner/rlimit_windows.go` | Windows 上 `Limits{MemoryBytes: …}` 真正生效；不需要逃生阀即可构建 |
-| AUD-25 | ⬜ **`ulimit -u` 在 dash 上不可用**（AUD-11 顺带发现，非登记项）：`ulimit -u` 的可移植性是 **bash ✅ / busybox ash ✅ / dash ❌**（Debian/Ubuntu 的 `/bin/sh` 报 "Illegal option -u"）。故 `Limits.NumProcs` 在 Debian/Ubuntu 上会让构建 fail-closed 报 `ErrLimitSetupFailed`。生产组合根没设 `NumProcs`，所以是地雷不是现患。**决策点**：① 探测 shell 能力并在缺失时报 `ErrLimitsUnsupported`（语义更准）；② 改走 cgroup `pids.max`；③ 把 `NumProcs` 从 API 移除，只留平台原生实现 | `internal/sandbox/runner/rlimit_posix.go` | Debian/Ubuntu 上设 `NumProcs` 时给出「本平台不支持」而非含糊的 setup 失败 |
-| AUD-26 | ⬜ **runner 测试在 Windows 上依赖 PATH 里有 POSIX userland**（AUD-11 顺带发现，非登记项）：`TestRun_ExitZero` 用 `echo`、`TestRun_Timeout` 用 `sleep`、`TestRun_StdinAndEnv` 用 `sh`、`TestRun_NonZeroExit` 用 `false`、`TestRunExitCode` 用 `sh -c`。本机因为装了 Git for Windows 才全绿，**裸 Windows（无 Git Bash）会失败**。CI 跑 Linux 故不影响门禁，但会让「本机全绿」这个信号在裸 Windows 上失真。修法：改成用 `os.Executable()` 自举（测试二进制支持 `-test.run=TestHelperProcess` 模式）或按平台选命令 | `internal/sandbox/runner/runner_test.go` | 裸 Windows 上 `go test ./internal/sandbox/runner/` 也全绿 |
+> **沙箱跨平台一组（AUD-24 / AUD-25 / AUD-26）已于 2026-09-22 全部关闭**，
+> 落地说明见本文件末尾「AUD-24 / AUD-25 / AUD-26 落地说明」一节。
+>
+> **顺带发现并当场落地 AUD-38**：CI 是 Linux-only，全仓 2 个 `//go:build windows`
+> 文件在 CI 里**从不被编译** —— 而 `go build` 连 `_test.go` 都不编译，AUD-26 恰恰
+> 在这两个测试文件里引入过编译错误、直到在 Windows 上跑才暴露。已补
+> `GOOS=windows go vet ./...` 步骤（破坏验证：旧门禁绿、新门禁红）。
+>
 | AUD-35 | ⬜ **`LOG_LEVEL` / `LOG_FORMAT` 是死配置**（AUD-29 顺带发现，非登记项）：`docker-compose.yml` 里 3 个服务各一处、`deploy/k8s/configmap.yaml` 里 2 个键，**全仓无人读**。viper 的 `AutomaticEnv` + `SetEnvKeyReplacer(".", "_")` 把 `logging.level` 映射到 **`LOGGING_LEVEL`**，`LOG_LEVEL` 永远匹配不上；也没有任何 `BindEnv` 把它们接起来（全仓只有 `auth.jwt_secret` / `auth.allow_insecure` 两条 BindEnv）。症状：改了 `LOG_LEVEL` 以为改了日志级别，实际没变 —— 与 AUD-19 同族（**看着有效，零读取点**）。**决策点**：改名成 `LOGGING_LEVEL` / `LOGGING_FORMAT`，还是加 `BindEnv` 保留旧名 | `docker-compose.yml`、`deploy/k8s/configmap.yaml` | 这两个键要么真的被读到，要么被删掉；不能留着假装有效 |
 | AUD-36 | ⬜ **`cmd/strategy` 未接 `viper.AutomaticEnv()`**（AUD-29 顺带发现，非登记项）：`cmd/analysis/setup.go` 与 `cmd/data/setup.go` 都调了 `AutomaticEnv()` + `SetEnvKeyReplacer(".", "_")`，`cmd/strategy/main.go` 的 `loadConfig` **没有** → 该服务**没有任何 env 覆盖**。compose 给它设的 `DATA_SERVICE_URL` / `REDIS_URL` / `LOG_LEVEL` 全部**静默不生效**，只是恰好与 `config/strategy-service.yaml` 里的值一致才「碰巧能用」（与 P1-8 的 k8s `DATA_SERVICE_URL` 同型）。**危害方向与「配了却报未设置」同族**：照另两个服务的经验去设 env，会静默不生效。注意 `cmd/strategy` **目前没有测试包** —— 加之前先补一条「env 覆盖真的生效」的测试，否则改完无法证伪 | `cmd/strategy/main.go#L166-197` | strategy 的 `SERVER_*` env 覆盖与另两个服务一致地生效（或明确记录为有意不支持） |
 | AUD-37 | ⬜ **回测引擎从不读 yaml 的 `trading:` 块**（AUD-20 顺带发现，非登记项）：`NewEngine` 用 `v.Sub("backtest").Unmarshal(&config)` 读的是 **`backtest.trading.*`**，而 `config/analysis-service.yaml` 把这一整块放在**顶层 `trading:`**（L140），`backtest:` 段（L117）里**没有** `trading:` 子段 → `config.Trading` 恒为零值 → `engine.go:202`（及 `:296`）`if config.Trading.StampTaxRate == 0 { config.Trading = defaultTradingConfig() }` **整体替换**为默认值。**逐键核实（2026-09-22，grep 全仓非测试代码）**：① `trading.stamp_tax_rate` / `trading.min_commission` **有人读**，但是 `cmd/analysis/setup.go#L145/L151`（analysis-service 的实盘执行路径），**不是引擎** → 引擎与实盘各用一套费率假设，今天两边都是 0.0005 所以看不出来；② `trading.transfer_fee_rate`、`trading.price_limit.*`、`trading.new_stock_days` **全仓零读取点**（引擎读的是 `backtest.trading.*`，而 yaml 里没有）→ 真死键。**为什么至今没人发现**：这 7 个键的 yaml 值**全部恰好等于** `DefaultTradingConfig()` 的对应默认值（0.0005 / 5.0 / 0.00001 / 0.10 / 0.05 / 0.20 / 60）→ 改 yaml 没有任何可观察效果，与 AUD-35 / AUD-36 同族（**看着有效，零读取点**），但危害更实在：`trading:` 块的注释写着「A-share trading rules」，是用户调回测参数的第一入口。**附带地雷**：`== 0` 判零后**整体替换**，所以将来若只补 `backtest.trading.stamp_tax_rate` 而不补其余键，其余键会**静默回落到默认值**（不是"没填"，是"被覆盖"）。**决策点**：把 yaml 的 `trading:` 段移进 `backtest:`，还是让引擎改读顶层（并保留实盘侧同一来源） | `pkg/backtest/engine.go#L173/L202/L296`、`config/analysis-service.yaml#L117-164` | 引擎的 `TradingConfig` 真的来自 yaml；`trading:` 块里每个键要么被读到、要么被删 |
@@ -1183,6 +1188,110 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > `-race`（docker + `golang:1.25`）覆盖 `pkg/backtest/...` / `pkg/marketdata` /
 > `pkg/risk` / `pkg/fees` 共 **17 包全绿**；两道护栏脚本
 > （`check_doc_links.py` / `check_deploy_consistency.py`）全绿。
+
+> **AUD-26 落地说明（2026-09-22）**：若曦裁决 **`os.Executable()` 自举**。
+> 8 个测试全部改为重入测试二进制自身；模式走**环境变量**而不是 argv（argv 正是
+> 其中几个测试要断言的东西）。`TestMain` 在框架启动前拦截 helper 模式，所以子进程
+> 的 stdout 里不会混进框架的 "PASS"。
+> - **登记漏列 3 个测试**（登记写 5 个用宿主命令，实际 8 个；另
+>   `limits_windows_test.go` 还有第 9 处 `echo`）。已一并改掉。
+> - **`Options.Stdin` 此前零测试**：旧 `TestRun_StdinAndEnv` 名字承诺了 stdin，
+>   函数体从没设过它。已拆成 env / stdin / stdin 默认 EOF 三条。
+> - `TestRun_Dir` 不再在 Windows 上 `t.Skip`（跳过 = 让 `Options.Dir` 在最需要它的
+>   平台零测试）；`TestRun_BinaryNotFound` 不再用 `/nonexistent/binary`（在 Windows
+>   上读起来像 UNC 路径，测的是另一件事）。
+> - **两条新护栏**：`TestCrossPlatformTestsNameNoHostCommand`（**AST** 结构护栏：
+>   `runner_test.go` 与 `limits_windows_test.go` 里任何 `Run` / `RunExitCode` /
+>   `exec.Command` 都**不许出现字符串字面量命令名**。规则是「不许字面量」而不是
+>   「必须是 `helperBinary(t)`」，因为 `TestRun_BinaryNotFound` 合法地传变量）、
+>   `TestHelperRefusesToRecurseWithoutAMode`（防递归护栏的护栏）。
+> - **防递归护栏本身是必要的**：子进程若用 `Options.Env == nil` 会继承 suite 标记
+>   → 跑整套测试 → 再开子进程 = fork 炸弹。`TestMain` 里拦截并 exit 97。
+> - **破坏验证（3 次）**：① 注入 `_ = exec.Command("echo")`（行为中性）→ **只有 AST
+>   护栏红**、全部行为测试绿（证明护栏有独立检出力）；② `TestRun_ExitZero` 改回
+>   `"echo"` → 护栏红并指名 `runner_test.go:184:25`，而**该测试本身仍绿**（本机装了
+>   Git for Windows）—— **AUD-26 的失败模式自己复现了一遍**；③ `TestMain` 的 guard
+>   改成 exit 96 且无消息 → 防递归测试两条断言都红。**注**：把 guard 整块删掉**不能
+>   实跑**（它本身就是那个 fork 炸弹），故改为钉住 guard 的可观测契约。
+> - **行为证据**：把 `PATH` 指向空目录后 `go test ./internal/sandbox/runner/` 仍全绿。
+> - `-race`（docker + `golang:1.25`）18 包全绿。
+
+> **AUD-25 落地说明（2026-09-22）**：若曦裁决 **探测 shell 能力，缺失时报
+> `ErrLimitsUnsupported`**。wrapper 现在对**每个**要用的 ulimit 先探测再加：
+> `ulimit -u >/dev/null 2>&1 || { echo '<不支持标记>' >&2; exit 126; }` 然后
+> `ulimit -u 64 || { echo '<设置失败标记>' >&2; exit 125; }`。
+> - 两个标记 + 两个状态码，`Run` 里分别映射到 `ErrLimitsUnsupported` /
+>   `ErrLimitSetupFailed`。**126 也是任何程序都能用的合法退出码**，所以和 125 一样
+>   要求「状态码 AND 标记」双匹配（已补对称护栏 `TestRun_Exit126WithoutMarker…`）。
+> - 探测是**逐 limit** 而不是只给 `-u`：「这个 shell 表达不了 RLIMIT_AS」比「这个值
+>   被拒了」更准确，代价是一次 builtin 调用。
+> - **如实记录的局限**：`WithAllowUnenforcedLimits` **救不了**这一条 —— 那个决定发生
+>   在子进程里，父进程早已做完选择。dash 系统上 `NumProcs` 请求会 fail-closed，唯一
+>   的逃生阀是「不要请求这个限额」。已写在错误与选项两处文档里。
+> - **实证**：`golang:1.25`（`/bin/sh -> dash`）走不支持分支；`golang:1.25-alpine`
+>   （busybox ash）走成功分支并打印 `64`。**两侧都断言、都不跳过**，所以测试不依赖
+>   跑它的镜像是哪个。另有**对照组**：同一份脚本分别跑在 dash 与 bash 下（bash 那半
+>   是承重的 —— 没有它，一个永远 exit 126 的脚本也能通过 dash 那半）。
+> - **目标用 shell builtin 而不是 Go 程序**：RLIMIT_NPROC 是按**用户的总进程数**算
+>   的，任何需要 clone 线程的 Go 子进程在低限额下都可能起不来；builtin 不 fork。
+> - **破坏验证（3 次）**：① 去掉探测 → 4 条护栏红（脚本形状 ×2 / 顺序 / 端到端）；
+>   ② 探测保留但用错标记 → 同样 4 条红（**标记本身也是承重的**）；③ 探测与设置对调
+>   → 顺序测试以 `RLIMIT_CPU: the capability probe must come first` 变红。
+> - **生产侧是潜伏而非现患**：组合根请求 `{1GiB, 25s, 256 fds}` **不含 `NumProcs`**，
+>   且运行镜像是 alpine（busybox ash 有 `-u`）。
+
+> **AUD-24 落地说明（2026-09-22）**：若曦裁决 **做可映射子集 + 明确报告不支持项**。
+> **登记有两处错，两处都订正而非绕过**：
+> - ① 登记说「Job Object 需要 `CREATE_SUSPENDED` 才能在 exec 前挂载」—— **做不到**。
+>   `syscall.StartProcess` 在返回前就关掉了主线程句柄（`sdk/go1.25.0/src/syscall/
+>   exec_windows.go` 里 `defer CloseHandle(Handle(pi.Thread))`），没有线程可
+>   ResumeThread；`syscall.SysProcAttr` 也没有 `PROC_THREAD_ATTRIBUTE_JOB_LIST`，
+>   构造不出 `STARTUPINFOEX`。所以**只能在 `Start()` 之后挂载**，子进程有一小段无
+>   约束窗口。已把窗口写进 `attachProcessLimits` 的注释，含两条后果：「窗口内跑完的
+>   子进程从未被限额」与「窗口内生出的孙进程不在 job 里」。
+> - ② 登记说验收标准是「Windows 上不需要逃生阀即可构建」—— **构造上达不到**。
+>   Job Object **没有**句柄数限额、也**没有**单文件大小限额（逐字段核对
+>   `JOBOBJECT_BASIC_LIMIT_INFORMATION` / `JOBOBJECT_EXTENDED_LIMIT_INFORMATION`
+>   与整个 API）。验收标准改写为「可映射子集真的生效，其余被点名」。
+> - 映射：`CPUSeconds → JOB_OBJECT_LIMIT_PROCESS_TIME`（100ns）、`MemoryBytes →
+>   PROCESS_MEMORY`（提交内存）、`NumProcs → ACTIVE_PROCESS`（**语义不同**：POSIX
+>   按用户算，这里按 job 算），外加 `KILL_ON_JOB_CLOSE`（失控子进程活不过守护进程）。
+> - **`WithOnUnenforcedLimits` 回调签名改了**：从 `func(argv []string)` 改为
+>   `func(argv []string, unenforced Limits)`。理由：「某个限额没生效」本身不可行动，
+>   运维要知道**是哪个**。`cmd/analysis` 把它记成一个日志字段。
+> - **实测（不是推断）：`JOB_OBJECT_LIMIT_PROCESS_TIME` 的触发点几乎不随限额变化。**
+>   0.1s / 1s / 3s 三个限额都在 **5.3–7.2s 累计用户时间**才杀掉一个 8s 的 CPU 燃烧；
+>   而**同一燃烧不设限额时跑满 8.1s 正常退出**（对照组）。所以 Windows 上的
+>   `CPUSeconds` 是**兜底**，不是「最多 N CPU 秒」的紧界 —— 已写进包级威胁模型，
+>   免得有人拿它做任务预算。
+> - **验证**：① **回读式单元测试** —— `createJobObject` 的结果用
+>   `QueryInformationJobObject` 读回来断言，而不是相信刚填进去的结构体（flag 位、
+>   100ns 换算、内存/进程数字恰是「看着对其实错」的高发区）；另一条钉住
+>   `OpenFiles` / `FileSize` **不设任何 flag**。② **每个可映射字段一条行为测试，
+>   各带对照组**：内存（512MiB 在 128MiB job 里死、在 2GiB job 里活）、活跃进程数
+>   （无限额能 spawn、限额 1 时被拒）、CPU 秒（见上面的松紧度；因要烧核数秒，用
+>   `testing.Short()` 门控）。③ **破坏验证 4 次**：只建不挂 → 3 条行为测试红（CPU
+>   那条跑满 12s 才红，正说明限额是死因）；`unenforceableOnWindows` 返回零 → 5 条红
+>   （含跨平台契约 `TestRun_LimitsAreEnforcedOrRefused`），即「静默丢限额」这个 bug
+>   复现；去掉 `KILL_ON_JOB_CLOSE` → 2 条单元测试红；100ns 乘数写错 10000 倍 → 单元
+>   测试以 `expected: 250000000, actual: 25000` 指名单位变红。
+> - `golang.org/x/sys` 从 indirect 提为 direct（版本不变，v0.46.0 本就在依赖图里）。
+
+> **AUD-38 落地说明（2026-09-22，登记外发现）**：CI 是 Linux-only，全仓 2 个
+> `//go:build windows` 文件（`rlimit_windows.go` / `limits_windows_test.go`）
+> **从不被 CI 编译** —— 而这两个文件是 Windows 上唯一的限额强制路径（AUD-24）。
+> 用 `vet` 而不是 `build`：`go build` **不编译 `_test.go`**，而 AUD-26 恰在这两个
+> 测试文件里引入过编译错误、直到在 Windows 上跑才暴露。**破坏验证（两侧）**：往
+> `rlimit_windows.go` 注入类型错误 → 旧门禁 `go vet ./...`（Linux）**绿**（完全
+> 漏检）、新门禁 `GOOS=windows go vet ./...` **红**并指名
+> `rlimit_windows.go:14:13`。
+
+> **AUD-24 / 25 / 26 / 38 共同验证（2026-09-22）**：`gofmt -l` 0 文件；Windows 侧
+> `go build` / `go vet` / `go test ./... -count=1` 全绿；Linux 侧（docker +
+> `golang:1.25`）`go build` / `go vet` / `go test -count=1` 全绿，且
+> `internal/sandbox/...` + `cmd/analysis` 在 `-race` 下全绿；`GOOS=windows go vet
+> ./...` 从 Linux 容器可跑且通过。四个提交：`c5adcab`（AUD-26）/ `384c26b`
+> （AUD-25）/ `aff1028`（AUD-24）/ `c4dd2bd`（AUD-38）。
 
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、
