@@ -6,11 +6,13 @@ server:
   # 未配置、或写了不认识的值，一律按 release 处理（fail-safe）。
   # 此前由 logging.level != "debug" 推断（与 analysis 服务的
   # logging.format == "json" 口径不一致）。
+  # env 覆盖：SERVER_GIN_MODE
   #
-  # ⚠️ 本服务**没有 env 覆盖**：cmd/strategy 的 loadConfig 未接
-  # viper.AutomaticEnv（analysis / data 都接了），所以 SERVER_GIN_MODE
-  # 在这里不生效 —— 要改只能改这份文件。改之前请先读 TASKS.md 的
-  # AUD-29 落地说明。
+  # AUD-36：本服务**此前没有** env 覆盖 —— loadConfig 未接
+  # viper.AutomaticEnv（analysis / data 都接了），所以 compose 给它设的
+  # REDIS_URL / DATA_SERVICE_URL / LOGGING_LEVEL 全部静默不生效，只是
+  # 恰好与这份文件里的值相同才「碰巧能用」。现已接上，三个服务一致；
+  # 见 cmd/strategy/main.go 的 loadConfig 与 cmd/strategy/main_test.go。
   gin_mode: "release"
 
 redis:

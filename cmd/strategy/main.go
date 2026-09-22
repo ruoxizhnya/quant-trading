@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -169,6 +170,21 @@ func loadConfig(logger zerolog.Logger) (*Config, error) {
 	viper.AddConfigPath("./config")
 	viper.AddConfigPath("../config")
 	viper.AddConfigPath("../../config")
+
+	// AUD-36: env overrides. This service used to be the odd one out —
+	// cmd/analysis and cmd/data both call AutomaticEnv +
+	// SetEnvKeyReplacer, this one did not, so every env var docker-compose
+	// set for it (REDIS_URL / DATA_SERVICE_URL / LOGGING_LEVEL) was
+	// silently ignored. It "worked" only because those values happened to
+	// match config/strategy-service.yaml — the same failure shape as the
+	// k8s DATA_SERVICE_URL gap (P1-8).
+	//
+	// With the replacer, the config key `server.port` is overridden by
+	// SERVER_PORT, `data_service.url` by DATA_SERVICE_URL, and so on.
+	// viper's precedence puts env above the config file, so a set env var
+	// always wins. Guarded by TestLoadConfig_EnvOverridesAreApplied.
+	viper.AutomaticEnv()
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	// Set defaults
 	viper.SetDefault("server.host", "0.0.0.0")
