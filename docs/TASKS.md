@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-09-22
-verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）
+verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）
 status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有未解除的前置）" —— 见下方「状态总览」
 ---
 
@@ -32,16 +32,18 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | P1 | 16 | 16 | 0 | 0 | 0 | 含 P1-1 —— 子项 1a/1b/1c 均已完成 |
 | P2 | 19 | 15 | 0 | 2 | 2 | ⬜ P2-1 / P2-2；⛔ P2-8、P2-13（两者都卡在数据同步，见下） |
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
-| AUD-19~38 | 20 | 17 | 0 | 3 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-28 / AUD-29 / AUD-30 / AUD-31 / AUD-32 / AUD-33 / AUD-20 / AUD-21 / AUD-22（2026-09-22）+ **AUD-34**（裁决：保留）+ **AUD-24 / AUD-25 / AUD-26 / AUD-38**（2026-09-22）；⬜ **AUD-35 / AUD-36 / AUD-37**（AUD-28/29/20 顺带发现）；**无阻塞项** |
+| AUD-19~38 | 20 | 20 | 0 | 0 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-28 / AUD-29 / AUD-30 / AUD-31 / AUD-32 / AUD-33 / AUD-20 / AUD-21 / AUD-22（2026-09-22）+ **AUD-34**（裁决：保留）+ **AUD-24 / AUD-25 / AUD-26 / AUD-38**（2026-09-22）+ **AUD-35 / AUD-36 / AUD-37**（2026-09-22，配置一致性三项） |
+| AUD-39~40 | 2 | 0 | 0 | 2 | 0 | ⬜ **AUD-39**（k8s 的 DATABASE_*/REDIS_* env 键名系统性不匹配，本批登记未修）+ **AUD-40**（`v.Sub("backtest")` 在缺段时返回 nil → `Unmarshal` 空指针 panic，AUD-37 顺带发现） |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：配置一致性 **AUD-35 / AUD-36 / AUD-37**（分别由 AUD-29 /
-AUD-28-29 / AUD-20 顺带发现，三项同族：**配置项看着有效，却没有读取点**；
-AUD-37 是其中最实在的一条 —— `trading:` 块注释自称「A-share trading rules」，
-却是引擎读不到的死键）。**沙箱跨平台一组（AUD-24/25/26/38）已于 2026-09-22 全部关闭。**
+**下一批建议顺序**：**AUD-39**（k8s 侧 env 与代码读取键名不匹配 —— 比 AUD-35/36/37
+更实在：k8s 一个 `DATABASE_*` 都没给，应用回落到镜像内 yaml，而
+`database.password` 是字面量 `${DATABASE_PASSWORD}`，全仓**没有** env 展开器 →
+k8s 下 DB 连接会用错密码）→ **AUD-40**（小，两行）。
+**配置一致性三项（AUD-35/36/37）已于 2026-09-22 全部关闭。**
 
 ### 已完成（2026-09-16，已从下方列表移出）
 
@@ -514,9 +516,12 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > 在这两个测试文件里引入过编译错误、直到在 Windows 上跑才暴露。已补
 > `GOOS=windows go vet ./...` 步骤（破坏验证：旧门禁绿、新门禁红）。
 >
-| AUD-35 | ⬜ **`LOG_LEVEL` / `LOG_FORMAT` 是死配置**（AUD-29 顺带发现，非登记项）：`docker-compose.yml` 里 3 个服务各一处、`deploy/k8s/configmap.yaml` 里 2 个键，**全仓无人读**。viper 的 `AutomaticEnv` + `SetEnvKeyReplacer(".", "_")` 把 `logging.level` 映射到 **`LOGGING_LEVEL`**，`LOG_LEVEL` 永远匹配不上；也没有任何 `BindEnv` 把它们接起来（全仓只有 `auth.jwt_secret` / `auth.allow_insecure` 两条 BindEnv）。症状：改了 `LOG_LEVEL` 以为改了日志级别，实际没变 —— 与 AUD-19 同族（**看着有效，零读取点**）。**决策点**：改名成 `LOGGING_LEVEL` / `LOGGING_FORMAT`，还是加 `BindEnv` 保留旧名 | `docker-compose.yml`、`deploy/k8s/configmap.yaml` | 这两个键要么真的被读到，要么被删掉；不能留着假装有效 |
-| AUD-36 | ⬜ **`cmd/strategy` 未接 `viper.AutomaticEnv()`**（AUD-29 顺带发现，非登记项）：`cmd/analysis/setup.go` 与 `cmd/data/setup.go` 都调了 `AutomaticEnv()` + `SetEnvKeyReplacer(".", "_")`，`cmd/strategy/main.go` 的 `loadConfig` **没有** → 该服务**没有任何 env 覆盖**。compose 给它设的 `DATA_SERVICE_URL` / `REDIS_URL` / `LOG_LEVEL` 全部**静默不生效**，只是恰好与 `config/strategy-service.yaml` 里的值一致才「碰巧能用」（与 P1-8 的 k8s `DATA_SERVICE_URL` 同型）。**危害方向与「配了却报未设置」同族**：照另两个服务的经验去设 env，会静默不生效。注意 `cmd/strategy` **目前没有测试包** —— 加之前先补一条「env 覆盖真的生效」的测试，否则改完无法证伪 | `cmd/strategy/main.go#L166-197` | strategy 的 `SERVER_*` env 覆盖与另两个服务一致地生效（或明确记录为有意不支持） |
-| AUD-37 | ⬜ **回测引擎从不读 yaml 的 `trading:` 块**（AUD-20 顺带发现，非登记项）：`NewEngine` 用 `v.Sub("backtest").Unmarshal(&config)` 读的是 **`backtest.trading.*`**，而 `config/analysis-service.yaml` 把这一整块放在**顶层 `trading:`**（L140），`backtest:` 段（L117）里**没有** `trading:` 子段 → `config.Trading` 恒为零值 → `engine.go:202`（及 `:296`）`if config.Trading.StampTaxRate == 0 { config.Trading = defaultTradingConfig() }` **整体替换**为默认值。**逐键核实（2026-09-22，grep 全仓非测试代码）**：① `trading.stamp_tax_rate` / `trading.min_commission` **有人读**，但是 `cmd/analysis/setup.go#L145/L151`（analysis-service 的实盘执行路径），**不是引擎** → 引擎与实盘各用一套费率假设，今天两边都是 0.0005 所以看不出来；② `trading.transfer_fee_rate`、`trading.price_limit.*`、`trading.new_stock_days` **全仓零读取点**（引擎读的是 `backtest.trading.*`，而 yaml 里没有）→ 真死键。**为什么至今没人发现**：这 7 个键的 yaml 值**全部恰好等于** `DefaultTradingConfig()` 的对应默认值（0.0005 / 5.0 / 0.00001 / 0.10 / 0.05 / 0.20 / 60）→ 改 yaml 没有任何可观察效果，与 AUD-35 / AUD-36 同族（**看着有效，零读取点**），但危害更实在：`trading:` 块的注释写着「A-share trading rules」，是用户调回测参数的第一入口。**附带地雷**：`== 0` 判零后**整体替换**，所以将来若只补 `backtest.trading.stamp_tax_rate` 而不补其余键，其余键会**静默回落到默认值**（不是"没填"，是"被覆盖"）。**决策点**：把 yaml 的 `trading:` 段移进 `backtest:`，还是让引擎改读顶层（并保留实盘侧同一来源） | `pkg/backtest/engine.go#L173/L202/L296`、`config/analysis-service.yaml#L117-164` | 引擎的 `TradingConfig` 真的来自 yaml；`trading:` 块里每个键要么被读到、要么被删 |
+> **配置一致性三项（AUD-35 / AUD-36 / AUD-37）已于 2026-09-22 全部关闭**，
+> 落地说明见本文件末尾「AUD-35 / AUD-36 / AUD-37 落地说明」一节。三项同族：
+> **配置项看着有效，却没有读取点**。
+>
+| AUD-39 | ⬜ **k8s 侧 env 与代码读取的键名系统性不匹配**（AUD-35 顺带发现，非登记项）：`deploy/k8s/configmap.yaml` 的 `POSTGRES_HOST`(L27) / `POSTGRES_PORT`(L28) / `REDIS_HOST`(L32) / `REDIS_PORT`(L33) **全仓零读取者** —— postgres/redis 容器只读 `POSTGRES_DB`(L29) / `POSTGRES_USER`(L30) / `POSTGRES_PASSWORD`，而 Go 侧读的是 `database.host` / `database.port` / `redis.url`，按 AutomaticEnv + `"."→"_"` 推导出的 env 名是 `DATABASE_HOST` / `DATABASE_PORT` / `REDIS_URL`。`analysis-deployment.yaml`(L31/L36) 与 `data-deployment.yaml`(L31) 注入的 `POSTGRES_PASSWORD` / `REDIS_PASSWORD` 同样零读取者（代码读 `database.password` → `DATABASE_PASSWORD`）。**而 k8s 一个 `DATABASE_*` 都没给** → 应用回落到镜像内的 `config/*.yaml`，而 `config/analysis-service.yaml`(L44/L48) 与 `config/data-service.yaml`(L31) 的 `database.password` 是**字面量** `${DATABASE_PASSWORD}`：全仓没有 `os.ExpandEnv` / `os.Expand` 展开器（`cmd/analysis/setup.go:202` 只对 `database.url` 做了 `strings.Contains(dbURL, "${")` 兜底，所以 url 那条会走逐字段拼装，而逐字段拼装又读到同一个字面量密码）→ **k8s 下 DB 连接会用错密码**。compose 侧反而是对的（`DATABASE_HOST` / `DATABASE_PORT` / `DATABASE_USER` / `DATABASE_DATABASE` / `DATABASE_PASSWORD` / `REDIS_URL` 都在）。**决策点**：k8s 改用 `DATABASE_*` + `REDIS_URL` 并删掉 4 个死键与 2 处无读取者的 `*_PASSWORD` 注入，还是让代码改读 `POSTGRES_*` | `deploy/k8s/configmap.yaml#L25-44`、`deploy/k8s/analysis-deployment.yaml#L27-37`、`deploy/k8s/data-deployment.yaml#L27-37` | k8s 下每个注入的 env 要么被某段代码读到、要么被删；且 DB 连接不再依赖字面量占位符 |
+| AUD-40 | ⬜ **`NewEngine` 对缺少 `backtest:` 段的配置会 panic 而不是报错**（AUD-37 顺带发现，非登记项）：`engine.go:173` 的 `v.Sub("backtest").Unmarshal(&config)` —— viper 的 `Sub` 在键不存在时返回 **nil `*viper.Viper`**，随后 `.Unmarshal` 直接空指针 panic（栈顶 `viper.(*Viper).AllKeys` 解引用 0x0）。生产不可达（`config/analysis-service.yaml` 总有 `backtest:` 段），但嵌入方与测试会撞上 —— AUD-37 的测试夹具第一次跑就撞了，症状是「测试 panic 而不是断言失败」。**修法**：`sub := v.Sub("backtest"); if sub == nil { ... }`，或直接 `v.UnmarshalKey("backtest", &config)`（后者对缺键返回 nil error） | `pkg/backtest/engine.go#L173` | 缺少 `backtest:` 段时返回可诊断的错误（或按默认值启动），而不是 panic |
 
 ## P2 — 数据与清理
 
@@ -1297,6 +1302,79 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、
 > L3（legacy HTML 残留）。原表只有 AUD-14/AUD-15 两行却写"新增 3 项"，那第 3 项
 > 是已被判定为误报的 AUD-L1。现补为 AUD-16/17/18，24 项全部有主。
+
+> **AUD-35 落地说明（2026-09-22）**：若曦裁决 **改名**（不加 BindEnv 别名）。
+> `docker-compose.yml` 3 处 `LOG_LEVEL` → `LOGGING_LEVEL`（data / strategy /
+> analysis），`deploy/k8s/configmap.yaml` 的 `LOG_LEVEL` / `LOG_FORMAT` →
+> `LOGGING_LEVEL` / `LOGGING_FORMAT`。**为什么不加别名**：AUD-29 移除 k8s
+> `GIN_MODE` 时已确立「一个决定只留一个入口」（configmap 里那条注释就是理由），
+> 加 `BindEnv("logging.level", "LOG_LEVEL")` 与先例相反，而且会让错名继续留在
+> 部署文件里误导下一个人。**护栏（4 条，两向都钉）**：cmd/analysis 与 cmd/data
+> 各一对 —— `LOGGING_LEVEL` / `LOGGING_FORMAT` 生效（正向）、`LOG_LEVEL` /
+> `LOG_FORMAT` **不**生效（负向，「退役的名字不许回来」）。cmd/data 那份必须
+> 单独写：它驱动的是**全局 viper 单例**，与 analysis 的独立 `viper.New()` 是两条
+> 不同接线。**破坏验证**：① 把 `SetEnvKeyReplacer` 的 `"."` 改成 `"-"` → 只有
+> 正向那条红（全包仅此一条）；② 把 `BindEnv("logging.level", "LOG_LEVEL")` 加回来
+> → 只有负向那条红。提交 `3bb7e7d`。
+
+> **AUD-36 落地说明（2026-09-22）**：若曦裁决 **接上 AutomaticEnv**，与另两服务
+> 一致。`cmd/strategy/main.go` 的 `loadConfig` 加 `AutomaticEnv` +
+> `SetEnvKeyReplacer`；新建 `cmd/strategy/main_test.go`（本包此前**零测试文件**，
+> 这正是缺口能活下来的原因之一）；`config/strategy-service.yaml` 里那段
+> 「⚠️ 本服务没有 env 覆盖 …… SERVER_GIN_MODE 在这里不生效」**已过期**，改为与
+> 另两份 config 一致的「env 覆盖：SERVER_GIN_MODE」。
+> **护栏的关键设计**：断言落在 **`Unmarshal` 之后的 `Config` 结构体**上，不是
+> `viper.Get` —— `loadConfig` 走 `viper.Unmarshal`，而 env 只对「viper 已知的键」
+> （来自配置文件或 `SetDefault`）才可见；只断言 `GetString` 会在 `Unmarshal` 静默
+> 丢掉覆盖时依然通过，等于钉错了东西。**破坏验证**：移除 `AutomaticEnv()`（即修复
+> 前的原状）→ 基线仍绿、7 条 env 断言全部指名失败 —— **这条护栏对修复前的代码是
+> 红的**，即它真能抓住这个缺口，而不是恰好通过。提交 `df58af3`。
+
+> **AUD-37 落地说明（2026-09-22）**：若曦裁决 **引擎改读顶层 `trading:`**。
+> 落地时发现两件登记没写的事：
+>
+> ① **`backtest.trading` 那条路径今天确实活着** —— `engine_accessors_test.go` 与
+> `engine_deterministic_replay_test.go` 两个夹具都在写它。核实过：两个文件里
+> **没有任何**对 Trading / commission / tax 的断言，也没有 `config.Trading` 的直接
+> 引用 —— 所以它们既没暴露问题、也没证明这条路径（夹具里的错路径是「哑」的）。
+> 因此「引擎改读顶层」必须**同时**让旧路径退役（`Config.Trading` 的
+> mapstructure tag 改成 `"-"`）：留着两条路径的话，顶层那条永远胜出（yaml 里总是
+> 有它），`backtest.trading` 就变成「看着有效、实际被遮蔽」的第二个入口 —— 正是
+> 本次要修的缺陷类型。
+>
+> ② **整体替换是地雷，且机制比登记写的更狠**：`portfolio.ComputeFees`
+> （`portfolio.go:45-60`）**不调** `fees.AShareFees.ApplyDefaults`，所以
+> `MinCommission` 为 0 = **没有最低佣金**、`TransferFeeRate` 为 0 = **不收过户费**
+> —— 两者都让成交静默变便宜、回测收益被抬高。（`fees.StampTaxRateFor` 与
+> `resolvePriceLimit` 则各自有逐字段回落，所以不是所有字段都同样危险。）故新增
+> `TradingConfig.WithDefaults()` 逐字段回落。另补 `stamp_tax_rate_before: 0.001`
+> 进 yaml（与 `price_limit` 的 `st` / `st_before` 同模式：当前值与历史值分开）。
+>
+> **护栏（pkg/backtest 5 条 + contracts 1 条）**：9 个键全部用**非默认值**驱动
+> 逐字段断言（静默回落或接错键都会红）；只设一个键时其余字段必须是**默认值而非
+> 0**；无 `trading:` 块的启动路径；「退役路径不许回来」；以及一条**结构性护栏**
+> `TestTradingBlockInServiceConfigHasNoDeadKeys` —— **解析真实 yaml**（不是文本
+> grep），沿结构体 `mapstructure` tag **递归**核对 `trading:` 块里每个键都有 Go
+> 读取者，并显式白名单两个实盘专用键（`emergency_token` /
+> `default_user_profile`）。**破坏验证（4 次）**：A 摘掉顶层读取 → 红 2 绿 3；
+> B 换回整体替换 → **只红 1** 并指名「min_commission 不能变成 0」；C 把
+> `backtest.trading` 标签加回来 → **只红 1**（退役路径那条）；D 往真实 yaml 注入
+> 死键（**顶层 + 嵌套各一个**）→ 结构护栏报出 `trading.bogus_top_level_knob` 与
+> `trading.price_limit.bogus_nested_knob` 两条完整路径 —— **嵌套那条同时证明递归
+> 分支真的在跑**。四次破坏后均用备份恢复，`grep SABOTAGE` = 0、`diff` 与备份
+> 一致、全量重跑绿。提交 `7fcf7d2`。
+
+> **AUD-35 / 36 / 37 共同验证（2026-09-22）**：`gofmt -l`（本批改动文件）0 命中；
+> `go build ./...` / `go vet ./...` / `GOOS=windows go vet ./...` 全绿；
+> `go test ./... -count=1` **73 个包 ok、0 失败**；`check_doc_links.py` 52 文件无
+> 坏链；`check_deploy_consistency.py` 四项全绿。三个提交：`3bb7e7d`（AUD-35）/
+> `df58af3`（AUD-36）/ `7fcf7d2`（AUD-37）。
+
+> **AUD-39 / AUD-40 为本次顺带登记，未修**：见上方待办表。AUD-39 是 AUD-35 的
+> 同类但更实在（k8s 下 DB 连接会用错密码 —— k8s 一个 `DATABASE_*` 都没给，而
+> `database.password` 是字面量 `${DATABASE_PASSWORD}`，全仓没有 env 展开器）；
+> AUD-40 是 AUD-37 撞出来的（`v.Sub("backtest")` 缺段时返回 nil → `Unmarshal`
+> 空指针 panic，而不是返回错误）。
 
 ---
 
