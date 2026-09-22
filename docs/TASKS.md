@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-09-22
-verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）；AUD-41/42 落地（SPEC 的 `## Configuration` 段整段订正 + doc 护栏第二项检查；`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓单实现结构护栏）+ 顺带登记 AUD-43 / AUD-44（2026-09-22）；AUD-43/44/45 落地（AUD-43 前提订正后**裁决保留** `pkg/testutil` 并归并入 AUD-45；AUD-45 = 统一盘点 13 个零导入者包 + 新增 `internal/repoguard` 结构性护栏；AUD-44 = 三份入口文档补 R1 frontmatter + doc 护栏第三项检查）+ 顺带登记 AUD-46 / AUD-47（2026-09-22）
+verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）；AUD-41/42 落地（SPEC 的 `## Configuration` 段整段订正 + doc 护栏第二项检查；`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓单实现结构护栏）+ 顺带登记 AUD-43 / AUD-44（2026-09-22）；AUD-43/44/45 落地（AUD-43 前提订正后**裁决保留** `pkg/testutil` 并归并入 AUD-45；AUD-45 = 统一盘点 13 个零导入者包 + 新增 `internal/repoguard` 结构性护栏；AUD-44 = 三份入口文档补 R1 frontmatter + doc 护栏第三项检查）+ 顺带登记 AUD-46 / AUD-47（2026-09-22）；AUD-46/47 落地（AUD-46 = 删除 `pkg/metrics`（ADR-017 §1 的竞争实现，四个核心指标由 `pkg/observability` 实现）+ `internal/repoguard` 新增 `retiredPackages` 退役负向断言，`pkg/decimal` 裁决保留并标注「待采用」；AUD-47 = `docs/TEST.md` §5–§7 内容复核 —— 沙箱限制改实测值 30s/1 GiB、覆盖率目标标注为「不是门禁」、前端与 e2e 用例数改实测），2026-09-22
 status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有未解除的前置）" —— 见下方「状态总览」
 ---
 
@@ -36,16 +36,18 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | AUD-39~40 | 2 | 2 | 0 | 0 | 0 | ✅ **AUD-39**（k8s 的 `DATABASE_*`/`REDIS_URL` 口径 + 值对齐 + 消灭 `${...}` 字面量占位符 + 部署护栏检查 5~8）+ **AUD-40**（`v.Sub` 缺段返回 nil → panic 防护），2026-09-22 |
 | AUD-41~42 | 2 | 2 | 0 | 0 | 0 | ✅ **AUD-41**（`docs/SPEC.md` 的 `## Configuration` 段整段订正 —— 如实描述三份真实配置文件 + 策略 YAML 真实 schema；`tools/check_doc_links.py` 加第二项检查「文档里引用的 config/ · deploy/ 路径必须存在」，**第一版只认反引号、对目标形态是瞎的，已修正**）+ **AUD-42**（`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓「只有一处 DSN 拼装」结构护栏），2026-09-22 |
 | AUD-43~45 | 3 | 3 | 0 | 0 | 0 | ✅ **AUD-43**（`pkg/testutil` 零导入者 —— 前提订正后裁决**保留**并归并入 AUD-45）+ **AUD-45**（统一盘点 **13 个**零导入者包 + 新增 `internal/repoguard` 结构性护栏「pkg/ internal/ 下的包必须有消费者，否则进白名单并写理由」，**范围从源码推导、白名单自带 stale 检测**）+ **AUD-44**（`docs/SPEC.md` / `docs/TEST.md` / `docs/ADR.md` 补 R1 frontmatter + `check_doc_links.py` 第三项检查「入口层文档必须带 R1 三字段」，**范围从 `docs/README.md` 的链接推导**），2026-09-22 |
+| AUD-46~47 | 2 | 2 | 0 | 0 | 0 | ✅ **AUD-46**（删除 `pkg/metrics` —— 它是 ADR-017 §1 的**竞争实现**，那四个核心指标由 `pkg/observability` 实现，两者同时接线会重复注册 `backtest_duration_seconds` 并 panic；`internal/repoguard` 新增 **`retiredPackages` 退役负向断言**；`pkg/decimal` 裁决**保留**并标注「待采用」）+ **AUD-47**（`docs/TEST.md` §5–§7 内容复核 —— 沙箱限制 5s/100MB → 实测 **30s/1 GiB**、覆盖率目标标注为「**不是门禁**」（CI 不设阈值）、`format.test.ts` 8→**28** 例、e2e 3 套件 22 例 → 实测 **17 spec / 160 例**），2026-09-22 |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：**AUD-46**（13 个零导入者包里两个「疑似真死代码」待裁决 ——
-`pkg/metrics` 与 `pkg/observability` 重复实现、`pkg/decimal` 全仓零引用；两者已进
-`internal/repoguard` 白名单临时安置，白名单不是结论）→ **AUD-47**（`docs/TEST.md`
-§5–§7 的内容复核 —— AUD-44 只验了路径引用，`last-verified` 已如实写明这一点）。
-**AUD-43 / AUD-44 / AUD-45 已于 2026-09-22 全部关闭**，落地说明见本文件末尾。
+**AUD 线已全部关闭**（AUD-01 ~ AUD-47，2026-09-22）—— 状态总览里的 AUD 行全部
+为 ✅，待办表里已无 AUD 项。
+
+**下一批建议**：**P2-1**（补宏观 / 跨境数据源）与 **P2-2**（产业链数据底座最小版）
+—— 两者都不依赖审计结论，但**都要先能同步数据**；**P2-8 / P2-13 ⛔ 仍卡在
+数据同步**，前置不解除、做完也验不了。
 
 ### 已完成（2026-09-16，已从下方列表移出）
 
@@ -523,8 +525,16 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > **配置项看着有效，却没有读取点**。
 >
 
-| AUD-46 | ⬜ **13 个零导入者包里的两个「疑似真死代码」待裁决**（AUD-45 盘点顺带发现，非登记项）：① `pkg/metrics` 与 `pkg/observability` **重复实现** —— 两者都定义 `Metrics` / `NewMetrics`，服务实际用的是 `observability`（`cmd/analysis/main.go:319` → `observability.Handler(deps.Metrics)`），所以 `pkg/metrics` 是**重复**不是「待接线」；② `pkg/decimal` 定点小数工具库，**全仓零引用**（portfolio / 回测仍用 float64）—— 属「从未采用」。两者都已进 `internal/repoguard` 的白名单（理由写明「需裁决」），⚠️ **但白名单是临时安置，不是结论** | `pkg/metrics/metrics.go`（135 行）/ `pkg/decimal/decimal.go`（624 行） | 各自裁决：**删除**（并按 AUD-33 范式加负向断言）or **采用**（给出接线点） |
-| AUD-47 | ⬜ **`docs/TEST.md` §5–§7 的内容复核**（AUD-44 顺带发现，非登记项）：AUD-44 只修了**路径引用**（`pkg/tracker` → `pkg/backtest/tracker`、`docs/phase-gate-reviews.md` → `docs/archive/research-2026-Q2/`、§4 的 CLI 示例标注为非真实接口），`last-verified` 已如实写明「只验了路径」。**未逐条复核的**：§5 AI 演化验证的判据、§6 覆盖率目标（是否与实际 CI 门禁一致）、§7 前端测试（Vitest / Playwright 的文件与用例数是否还在跑） | `docs/TEST.md` §5–§7 | 逐条对齐当前实现，或删掉不再适用的条目 |
+
+**ODR-065 的 AUD 线已全部关闭**（AUD-01 ~ AUD-47，2026-09-22）。本批收尾：
+**AUD-46**（删除 `pkg/metrics` —— ADR-017 §1 的**竞争实现**，那四个核心指标由
+`pkg/observability` 实现，两者同时接线会重复注册 `backtest_duration_seconds` 并 panic；
+`internal/repoguard` 新增 **`retiredPackages` 退役负向断言**；`pkg/decimal` 裁决
+**保留**并标注「待采用」）/ **AUD-47**（`docs/TEST.md` §5–§7 内容复核）。
+落地说明见本文件末尾。
+
+**剩下的未完成项全在 P2**：P2-1 / P2-2 ⬜ 待做；P2-8 / P2-13 ⛔ 卡在数据同步
+（`TUSHARE_TOKEN` 未设置）。**AUD 线已无待办。**
 
 ## P2 — 数据与清理
 
@@ -1622,6 +1632,51 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > `internal/repoguard`）；`check_doc_links.py` 52 文件**三项检查**全绿；
 > `check_deploy_consistency.py` **七项**全绿。提交：`5e16fbe`（AUD-45）、
 > `85cf38c`（AUD-44）。
+
+
+> **AUD-46 / AUD-47 落地说明（2026-09-22）**：**AUD-45 的盘点把 13 个零导入者包
+> 放进了同一个桶（「零导入者」），本批证明这个桶里装的不是同一种东西。**
+>
+> **AUD-46 —— `pkg/metrics` 是「竞争实现」，不是「待接线」**（`cba6bfe`）：
+> 取证把登记里的模糊判断换成了精确事实 —— **ADR-017 §1 定义的那四个核心指标**
+> （`backtest_duration_seconds` / `http_client_requests_total` / `llm_tokens_total` /
+> `cache_hit_ratio`）**正是 `pkg/observability` 实现的那四个**
+> （`deps.Metrics *observability.Metrics`，`main.go:319` →
+> `observability.Handler(deps.Metrics)`）。`pkg/metrics` 是另一套 **7 个**指标，
+> 与它**只重叠一个名字**（`backtest_duration_seconds`）—— 所以「保留并接线」
+> **技术上不可行**：两者同时注册会**重复注册该指标并 panic**。
+> → 若曦 2026-09-22 裁决**删除**（要加指标请加进 `observability`，一个注册表）。
+> **`pkg/decimal` 裁决保留**，白名单理由从「需裁决」改为「**待采用**：portfolio /
+> 回测仍用 float64，迁移未排期」—— 它是能力包，与另外 11 个同型。
+>
+> **退役 = 删代码 + 加一条「它不许回来」的断言**（AUD-33 的教训，AUD-45 已把它
+> 写成护栏）：`internal/repoguard` 新增 **`retiredPackages`** —— 对每个退役包断言
+> **目录不存在**（用 `os.Stat`，所以**连只放 `_test.go` 的纯测试目录也算复活**）。
+> 破坏验证 **4/4**（`.workbuddy-ai/tmp/aud46_sabotage.py`）：T1 重建 `pkg/metrics`
+> （有非测试文件）→ 红指名它；T2 **只重建测试文件** → 仍红（证明判的是目录存在、
+> 不是候选集）；T3 什么都不改 → **绿（保持绿对照）**；T4 删白名单条目
+> （`pkg/decimal`）→ 红（证明原有的「零导入者」检查没被这次编辑改坏）。
+>
+> **AUD-47 —— `docs/TEST.md` §5–§7 内容复核**（`ca5e547`）：AUD-44 只验了路径引用，
+> 本批把 §5–§7 逐条对齐实现 —— **四处都错了**：
+> ① §5 沙箱限制写「`GenerateSignals()` ≤ 5s / 内存 ≤ 100MB」，实测是
+> **30s CPU + 1 GiB**（ODR-020，见 `cmd/analysis/main.go` 的 `sandboxRunnerAdapter`）；
+> ② §6「Coverage Targets」**在 CI 里没有门禁** —— go job 只跑 `go build` / `go vet` /
+> `GOOS=windows go vet` / `go test -count=1 -race`，**不读 `coverage.out`**；
+> `make test` 只生成报告。已加显式警告「**这是目标，不是门禁**」；
+> ③ §7.1 `format.test.ts` 写 8 tests，实测 **28**；
+> ④ §7.2 e2e 写 3 个套件共 22 例，实测 **17 个 spec / 160 例**；顺带修
+> `--project=chrome` → **`chromium`**（配置里唯一注册的 project 名）。
+> 改完 `last-verified` 才如实升到 2026-09-22（`verified-by` 列出验了哪四处）。
+> **教训**：AUD-44 说「§5–§7 未核」时，那是**老实话**；本批把老实话变成了核对 ——
+> 一份「只验了路径」的文档，剩下的部分几乎必然也是错的（四处无一例外）。
+>
+> **AUD-46 / AUD-47 共同验证（2026-09-22）**：`gofmt -l`（本批改动文件）0 命中；
+> `go build ./...` / `go vet ./...` / `GOOS=windows go vet ./...` 全绿；
+> `go test ./... -count=1` **74 个包 ok、0 失败**（比上批 **−1** —— `pkg/metrics`
+> 已删）；`check_doc_links.py` 52 文件**三项检查**全绿；
+> `check_deploy_consistency.py` **七项**全绿。
+> **AUD 线到此全部关闭**（AUD-01 ~ AUD-47）。
 
 ## 已冻结（本次定位重构后不再投入）
 
