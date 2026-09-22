@@ -44,16 +44,22 @@ spec:
             - name: tcp-postgres
               containerPort: 5432
           env:
+            # AUD-39：configmap 里只有一份词汇表（DATABASE_*），这里把它
+            # 翻译成 postgres 官方镜像认的 POSTGRES_* 名字。**name 是容器
+            # 侧的名字，key 是 configmap 侧的键** —— 两者故意不同，不要
+            # 「顺手统一」。此前 key 写的是 POSTGRES_DB / POSTGRES_USER，
+            # 而 configmap 里那两个键的值是 quantlab，与应用读的
+            # quant_trading / postgres 对不上。
             - name: POSTGRES_DB
               valueFrom:
                 configMapKeyRef:
                   name: quant-trading-config
-                  key: POSTGRES_DB
+                  key: DATABASE_DATABASE
             - name: POSTGRES_USER
               valueFrom:
                 configMapKeyRef:
                   name: quant-trading-config
-                  key: POSTGRES_USER
+                  key: DATABASE_USER
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -65,13 +71,13 @@ spec:
               subPath: postgres
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "quantlab", "-d", "quantlab"]
+              command: ["pg_isready", "-U", "postgres", "-d", "quant_trading"]
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "quantlab", "-d", "quantlab"]
+              command: ["pg_isready", "-U", "postgres", "-d", "quant_trading"]
             initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 5

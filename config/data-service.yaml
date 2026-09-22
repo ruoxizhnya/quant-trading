@@ -24,18 +24,35 @@ server:
 rate_limit:
   per_minute: 100
 
+# 数据库。密码**只能**从 env 注入（DATABASE_PASSWORD）。
+#
+# AUD-39：此前 password 写的是字面量 "${DATABASE_PASSWORD}"，而本仓没有 env
+# 展开器 —— 那个字面量会被当成真密码用。现在改成空串，启动期由
+# pkg/storage.BuildDSN 校验（空密码 Fatal 并指向 DATABASE_PASSWORD）。
+#
+# url 留空 = 逐字段拼装；它是 DATABASE_URL 的覆盖点。
 database:
+  url: ""
   host: "postgres"
   port: 5432
   user: "postgres"
-  password: "${DATABASE_PASSWORD}"
+  password: ""
   database: "quant_trading"
   sslmode: "disable"
 
 redis:
   url: "redis://redis:6379"
 
+# Tushare。token **只能**从 env 注入（TUSHARE_TOKEN）；空 = 未配置。
+#
+# AUD-39：此前写的是字面量 "${TUSHARE_TOKEN}"。没有展开器，于是「未配置」
+# 变成「配置了一个内容为 ${TUSHARE_TOKEN} 的 token」—— Tushare 返回 40101，
+# 而日志里看不出是没填 token（P2-8 那条静默失败就是这个形状）。改成空串后，
+# buildTushareClient 会打印明确的 warn。
+#
+# 注意这里**不**做启动期 Fatal：buildTushareClient 的注释明示「sync 端点会在
+# 调用时失败，但 read 端点仍可用」是有意的设计（只读路径不依赖 token）。
 tushare:
-  token: "${TUSHARE_TOKEN}"
+  token: ""
   base_url: "https://api.tushare.pro"
   max_retries: 3

@@ -40,12 +40,28 @@ auth:
 rate_limit:
   per_minute: 100
 
+# 数据库。密码**只能**从 env 注入（DATABASE_PASSWORD）。
+#
+# AUD-39：这里此前写的是字面量 "${DATABASE_PASSWORD}"。本仓**没有**任何
+# env 展开器（全仓无 os.ExpandEnv / envsubst），YAML 里的 ${...} 不是模板，
+# 就是那 22 个字符本身 —— 它会被当成密码交给驱动，失败点在 TCP 连上之后，
+# 日志里只有 "password authentication failed"，读起来像「密码错了」而不是
+# 「没填密码」。k8s 侧因为注入的 env 名不匹配（见 deploy/k8s/configmap.yaml），
+# 应用拿到的正是这个字面量。
+#
+# 现在改成空串 + 启动期校验（pkg/storage.BuildDSN）：空密码直接 Fatal 并
+# 告诉你填 DATABASE_PASSWORD。注意这里是**空**，不是占位符 —— 占位符会被
+# BuildDSN 当成错误（ErrDSNPlaceholder）。
+#
+# url 留空 = 由下面的逐字段拼装；它同时是 DATABASE_URL 的覆盖点，方便嵌入方
+# 直接给完整 DSN。这条不变量由 tools/check_deploy_consistency.py 的检查 7 守护
+# （config/*.yaml 里不得出现 ${）。
 database:
-  url: "postgres://postgres:${DATABASE_PASSWORD}@postgres:5432/quant_trading?sslmode=disable"
+  url: ""
   host: "localhost"
   port: 5432
   user: "postgres"
-  password: "${DATABASE_PASSWORD}"
+  password: ""
   database: "quant_trading"
   sslmode: "disable"
 

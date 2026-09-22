@@ -1486,7 +1486,20 @@ When a LiveTrader is attached, the engine can run in "paper trading" mode where 
 
 ## Configuration
 
-### Global Config (config/global.yaml)
+> ⚠️ **下面是设计草图，不是本仓的文件清单。** 本仓实际有三份服务配置：
+> `config/analysis-service.yaml` / `config/data-service.yaml` /
+> `config/strategy-service.yaml` —— **`config/global.yaml` 并不存在**，键名也与
+> 下面不同（`database.database` 而非 `database.name`；`redis.url` 而非
+> `redis.host` / `redis.port` / `redis.password`）。**以文件为准。**
+>
+> ⚠️ **不要照抄这里的 `${...}` 写法。** 本仓**没有** env 展开器（全仓无
+> `os.ExpandEnv` / `envsubst`），YAML 里的 `${X}` 不是模板 —— 它是那 4 个字符
+> 本身，会被当成真的密码 / token 用（AUD-39 就是被这个坑掉的）。密码类字段一律
+> 留**空**，由启动期校验要求 env 必填。
+>
+> 这段草图的整体订正（键名、文件拆分）另立台账项，本次只消除 `${...}` 反例。
+
+### Global Config (sketch — see the note above)
 ```yaml
 app:
   name: "quant-trading"
@@ -1496,7 +1509,8 @@ database:
   host: "localhost"
   port: 5432
   user: "postgres"
-  password: "${DB_PASSWORD}"
+  # AUD-39：留空，由 env 注入（必填）。不要写 ${...} —— 没有展开器。
+  password: ""          # env: DATABASE_PASSWORD
   name: "quant_trading"
   sslmode: "disable"
   max_connections: 20
@@ -1504,16 +1518,18 @@ database:
 redis:
   host: "localhost"
   port: 6379
-  password: "${REDIS_PASSWORD}"
+  # 本项目的 redis 未启用 requirepass，不校验密码（见 docker-compose.yml 文件头）。
+  password: ""
   db: 0
 
 logging:
-  level: "info"
-  format: "json"
+  level: "info"         # env: LOGGING_LEVEL
+  format: "json"        # env: LOGGING_FORMAT
   output: "stdout"
 
 tushare:
-  token: "${TUSHARE_TOKEN}"
+  # 留空 = 未配置（sync 端点会失败，read 端点仍可用）。
+  token: ""             # env: TUSHARE_TOKEN
   base_url: "https://api.tushare.pro"
 
 services:

@@ -26,13 +26,12 @@ spec:
               containerPort: 6379
           command: ["redis-server"]
           args: ["--appendonly", "yes"]
-          env:
-            - name: REDIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: redis-credentials
-                  key: password
-                  optional: true
+          # AUD-39：这里**没有** env，是有意的。此前注入过一个
+          # REDIS_PASSWORD（secret redis-credentials），但 command 覆盖了
+          # 镜像 entrypoint 且 args 只有 --appendonly —— **没有
+          # --requirepass**，redis 根本不校验密码。那个 env 零读取者，只是
+          # 让清单看起来有密码保护。给 redis 加密码要动全部服务的
+          # REDIS_URL，是另一件事（见 docker-compose.yml 文件头的说明）。
           volumeMounts:
             - name: data
               mountPath: /data

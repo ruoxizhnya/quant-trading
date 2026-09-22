@@ -26,7 +26,13 @@ services:
     image: timescale/timescaledb:latest-pg17
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      # AUD-39：读的是 **DATABASE_PASSWORD**，与应用侧同一个变量。
+      # 此前这里写的是 ${DB_PASSWORD:-postgres} —— 与应用读的
+      # ${DATABASE_PASSWORD:-postgres} 是**两个独立的变量**，只是默认值
+      # 恰好相同。一旦有人把密码改成非默认（改哪个都错），postgres 与
+      # 应用就会用不同的密码，连接必然失败。ADR-017 与 SPEC.md 里写的
+      # `DB_PASSWORD` 是第三个口径，已一并订正。
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
       POSTGRES_DB: quant_trading
     ports:
       # AUD-13：数据库只绑回环，不暴露到局域网。
@@ -67,7 +73,19 @@ services:
     ports:
       - "8081:8081"
     environment:
-      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      # AUD-39：DATABASE_HOST/PORT/USER/DATABASE 四项此前**没给** data-service
+      # （只给了密码），它靠 config/data-service.yaml 里的 host/port/user/
+      # database 兜底 —— 值恰好与这里相同，所以「碰巧能用」（P1-8 同型：
+      # 一旦 yaml 或服务名改了就会静默连错库）。显式补齐，与
+      # analysis-service 的口径一致。
+      #
+      # DB_PASSWORD 已删除：viper 的键是 database.password，推导出的 env 名
+      # 是 DATABASE_PASSWORD；DB_PASSWORD 零读取者（与 k8s 侧
+      # POSTGRES_PASSWORD 是同一类死键）。
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: postgres
+      DATABASE_DATABASE: quant_trading
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
       REDIS_URL: redis://redis:6379
@@ -118,7 +136,8 @@ services:
     ports:
       - "8085:8085"
     environment:
-      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      # AUD-39：DB_PASSWORD 已删除（零读取者，viper 读的是
+      # database.password → DATABASE_PASSWORD，见 postgres 服务的说明）。
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
       # P0-4: 鉴权密钥，必须设置。容器里监听 0.0.0.0，不配密钥服务会
       # 拒绝启动（`auth: JWT secret missing`）—— 这是刻意的 fail-closed。

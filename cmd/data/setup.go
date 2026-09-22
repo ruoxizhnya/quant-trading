@@ -111,16 +111,26 @@ func requestLogger() gin.HandlerFunc {
 // initStore connects to PostgreSQL using the database.* viper keys.
 // Fatal-exits the process on connection failure (data-service cannot
 // operate without a database).
+//
+// AUD-39: the DSN is resolved by storage.BuildDSN, shared with cmd/analysis.
+// It rejects two configurations that used to slip through silently — a
+// `${...}` placeholder left in database.url (this repo has no env expander,
+// so it would be handed to the driver as the literal password) and an empty
+// password. This function previously did its own fmt.Sprintf and checked
+// neither, and it did not escape the password.
 func initStore(ctx context.Context, logger zerolog.Logger) *storage.PostgresStore {
-	dbConnString := fmt.Sprintf(
-		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		viper.GetString("database.user"),
-		viper.GetString("database.password"),
-		viper.GetString("database.host"),
-		viper.GetInt("database.port"),
-		viper.GetString("database.database"),
-		viper.GetString("database.sslmode"),
-	)
+	dbConnString, err := storage.BuildDSN(storage.DatabaseConfig{
+		URL:      viper.GetString("database.url"),
+		Host:     viper.GetString("database.host"),
+		Port:     viper.GetInt("database.port"),
+		User:     viper.GetString("database.user"),
+		Password: viper.GetString("database.password"),
+		Name:     viper.GetString("database.database"),
+		SSLMode:  viper.GetString("database.sslmode"),
+	})
+	if err != nil {
+		logger.Fatal().Err(err).Msg("invalid database configuration")
+	}
 
 	store, err := storage.NewPostgresStore(ctx, dbConnString)
 	if err != nil {

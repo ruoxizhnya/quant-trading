@@ -28,7 +28,9 @@ spec:
             - configMapRef:
                 name: quant-trading-config
           env:
-            - name: POSTGRES_PASSWORD
+            # AUD-39：名字必须是 DATABASE_PASSWORD（代码读 `database.password`）。
+            # 此前注入的是 POSTGRES_PASSWORD —— 零读取者，密码到不了应用手里。
+            - name: DATABASE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: postgres-credentials

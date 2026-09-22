@@ -23,14 +23,39 @@ data:
   # 就会静默失效。显式写出来，并由 tools/check_deploy_consistency.py
   # 校验它与 docker-compose.yml 里的一致。
   DATA_SERVICE_URL: "http://data-service:8081"
-  # Database (PostgreSQL)
-  POSTGRES_HOST: "postgres"
-  POSTGRES_PORT: "5432"
-  POSTGRES_DB: "quantlab"
-  POSTGRES_USER: "quantlab"
-  # Cache (Redis)
-  REDIS_HOST: "redis"
-  REDIS_PORT: "6379"
+  # ── Database (PostgreSQL) ──────────────────────────────────────────
+  # AUD-39：这里的键名必须是**应用读的那一套**（DATABASE_*），不是
+  # postgres 官方镜像的那一套（POSTGRES_*）。两个服务都用 viper 的
+  # AutomaticEnv + SetEnvKeyReplacer(".", "_")，它把配置键
+  # `database.host` 映射成 env 名 **DATABASE_HOST**。此前这里写的是
+  # POSTGRES_HOST / POSTGRES_PORT —— 全仓零读取者（postgres 容器也不
+  # 需要知道自己的 host/port），于是应用回落到镜像内的 config/*.yaml，
+  # 而那份文件的 database.password 是**字面量** `${DATABASE_PASSWORD}`
+  # （全仓没有 env 展开器）→ k8s 下 DB 连接必然认证失败。
+  #
+  # 同一个 configmap 也被 postgres StatefulSet 用 configMapKeyRef 读：
+  # 它把 DATABASE_USER / DATABASE_DATABASE 映射到容器认的 POSTGRES_USER /
+  # POSTGRES_DB —— **一份词汇表，各自在边界上翻译**，不在这里重复定义
+  # 第二个名字（POSTGRES_DB / POSTGRES_USER 已删除）。
+  #
+  # 值必须与 config/*.yaml、docker-compose.yml 一致（quant_trading /
+  # postgres）。此前这里是 quantlab / quantlab，而应用读的是
+  # quant_trading / postgres —— 即使键名修好，库名与用户名仍然对不上。
+  # 这条不变量由 tools/check_deploy_consistency.py 的检查 5 守护。
+  DATABASE_HOST: "postgres"
+  DATABASE_PORT: "5432"
+  DATABASE_USER: "postgres"
+  DATABASE_DATABASE: "quant_trading"
+  # ── Cache (Redis) ──────────────────────────────────────────────────
+  # AUD-39：同理，应用读的是 `redis.url` → **REDIS_URL**。此前写的是
+  # REDIS_HOST / REDIS_PORT，零读取者。
+  #
+  # 这里没有、也不该有 Redis 密码：本项目的 redis 是
+  # `redis-server --appendonly yes`，**没有 --requirepass**，它根本不
+  # 校验密码（docker-compose.yml 文件头有同样的说明）。此前
+  # redis-deployment.yaml 与 analysis-deployment.yaml 各注入了一个
+  # REDIS_PASSWORD，两处都零读取者 —— 只是让清单**看起来**有密码保护。
+  REDIS_URL: "redis://redis:6379"
   # Logging
   #
   # AUD-35：键名必须是 LOGGING_LEVEL / LOGGING_FORMAT。这三个服务都用

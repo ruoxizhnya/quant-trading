@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -196,32 +195,25 @@ func buildAlertSystem(v *viper.Viper, executionTrader live.LiveTrader, riskManag
 	return alertManager, alertLoop
 }
 
-// initStore constructs the PostgreSQL store from viper config. If
-// database.url is empty or contains unresolved placeholders, it's
-// assembled from individual database.* keys.
+// initStore constructs the PostgreSQL store from viper config.
+//
+// The DSN is resolved by storage.BuildDSN (AUD-39), which is shared with
+// cmd/data and rejects two misconfigurations that used to slip through
+// silently: a `${...}` placeholder left in database.url (this repo has no env
+// expander, so it would be handed to the driver as the literal password), and
+// an empty password.
 func initStore(v *viper.Viper, logger zerolog.Logger) *storage.PostgresStore {
-	dbURL := v.GetString("database.url")
-	if dbURL == "" || strings.Contains(dbURL, "${") {
-		dbUser := v.GetString("database.user")
-		dbPassword := v.GetString("database.password")
-		dbHost := v.GetString("database.host")
-		dbPort := v.GetInt("database.port")
-		dbName := v.GetString("database.database")
-		dbSSLMode := v.GetString("database.sslmode")
-		if dbHost == "" {
-			dbHost = "localhost"
-		}
-		if dbPort == 0 {
-			dbPort = 5432
-		}
-		if dbName == "" {
-			dbName = "quant_trading"
-		}
-		if dbSSLMode == "" {
-			dbSSLMode = "disable"
-		}
-		dbURL = fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-			url.PathEscape(dbUser), url.PathEscape(dbPassword), dbHost, dbPort, dbName, dbSSLMode)
+	dbURL, err := storage.BuildDSN(storage.DatabaseConfig{
+		URL:      v.GetString("database.url"),
+		Host:     v.GetString("database.host"),
+		Port:     v.GetInt("database.port"),
+		User:     v.GetString("database.user"),
+		Password: v.GetString("database.password"),
+		Name:     v.GetString("database.database"),
+		SSLMode:  v.GetString("database.sslmode"),
+	})
+	if err != nil {
+		logger.Fatal().Err(err).Msg("invalid database configuration")
 	}
 	store, err := storage.NewPostgresStore(context.Background(), dbURL)
 	if err != nil {

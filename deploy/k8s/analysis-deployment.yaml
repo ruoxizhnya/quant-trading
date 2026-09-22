@@ -28,17 +28,18 @@ spec:
             - configMapRef:
                 name: quant-trading-config
           env:
-            - name: POSTGRES_PASSWORD
+            # AUD-39：名字必须是 DATABASE_PASSWORD —— 代码读的是
+            # `database.password`，AutomaticEnv 把它映射成 DATABASE_PASSWORD。
+            # 此前注入的是 POSTGRES_PASSWORD（零读取者），于是密码根本到不了
+            # 应用手里。
+            #
+            # REDIS_PASSWORD 已删除：本项目 redis 没有 --requirepass，不校验
+            # 密码，那个 env 零读取者（详见 configmap.yaml 的说明）。
+            - name: DATABASE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: postgres-credentials
                   key: password
-            - name: REDIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: redis-credentials
-                  key: password
-                  optional: true
           readinessProbe:
             httpGet:
               path: /api/health

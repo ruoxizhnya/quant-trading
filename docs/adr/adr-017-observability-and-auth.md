@@ -54,6 +54,15 @@ Browser → /api/backtest
 | **AI service** | 加 token bucket 限流：`golang.org/x/time/rate` 10 req/min/user |
 | **凭据安全** | `pgcrypto` 加密 DB 密码；`SOPS` 加密 yaml 密钥；docker-compose 启动校验 `DB_PASSWORD != "postgres"` 否则 fail-fast |
 
+> **2026-09-22 订正（AUD-39）** —— 上面这一行有两处已过期，**不要照抄**：
+> ① 变量名是 **`DATABASE_PASSWORD`**，不是 `DB_PASSWORD`。compose 里曾同时存在
+> 两个变量（postgres 容器读 `DB_PASSWORD`、应用读 `DATABASE_PASSWORD`），默认值
+> 恰好相同所以能用，一旦改成非默认值就必然对不上；现已收敛为
+> `DATABASE_PASSWORD` 一个。
+> ② 「docker-compose 启动校验 `!= "postgres"` 否则 fail-fast」**从未实现** ——
+> compose 里没有任何这样的检查。当前的实际防线是「密码为空即启动 Fatal」
+> （`pkg/storage.BuildDSN`），它拦的是**没配**，不是**配得弱**。
+
 ### §3. 审计日志
 
 `audit_logs` 表记录所有 mutating API 调用，retention 90 天（个人）/ 365 天（机构，可配置）：
