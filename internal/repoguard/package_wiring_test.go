@@ -1,8 +1,9 @@
 package repoguard
 
-// AUD-45 (ODR-065) structural guard: **every package under pkg/ and internal/
-// must have at least one importer inside this module**, unless it is named in
-// unwiredPackages with a reason.
+// AUD-45 / AUD-46 (ODR-065) structural guard: **every package under pkg/ and
+// internal/ must have at least one importer inside this module**, unless it is
+// named in unwiredPackages with a reason; and **a package named in
+// retiredPackages must not exist at all**.
 //
 // Why this exists. AUD-43 was registered as "pkg/testutil has zero importers".
 // That was true — and true of **13** packages, not one. The repo deliberately
@@ -11,6 +12,12 @@ package repoguard
 // "zero importers" is not by itself a defect. But it is a state that should be
 // **visible and deliberate** rather than discovered by accident, which is
 // exactly what happened here.
+//
+// AUD-46 then split the 13: pkg/metrics turned out not to be "awaiting wiring"
+// but a **competing implementation** (ADR-017 §1's four core metrics live in
+// pkg/observability; wiring both would double-register a metric and panic), so
+// it was retired — and retirement needs the second half, the assertion that it
+// does not come back.
 //
 // The importer set is derived from the source (go/ast over every .go file), not
 // from a hand-written list — a hand-written list goes stale the moment someone
@@ -55,10 +62,12 @@ import (
 // and must be removed (the test reports it).
 //
 // 2026-09-22 (AUD-45) initial inventory — 13 packages.
+// 2026-09-22 (AUD-46) pkg/metrics removed from this list and retired instead:
+// it was a competing implementation of ADR-017 §1's four core metrics, which
+// pkg/observability already implements. See retiredPackages below.
 var unwiredPackages = map[string]string{
 	"github.com/ruoxizhnya/quant-trading/pkg/api":                   "P2-16 API 版本化基础设施（APIVersionMiddleware）；各服务目前各自手写 /api/v1，待统一接线",
-	"github.com/ruoxizhnya/quant-trading/pkg/decimal":               "定点小数工具库，尚未被采用（portfolio / 回测仍用 float64）—— 属「从未采用」，需裁决采用还是删除（见 AUD-46）",
-	"github.com/ruoxizhnya/quant-trading/pkg/metrics":               "⚠️ 与 pkg/observability 重复实现（两者都定义 Metrics / NewMetrics，服务实际用 observability）—— 是「疑似死代码」不是「待接线」，需裁决删除（见 AUD-46）",
+	"github.com/ruoxizhnya/quant-trading/pkg/decimal":               "待采用：定点小数工具库，portfolio / 回测仍用 float64，迁移未排期（AUD-46 裁决保留，与另外 11 个能力包同型）",
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/factor":             "因子计算（资金流 / 板块轮动），待 ETL + IC 回测接线",
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/auction":      "P1-6 集合竞价撮合（9:15-9:25 / 14:57-15:00），待回测引擎接线",
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/marketimpact": "市场冲击模型，待回测引擎接线",
@@ -69,6 +78,17 @@ var unwiredPackages = map[string]string{
 	"github.com/ruoxizhnya/quant-trading/pkg/data/source/hkex":      "港股数据源，待数据同步接线",
 	"github.com/ruoxizhnya/quant-trading/pkg/live/broker/xtp":       "中泰证券 XTP 券商适配，待实盘链路接线",
 	"github.com/ruoxizhnya/quant-trading/pkg/testutil":              "预留的 DB 集成测试底座（AUD-43 裁决：保留，不删；归档审查报告曾把它列为「有 DB 环境下可选集成验证」的设想）",
+}
+
+// retiredPackages maps an import path that was deliberately deleted to the
+// reason it must not come back. Retiring something is not just deleting the
+// code: without this assertion a later change can silently re-introduce it and
+// nothing goes red (AUD-33 taught this — deleting the old `mustHave` lines left
+// no resistance at all).
+//
+// 2026-09-22 (AUD-46): pkg/metrics.
+var retiredPackages = map[string]string{
+	"github.com/ruoxizhnya/quant-trading/pkg/metrics": "ADR-017 §1 的四个核心指标（backtest_duration_seconds / http_client_requests_total / llm_tokens_total / cache_hit_ratio）由 pkg/observability 实现（deps.Metrics *observability.Metrics）。pkg/metrics 是竞争实现，只与它重叠一个指标名 —— 两者同时接线会重复注册 backtest_duration_seconds 并 panic。要加指标请加进 observability（一个注册表）",
 }
 
 func TestEveryPackageHasAConsumer(t *testing.T) {
@@ -147,6 +167,20 @@ func TestEveryPackageHasAConsumer(t *testing.T) {
 	assert.Empty(t, stale,
 		"unwiredPackages 里这些包已经有导入者了 —— 删掉它们的白名单条目"+
 			"（白名单只该列「当前无人用」的包，否则它就在替死代码打掩护）：%v", stale)
+
+	// A retired package must not come back at all — not even as a test-only
+	// directory. Deleting the code is only half of it; this is the other half.
+	var resurrected []string
+	for p := range retiredPackages {
+		dir := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(p, mod+"/")))
+		if _, statErr := os.Stat(dir); statErr == nil {
+			resurrected = append(resurrected, p)
+		}
+	}
+	sort.Strings(resurrected)
+	assert.Empty(t, resurrected,
+		"这些包已被刻意退役（理由见 retiredPackages），但目录又出现了 —— "+
+			"要么删掉它，要么说明当初的退役判断错在哪：%v", resurrected)
 }
 
 // isCheckedTree reports whether rel is the pkg/ or internal/ tree (the trees
