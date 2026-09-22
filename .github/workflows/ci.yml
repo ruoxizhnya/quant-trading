@@ -50,6 +50,22 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # AUD-38：windows-only 文件在 Linux-only CI 里**从不被编译**。
+      #
+      # 全仓只有 2 个 `//go:build windows` 文件 —— internal/sandbox/runner/
+      # 的 rlimit_windows.go 与 limits_windows_test.go。它们是 Windows 上
+      # 唯一能强制资源限额的路径（Job Object，AUD-24），却连一个语法错误都
+      # 拦不住：本机的 Windows 是它们**唯一**的编译验证，也就是说这类文件的
+      # 首次编译发生在别人的机器上。
+      #
+      # 用 vet 而不是 build：`go build` **不编译 _test.go**，而 AUD-26 恰恰
+      # 就是在这两个测试文件里引入过编译错误、直到在 Windows 上跑才暴露。
+      # vet 会连测试文件一起做类型检查，所以它同时覆盖了两者。
+      #
+      # 交叉编译不需要链接或运行，成本接近零（实测约 20s，与 Linux vet 同量级）。
+      - name: Vet (windows)
+        run: GOOS=windows go vet ./...
+
       # AUD-27：补上 gofmt 门禁。AGENTS.md §8 的提交前清单早就写了
       # 「`gofmt -l .` 无输出」，但这条检查在**本机恒失败** —— 本机
       # core.autocrlf=true（PortableGit 的 etc/gitconfig，系统级）会把 checkout
