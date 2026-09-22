@@ -494,7 +494,7 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | AUD-28 | **其余 5 个包仍有「测试各自调 `gin.SetMode`」的模式**（AUD-12 顺带发现，非登记项）：`cmd/data/handlers_ingest_test.go`、`cmd/data/setup_test.go`、`internal/httpserver/cors_test.go`、`internal/httpserver/errors_test.go`、`pkg/api/versioning_test.go`。**今天不报竞争** —— 实测这些包都没用 `t.Parallel()`，所以是**潜在雷**而非现患：一旦有人给这些测试加并行，就会复现 AUD-12 修掉的同类竞争。修法同 AUD-12（`TestMain` 集中设置 + 删掉逐测试调用） | 上述 5 个文件 | 这些包加 `t.Parallel()` 后 `-race` 仍绿 |
 | AUD-29 | **`buildRouter` 在运行期按日志格式写 gin 全局 mode**（AUD-12 顺带发现，非登记项）：`if v.GetString("logging.format") == "json" { gin.SetMode(gin.ReleaseMode) }`。两个问题：① **语义可疑** —— 日志格式与 gin 运行模式是两件事，用前者决定后者没有依据；② **运行期改进程级全局** —— 当前测试都用 `logging: level: info`，所以没触发；只要有人写一条 `format: json` 的测试并与并行测试共存，就会复现同类竞争，且这次栈里会出现**生产文件**。`cmd/data/setup.go:220`、`cmd/strategy/main.go:102` 同样写法。**决策点**：是否改由语义相符的配置项（如显式 `server.gin_mode`）决定，并在启动早期设置一次 | `cmd/analysis/setup.go#L638`、`cmd/data/setup.go#L220`、`cmd/strategy/main.go#L102` | gin mode 由语义相符的配置项决定，且在启动期设置一次 |
 | AUD-30 | **`docs/SPEC.md` 仍按 ADR-022 定版，未反映 ADR-023/024**（AUD-14 顺带发现，非登记项）：文件头 `Version: 1.5.0 (Unified Research Platform — ADR-022)`、`Last Updated: 2026-09-15`；正文有独立的 `## Unified Research Platform (ADR-022, Proposed)` 章节（四层架构 L0-L3 / 双对等工作面 / 飞轮闭环），全文 7 处引用 ADR-022。**与 AGENTS.md 校准前的状态是同一批漂移**，但 SPEC.md 是 1660 行的 Canonical 规格、那节是独立章节不是散落引用，改动量明显更大 —— 故本次不扩大改动，单独立项。修法同 AUD-14：定位陈述切到 ADR-023/024，并核对 § 里对 API/数据模型**有约束力**的部分是否随定位变了 （ADR-024 影响策略执行载体：YAML → ExpressionStrategy，不是编译产物） | `docs/SPEC.md` 头部 + 第 70 行起的 Unified Research Platform 章节 | SPEC.md 里不再有按 ADR-022 陈述的现行定位；ADR-023/024 对 API/数据模型的约束已体现；`docs/ADR.md` 与 AGENTS.md §11 对 SPEC 的描述一致 |
-
+| AUD-31 | **`LiveEngine.portfolio` 从未被更新** —— `GetPortfolio()` 恒返回「初始资金 + 空持仓」（AUD-16 逐行复核时顺带发现，非登记项）：`e.portfolio` 只在 `NewLiveEngine` 里构造一次，之后**没有任何写入点**；现金也不随成交增减（`MockTrader` 有 `m.cash` 并维护，`LiveEngine` 没有）。唯一调用方是 `cmd/analysis/handlers_paper_trading.go:266`，而那批 `/api/paper/*` 端点未在 `main.go` / `setup.go` 注册（AUD-19 的死代码）。**与 AUD-19 / AUD-23 绑在一起裁决**：若 AUD-19 删掉 paper 端点，本字段变成零调用方，直接删即可；若保留，则需决定是补现金记账让读数变诚实（现金口径要定：含不含在途、手续费是否计入成本），还是删除。注：AUD-16 只修了 `updatePortfolio()` 写回持仓估值，没动这个字段 | `pkg/live/engine.go#L20,70-74,174-176` | 要么 `GetPortfolio()` 反映真实状态（现金 + 持仓市值），要么该字段与端点一并删除；两种结局都不允许「返回初始资金」这种恒假读数 |\n
 ---
 
 ## P2 — 数据与清理
@@ -521,7 +521,7 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | **P2-12** | ~~**表达式引擎只暴露 OHLCV**（open/high/low/close/volume/turnover），因此 `value` / `quality` 类意图表达不出 —— P0-5 中它们只能明确失败，而不是套一个无关的价格表达式产出误导性回测数字~~ | **✅ 2026-09-18** `pkg/strategy/expression/data_provider.go` + `strategy.go` + `pkg/strategy/strategy.go` + `pkg/storage/fundamentals.go` + `pkg/backtest/engine.go` + `pkg/ai/yaml/generator.go` | 新增 `pe/pb/ps/roe/roa` 五个字段，**按 PIT 对齐**（`GetFundamentalsPITBulk` 返回的 Date 是可用日 `COALESCE(ann_date, trade_date)`，不是报告期；`OHLCVDataProvider.fundamentalSeries` 按每根 K 线的日期切一刀，取不到填 NaN 不是 0）。注入走 `strategy.FundamentalAware` 可选接口（`GenerateSignals` 签名没有基本面参数，不动接口；范式同 `FactorAware`），且**只有声明要财报的策略才预热**——纯价量策略不付这份查询成本。`value` → `cs_rank(neg(pe)) + cs_rank(neg(pb)) > 1.6`，`quality` → `cs_rank(roe) + cs_rank(roa) > 1.6`；`custom` 仍明确失败。**估值倍数非正一律 NaN**：PE 为负不是"便宜"是亏损，`neg(pe)` 不该把亏得最狠的排成最便宜（经典价值陷阱）；ROE/ROA 为负是真实的差，原样保留。**顺手修掉一个潜伏 bug**：`neg(x)` 的函数形式此前从未接上（`evaluateFunction` 无条件走 `applyTimeSeriesOp`），`multi_factor` 的默认表达式 `cs_rank(neg(ts_std(close,20)))` 从落地起就是「解析得过、跑不起来」—— 它只被断言过能解析，从没被求值过 |
 | **P2-13** | **验证器链缺真实回测的端到端取证**（2026-09-17 已解决一半）。缺口只剩数据：本地库 `stocks` / `trading_calendar` / `ohlcv_daily_qfq` 均 0 行。~~引擎离线跑不了~~ —— 这是误判，引擎三处 HTTP（仓位 / 择时 / 止损）**都有 in-process 分支**，`cmd/analysis/main.go:160` 也已 `SetRiskManager`；取证时用 `marketdata.NewInMemoryProvider()` + `SetRiskManager` 即可完全离线（范式见 `pkg/validation/economic_integration_test.go`） | `pkg/validation/economic_integration_test.go` | 跑数据同步补齐行情后，用同一范式接真库 |
 
-**2026-09-21 全栈审查（ODR-065）新增 5 项**（Medium/Low）—— **AUD-14 / AUD-15 已完成，剩 3 项**：
+**2026-09-21 全栈审查（ODR-065）新增 5 项**（Medium/Low）—— **AUD-14 / AUD-15 / AUD-16 已完成，剩 2 项**：
 
 > **AUD-14 落地说明（2026-09-21）**：AGENTS.md 从 v3.3 升到 **v3.4**，顶层叙述整体
 > 从 ADR-022（双对等工作面 + 飞轮闭环，从未实施）切换到 **ADR-023/024 的现实**
@@ -620,6 +620,34 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > handler 路由注册在 `main.go`（不在 `buildRouter`），测试用手写 router，
 > 钉的是 handler 不是 wiring。
 
+> **AUD-16 落地说明（2026-09-22）**：登记只要求「补复核」—— 逐行读组合状态更新
+> 路径，确认是否真有分支导致状态不更新，坐实则升级为缺陷并定级。
+> **坐实，而且比登记说的更狠：不是「某分支不触发」，是整条路径都不落地。**
+>
+> `updatePortfolio()` 从 `positionManager.GetPositions()` 拿到的是**拷贝切片**
+> （`append(result, position)` 值拷贝），三个赋值全写在拷贝上、从不写回 →
+> `CurrentPrice` / `MarketValue` / `UnrealizedPnL` **恒为 0**，
+> `GetTotalMarketValue()` / `GetTotalUnrealizedPnL()` 也跟着恒为 0。
+> 实证方式是**先写测试再修**（红 → 绿）：12.5 → 0、1250 → 0、250 → 0。
+>
+> 修法：新增 `PositionManager.ApplyQuote(symbol, price)`，在**同一把写锁里**
+> 读-改-写 —— 不做成「GetPositions → 改 → UpdatePosition」，那样会把夹在
+> 中间的成交（或 broker 持仓同步）覆盖掉，是同一个 bug 往上一层。
+>
+> 顺带挡掉两种「不是价格的价格」：
+>
+> - `GetQuote` 报错 → 保留上一次 mark，下一轮 ticker 重试（报错是「没有价格」）；
+> - `Close <= 0` → 同上。**本仓自己的 `errDataFeed.GetQuote` 就返回零值 Quote
+>   且不带 error**，照写会把 mark 抹成 0（「价格为 0」在 A 股不是合法价格）。
+>
+> **定级 Medium（不是 Low）**：功能是死的，但当前**爆炸半径为零** —— 唯一消费方
+> `handlers_paper_trading.go` 的 `/api/paper/*` 端点**未在 `main.go` / `setup.go`
+> 注册**（AUD-19 的死代码）。一旦有人接线，拿到的就是全 0 的估值与全 0 的汇总。
+>
+> **新登记 AUD-31**：`e.portfolio` 从构造后**从未被更新**（见下表）。本次不扩大
+> 改动 —— 它与 AUD-19（删 paper 端点）/ AUD-23（`GetPortfolio()` 无锁）绑在一起，
+> 端点删了之后它可能直接变成零调用方死字段。
+
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、
 > L3（legacy HTML 残留）。原表只有 AUD-14/AUD-15 两行却写"新增 3 项"，那第 3 项
@@ -627,7 +655,6 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 
 | ID | 任务 | 位置 |
 |----|------|------|
-| AUD-16 | **补复核 L2**：live engine 组合状态更新路径"存在不触发场景"（D4 子代理报告，ODR-065 自标**未逐行复核**，复核也把它列进未覆盖项）—— 逐行读组合状态更新路径，确认是否真有分支导致状态不更新；坐实则升级为缺陷并定级，证伪则关闭 | `pkg/live/engine.go` |
 | AUD-17 | **M4 威胁模型声明**：`internal/sandbox/staticcheck` 是 14 条正则黑名单，经包别名 / 变量间接调用 / 反射 / 字符串拼接可绕过。注释里明示威胁模型（防 AI 生成代码的**无意**违规，**不防**有意攻击者），别让人误以为它是安全边界；中期评估 gosec / go-ast 分析替代 | `internal/sandbox/staticcheck/staticcheck.go` |
 | AUD-18 | **L3 legacy HTML 去留裁决**：`cmd/analysis/static/` 已标 deprecated 但无删除时间表 —— 无限期共存等于两套 UI 都要维护。给出裁决 + 时间表 | `cmd/analysis/static/` |
 

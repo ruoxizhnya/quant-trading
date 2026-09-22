@@ -489,3 +489,97 @@ func TestValidateOrderShape(t *testing.T) {
 func TestValidateOrderShape_NilOrder(t *testing.T) {
 	assert.Error(t, validateOrderShape(nil))
 }
+
+// ---------------------------------------------------------------------------
+// AUD-16 — 组合状态更新路径（updatePortfolio）是否真的落地
+//
+// ODR-065 的 L2 是 D4 子代理的说法，报告自标「未逐行复核」。这两个用例把
+// 断言落在**可观测状态**上（PositionManager 里存的东西），而不是落在
+// 「函数被调用了几次」上 —— 后者看不出更新有没有写回。
+// ---------------------------------------------------------------------------
+
+func TestUpdatePortfolio_MarksPositionsToMarket(t *testing.T) {
+	const symbol = "600519.SH"
+
+	df := NewSimulatedDataFeed()
+	df.SetQuote(Quote{Symbol: symbol, Close: 12.5, Timestamp: time.Now()})
+
+	engine := NewLiveEngine(newInstrumentedBroker(), df, defaultExecConfig())
+	engine.positionManager.UpdatePosition(domain.Position{
+		Symbol:   symbol,
+		Quantity: 100,
+		AvgCost:  10,
+	})
+
+	engine.updatePortfolio()
+
+	got, ok := engine.positionManager.GetPosition(symbol)
+	require.True(t, ok, "position should still exist after updatePortfolio")
+	assert.InDelta(t, 12.5, got.CurrentPrice, 1e-9, "CurrentPrice")
+	assert.InDelta(t, 1250.0, got.MarketValue, 1e-9, "MarketValue = price x quantity")
+	assert.InDelta(t, 250.0, got.UnrealizedPnL, 1e-9, "UnrealizedPnL = market value - cost")
+
+	// 汇总口径依赖上面那三个字段，写不回就等于这两个汇总永远是 0。
+	assert.InDelta(t, 1250.0, engine.positionManager.GetTotalMarketValue(), 1e-9)
+	assert.InDelta(t, 250.0, engine.positionManager.GetTotalUnrealizedPnL(), 1e-9)
+}
+
+// GetQuote 失败的标的这一轮不该被抹成 0 —— 报错不是「价格是 0」。
+func TestUpdatePortfolio_QuoteErrorLeavesPositionUnchanged(t *testing.T) {
+	const (
+		known   = "600519.SH"
+		unknown = "999999.SH" // 没有 quote，GetQuote 返回 error
+	)
+
+	df := NewSimulatedDataFeed()
+	df.SetQuote(Quote{Symbol: known, Close: 12.5, Timestamp: time.Now()})
+
+	engine := NewLiveEngine(newInstrumentedBroker(), df, defaultExecConfig())
+	engine.positionManager.UpdatePosition(domain.Position{
+		Symbol: known, Quantity: 100, AvgCost: 10,
+		CurrentPrice: 11.0, MarketValue: 1100, UnrealizedPnL: 100,
+	})
+	engine.positionManager.UpdatePosition(domain.Position{
+		Symbol: unknown, Quantity: 100, AvgCost: 10,
+		CurrentPrice: 20.0, MarketValue: 2000, UnrealizedPnL: 1000,
+	})
+
+	engine.updatePortfolio()
+
+	got, ok := engine.positionManager.GetPosition(unknown)
+	require.True(t, ok)
+	assert.InDelta(t, 20.0, got.CurrentPrice, 1e-9,
+		"a symbol whose quote failed must keep its last mark, not be zeroed")
+	assert.InDelta(t, 2000.0, got.MarketValue, 1e-9)
+}
+
+// errDataFeed.GetQuote 返回零值 Quote 且**不带 error**。把这样的价格写进去
+// 等于把上一次的 mark 抹成 0 —— 报错是「没有价格」，零值是「价格为 0」，
+// 后者在 A 股不是一个合法价格。
+func TestUpdatePortfolio_ZeroPriceQuoteDoesNotWipeMark(t *testing.T) {
+	const symbol = "600519.SH"
+
+	engine := NewLiveEngine(newInstrumentedBroker(), &errDataFeed{}, defaultExecConfig())
+	engine.positionManager.UpdatePosition(domain.Position{
+		Symbol: symbol, Quantity: 100, AvgCost: 10,
+		CurrentPrice: 12.5, MarketValue: 1250, UnrealizedPnL: 250,
+	})
+
+	engine.updatePortfolio()
+
+	got, ok := engine.positionManager.GetPosition(symbol)
+	require.True(t, ok)
+	assert.InDelta(t, 12.5, got.CurrentPrice, 1e-9)
+	assert.InDelta(t, 1250.0, got.MarketValue, 1e-9)
+}
+
+// ApplyQuote 不能凭一条行情凭空造出持仓。
+func TestPositionManager_ApplyQuote_UnknownSymbol(t *testing.T) {
+	pm := NewPositionManager()
+	if _, ok := pm.ApplyQuote("NOPE", 10); ok {
+		t.Error("ApplyQuote reported success for a symbol that is not held")
+	}
+	if pm.HasPosition("NOPE") {
+		t.Error("ApplyQuote created a position for a symbol that is not held")
+	}
+}

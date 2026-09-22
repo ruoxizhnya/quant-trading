@@ -427,6 +427,23 @@ func (e *LiveEngine) updateTrailingHWM(order *domain.Order, quote Quote) {
 	}
 }
 
+// updatePortfolio marks every held position to market.
+//
+// AUD-16: the three assignments used to be made on the slice returned by
+// GetPositions — which is a slice of copies — and never written back, so this
+// function computed a mark for every position and threw it away. Every
+// mark-to-market field (CurrentPrice / MarketValue / UnrealizedPnL) and both
+// totals derived from them stayed 0 for the life of the engine. The write now
+// goes through PositionManager.ApplyQuote, which mutates the stored position
+// under its own lock.
+//
+// Two non-prices are rejected rather than applied:
+//
+//   - a quote error → the position keeps its last mark and is retried on the
+//     next tick. An absent quote is not a price of zero.
+//   - a non-positive price → same reason. A feed that hands back a zero-value
+//     Quote without an error (this repo's own test double does) would otherwise
+//     silently wipe the mark to zero.
 func (e *LiveEngine) updatePortfolio() {
 	positions := e.positionManager.GetPositions()
 	for i := range positions {
@@ -434,9 +451,10 @@ func (e *LiveEngine) updatePortfolio() {
 		if err != nil {
 			continue
 		}
-		positions[i].CurrentPrice = quote.Close
-		positions[i].MarketValue = quote.Close * positions[i].Quantity
-		positions[i].UnrealizedPnL = positions[i].MarketValue - (positions[i].AvgCost * positions[i].Quantity)
+		if quote.Close <= 0 {
+			continue
+		}
+		e.positionManager.ApplyQuote(positions[i].Symbol, quote.Close)
 	}
 }
 

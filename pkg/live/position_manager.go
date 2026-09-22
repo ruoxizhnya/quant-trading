@@ -58,6 +58,36 @@ func (pm *PositionManager) UpdateFromTrade(trade domain.Trade) {
 	pm.positions[trade.Symbol] = position
 }
 
+// ApplyQuote marks one position to market at price.
+//
+// AUD-16: this exists because the engine's mark-to-market used to be a no-op —
+// updatePortfolio fetched a snapshot of positions (GetPositions returns copies),
+// wrote CurrentPrice / MarketValue / UnrealizedPnL into the copies and dropped
+// them, so every mark-to-market field stayed 0 forever and the two totals below
+// were permanently 0 as well.
+//
+// The read-modify-write is done under one write lock on purpose: doing it as
+// "GetPositions → mutate → UpdatePosition" would clobber a fill (or a broker
+// position sync) that lands in between, which is the same class of bug one
+// layer up.
+//
+// Returns false when the symbol is not held, so a quote for something we do not
+// own cannot create a position.
+func (pm *PositionManager) ApplyQuote(symbol string, price float64) (domain.Position, bool) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	position, exists := pm.positions[symbol]
+	if !exists {
+		return domain.Position{}, false
+	}
+	position.CurrentPrice = price
+	position.MarketValue = price * position.Quantity
+	position.UnrealizedPnL = position.MarketValue - (position.AvgCost * position.Quantity)
+	pm.positions[symbol] = position
+	return position, true
+}
+
 // GetPosition returns a position by symbol
 func (pm *PositionManager) GetPosition(symbol string) (domain.Position, bool) {
 	pm.mu.RLock()
