@@ -17,8 +17,14 @@ type LiveEngine struct {
 	positionManager *PositionManager
 	dataFeed        DataFeed
 
-	portfolio *domain.Portfolio
-	config    domain.ExecutionConfig
+	// AUD-31（2026-09-22）：这里原有一个 `portfolio *domain.Portfolio`
+	// 字段，从构造之后**从未被写入过** —— 于是 GetPortfolio() 恒返回
+	// 「初始资金 + 空持仓」，现金也从不随成交增减。它的唯一消费方是
+	// /api/paper/* 那批从未挂载的端点（AUD-19 已整条删除）。
+	// 组合状态的真实来源是 positionManager（AUD-16 起 mark-to-market
+	// 会真的写回），所以这个字段连同 GetPortfolio() 一并删掉，
+	// 而不是留着一个永远说谎的读数。
+	config domain.ExecutionConfig
 
 	mu      sync.RWMutex
 	running bool
@@ -67,12 +73,7 @@ func NewLiveEngine(
 		orderManager:    NewOrderManager(broker, config),
 		positionManager: NewPositionManager(),
 		config:          config,
-		portfolio: &domain.Portfolio{
-			Cash:       config.InitialCapital,
-			Positions:  make(map[string]domain.Position),
-			TotalValue: config.InitialCapital,
-		},
-		stopCh: make(chan struct{}),
+		stopCh:          make(chan struct{}),
 	}
 }
 
@@ -170,10 +171,14 @@ func (e *LiveEngine) IsRunning() bool {
 	return e.running
 }
 
-// GetPortfolio returns the current portfolio
-func (e *LiveEngine) GetPortfolio() *domain.Portfolio {
-	return e.portfolio
-}
+// AUD-31（2026-09-22）：GetPortfolio() 已删除 —— 它返回的 `e.portfolio`
+// 从构造后从未被更新，是个恒假读数（「初始资金 + 空持仓」）。同时它
+// 无锁返回内部指针（AUD-23），调用方既能读到半更新状态也能改写引擎组合。
+// 组合的真实来源是 positionManager：
+//   - 持仓：GetPositions() / GetPosition(symbol)
+//   - 汇总：GetTotalMarketValue() / GetTotalUnrealizedPnL() / GetTotalRealizedPnL()
+// 若将来要做实盘组合视图，应在 PositionManager 上加一个带锁的快照方法，
+// 而不是恢复一个「构造时算一次」的字段。
 
 // GetPositions returns current positions
 func (e *LiveEngine) GetPositions() []domain.Position {

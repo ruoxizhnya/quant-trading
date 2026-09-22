@@ -32,7 +32,7 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | P1 | 16 | 16 | 0 | 0 | 0 | 含 P1-1 —— 子项 1a/1b/1c 均已完成 |
 | P2 | 19 | 15 | 0 | 2 | 2 | ⬜ P2-1 / P2-2；⛔ P2-8、P2-13（两者都卡在数据同步，见下） |
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
-| AUD-19~33 | 15 | 1 | 0 | 13 | 1 | ✅ AUD-32（2026-09-22）；⛔ AUD-31（待 AUD-19/23 裁决）；AUD-33 的前置已解除 |
+| AUD-19~34 | 16 | 4 | 0 | 12 | 0 | ✅ AUD-19 / AUD-23 / AUD-31 / AUD-32（2026-09-22）；**无阻塞项**（AUD-34 为 AUD-19 顺带发现的新登记） |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
@@ -104,11 +104,11 @@ S0 止血阶段的出口判据已满足，见 [ROADMAP](ROADMAP.md)。
   1. 拆掉 legacy 根路径的 `requireTrader()` → 只 `TestExecution_LegacyPath_SameAuthorityAsAPIPath` 变红，其余 10 项仍绿；
   2. 把 `s.RequireRole` 换回包级 `RequireRole` → `pkg/auth` 与 `cmd/analysis` **两层**同时变红；
   3. 把 `Classify` 的兜底改成 `SideEffectRead`（fail-open）→ `TestClassify_FailClosed` + `TestTools_UnclassifiedTool_FailsClosed` 同时变红。
-- **顺带发现（新登记 AUD-19）**：`/api/paper/*` 全部 10 个端点**是死代码** —— `registerPaperTradingRoutes` **零调用方**，全仓无前端/文档引用。原本担心它是「第二处无鉴权写端点」，实为「根本没挂上」。**给不可达代码加 RBAC 是纯装饰**，故不在 AUD-02 内处理，改走 AUD-19（裁决：删除）。这也修正了本次勘察初期的判断。
+- **顺带发现（新登记 AUD-19）**：`/api/paper/*` 全部 10 个端点**从未挂载** —— `registerPaperTradingRoutes` **零调用方**。原本担心它是「第二处无鉴权写端点」，实为「根本没挂上」。**给不可达代码加 RBAC 是纯装饰**，故不在 AUD-02 内处理，改走 AUD-19（裁决：删除）。
+> ⚠️ **本条当时的措辞「全仓无前端/文档引用」是错的**（2026-09-22 在 AUD-19 里核实）：前端有完整的「模拟交易」页面在调这 10 个路径，`docs/SPEC.md` 也有一整节在描述它们。真正的结论要更强：不是「没人用」，而是「**有人在用，但后端从未挂上 → 那个页面打开就是 404**」。结论（删除）没变，理由变了 —— 见 AUD-19 落地说明。
 
 | ID | 任务 | 位置 | 验收 |
 |----|------|------|------|
-| AUD-19 | ⬜ **删除 `/api/paper/*` 死代码**：`registerPaperTradingRoutes` 零调用方，10 个端点（含 POST `/paper/start`、POST `/paper/orders`、DELETE `/paper/orders/:id`）从未挂上任何 router，全仓无引用 | cmd/analysis/handlers_paper_trading.go（整文件，约 300+ 行）+ `live.NewSimulatedBroker`/`NewSimulatedDataFeed` 若因此零调用则一并裁决 | 删前 grep 正向确认零调用方；删后 build 全绿；若 backend 确有规划用途则改为「登记到 main.go 并接 RBAC」，二选一须写明理由 |
 
 ---
 
@@ -269,8 +269,9 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > 既是数据竞争，也把「谁最后读谁说了算」的临时价格**固化**进了持仓记录。
 >
 > **并发场景是真实的、不是理论风险**：`cmd/analysis/alert_loop.go` 的后台
-> 周期任务调 `GetAccount`，而 `handlers_execution.go` / `handlers_paper_trading.go`
-> 的 HTTP handler 同时读 —— 两个 reader 打同一个字段。
+> 周期任务调 `GetAccount`，而 `handlers_execution.go` 的 HTTP handler 同时读
+> —— 两个 reader 打同一个字段。
+> （原文还列了 `handlers_paper_trading.go`；该文件已随 AUD-19 删除，且它当时**根本没挂载**，所以那次列举里其实只有 execution 一侧是真的。）
 >
 > **实现**：新增 `snapshot(pos) PositionInfo` helper，先 `cp := *pos` 再在副本上
 > 取价；两处调用点改为在副本上算 `MarketValue` / `UnrealizedPnL`。
@@ -506,7 +507,6 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | AUD-20 | ⬜ **费率史按日期分段**（AUD-06 的延伸，非登记项）：`feeSchedule()` 不接收日期，回测跨费率变动日时全程用同一费率。需在 `Tracker.ExecuteTrade(timestamp)` 处按日期选档（2023-08-28 前后 0.1% / 0.05%），并考虑未来更多变动（佣金、过户费也有沿革）。**决策点**：是否值得做 —— 若曦的回测窗口是否常跨 2023-08-28 | `pkg/backtest/tracker/tracker.go#L110-117`、`pkg/fees/ashare.go` | 跨 2023-08-28 的窗口，前后卖出印花税分别为 0.1% / 0.05%；不跨的窗口行为不变 |
 | AUD-21 | ⬜ **XTP 整手检查对科创板/北交所过严**（AUD-09 的实盘侧延伸，非登记项）：`int(quantity)%100 != 0` 一律报错，但科创板允许「≥200 股、1 股递增」、北交所「≥100 股」，617 股在科创板是合法单却被拒。**待查证**：XTP 柜台是否支持科创板 1 股递增 —— 若券商柜台本身只收 100 倍数，则这是券商限制而非本仓 bug，应改为注释说明；若支持，则需按板块放宽 | `pkg/live/broker/xtp/xtp.go#L373-375` | 科创板/北交所合法单不被本地拒单；或明确记录为券商限制 |
 | AUD-22 | ⬜ **北交所风险警示股当日买入上限**（非登记项）：北交所《交易规则》4.5.4 —— 投资者当日累计买入单只风险警示股票**不得超过 20 万股**（竞价 + 大宗 + 盘后固定价格合并计算）。当前引擎无此约束，回测会允许超限买入。沪深是否有同类上限需一并查证 | 下单量校验处（与 AUD-09 同域） | 单日累计买入 ST 股超 20 万股时被拒 |
-| AUD-23 | ⬜ **`LiveEngine.GetPortfolio()` 无锁返回内部指针**（非登记项，AUD-10 顺带发现）：返回 `e.portfolio` 本体，调用方既能读到半更新状态，也能直接改写引擎组合。需裁决：改为返回值拷贝 / 加锁 + 文档化「只读」契约 / 保持现状但在 godoc 明示不可变约定。**先勘察调用方是否真的写它** —— 若无人写，可能只需文档化 | `pkg/live/engine.go#L173-176` | 并发调用 `GetPortfolio` + 组合更新时无竞争；外部改动不回流引擎 |
 | AUD-24 | ⬜ **Windows Job Object 实现**（AUD-11 的后续增强）：`CreateJobObject` + `SetInformationJobObject`（`JOB_OBJECT_LIMIT_PROCESS_MEMORY` / `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` / `JOB_OBJECT_LIMIT_JOB_MEMORY`）+ `AssignProcessToJobObject`。做完之后 Windows 才能真正执行受限子进程，`ErrLimitsUnsupported` 就不再是常态。**注意**：Job Object 需要 `cmd.SysProcAttr.CreationFlags` 里加 `CREATE_SUSPENDED` 才能在 exec 前挂载 | `internal/sandbox/runner/rlimit_windows.go` | Windows 上 `Limits{MemoryBytes: …}` 真正生效；不需要逃生阀即可构建 |
 | AUD-25 | ⬜ **`ulimit -u` 在 dash 上不可用**（AUD-11 顺带发现，非登记项）：`ulimit -u` 的可移植性是 **bash ✅ / busybox ash ✅ / dash ❌**（Debian/Ubuntu 的 `/bin/sh` 报 "Illegal option -u"）。故 `Limits.NumProcs` 在 Debian/Ubuntu 上会让构建 fail-closed 报 `ErrLimitSetupFailed`。生产组合根没设 `NumProcs`，所以是地雷不是现患。**决策点**：① 探测 shell 能力并在缺失时报 `ErrLimitsUnsupported`（语义更准）；② 改走 cgroup `pids.max`；③ 把 `NumProcs` 从 API 移除，只留平台原生实现 | `internal/sandbox/runner/rlimit_posix.go` | Debian/Ubuntu 上设 `NumProcs` 时给出「本平台不支持」而非含糊的 setup 失败 |
 | AUD-26 | ⬜ **runner 测试在 Windows 上依赖 PATH 里有 POSIX userland**（AUD-11 顺带发现，非登记项）：`TestRun_ExitZero` 用 `echo`、`TestRun_Timeout` 用 `sleep`、`TestRun_StdinAndEnv` 用 `sh`、`TestRun_NonZeroExit` 用 `false`、`TestRunExitCode` 用 `sh -c`。本机因为装了 Git for Windows 才全绿，**裸 Windows（无 Git Bash）会失败**。CI 跑 Linux 故不影响门禁，但会让「本机全绿」这个信号在裸 Windows 上失真。修法：改成用 `os.Executable()` 自举（测试二进制支持 `-test.run=TestHelperProcess` 模式）或按平台选命令 | `internal/sandbox/runner/runner_test.go` | 裸 Windows 上 `go test ./internal/sandbox/runner/` 也全绿 |
@@ -514,9 +514,8 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | AUD-28 | ⬜ **其余 5 个包仍有「测试各自调 `gin.SetMode`」的模式**（AUD-12 顺带发现，非登记项）：`cmd/data/handlers_ingest_test.go`、`cmd/data/setup_test.go`、`internal/httpserver/cors_test.go`、`internal/httpserver/errors_test.go`、`pkg/api/versioning_test.go`。**今天不报竞争** —— 实测这些包都没用 `t.Parallel()`，所以是**潜在雷**而非现患：一旦有人给这些测试加并行，就会复现 AUD-12 修掉的同类竞争。修法同 AUD-12（`TestMain` 集中设置 + 删掉逐测试调用） | 上述 5 个文件 | 这些包加 `t.Parallel()` 后 `-race` 仍绿 |
 | AUD-29 | ⬜ **`buildRouter` 在运行期按日志格式写 gin 全局 mode**（AUD-12 顺带发现，非登记项）：`if v.GetString("logging.format") == "json" { gin.SetMode(gin.ReleaseMode) }`。两个问题：① **语义可疑** —— 日志格式与 gin 运行模式是两件事，用前者决定后者没有依据；② **运行期改进程级全局** —— 当前测试都用 `logging: level: info`，所以没触发；只要有人写一条 `format: json` 的测试并与并行测试共存，就会复现同类竞争，且这次栈里会出现**生产文件**。`cmd/data/setup.go:220`、`cmd/strategy/main.go:102` 同样写法。**决策点**：是否改由语义相符的配置项（如显式 `server.gin_mode`）决定，并在启动早期设置一次 | `cmd/analysis/setup.go#L638`、`cmd/data/setup.go#L220`、`cmd/strategy/main.go#L102` | gin mode 由语义相符的配置项决定，且在启动期设置一次 |
 | AUD-30 | ⬜ **`docs/SPEC.md` 仍按 ADR-022 定版，未反映 ADR-023/024**（AUD-14 顺带发现，非登记项）：文件头 `Version: 1.5.0 (Unified Research Platform — ADR-022)`、`Last Updated: 2026-09-15`；正文有独立的 `## Unified Research Platform (ADR-022, Proposed)` 章节（四层架构 L0-L3 / 双对等工作面 / 飞轮闭环），全文 7 处引用 ADR-022。**与 AGENTS.md 校准前的状态是同一批漂移**，但 SPEC.md 是 1660 行的 Canonical 规格、那节是独立章节不是散落引用，改动量明显更大 —— 故本次不扩大改动，单独立项。修法同 AUD-14：定位陈述切到 ADR-023/024，并核对 § 里对 API/数据模型**有约束力**的部分是否随定位变了 （ADR-024 影响策略执行载体：YAML → ExpressionStrategy，不是编译产物） | `docs/SPEC.md` 头部 + 第 70 行起的 Unified Research Platform 章节 | SPEC.md 里不再有按 ADR-022 陈述的现行定位；ADR-023/024 对 API/数据模型的约束已体现；`docs/ADR.md` 与 AGENTS.md §11 对 SPEC 的描述一致 |
-| AUD-31 | ⛔ **`LiveEngine.portfolio` 从未被更新** —— `GetPortfolio()` 恒返回「初始资金 + 空持仓」（AUD-16 逐行复核时顺带发现，非登记项）：`e.portfolio` 只在 `NewLiveEngine` 里构造一次，之后**没有任何写入点**；现金也不随成交增减（`MockTrader` 有 `m.cash` 并维护，`LiveEngine` 没有）。唯一调用方是 `cmd/analysis/handlers_paper_trading.go:266`，而那批 `/api/paper/*` 端点未在 `main.go` / `setup.go` 注册（AUD-19 的死代码）。**与 AUD-19 / AUD-23 绑在一起裁决**：若 AUD-19 删掉 paper 端点，本字段变成零调用方，直接删即可；若保留，则需决定是补现金记账让读数变诚实（现金口径要定：含不含在途、手续费是否计入成本），还是删除。注：AUD-16 只修了 `updatePortfolio()` 写回持仓估值，没动这个字段 | `pkg/live/engine.go#L20,70-74,174-176` | 要么 `GetPortfolio()` 反映真实状态（现金 + 持仓市值），要么该字段与端点一并删除；两种结局都不允许「返回初始资金」这种恒假读数 |\n
 | AUD-33 | ⬜ **legacy HTML 退役执行**（**前置 AUD-32 已于 2026-09-22 完成**，AUD-18 的第 ③ 阶段 —— 依赖已解除）：AUD-32 一完成就把 `cmd/analysis/static/` **冻结**（只许不动，不再改），随后删除。删除清单是连带的一整串，不是删 6 个文件：6 个文件（5 html + 1 css，124K）+ `main.go:287-320` 的 **10 条路由**（`/`、`/screen`、`/dashboard`、`/copilot`、`/strategy-selector` 各带 `.html` 变体）与 `/static` 静态目录 + **4 条裸镜像路由**（`/ohlcv/:symbol`、`POST /screen`、`/stocks/count`、`/market/index`，只被 legacy 消费，ODR-062 取证 e 已记「与 legacy 共存亡」）+ `cmd/analysis/deps_test.go:172` 的 `GET /static/*filepath` 路由断言 + AGENTS.md §14 的那一行。**顺序不能反**：先删了就会有一段「:8085 打开只剩 API」的空窗 | `cmd/analysis/static/` + `cmd/analysis/main.go` + `deps_test.go` | SPA 已在 AUD-32 上线并被实际使用过；删完后 `:8085` 不再返回 HTML、全量测试绿、4 条裸路由无引用 |
----
+| AUD-34 | ⬜ **`LiveEngine` 生产零调用方**（AUD-19 删除 paper handler 后暴露，非登记项）：`pkg/live/engine.go` 的 `LiveEngine` 现在**没有任何生产调用方** —— 唯一的生产消费者是刚被删掉的 `handlers_paper_trading.go`。活的 `/api/execution/*` 走的是 `MockTrader`（`live.LiveTrader` 的另一个实现），不经过 `LiveEngine`。剩下的调用方全在测试里（`live_test.go` / `engine_test.go`，含 AUD-16 新加的三例）。**决策点**：① 保留为「未来实盘引擎骨架」（它确实是完整的 Start/Stop/SubmitOrder/PositionManager 编排，约 450 行），但要接受「只被测试覆盖、从未被真实请求跑过」；② 删除 —— 会连带作废 AUD-16 的修复（那个修复本身是对的：`GetPositions()` 返回值拷贝导致 mark-to-market 算了就扔）与三个新测试；③ 折中：保留但补一条集成测试，从 HTTP 层真的接一次，让它至少被真实请求路径跑过一次。**注意**：`SimulatedBroker` 随本次删除已零调用方（只有 `SimulatedDataFeed` 还被测试用） | `pkg/live/engine.go`（+ `simulated_broker.go`） | 要么 `LiveEngine` 被真实请求路径跑过至少一次，要么删除并写明理由；不允许长期停在「只有测试在用」|\n---
 
 ## P2 — 数据与清理
 
@@ -796,6 +795,58 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > k8s **Service** 的端口，**不管 ingress 的 backend** —— 改 web 端口时漏改
 > `ingress.yaml` 不会报错，只会让 k8s 路径下前端打不开。这条已写进
 > `docs/guides/deploy-config.md` 的端口清单（第 5 步）。
+
+> **AUD-19 落地说明（2026-09-22）**：整条 `/api/paper/*` 已删除。
+>
+> **⚠️ 登记的判断被推翻 —— 但结论没变、理由变了。** 登记（AUD-02 顺带发现）
+> 写的是「零调用方死代码、全仓无前端/文档引用」。逐项核实后发现**前半句对、
+> 后半句错**：
+>
+> - `registerPaperTradingRoutes` 确实**零调用方** —— 10 个端点从未挂到任何 router；
+> - **但前端有完整的「模拟交易」页面**：`PaperTrading.vue` + `/paper-trading`
+>   路由 + 两个导航入口（NavTiles / AppSidebar）+ `usePaperTradingData` 并发调
+>   4 个 API；`docs/SPEC.md` 还有一整节在描述这 10 个端点。
+>
+> 所以真正的结论比登记写的更强：**不是「没人用」，是「有人在用，而后端从未挂上
+> → 那个页面打开就是 404」**。功能从未上线过 —— 不是「坏了」。
+>
+> **裁决依据（若曦裁定「删整条线」）**：
+>
+> | 依据 | 证据 |
+> |---|---|
+> | 能力已被活的端点覆盖 7/10 | orders / orders/:id / orders/:id/cancel / positions 与 `/api/execution/*` 一一对应，`/account` 对应 portfolio；且那套**带 RBAC**（`requireTrader`） |
+> | 剩下 3 个无生产用途 | start / stop / status 是「模拟会话生命周期」，`MockTrader` 那套不需要这个概念 |
+> | 底层是测试脚手架 | `SimulatedDataFeed` 文件头自己写着 `for testing` —— 不是行情接入，即使挂载也没有真实数据源 |
+> | 顺带关掉两个缺陷 | `GetPortfolio()` 恒返回「初始资金 + 空持仓」（AUD-31）、无锁返回内部指针（AUD-23） |
+>
+> **删除清单（前后端两侧）**：
+>
+> - 后端：`cmd/analysis/handlers_paper_trading.go`（整文件 282 行）；
+>   `LiveEngine.portfolio` 字段 + `GetPortfolio()` 方法（AUD-31 / AUD-23 的验收：
+>   该字段与端点一并删除）；`live_test.go` 两处随之调整（一处断言测的正是那个
+>   恒假读数，改成断言 `positionManager` 的真实汇总）。
+> - 前端：`pages/PaperTrading.vue`、`composables/usePaperTradingData.ts`（+ 测试）、
+>   `api/paper-trading.ts`、router 的 `paper-trading` 路由、NavTiles 与 AppSidebar
+>   的「模拟交易」入口（顺带清掉随之未使用的 `TrendingUpOutline` / `CashOutline`
+>   import）。
+> - 文档：`docs/SPEC.md` 第 5 节改写为「已删除」并保留订单类型语义；
+>   `docs/openapi.yaml` 的 `paper-trading order` 措辞澄清（它指的是 execution 端点，
+>   不是被删的那批）。
+>
+> **⚠️ 一个连带决定**：`EmergencyFlatten.vue`（kill-switch）**只被 PaperTrading.vue
+> 引用** —— 删页面会让它成孤儿组件，但它打的 `/api/execution/emergency-flatten`
+> 是**活的**。若曦裁定**挂到控制台**：现已移到 `Dashboard.vue` 页尾（危险操作不放
+> 显眼处），`@flattened` 事件不监听（控制台没有持仓视图）。`api/paper-trading.ts`
+> 里唯一活着的东西（`emergencyFlatten`）搬到新建的 `web/src/api/execution.ts`。
+>
+> **顺带修正两处过期叙述**：AUD-02 落地说明里「全仓无前端/文档引用」已标注为错误；
+> AUD-10 落地说明里「`handlers_paper_trading.go` 的 HTTP handler 同时读」已删除
+> （它当时根本没挂载，那次列举里只有 execution 一侧是真的）。
+>
+> **验证**：`go build` / `go vet` / `go test ./...` 全绿；前端 `typecheck` 通过、
+> `lint` **0 errors**（714 个格式 warning 是仓内既有）、`npm test` 14 文件 161 测试
+> 全过；全仓 grep 确认 `/api/paper`、`PaperTrading`、`GetPortfolio` 无残留引用
+> （剩下的是注释与 `pkg/backtest/tracker` 的同名方法，是不同的东西）。
 
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、

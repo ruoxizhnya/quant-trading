@@ -1042,29 +1042,30 @@ GET  /account                        - legacy alias
 
 > **Source**: `cmd/analysis/handlers_execution.go` — `ExecutionHandler.RegisterRoutes`
 
-### 5. Paper Trading Service (port 8085 /api/paper)
-**Responsibilities**:
-- Simulated trading with real-time market data
-- Order lifecycle management (submit, cancel, query)
-- Position tracking with T+1 settlement
-- Portfolio PnL calculation
-- Trade history recording
+### 5. ~~Paper Trading Service~~ — 已删除（AUD-19, 2026-09-22）
 
-**Endpoints**:
-```
-POST /api/paper/start              - Start paper trading session
-     {"symbols": ["000001.SZ", ...], "initial_capital": 1000000}
-POST /api/paper/stop               - Stop paper trading session
-GET  /api/paper/status             - Get session status
-POST /api/paper/orders             - Submit new order
-     {"symbol": "000001.SZ", "direction": "long", "quantity": 100, "order_type": "market"}
-GET  /api/paper/orders             - List all orders
-GET  /api/paper/orders/:id         - Get order by ID
-DELETE /api/paper/orders/:id       - Cancel order
-GET  /api/paper/positions          - Get current positions
-GET  /api/paper/portfolio          - Get portfolio summary
-GET  /api/paper/trades             - Get trade history
-```
+**这一节描述的 `/api/paper/*` 端点从未挂载过**，已整条删除。保留标题是为了让
+查过旧版文档的人能看到「它去哪了」，而不是以为文档漏了一节。
+
+删它的依据（逐项核实过，不是按「零调用方」一笔带过）：
+
+- `registerPaperTradingRoutes` **零调用方** —— 10 个端点从未挂到任何 router。
+- 前端确实有一个「模拟交易」页面在调这 10 个路径，**但那个页面打开就是 404**：
+  功能从未上线，不是「坏了」。该页面（`PaperTrading.vue`）与它的导航入口
+  已随本次删除。
+- 能力上 7/10 已被**活的** `/api/execution/*` 覆盖（见上一节），且那套带 RBAC：
+  orders / orders/:id / orders/:id/cancel / positions 一一对应，
+  `/api/execution/account` 对应 portfolio。剩下的 start / stop / status 是
+  「模拟会话生命周期」，没有生产用途。
+- 底层的 `SimulatedDataFeed` 文件头自己写着 `for testing` —— 它是测试脚手架，
+  不是行情接入。即使挂载起来也没有真实数据源。
+- 顺带关掉了两个缺陷：`LiveEngine.GetPortfolio()` 恒返回「初始资金 + 空持仓」
+  （字段从构造后从未被写入，AUD-31），且无锁返回内部指针（AUD-23）。
+  两者都随消费方消失而删除。
+
+**仍然有效的部分**：下面这些是 `pkg/live` 的订单类型与校验规则。`LiveEngine` /
+`OrderManager` 仍在仓库中（当前**无生产接线** —— `/api/execution/*` 走的是
+`MockTrader`）。文档保留，免得下次需要时无从查起。
 
 **Order types (P1-3 / ODR-016)** — `pkg/live/engine.go:tryFillOrder`:
 - `market` — 立即按 Ask/Bid 成交

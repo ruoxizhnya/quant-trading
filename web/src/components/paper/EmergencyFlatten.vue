@@ -142,11 +142,13 @@ import {
   useMessage,
 } from 'naive-ui'
 import { WarningOutline } from '@vicons/ionicons5'
+// AUD-19：原先 import 自 `@/api/paper-trading`，但 emergencyFlatten 打的
+// 是 /api/execution/emergency-flatten（paper 那条线已整条删除）。
 import {
   emergencyFlatten,
   type EmergencyFlattenOrder,
   type EmergencyFlattenResult,
-} from '@/api/paper-trading'
+} from '@/api/execution'
 
 const message = useMessage()
 const armed = ref(false)
@@ -156,9 +158,13 @@ const loading = ref(false)
 const lastResult = ref<EmergencyFlattenResult | null>(null)
 
 // S7-P2-8: emit 'flattened' after a successful kill-switch fire so the
-// parent (PaperTrading) can refresh its positions/orders grid. Without
-// this signal, the parent would only update on the next 5s auto-refresh
-// tick, leaving stale positions visible right after a flatten.
+// parent can refresh its positions/orders grid. Without this signal, the
+// parent would only update on the next 5s auto-refresh tick, leaving
+// stale positions visible right after a flatten.
+//
+// AUD-19（2026-09-22）：原先的父组件 PaperTrading.vue 已随 /api/paper/*
+// 整条线删除，本组件改挂在 Dashboard.vue 上。契约保留 —— 将来若把它放进
+// 某个有持仓视图的页面，那个页面就能重新用上这个信号。
 const emit = defineEmits<{
   flattened: []
 }>()

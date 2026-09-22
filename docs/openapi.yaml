@@ -1545,7 +1545,10 @@ paths:
       tags: [Execution]
       summary: Submit an order
       description: |
-        Submits a paper-trading order to the in-process MockTrader.
+        Submits a simulated order to the in-process MockTrader.
+
+        (Wording note: this is NOT the removed `/api/paper/*` family —
+        those endpoints were never mounted and were deleted in AUD-19.)
 
         AUD-02 (ODR-065 H5): requires role `trader` or `admin`. A `viewer`
         token gets 403. The legacy root path `POST /orders` carries the

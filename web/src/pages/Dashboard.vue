@@ -27,6 +27,14 @@
       @clear="backtestStore.clearHistory()"
       @view-report="(id: string) => router.push({ path: '/backtest', query: { id } })"
     />
+
+    <!-- AUD-19（2026-09-22）：紧急平仓（kill-switch）原先挂在 PaperTrading.vue 上，
+         那个页面连同 /api/paper/* 整条线已删除。它打的是**活的**
+         /api/execution/emergency-flatten（双因子：bearer token + confirmation_token），
+         所以保留并移到这里 —— 放在页尾，与「危险操作不放显眼处」的惯例一致。
+         @flattened 原本用来让父页面刷新持仓/订单；控制台没有持仓视图，故不监听
+         （组件内部已用 useMessage 提示结果）。 -->
+    <EmergencyFlatten />
   </div>
 </template>
 
@@ -43,6 +51,7 @@ import MarketMetrics from '@/components/dashboard/MarketMetrics.vue'
 import QuickBacktest from '@/components/dashboard/QuickBacktest.vue'
 import NavTiles from '@/components/dashboard/NavTiles.vue'
 import ConsoleHistory from '@/components/dashboard/ConsoleHistory.vue'
+import EmergencyFlatten from '@/components/paper/EmergencyFlatten.vue'
 
 const router = useRouter()
 const message = useMessage()

@@ -3,19 +3,23 @@
 // Tests the kill-switch component's integration contract:
 //   1. Renders arm/disarm UI correctly.
 //   2. Emits 'flattened' after a successful emergencyFlatten() call,
-//      so the parent (PaperTrading) can refresh its positions/orders.
+//      so the parent can refresh its positions/orders.
 //
 // The emit is the integration point added in S7-P2-8 — before this,
 // EmergencyFlatten was a standalone component with no way to signal
 // the parent that positions have changed.
+//
+// AUD-19（2026-09-22）：父组件从 PaperTrading.vue 换成了 Dashboard.vue
+// （前者连同 /api/paper/* 整条线已删除）。emit 契约本身没变，所以下面的
+// 断言照旧 —— 只是控制台没有持仓视图，当前不监听这个事件。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { NMessageProvider } from 'naive-ui'
 import EmergencyFlatten from './EmergencyFlatten.vue'
-import * as paperApi from '@/api/paper-trading'
-import type { EmergencyFlattenResult } from '@/api/paper-trading'
+import * as executionApi from '@/api/execution'
+import type { EmergencyFlattenResult } from '@/api/execution'
 
 // Mount helper: NMessageProvider must be an ancestor because
 // EmergencyFlatten calls useMessage().
@@ -63,7 +67,7 @@ describe('EmergencyFlatten', () => {
   })
 
   it('emits flattened event after successful emergency flatten', async () => {
-    vi.spyOn(paperApi, 'emergencyFlatten').mockResolvedValue(mockResult)
+    vi.spyOn(executionApi, 'emergencyFlatten').mockResolvedValue(mockResult)
 
     const wrapper = mountFlatten()
     const flatten = wrapper.findComponent(EmergencyFlatten)
@@ -88,13 +92,13 @@ describe('EmergencyFlatten', () => {
     await flushPromises()
 
     // 4. Assert emit.
-    expect(paperApi.emergencyFlatten).toHaveBeenCalledWith('test-token-123', '系统检测到异常行情')
+    expect(executionApi.emergencyFlatten).toHaveBeenCalledWith('test-token-123', '系统检测到异常行情')
     expect(flatten.emitted('flattened')).toBeTruthy()
     expect(flatten.emitted('flattened')!.length).toBe(1)
   })
 
   it('does NOT emit flattened on API failure', async () => {
-    vi.spyOn(paperApi, 'emergencyFlatten').mockRejectedValue(new Error('server error'))
+    vi.spyOn(executionApi, 'emergencyFlatten').mockRejectedValue(new Error('server error'))
 
     const wrapper = mountFlatten()
     const flatten = wrapper.findComponent(EmergencyFlatten)

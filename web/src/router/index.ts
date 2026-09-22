@@ -67,12 +67,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '数据同步' },
       },
       {
-        path: 'paper-trading',
-        name: 'paper-trading',
-        component: () => import('@/pages/PaperTrading.vue'),
-        meta: { title: '模拟交易' },
-      },
-      {
         path: 'alerts',
         name: 'alerts',
         component: () => import('@/pages/Alerts.vue'),

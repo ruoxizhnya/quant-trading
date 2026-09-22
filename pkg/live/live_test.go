@@ -398,9 +398,12 @@ func TestLiveEngine_NewEngineDefaults(t *testing.T) {
 	engine := NewLiveEngine(newInstrumentedBroker(), NewSimulatedDataFeed(), defaultExecConfig())
 	require.NotNil(t, engine)
 	assert.False(t, engine.IsRunning())
-	pf := engine.GetPortfolio()
-	require.NotNil(t, pf)
-	assert.Equal(t, 1_000_000.0, pf.Cash)
+	// AUD-31：这里原先断言 GetPortfolio().Cash == 初始资金。那测的正是被删掉的
+	// 字段 —— 它在构造时算一次、之后从不更新，所以「等于初始资金」永远成立，
+	// 断言再强也证明不了任何事。组合的真实来源是 positionManager
+	// （AUD-16 起 mark-to-market 会真的写回）。
+	assert.Empty(t, engine.GetPositions())
+	assert.InDelta(t, 0.0, engine.positionManager.GetTotalMarketValue(), 1e-9)
 }
 
 func TestLiveEngine_StartAlreadyRunning(t *testing.T) {
@@ -625,14 +628,15 @@ func TestLiveEngine_Stop_Concurrent_1000xNoDeadlock(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func() {
 			defer wg.Done()
-			// Mix Stop + IsRunning + GetPortfolio so the accessors
-			// would have contended on the old lock-held-during-I/O
-			// code path.
+			// Mix Stop + IsRunning so the accessors would have
+			// contended on the old lock-held-during-I/O code path.
+			// (GetPortfolio was dropped from this mix in AUD-31 —
+			// the method itself is gone.)
 			if i%3 == 0 {
 				_ = engine.Stop([]string{"X"})
 			} else {
 				_ = engine.IsRunning()
-				_ = engine.GetPortfolio()
+				_ = engine.GetPositions()
 			}
 		}()
 	}
