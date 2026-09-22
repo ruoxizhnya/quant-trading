@@ -32,16 +32,15 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | P1 | 16 | 16 | 0 | 0 | 0 | 含 P1-1 —— 子项 1a/1b/1c 均已完成 |
 | P2 | 19 | 15 | 0 | 2 | 2 | ⬜ P2-1 / P2-2；⛔ P2-8、P2-13（两者都卡在数据同步，见下） |
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
-| AUD-19~34 | 16 | 6 | 0 | 10 | 0 | ✅ AUD-19 / AUD-23 / AUD-31 / AUD-32 / AUD-33（2026-09-22）+ **AUD-34**（裁决：保留，见落地说明）；**无阻塞项** |
+| AUD-19~34 | 16 | 7 | 0 | 9 | 0 | ✅ AUD-19 / AUD-23 / AUD-30 / AUD-31 / AUD-32 / AUD-33（2026-09-22）+ **AUD-34**（裁决：保留，见落地说明）；**无阻塞项** |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：**AUD-30**（`docs/SPEC.md` 仍按 ADR-022 定版，纯文档）→
-**AUD-27**（`gofmt -l .` 恒失败：blob 存 CRLF 且无 `.gitattributes`）→
-AUD-28 / AUD-29（`gin.SetMode` 的两处）→ 监管规则类 AUD-20 / AUD-21 / AUD-22 →
-沙箱跨平台 AUD-24 / AUD-25 / AUD-26。
+**下一批建议顺序**：**AUD-27**（`gofmt -l .` 恒失败：blob 存 CRLF 且无
+`.gitattributes`）→ AUD-28 / AUD-29（`gin.SetMode` 的两处）→ 监管规则类
+AUD-20 / AUD-21 / AUD-22 → 沙箱跨平台 AUD-24 / AUD-25 / AUD-26。
 
 ### 已完成（2026-09-16，已从下方列表移出）
 
@@ -515,7 +514,6 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | AUD-27 | ⬜ **`gofmt -l .` 在本仓恒失败**（AUD-12 顺带发现，非登记项）：仓库 blob 里存的是 **CRLF**（实测 `git show HEAD:pkg/risk/lot.go` 有 99 行带 CR）、**没有 `.gitattributes`**、`core.autocrlf=true`。于是 `gofmt -l .` 在 Linux CI 与 Windows 本机都会列出**全部** Go 文件 —— AGENTS.md §8 的「`gofmt -l .` 无输出」检查项因此在**所有平台上都失效**（本机一直靠「只对本次改动的文件跑」绕过）。**修法（择一）**：① 加 `.gitattributes`（`*.go text eol=lf`）+ `git add --renormalize .` —— 一次性大 diff，但从此换行符一致；② 保留 CRLF，把检查改成「归一化后再 gofmt」（`tr -d '\r' \| gofmt -d`，每文件一个子进程，慢但可行）；③ 承认现状，把 AGENTS.md §8 那条删掉。**这也是 AUD-12 没有加 `gofmt` CI 步骤的原因** | `.gitattributes`（缺失）、`AGENTS.md#L449` | `gofmt -l .` 在 CI 与本机都无输出；或明确记录该检查项已作废 |
 | AUD-28 | ⬜ **其余 5 个包仍有「测试各自调 `gin.SetMode`」的模式**（AUD-12 顺带发现，非登记项）：`cmd/data/handlers_ingest_test.go`、`cmd/data/setup_test.go`、`internal/httpserver/cors_test.go`、`internal/httpserver/errors_test.go`、`pkg/api/versioning_test.go`。**今天不报竞争** —— 实测这些包都没用 `t.Parallel()`，所以是**潜在雷**而非现患：一旦有人给这些测试加并行，就会复现 AUD-12 修掉的同类竞争。修法同 AUD-12（`TestMain` 集中设置 + 删掉逐测试调用） | 上述 5 个文件 | 这些包加 `t.Parallel()` 后 `-race` 仍绿 |
 | AUD-29 | ⬜ **`buildRouter` 在运行期按日志格式写 gin 全局 mode**（AUD-12 顺带发现，非登记项）：`if v.GetString("logging.format") == "json" { gin.SetMode(gin.ReleaseMode) }`。两个问题：① **语义可疑** —— 日志格式与 gin 运行模式是两件事，用前者决定后者没有依据；② **运行期改进程级全局** —— 当前测试都用 `logging: level: info`，所以没触发；只要有人写一条 `format: json` 的测试并与并行测试共存，就会复现同类竞争，且这次栈里会出现**生产文件**。`cmd/data/setup.go:220`、`cmd/strategy/main.go:102` 同样写法。**决策点**：是否改由语义相符的配置项（如显式 `server.gin_mode`）决定，并在启动早期设置一次 | `cmd/analysis/setup.go#L638`、`cmd/data/setup.go#L220`、`cmd/strategy/main.go#L102` | gin mode 由语义相符的配置项决定，且在启动期设置一次 |
-| AUD-30 | ⬜ **`docs/SPEC.md` 仍按 ADR-022 定版，未反映 ADR-023/024**（AUD-14 顺带发现，非登记项）：文件头 `Version: 1.5.0 (Unified Research Platform — ADR-022)`、`Last Updated: 2026-09-15`；正文有独立的 `## Unified Research Platform (ADR-022, Proposed)` 章节（四层架构 L0-L3 / 双对等工作面 / 飞轮闭环），全文 7 处引用 ADR-022。**与 AGENTS.md 校准前的状态是同一批漂移**，但 SPEC.md 是 1660 行的 Canonical 规格、那节是独立章节不是散落引用，改动量明显更大 —— 故本次不扩大改动，单独立项。修法同 AUD-14：定位陈述切到 ADR-023/024，并核对 § 里对 API/数据模型**有约束力**的部分是否随定位变了 （ADR-024 影响策略执行载体：YAML → ExpressionStrategy，不是编译产物） | `docs/SPEC.md` 头部 + 第 70 行起的 Unified Research Platform 章节 | SPEC.md 里不再有按 ADR-022 陈述的现行定位；ADR-023/024 对 API/数据模型的约束已体现；`docs/ADR.md` 与 AGENTS.md §11 对 SPEC 的描述一致 |
 
 ## P2 — 数据与清理
 
@@ -912,6 +910,44 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 >
 > **接线到实时行情 / 真实券商之前，第一件事是补一条从 HTTP 层真的接一次的
 > 集成测试**，而不是直接上资金。这条已写进 AGENTS.md §14 的 Workaround 列。
+
+> **AUD-30 落地说明（2026-09-22）**：`docs/SPEC.md` 的顶层定位从 **ADR-022**
+> （Proposed 期间即被取代、**从未实施**）切到 **ADR-023 / ADR-024**。纯文档改动，
+> 零代码。
+>
+> **改动清单**：
+>
+> | 位置 | 改法 |
+> |---|---|
+> | 头部 | `Version: 1.5.0 (Unified Research Platform — ADR-022)` → **`1.6.0 (AI 实验员实验室 — ADR-023 / ADR-024)`**；`Last Updated` 2026-09-15 → 2026-09-22；补 `Changelog v1.6.0` |
+> | 核心章节 | `## Unified Research Platform (ADR-022, Proposed)` → **`## AI 实验员实验室（ADR-023 / ADR-024）`** —— 四层 L0-L3 / 双对等工作面 / 飞轮闭环 → 三角色 + 三层（**L1 数据 / L2 能力 / L3 AI 编排**）+ 验证器链（5 确定性 + 1 因果）+ 信息隔离 + EquityDeep 降为数据底座 + 可校准目标 + 数据归属 A-E + 证据服务 + **§策略执行载体（ADR-024）** |
+> | §6 末 | `### 6. AI Research Service (port 8086)` **整块（~190 行）换成墓碑** —— 该服务 2026-09-18 已删（P2-5），SPEC 却仍标 `✅ Implemented` 并列约 100 行端点 |
+> | §6 | Data Synchronization 子节上移 —— **SSE 路径是 `GET /api/sync/jobs/:id/progress`**，不是旧文档写的 `/api/sync/stream` |
+> | Pipeline Stages | 第 3~5 步按 ADR-024 校准：LLM 生成的 Go 代码是 **artifact**（失败不阻断），回测跑的是**表达式信号** |
+> | Phase 4 Changes | 加历史标注 —— 那张表是 Phase 4 的**历史交付清单**，不是现状 |
+> | 3 处正文引用 | 重指 ADR-022 → ADR-023（external-source 段、`/api/factors/:factor_name`、`POST /api/datasource/switch` 退役说明） |
+> | 层号警告 | 显式提示：ADR-022 用 `L0 = 数据面`，ADR-023 用 **`L1 = 数据层`** —— 旧任务号里的「L0」一律读作 **L1 数据层** |
+>
+> **⚠️ 实际比登记写的严重**：登记说「全文 7 处引用 ADR-022」，落地时另发现三处
+> 独立问题 —— ① 已删除的 `:8086` 服务被标为 `✅ Implemented`；② 节号 `6.` 重复；
+> ③ Batch / Walk-Forward 路径写错（文档写 `/api/batch/backtest`，实际是 `/api/batch`）。
+> 三处都会让读者照着行动，属「按文档做会做错」，不是措辞问题。
+>
+> **验证**：`go build` / `go vet` / `go test ./... -count=1` 全绿；三道护栏
+> （`check_doc_links.py`、`--include-archive`、`check_deploy_consistency.py`）全绿。
+>
+> **顺带修正 `docs/ADR.md` 尾注累计块**：核对验收标准第 3 条（`docs/ADR.md` 与
+> AGENTS.md §11 对 SPEC 的描述一致）时发现 —— ADR.md 的 **ADR/ODR 索引表本身是
+> 对的**（ADR-022 已标 `Superseded by ADR-023`；ODR-065 已录入），但尾注的
+> 「累计」块陈旧：写「ADR 累计 22 条 … **ADR-021 由 ADR-022 取代**」—— 而
+> **ADR-022 本身早已被 ADR-023 取代**（这正是本项的正面主题）。已按实测改正为
+> **ADR 24 条 / ODR 65 条**，取代链补上 ADR-023。**这不是新问题** —— ODR-064
+> 那轮也修过同类的「尾注 vs 索引表」漂移。AGENTS.md §11 对 SPEC 的描述是中性的
+> （「技术规格、API 定义、数据模型、Strategy 接口」），不含 ADR-022 定位，
+> **无需改**。
+>
+> **有意不改**：`Owner: 龙少 (Longshao)` 是 `SPEC.md` / `ADR.md` / `TEST.md` 三个
+> 文件的一致约定（文档署名），属独立议题，本次不动。
 
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、
