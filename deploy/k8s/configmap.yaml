@@ -32,8 +32,16 @@ data:
   REDIS_HOST: "redis"
   REDIS_PORT: "6379"
   # Logging
-  LOG_LEVEL: "info"
-  LOG_FORMAT: "json"
+  #
+  # AUD-35：键名必须是 LOGGING_LEVEL / LOGGING_FORMAT。这三个服务都用
+  # viper 的 AutomaticEnv + SetEnvKeyReplacer(".", "_")，它把配置键
+  # `logging.level` 映射成 env 名 **LOGGING_LEVEL**（不是 LOG_LEVEL）。
+  # 此前这里写的是 LOG_LEVEL / LOG_FORMAT —— 全仓零读取点，改了日志级别
+  # 没有任何效果（死配置，与已删的 GIN_MODE / ANALYSIS_PORT 同类）。
+  # 注意 strategy-service 在 AUD-36 之前没有 AutomaticEnv，这两个键对它
+  # 也是空的；AUD-36 之后三个服务一致。
+  LOGGING_LEVEL: "info"
+  LOGGING_FORMAT: "json"
   # Gin mode
   #
   # 这里**曾经**有 `GIN_MODE: "release"`，已移除（AUD-29）。原因不是它没用 ——

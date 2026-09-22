@@ -71,7 +71,10 @@ services:
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
       REDIS_URL: redis://redis:6379
-      LOG_LEVEL: info
+      # AUD-35：名字必须是 LOGGING_LEVEL。viper 的 AutomaticEnv +
+      # SetEnvKeyReplacer(".", "_") 把 logging.level 映射成 LOGGING_LEVEL；
+      # 此前这里写的 LOG_LEVEL 全仓无人读（死配置）—— 改了没有任何效果。
+      LOGGING_LEVEL: info
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
       interval: 10s
@@ -94,7 +97,7 @@ services:
     environment:
       REDIS_URL: redis://redis:6379
       DATA_SERVICE_URL: http://data-service:8081
-      LOG_LEVEL: info
+      LOGGING_LEVEL: info
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8082/health || exit 1"]
       interval: 10s
@@ -140,7 +143,7 @@ services:
       # registry doesn't have the requested strategy.
       AI_API_KEY: ${AI_API_KEY:-}
       AI_API_URL: ${AI_API_URL:-https://api.openai.com/v1/chat/completions}
-      LOG_LEVEL: info
+      LOGGING_LEVEL: info
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8085/health || exit 1"]
       interval: 10s

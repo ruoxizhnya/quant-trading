@@ -248,3 +248,57 @@ func newTestViper(t *testing.T) *viper.Viper {
 	v.Set("data_service.url", "http://test-data:8081")
 	return v
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// AUD-35 guard: the env name for `logging.level` is LOGGING_LEVEL
+// ──────────────────────────────────────────────────────────────────────
+
+// writeLoggingConfig writes a minimal config with a known logging.level
+// and points CONFIG_PATH at it.
+func writeLoggingConfig(t *testing.T) {
+	t.Helper()
+	configPath := filepath.Join(t.TempDir(), "logging.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("logging:\n  level: info\n"), 0644))
+	t.Setenv("CONFIG_PATH", configPath)
+}
+
+// TestLoadConfig_LoggingLevelEnvNameIsHonoured is the AUD-35 guard.
+//
+// docker-compose.yml and deploy/k8s/configmap.yaml used to set `LOG_LEVEL` /
+// `LOG_FORMAT`. No code path reads those names: loadConfig applies
+// AutomaticEnv + SetEnvKeyReplacer(".", "_"), which maps the config key
+// `logging.level` to the env name **LOGGING_LEVEL**. The deploy files have
+// been renamed; this pins the name that actually reaches the config.
+//
+// Note the precedence being asserted: env beats the config file in viper, so
+// a non-zero override here is proof the env name was consulted — not that the
+// file happened to agree.
+func TestLoadConfig_LoggingLevelEnvNameIsHonoured(t *testing.T) {
+	writeLoggingConfig(t)
+	t.Setenv("LOGGING_LEVEL", "debug")
+
+	v := loadConfig(zerolog.Nop())
+
+	require.NotNil(t, v)
+	assert.Equal(t, "debug", v.GetString("logging.level"),
+		"LOGGING_LEVEL 必须覆盖 yaml 里的 logging.level（viper 里 env 优先于配置文件）")
+}
+
+// TestLoadConfig_LogLevelIsNotASecondEntry is the other half of the AUD-35
+// guard: the retired name must stay dead.
+//
+// AUD-29 removed the k8s `GIN_MODE` key for exactly this reason — it was a
+// second entry to the same decision, discoverable only by reading gin's
+// source. The same argument applies here: if someone later "helpfully" adds
+// BindEnv("logging.level", "LOG_LEVEL"), this test fails and points them at
+// the precedent instead of quietly re-creating two names for one knob.
+func TestLoadConfig_LogLevelIsNotASecondEntry(t *testing.T) {
+	writeLoggingConfig(t)
+	t.Setenv("LOG_LEVEL", "debug") // the retired name
+
+	v := loadConfig(zerolog.Nop())
+
+	require.NotNil(t, v)
+	assert.Equal(t, "info", v.GetString("logging.level"),
+		"LOG_LEVEL 是已退役的名字（AUD-35）；它不许成为第二个入口")
+}

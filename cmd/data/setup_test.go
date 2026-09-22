@@ -274,3 +274,42 @@ func TestSplit_HandlersFundamentals_HasOnlyReadHandlers(t *testing.T) {
 		}
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// AUD-35 guard: the env names for logging.* are LOGGING_LEVEL / LOGGING_FORMAT
+// ──────────────────────────────────────────────────────────────────────
+
+// The analysis service has the same guard in cmd/analysis/setup_test.go
+// (with the full rationale). It is duplicated here because this package
+// drives the *global* viper rather than a fresh viper.New() instance — a
+// different wiring that a test in the other package cannot cover.
+//
+// viper.Reset() first: TestBuildRouter_DoesNotTouchGinMode calls viper.Set,
+// and an explicit Set outranks env in viper's precedence order, so a
+// leftover override would mask what these tests are measuring.
+
+func TestLoadConfig_LoggingEnvNamesAreTheOnesThatWork(t *testing.T) {
+	viper.Reset()
+	t.Setenv("LOGGING_LEVEL", "debug")
+	t.Setenv("LOGGING_FORMAT", "text")
+
+	require.NoError(t, loadConfig())
+
+	assert.Equal(t, "debug", viper.GetString("logging.level"),
+		"LOGGING_LEVEL 必须覆盖 yaml 里的 logging.level")
+	assert.Equal(t, "text", viper.GetString("logging.format"),
+		"LOGGING_FORMAT 必须覆盖 yaml 里的 logging.format")
+}
+
+func TestLoadConfig_RetiredLogEnvNamesStayDead(t *testing.T) {
+	viper.Reset()
+	t.Setenv("LOG_LEVEL", "debug")
+	t.Setenv("LOG_FORMAT", "text")
+
+	require.NoError(t, loadConfig())
+
+	assert.Equal(t, "info", viper.GetString("logging.level"),
+		"LOG_LEVEL 是已退役的名字（AUD-35）")
+	assert.Equal(t, "json", viper.GetString("logging.format"),
+		"LOG_FORMAT 是已退役的名字（AUD-35）")
+}
