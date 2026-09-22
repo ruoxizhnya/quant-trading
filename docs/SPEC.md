@@ -26,6 +26,19 @@
 >   and the `/api`-prefixed Data Proxy variants
 > - CR-33 (2026-06-10): `Signal` → `domain.Signal` consistency in Vision/SPEC
 >
+> **Changelog v1.6.1 (§Configuration 整段订正, AUD-41, 2026-09-22):**
+> - `## Configuration` 段此前是一份**设计草图** —— 描述了一个并不存在的
+>   `config/global.yaml`，且键名与实际不符（`database.name` / `redis.host|port|password` /
+>   `app.env` / `services.*.port` 全无读取点）。现已改为**如实描述**：三份真实配置
+>   文件及其定位方式、键名 → env 名规则、主要配置段导航、`${...}` 禁令、
+>   策略 YAML 的真实 schema
+> - 「Strategy Config (`config/strategies/value_momentum.yaml`)」同属该段，那个文件
+>   也不存在 —— `value_momentum` 是 Go 实现 `pkg/strategy/examples/value_momentum.go`。
+>   已改为 `pkg/ai/yaml.Config` 的真实 schema + `LoadStrategy` 的加载条件
+> - `tools/check_doc_links.py` 新增第二项检查：行内代码里引用的 `config/` · `deploy/`
+>   路径必须存在。这类引用**不是 Markdown 链接**，原检查看不见它 —— 这正是本段
+>   能烂掉而无人发现的原因
+>
 > **Changelog v1.6.0 (定位校准到 ADR-023/024, AUD-30, 2026-09-22):**
 > - 顶层定位从 ADR-022（Proposed，**从未实施**，已被 ADR-023 取代）切到
 >   [ADR-023](adr/adr-023-ai-experimenter-lab.md)（AI 实验员 + 人类监督者实验室）
@@ -1486,118 +1499,154 @@ When a LiveTrader is attached, the engine can run in "paper trading" mode where 
 
 ## Configuration
 
-> ⚠️ **下面是设计草图，不是本仓的文件清单。** 本仓实际有三份服务配置：
-> `config/analysis-service.yaml` / `config/data-service.yaml` /
-> `config/strategy-service.yaml` —— **`config/global.yaml` 并不存在**，键名也与
-> 下面不同（`database.database` 而非 `database.name`；`redis.url` 而非
-> `redis.host` / `redis.port` / `redis.password`）。**以文件为准。**
->
-> ⚠️ **不要照抄这里的 `${...}` 写法。** 本仓**没有** env 展开器（全仓无
-> `os.ExpandEnv` / `envsubst`），YAML 里的 `${X}` 不是模板 —— 它是那 4 个字符
-> 本身，会被当成真的密码 / token 用（AUD-39 就是被这个坑掉的）。密码类字段一律
-> 留**空**，由启动期校验要求 env 必填。
->
-> 这段草图的整体订正（键名、文件拆分）另立台账项，本次只消除 `${...}` 反例。
+**本仓的配置就是 `config/` 下的三份 YAML。** 没有 `config/global.yaml`，也没有
+把多份合成一份的加载器 —— 每个服务只读自己那一份。
 
-### Global Config (sketch — see the note above)
+| 文件 | 谁读 | 定位方式 | 默认端口 |
+|---|---|---|---|
+| `config/analysis-service.yaml` | `cmd/analysis` | `CONFIG_PATH` env（默认 `config/analysis-service.yaml`） | 8085 |
+| `config/data-service.yaml` | `cmd/data` | viper `SetConfigName("data-service")`，搜索 `./config` `../config` `../../config` | 8081 |
+| `config/strategy-service.yaml` | `cmd/strategy` | viper `SetConfigName("strategy-service")`，同上三个路径 | 8082 |
+
+⚠️ **定位方式不统一是有意保留的历史差异，不是设计。** analysis 走 `CONFIG_PATH`
+（便于容器里挂不同文件），另两个走 viper 的搜索路径。改启动逻辑时注意别把
+`CONFIG_PATH` 当成三个服务的通用开关 —— 它只对 `cmd/analysis` 生效。
+
+### 键名 → env 名
+
+三个服务都接了 `viper.AutomaticEnv()` + `SetEnvKeyReplacer(".", "_")`，所以
+**配置键里的 `.` 换成 `_` 就是 env 名**：`database.host` → `DATABASE_HOST`、
+`server.gin_mode` → `SERVER_GIN_MODE`、`logging.level` → `LOGGING_LEVEL`、
+`redis.url` → `REDIS_URL`。这是本仓**唯一**的重命名规则，不要再发明第二种 ——
+AUD-35 的两个死键（`LOG_LEVEL` / `LOG_FORMAT`）就是照抄了并不存在的规则。
+
+`tools/check_deploy_consistency.py` 的检查 6 会把「部署里注入的 env」与
+「Go 源码里真的被读到的键」对账：注入一个没人读的 env 会报错。
+
+### 主要配置段
+
+| 段 | 键 | 读到哪 |
+|---|---|---|
+| `server` | `host` / `port` / `gin_mode` / `cors.allowed_origins` | `internal/httpserver` |
+| `auth` | `jwt_secret`（env `JWT_SECRET` 或 `AUTH_JWT_SECRET`）/ `allow_insecure` / `issuer` / `access_token_ttl` / `refresh_token_ttl` | `pkg/auth` |
+| `rate_limit` | `per_minute`（env `RATE_LIMIT_PER_MINUTE`） | 网关限流中间件 |
+| `database` | `url`（整串 DSN 覆盖点）/ `host` / `port` / `user` / `password` / `database` / `sslmode` | `pkg/storage.BuildDSN` |
+| `redis` | `url` | `pkg/storage.NewCache` |
+| `data_service` / `strategy_service` / `risk_service` | `url` | 服务间 HTTP 调用（`risk_service` 仅 analysis，legacy 回落） |
+| `risk_manager` | `target_volatility` / `max_position_weight` / `min_position_weight` / `stoploss.*` / `take_profit.*` / `volatility.*` / `regime.*` | 回测引擎（进程内，无 HTTP 跳） |
+| `alert` | `enabled` / `interval_sec` / `history_limit` / `recorder_capacity` / `max_position_weight` / `max_sector_weight` / `max_drawdown` / `daily_loss_limit` / `failure_rate_limit` / `webhook_url` / `webhook_timeout_sec` | `pkg/alert` |
+| `backtest` | `initial_capital` / `commission_rate` / `slippage_rate` / `risk_free_rate` | 回测引擎 |
+| `copilot` | `working_dir` | AI 沙箱（空 = 拒绝构建生成的策略，fail closed） |
+| `trading` | `stamp_tax_rate` / `stamp_tax_rate_before` / `min_commission` / `transfer_fee_rate` / `price_limit.{normal,st,st_before,new}` / `new_stock_days` / `emergency_token` | 回测引擎（`UnmarshalKey("trading")`）+ `cmd/analysis` 实盘费率 |
+| `logging` | `level` / `format` | zerolog 初始化 |
+| `tushare`（仅 data） | `token`（空 = 未配置）/ `base_url` / `max_retries` | `pkg/data` |
+
+**上表是导航，不是 schema —— 以文件和 Go 侧的读取点为准。** 加键前先 grep
+有没有人读它；`pkg/backtest` 的 `TestTradingBlockInServiceConfigHasNoDeadKeys`
+会把 `trading.*` 里没人读的键报出来。
+
+### ⚠️ YAML 里不要写 `${...}`
+
+本仓**没有** env 展开器（全仓无 `os.ExpandEnv` / `envsubst`）。写
+`password: "${DATABASE_PASSWORD}"` 时，那串字符**就是密码本身**，会被交给驱动；
+失败点在 TCP 连上之后，日志里只有 `password authentication failed` ——
+读起来像「密码错了」，实际是「没填密码」（AUD-39）。
+
+凭据类字段一律留**空**，由启动期校验要求 env 必填：
+
+- `database.password` 空 → `pkg/storage.BuildDSN` 返回 `ErrEmptyDBPassword`，
+  调用方 `Fatal` 并指向 `DATABASE_PASSWORD`（`cmd/analysis` / `cmd/data` 都是）。
+- `tushare.token` 空 → **不 Fatal**，这是有意的：只读端点不依赖 token，只有
+  sync 端点会在调用时失败并打明确 warn。
+- `database.url` 非空且不含 `${` → 原样使用（嵌入方直接给整串 DSN 的逃生口）。
+
+`tools/check_deploy_consistency.py` 的检查 7 钉住「`config/*.yaml` 里不得出现
+`${`」；检查 5 钉住 compose ↔ k8s 的库名 / 用户名 / 密码变量不漂移。
+
+### 策略 YAML
+
+**`value_momentum` 不是一个 YAML 文件** —— 它是 Go 实现
+`pkg/strategy/examples/value_momentum.go`。运行时真正加载的策略 YAML 由
+`pkg/ai/yaml.Generator` 产出、由 `pkg/ai/yaml.LoadStrategy(yamlStr)` 加载，
+schema 是 `pkg/ai/yaml.Config`：
+
 ```yaml
-app:
-  name: "quant-trading"
-  env: "development"  # development, production
+strategy:                 # → StrategyConfig
+  name: "value_momentum"          # 必填，且不得是保留名 expression_template
+  type: "momentum"                # 自由字符串，见下面的加载条件
+  description: "…"
+  indicators: ["pe", "pb"]        # 可选
+  parameters: {}                  # map，自由键值
 
-database:
-  host: "localhost"
-  port: 5432
-  user: "postgres"
-  # AUD-39：留空，由 env 注入（必填）。不要写 ${...} —— 没有展开器。
-  password: ""          # env: DATABASE_PASSWORD
-  name: "quant_trading"
-  sslmode: "disable"
-  max_connections: 20
+backtest:                 # → BacktestConfig
+  start_date: "2020-01-01"
+  end_date: "2024-01-01"
+  initial_capital: 1000000
+  commission_rate: 0.0003
+  slippage_rate: 0.0001
+  rebalance_frequency: "daily"
 
-redis:
-  host: "localhost"
-  port: 6379
-  # 本项目的 redis 未启用 requirepass，不校验密码（见 docker-compose.yml 文件头）。
-  password: ""
-  db: 0
+data:                     # → DataConfig
+  universe: "hs300"
+  timeframe: "1d"
+  providers: ["postgres", "tushare"]   # 可选
+  adjust_price: true
 
-logging:
-  level: "info"         # env: LOGGING_LEVEL
-  format: "json"        # env: LOGGING_FORMAT
-  output: "stdout"
+risk:                     # → RiskConfig（引擎级，可省）
+  max_positions: 10
+  max_drawdown: 0.15
+  stop_loss: 0.08
+  take_profit: 0.20
+  position_sizing: "volatility_target"
 
-tushare:
-  # 留空 = 未配置（sync 端点会失败，read 端点仍可用）。
-  token: ""             # env: TUSHARE_TOKEN
-  base_url: "https://api.tushare.pro"
+execution:                # → ExecutionConfig（可省）
+  order_type: "market"
+  price_tolerance: 0.01
 
-services:
-  data:
-    port: 8081
-  strategy:
-    port: 8082
-  # ODR-021 (P1-15): risk + execution are in-process under analysis-service,
-  # no separate service config / port needed.
-  analysis:
-    port: 8085
+optimization:             # → OptimizationConfig（可省）
+  enabled: false
+  method: "grid_search"
+  max_iterations: 100
+  parameters: ["lookback"]
+
+# ── 执行载体（ADR-024）──────────────────────────────────────────
+# expression 段映射到 expression.ExpressionStrategyConfig。有它，
+# LoadStrategy 才产出 ExpressionStrategy —— 这是「YAML → 确定性底座」
+# 那条路的入口；LLM 生成的 Go 代码只是可审阅 artifact，不加载、不执行。
+expression:
+  signal:
+    expression: "cs_rank(close) > 0.8"   # 有非空值即触发 ExpressionStrategy
+    action: "buy"
+    direction: "long"                   # 只认 long / short / close / hold
+    min_strength: 0.5
+    lookback: 20
+  sizing:
+    method: "equal_weight"
+    fixed_weight: 0.05
+    max_per_stock: 0.05
+    max_total: 0.95
+  risk:
+    max_position_pct: 0.05
+    max_drawdown: 0.15
+    max_open_positions: 20
+    min_cash_buffer: 0.05
 ```
 
-### Strategy Config (config/strategies/value_momentum.yaml)
-```yaml
-name: "value_momentum"
-description: "Multi-factor strategy combining value, momentum, and quality factors"
-version: "1.0.0"
+**`LoadStrategy` 的加载条件**（三者之一，否则报错）：
 
-factors:
-  - name: "value_pe"
-    enabled: true
-    weight: 0.25
-    params:
-      percentile: 30
-      direction: "lower_is_better"
+1. `expression.signal.expression` 非空 → 用该段的值构建 `ExpressionStrategy`
+   （省略的子字段由下游补默认值）；
+2. 否则 `strategy.type == "expression"` → 用包级默认（`cs_rank(close) > 0.8`、
+   equal sizing、单票 10%、20 个持仓、5% 现金缓冲）构建；
+3. 否则 **返回错误** —— `LoadStrategy` 只支持 expression 型策略。
 
-  - name: "value_pb"
-    enabled: true
-    weight: 0.20
-    params:
-      percentile: 30
-      direction: "lower_is_better"
+⚠️ **`expression.risk` 与顶层 `risk` 不是一回事。** 顶层 `risk` 是**引擎级**
+止损止盈（`RiskConfig`，由回测引擎消费）；`expression.risk` 是
+`ExpressionStrategy` 的**信号后权重**风控（`RiskYAML`）。两者同名不同层，
+改一个不影响另一个。
 
-  - name: "momentum"
-    enabled: true
-    weight: 0.30
-    params:
-      lookback: 20
-      direction: "higher_is_better"
-
-  - name: "quality_roe"
-    enabled: true
-    weight: 0.25
-    params:
-      threshold: 15.0
-      direction: "higher_is_better"
-
-filters:
-  market_cap:
-    enabled: true
-    quantile: 80
-  status:
-    enabled: true
-    values: ["active"]
-  price:
-    enabled: true
-    min: 1.0
-  liquidity:
-    enabled: true
-    min_turnover: 10000000
-
-risk:
-  max_position_pct: 0.05
-  max_portfolio_beta: 0.5
-  target_volatility: 0.15
-  base_stop_loss_atr: 2.0
-```
+`LoadStrategy` 只做「YAML → 对象」，**不注册**；要进全局 registry 用
+`LoadAndRegister`。
 
 ---
 
