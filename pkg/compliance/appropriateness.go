@@ -182,7 +182,7 @@ func (p *SuitabilityProfile) IsBoardEnabled(board marketdata.Board) bool {
 // both logs and the UI.
 type CheckResult struct {
 	Allowed    bool              // true = 用户有交易该板权限
-	Board      marketdata.Board        // 板块
+	Board      marketdata.Board  // 板块
 	Reasons    []string          // 不通过原因 (Allowed=true 时为空)
 	UserID     string            // 用户 ID (审计用)
 	ProfileAge int               // 用户经验月数 (审计用)

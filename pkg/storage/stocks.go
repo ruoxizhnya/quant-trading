@@ -177,7 +177,7 @@ func (s *PostgresStore) GetAllStocks(ctx context.Context) ([]domain.Stock, error
 // Delist == nil 表示还没退市（右端开放）。
 // List 为零值表示上市日未知 —— 此时不做左端过滤（宁可放宽也不凭空剔除）。
 type ListingWindow struct {
-	List  time.Time
+	List   time.Time
 	Delist *time.Time
 }
 

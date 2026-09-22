@@ -459,8 +459,13 @@ EquityDeep（数据底座，L1 — 非 agent、无独立编排）
 - **审查方式**:
   - 自审：提交前自己通读 diff
   - 工具审：`go vet ./...` + `gofmt -l .` + `npm run typecheck`（若可用）
-    ⚠️ `gofmt -l .` 在本仓**恒列出全部 Go 文件**（blob 存 CRLF 且无 `.gitattributes`，
-    见 TASKS AUD-27）—— 只对本次改动的文件跑，不要拿整仓输出当结论。
+    ✅ **AUD-27 已修（2026-09-22）**：此前 `gofmt -l .` 在**本机**恒列出全部
+    Go 文件。根因不是「仓库存了 CRLF」（登记时的实测是错的 —— `git ls-files
+    --eol` 实测 558/558 个 .go 的 index 侧都是 `i/lf`，blob 本来就是 LF），
+    而是本机 `core.autocrlf=true`（PortableGit 的 etc/gitconfig，**系统级**）
+    在 checkout 时把 LF 写成 CRLF。已加 `.gitattributes`（`* text=auto eol=lf`，
+    **零 blob 变化**）让工作区在所有平台都是 LF，并清掉被 CRLF 噪声掩盖的
+    **32 个**未格式化文件。现在整仓 `gofmt -l .` 可以当结论用，CI 也有门禁。
   - 必要时使用 TRAE-code-review skill 执行结构化审查
 - **审查记录**: 审查发现的问题要么当场修复，要么记录为新任务到 `docs/TASKS.md`
 

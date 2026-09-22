@@ -18,9 +18,9 @@
 package main
 
 import (
-	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"encoding/json"
 	"fmt"
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"net/http"
 	"time"
 

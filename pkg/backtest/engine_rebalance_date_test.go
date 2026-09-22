@@ -34,10 +34,12 @@ type asOfSpy struct {
 	sym   string
 }
 
-func (s *asOfSpy) Name() string        { return "asof-spy" }
-func (s *asOfSpy) Description() string { return "记录引擎传进来的组合日期（P1-12 取证用）" }
-func (s *asOfSpy) Parameters() []strategy.Parameter { return nil }
-func (s *asOfSpy) Configure(map[string]interface{}) error { return nil }
+func (s *asOfSpy) Name() string { return "asof-spy" }
+func (s *asOfSpy) Description() string {
+	return "记录引擎传进来的组合日期（P1-12 取证用）"
+}
+func (s *asOfSpy) Parameters() []strategy.Parameter        { return nil }
+func (s *asOfSpy) Configure(map[string]interface{}) error  { return nil }
 func (s *asOfSpy) Weight(strategy.Signal, float64) float64 { return 0.1 }
 func (s *asOfSpy) Cleanup()                                {}
 

@@ -115,7 +115,7 @@ var BuiltinFactorHypotheses = []FactorHypothesis{
 		FactorName: FactorSize,
 		SourceKind: FactorSourceLiterature,
 		Hypothesis: "小市值公司承担更高的流动性与破产风险，需要更高的预期回报补偿。",
-		Reference: "Banz (1981)；Fama & French (1993) SMB",
+		Reference:  "Banz (1981)；Fama & French (1993) SMB",
 	},
 	{
 		FactorName: FactorVolatility,
@@ -128,7 +128,7 @@ var BuiltinFactorHypotheses = []FactorHypothesis{
 		FactorName: FactorGrowth,
 		SourceKind: FactorSourceLiterature,
 		Hypothesis: "营收/利润持续高增长反映未被定价的竞争优势，市场外推不足。",
-		Reference: "Lakonishok, Shleifer & Vishny (1994)",
+		Reference:  "Lakonishok, Shleifer & Vishny (1994)",
 	},
 	{
 		FactorName: FactorGrossMarginTrend,

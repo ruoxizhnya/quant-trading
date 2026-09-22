@@ -32,14 +32,13 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | P1 | 16 | 16 | 0 | 0 | 0 | 含 P1-1 —— 子项 1a/1b/1c 均已完成 |
 | P2 | 19 | 15 | 0 | 2 | 2 | ⬜ P2-1 / P2-2；⛔ P2-8、P2-13（两者都卡在数据同步，见下） |
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
-| AUD-19~34 | 16 | 7 | 0 | 9 | 0 | ✅ AUD-19 / AUD-23 / AUD-30 / AUD-31 / AUD-32 / AUD-33（2026-09-22）+ **AUD-34**（裁决：保留，见落地说明）；**无阻塞项** |
+| AUD-19~34 | 16 | 8 | 0 | 8 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-30 / AUD-31 / AUD-32 / AUD-33（2026-09-22）+ **AUD-34**（裁决：保留，见落地说明）；**无阻塞项** |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：**AUD-27**（`gofmt -l .` 恒失败：blob 存 CRLF 且无
-`.gitattributes`）→ AUD-28 / AUD-29（`gin.SetMode` 的两处）→ 监管规则类
+**下一批建议顺序**：AUD-28 / AUD-29（`gin.SetMode` 的两处）→ 监管规则类
 AUD-20 / AUD-21 / AUD-22 → 沙箱跨平台 AUD-24 / AUD-25 / AUD-26。
 
 ### 已完成（2026-09-16，已从下方列表移出）
@@ -511,7 +510,6 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | AUD-24 | ⬜ **Windows Job Object 实现**（AUD-11 的后续增强）：`CreateJobObject` + `SetInformationJobObject`（`JOB_OBJECT_LIMIT_PROCESS_MEMORY` / `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` / `JOB_OBJECT_LIMIT_JOB_MEMORY`）+ `AssignProcessToJobObject`。做完之后 Windows 才能真正执行受限子进程，`ErrLimitsUnsupported` 就不再是常态。**注意**：Job Object 需要 `cmd.SysProcAttr.CreationFlags` 里加 `CREATE_SUSPENDED` 才能在 exec 前挂载 | `internal/sandbox/runner/rlimit_windows.go` | Windows 上 `Limits{MemoryBytes: …}` 真正生效；不需要逃生阀即可构建 |
 | AUD-25 | ⬜ **`ulimit -u` 在 dash 上不可用**（AUD-11 顺带发现，非登记项）：`ulimit -u` 的可移植性是 **bash ✅ / busybox ash ✅ / dash ❌**（Debian/Ubuntu 的 `/bin/sh` 报 "Illegal option -u"）。故 `Limits.NumProcs` 在 Debian/Ubuntu 上会让构建 fail-closed 报 `ErrLimitSetupFailed`。生产组合根没设 `NumProcs`，所以是地雷不是现患。**决策点**：① 探测 shell 能力并在缺失时报 `ErrLimitsUnsupported`（语义更准）；② 改走 cgroup `pids.max`；③ 把 `NumProcs` 从 API 移除，只留平台原生实现 | `internal/sandbox/runner/rlimit_posix.go` | Debian/Ubuntu 上设 `NumProcs` 时给出「本平台不支持」而非含糊的 setup 失败 |
 | AUD-26 | ⬜ **runner 测试在 Windows 上依赖 PATH 里有 POSIX userland**（AUD-11 顺带发现，非登记项）：`TestRun_ExitZero` 用 `echo`、`TestRun_Timeout` 用 `sleep`、`TestRun_StdinAndEnv` 用 `sh`、`TestRun_NonZeroExit` 用 `false`、`TestRunExitCode` 用 `sh -c`。本机因为装了 Git for Windows 才全绿，**裸 Windows（无 Git Bash）会失败**。CI 跑 Linux 故不影响门禁，但会让「本机全绿」这个信号在裸 Windows 上失真。修法：改成用 `os.Executable()` 自举（测试二进制支持 `-test.run=TestHelperProcess` 模式）或按平台选命令 | `internal/sandbox/runner/runner_test.go` | 裸 Windows 上 `go test ./internal/sandbox/runner/` 也全绿 |
-| AUD-27 | ⬜ **`gofmt -l .` 在本仓恒失败**（AUD-12 顺带发现，非登记项）：仓库 blob 里存的是 **CRLF**（实测 `git show HEAD:pkg/risk/lot.go` 有 99 行带 CR）、**没有 `.gitattributes`**、`core.autocrlf=true`。于是 `gofmt -l .` 在 Linux CI 与 Windows 本机都会列出**全部** Go 文件 —— AGENTS.md §8 的「`gofmt -l .` 无输出」检查项因此在**所有平台上都失效**（本机一直靠「只对本次改动的文件跑」绕过）。**修法（择一）**：① 加 `.gitattributes`（`*.go text eol=lf`）+ `git add --renormalize .` —— 一次性大 diff，但从此换行符一致；② 保留 CRLF，把检查改成「归一化后再 gofmt」（`tr -d '\r' \| gofmt -d`，每文件一个子进程，慢但可行）；③ 承认现状，把 AGENTS.md §8 那条删掉。**这也是 AUD-12 没有加 `gofmt` CI 步骤的原因** | `.gitattributes`（缺失）、`AGENTS.md#L449` | `gofmt -l .` 在 CI 与本机都无输出；或明确记录该检查项已作废 |
 | AUD-28 | ⬜ **其余 5 个包仍有「测试各自调 `gin.SetMode`」的模式**（AUD-12 顺带发现，非登记项）：`cmd/data/handlers_ingest_test.go`、`cmd/data/setup_test.go`、`internal/httpserver/cors_test.go`、`internal/httpserver/errors_test.go`、`pkg/api/versioning_test.go`。**今天不报竞争** —— 实测这些包都没用 `t.Parallel()`，所以是**潜在雷**而非现患：一旦有人给这些测试加并行，就会复现 AUD-12 修掉的同类竞争。修法同 AUD-12（`TestMain` 集中设置 + 删掉逐测试调用） | 上述 5 个文件 | 这些包加 `t.Parallel()` 后 `-race` 仍绿 |
 | AUD-29 | ⬜ **`buildRouter` 在运行期按日志格式写 gin 全局 mode**（AUD-12 顺带发现，非登记项）：`if v.GetString("logging.format") == "json" { gin.SetMode(gin.ReleaseMode) }`。两个问题：① **语义可疑** —— 日志格式与 gin 运行模式是两件事，用前者决定后者没有依据；② **运行期改进程级全局** —— 当前测试都用 `logging: level: info`，所以没触发；只要有人写一条 `format: json` 的测试并与并行测试共存，就会复现同类竞争，且这次栈里会出现**生产文件**。`cmd/data/setup.go:220`、`cmd/strategy/main.go:102` 同样写法。**决策点**：是否改由语义相符的配置项（如显式 `server.gin_mode`）决定，并在启动早期设置一次 | `cmd/analysis/setup.go#L638`、`cmd/data/setup.go#L220`、`cmd/strategy/main.go#L102` | gin mode 由语义相符的配置项决定，且在启动期设置一次 |
 
@@ -910,6 +908,57 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 >
 > **接线到实时行情 / 真实券商之前，第一件事是补一条从 HTTP 层真的接一次的
 > 集成测试**，而不是直接上资金。这条已写进 AGENTS.md §14 的 Workaround 列。
+
+> **AUD-27 落地说明（2026-09-22）**：`.gitattributes` 落地 + 工作区 EOL 归一化
+> + 清掉 32 个未格式化文件 + CI 加 `gofmt` 门禁。
+>
+> **⚠️ 登记的实测是错的，落地前先重验。** 登记写「仓库 blob 里存的是 CRLF
+> （实测 `git show HEAD:pkg/risk/lot.go` 有 99 行带 CR）」—— 实测**不成立**：
+>
+> | 检查 | 结果 |
+> |---|---|
+> | `git ls-files --eol '*.go'` | **558/558 全部 `i/lf`**（index 侧就是 LF） |
+> | `git cat-file blob HEAD:<任一 .go>` | **零个含 CR** |
+> | `git ls-files --eol`（全仓 915 文件） | 911 `i/lf` + 4 `i/none`（空文件/无尾换行） |
+>
+> 真相：**blob 本来就是 LF**；CRLF 只存在于**工作区**，来源是本机
+> `core.autocrlf=true`（`PortableGit/.../etc/gitconfig`，**系统级** —— 所以
+> `git config --global --get` 查不到，要用 `--list --show-origin`）。
+>
+> **推论**：登记说「Linux CI 与 Windows 本机都会列出全部 Go 文件」只对了后半句。
+> Linux runner 上 checkout 本来就是 LF —— 也就是说**这个门禁在 CI 里一直是有效的**，
+> 真正挡住它的是「本机跑不出可信结果，于是没人信它」（AUD-12 因此没加）。
+>
+> **顺带挖出被掩盖的债**：`gofmt -l .` 今天列 **429** 个。归一化 EOL 后仍列
+> **32** 个 —— 说明 CRLF 噪声**额外掩盖了 15 个**真未格式化文件（另 17 个本来就
+> 是 LF 所以一直可见）。错型：import 分组错序（`github.com/...` 插在 stdlib 组里）、
+> struct 字段/字面量对齐、缺尾换行、**1 个文件带 UTF-8 BOM**
+> （`pkg/tools/builtin/research_tool_test.go`）。
+>
+> **修法与实证**：
+>
+> | 步骤 | 做法 | 实证 |
+> |---|---|---|
+> | ① 加 `.gitattributes` | `* text=auto eol=lf`（仓库无 `.bat/.cmd/.ps1`，无需例外） | `git add --renormalize .` **暂存零个改动** —— 登记担心的「一次性大 diff」**不成立** |
+> | ② 归一化工作区 | 713 个已跟踪文件 CRLF→LF（原地，逐文件 sha256 校验归一化后内容一致） | 归一化后 `git diff --quiet` **退出码 0**（零内容差异）；`git status` 干净 |
+> | ③ 修 32 个真问题 | `gofmt -w` | `gofmt -l .` → **0**；diff 仅 32 文件 / 54+ 51- |
+> | ④ CI 门禁 | go job 加 `gofmt` 步骤（Build / Vet / **gofmt** / Test） | YAML 解析通过；本地模拟步骤逻辑 → PASS |
+>
+> **⚠️ 中间踩到一个假象**：归一化后 `git status` 一度报 **713 个 ` M`**，但
+> `git diff` / `git diff --numstat` / `git diff --ignore-cr-at-eol` **全为空**。
+> 那是 **index stat-cache 未刷新**的幻影（mtime 变了、内容没变），
+> `git add --renormalize .` 刷新索引后即消失。**判断「有没有真改动」要信
+> `git diff --quiet` 的退出码，不要信 `git status` 的行数。**
+>
+> **破坏验证**（CI 步骤的 shell 逻辑，本地模拟）：① 新建一个故意未格式化的
+> `.go` 文件 → 变红并列出该文件；② 往已格式化文件插入错序 import → 变红。
+> 两次都只红该红的，删除/还原后回到 0。
+>
+> **验证**：`go build` / `go vet` / `go test ./... -count=1` 全绿；三道护栏全绿。
+>
+> **⚠️ 一处未处理（不在本项范围）**：`e2e/package.json`、`e2e/tsconfig.json`、
+> `web/tsconfig.json` 三个 JSON **无尾换行**（`git ls-files --eol` 报 `i/none`）。
+> 不影响 gofmt，另立议题。
 
 > **AUD-30 落地说明（2026-09-22）**：`docs/SPEC.md` 的顶层定位从 **ADR-022**
 > （Proposed 期间即被取代、**从未实施**）切到 **ADR-023 / ADR-024**。纯文档改动，

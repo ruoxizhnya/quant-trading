@@ -1,0 +1,18 @@
+# 换行符统一为 LF（AUD-27）。
+#
+# 事实基础（2026-09-22 实测）：
+#   - 仓库 blob **本来就已经全部是 LF** —— `git ls-files --eol '*.go'` 显示
+#     558/558 个 .go 文件的 index 侧都是 `i/lf`，`git cat-file blob` 零个含 CR。
+#   - CRLF 只出现在**工作区**，来源是本机 core.autocrlf=true
+#     （PortableGit 的 etc/gitconfig，**系统级**，不在 repo/global 里）。
+#   - 后果：`gofmt -l .` 会列出全部 412 个 CRLF 的 .go 文件 —— 一个恒失败的
+#     检查项，因而被长期忽略（AGENTS.md §8 的「`gofmt -l .` 无输出」形同虚设，
+#     真正被 CRLF 噪声掩盖的 32 个未格式化文件反而没人看见）。
+#
+# 本文件只约束 **checkout 怎么写**，不改变任何 blob —— 所以它是一次零 diff
+# 的修正，不是「一次性大 diff」（登记时的判断建立在「blob 存 CRLF」这个错误
+# 前提上，见 docs/TASKS.md 的 AUD-27 落地说明）。
+#
+# 仓库内没有需要 CRLF 的 .bat / .cmd / .ps1（`git ls-files` 实测），
+# 因此全部文本文件统一 LF，无需例外。
+* text=auto eol=lf

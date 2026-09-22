@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"encoding/json"
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

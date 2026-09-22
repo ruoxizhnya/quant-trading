@@ -50,6 +50,28 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # AUD-27：补上 gofmt 门禁。AGENTS.md §8 的提交前清单早就写了
+      # 「`gofmt -l .` 无输出」，但这条检查在**本机恒失败** —— 本机
+      # core.autocrlf=true（PortableGit 的 etc/gitconfig，系统级）会把 checkout
+      # 写成 CRLF，于是 `gofmt -l .` 列出全部 412 个 CRLF 的 .go 文件。
+      # 一个恒失败的检查项等于没有检查项：真正的 32 个未格式化文件被 CRLF
+      # 噪声盖住，没人看见。
+      #
+      # 修法是加 `.gitattributes`（`* text=auto eol=lf`）。注意仓库 blob
+      # **本来就是 LF**（实测 558/558 个 .go 文件零个含 CR），所以那次修正是
+      # **零 blob 变化** —— 它只约束 checkout 怎么写。
+      #
+      # Linux runner 上 checkout 本来就是 LF，所以这一步在 CI 里一直有效；
+      # 真正挡住它的是「本机跑不出可信结果，于是没人信它」。
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt 发现未格式化文件（本地用 gofmt -w <file> 修）"
+            echo "$unformatted"
+            exit 1
+          fi
+
       # 存储层测试需要 Postgres；连不上会 t.Skip，因此这里显式提供服务容器，
       # 让 PIT 等回归测试真正被执行而不是被跳过。
       #

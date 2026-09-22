@@ -39,14 +39,14 @@ func causalEquityCurve(n int, daily float64, lastDayJump float64) []domain.Portf
 
 func sampleResult() *domain.BacktestResult {
 	return &domain.BacktestResult{
-		SharpeRatio:    1.2,
-		TotalReturn:    0.35,
-		TotalTrades:    40,
-		WinTrades:      24,
-		LoseTrades:     16,
-		WinRate:        0.6,
-		AvgHoldingDays: 12,
-		MaxDrawdown:    -0.18,
+		SharpeRatio:     1.2,
+		TotalReturn:     0.35,
+		TotalTrades:     40,
+		WinTrades:       24,
+		LoseTrades:      16,
+		WinRate:         0.6,
+		AvgHoldingDays:  12,
+		MaxDrawdown:     -0.18,
 		PortfolioValues: causalEquityCurve(300, 0.0005, 0.05),
 		Trades: []domain.Trade{{
 			Symbol: "600000.SH", Direction: domain.DirectionLong,
@@ -58,10 +58,10 @@ func sampleResult() *domain.BacktestResult {
 // stubNarrator 按脚本返回理论，并记录它收到的请求 ——
 // 记录请求是为了验证「结果没被递给模型」这条硬规矩。
 type stubNarrator struct {
-	theory  *CausalTheory
-	err     error
-	gotReq  CausalRequest
-	called  bool
+	theory *CausalTheory
+	err    error
+	gotReq CausalRequest
+	called bool
 	// leakResult 为 true 时故意把结果塞进请求（模拟错误接线），
 	// 用于证明测试真的能发现这件事。
 	leakResult bool
@@ -176,9 +176,9 @@ func TestValidateCausal_UnfalsifiableIsNotPassing(t *testing.T) {
 	n := &stubNarrator{theory: &CausalTheory{
 		Mechanism: "某种市场结构",
 		Predictions: []Prediction{
-			{Kind: PredictionWinRate, Statement: "胜率应该还行"},                      // 没边界
-			{Kind: "moon_phase", Statement: "月相也该配合", Min: fptr(0.1)},           // 未知种类
-			{Kind: PredictionTradeCount, Statement: "交易次数 < 5", Max: fptr(5)},      // 可验，会不中
+			{Kind: PredictionWinRate, Statement: "胜率应该还行"},                    // 没边界
+			{Kind: "moon_phase", Statement: "月相也该配合", Min: fptr(0.1)},         // 未知种类
+			{Kind: PredictionTradeCount, Statement: "交易次数 < 5", Max: fptr(5)}, // 可验，会不中
 		},
 	}}
 
