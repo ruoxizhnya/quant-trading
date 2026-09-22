@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-09-22
-verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）
+verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）
 status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有未解除的前置）" —— 见下方「状态总览」
 ---
 
@@ -33,17 +33,19 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | P2 | 19 | 15 | 0 | 2 | 2 | ⬜ P2-1 / P2-2；⛔ P2-8、P2-13（两者都卡在数据同步，见下） |
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
 | AUD-19~38 | 20 | 20 | 0 | 0 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-28 / AUD-29 / AUD-30 / AUD-31 / AUD-32 / AUD-33 / AUD-20 / AUD-21 / AUD-22（2026-09-22）+ **AUD-34**（裁决：保留）+ **AUD-24 / AUD-25 / AUD-26 / AUD-38**（2026-09-22）+ **AUD-35 / AUD-36 / AUD-37**（2026-09-22，配置一致性三项） |
-| AUD-39~40 | 2 | 0 | 0 | 2 | 0 | ⬜ **AUD-39**（k8s 的 DATABASE_*/REDIS_* env 键名系统性不匹配，本批登记未修）+ **AUD-40**（`v.Sub("backtest")` 在缺段时返回 nil → `Unmarshal` 空指针 panic，AUD-37 顺带发现） |
+| AUD-39~40 | 2 | 2 | 0 | 0 | 0 | ✅ **AUD-39**（k8s 的 `DATABASE_*`/`REDIS_URL` 口径 + 值对齐 + 消灭 `${...}` 字面量占位符 + 部署护栏检查 5~8）+ **AUD-40**（`v.Sub` 缺段返回 nil → panic 防护），2026-09-22 |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：**AUD-39**（k8s 侧 env 与代码读取键名不匹配 —— 比 AUD-35/36/37
-更实在：k8s 一个 `DATABASE_*` 都没给，应用回落到镜像内 yaml，而
-`database.password` 是字面量 `${DATABASE_PASSWORD}`，全仓**没有** env 展开器 →
-k8s 下 DB 连接会用错密码）→ **AUD-40**（小，两行）。
-**配置一致性三项（AUD-35/36/37）已于 2026-09-22 全部关闭。**
+**下一批建议顺序**：**AUD-41**（`docs/SPEC.md` 的 Configuration 段描述了一个
+**不存在**的 `config/global.yaml`，键名也与实际不符 —— `database.name` vs
+`database.database`、`redis.host/port/password` vs `redis.url`；本批只消除了
+`${...}` 反例，整段订正另立）→ **AUD-42**（`pkg/testutil` 的
+`TestDBConfig.DSN()` 是第三处手写 DSN 拼装，未转义密码、未走共享的
+`storage.BuildDSN`）。
+**AUD-39 / AUD-40 已于 2026-09-22 全部关闭**，落地说明见本文件末尾。
 
 ### 已完成（2026-09-16，已从下方列表移出）
 
@@ -520,8 +522,8 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > 落地说明见本文件末尾「AUD-35 / AUD-36 / AUD-37 落地说明」一节。三项同族：
 > **配置项看着有效，却没有读取点**。
 >
-| AUD-39 | ⬜ **k8s 侧 env 与代码读取的键名系统性不匹配**（AUD-35 顺带发现，非登记项）：`deploy/k8s/configmap.yaml` 的 `POSTGRES_HOST`(L27) / `POSTGRES_PORT`(L28) / `REDIS_HOST`(L32) / `REDIS_PORT`(L33) **全仓零读取者** —— postgres/redis 容器只读 `POSTGRES_DB`(L29) / `POSTGRES_USER`(L30) / `POSTGRES_PASSWORD`，而 Go 侧读的是 `database.host` / `database.port` / `redis.url`，按 AutomaticEnv + `"."→"_"` 推导出的 env 名是 `DATABASE_HOST` / `DATABASE_PORT` / `REDIS_URL`。`analysis-deployment.yaml`(L31/L36) 与 `data-deployment.yaml`(L31) 注入的 `POSTGRES_PASSWORD` / `REDIS_PASSWORD` 同样零读取者（代码读 `database.password` → `DATABASE_PASSWORD`）。**而 k8s 一个 `DATABASE_*` 都没给** → 应用回落到镜像内的 `config/*.yaml`，而 `config/analysis-service.yaml`(L44/L48) 与 `config/data-service.yaml`(L31) 的 `database.password` 是**字面量** `${DATABASE_PASSWORD}`：全仓没有 `os.ExpandEnv` / `os.Expand` 展开器（`cmd/analysis/setup.go:202` 只对 `database.url` 做了 `strings.Contains(dbURL, "${")` 兜底，所以 url 那条会走逐字段拼装，而逐字段拼装又读到同一个字面量密码）→ **k8s 下 DB 连接会用错密码**。compose 侧反而是对的（`DATABASE_HOST` / `DATABASE_PORT` / `DATABASE_USER` / `DATABASE_DATABASE` / `DATABASE_PASSWORD` / `REDIS_URL` 都在）。**决策点**：k8s 改用 `DATABASE_*` + `REDIS_URL` 并删掉 4 个死键与 2 处无读取者的 `*_PASSWORD` 注入，还是让代码改读 `POSTGRES_*` | `deploy/k8s/configmap.yaml#L25-44`、`deploy/k8s/analysis-deployment.yaml#L27-37`、`deploy/k8s/data-deployment.yaml#L27-37` | k8s 下每个注入的 env 要么被某段代码读到、要么被删；且 DB 连接不再依赖字面量占位符 |
-| AUD-40 | ⬜ **`NewEngine` 对缺少 `backtest:` 段的配置会 panic 而不是报错**（AUD-37 顺带发现，非登记项）：`engine.go:173` 的 `v.Sub("backtest").Unmarshal(&config)` —— viper 的 `Sub` 在键不存在时返回 **nil `*viper.Viper`**，随后 `.Unmarshal` 直接空指针 panic（栈顶 `viper.(*Viper).AllKeys` 解引用 0x0）。生产不可达（`config/analysis-service.yaml` 总有 `backtest:` 段），但嵌入方与测试会撞上 —— AUD-37 的测试夹具第一次跑就撞了，症状是「测试 panic 而不是断言失败」。**修法**：`sub := v.Sub("backtest"); if sub == nil { ... }`，或直接 `v.UnmarshalKey("backtest", &config)`（后者对缺键返回 nil error） | `pkg/backtest/engine.go#L173` | 缺少 `backtest:` 段时返回可诊断的错误（或按默认值启动），而不是 panic |
+| AUD-41 | ⬜ **`docs/SPEC.md` 的 Configuration 段描述了一个不存在的 `config/global.yaml`，且键名与实际不符**（AUD-39 顺带发现，非登记项）：SPEC.md 的「Global Config (config/global.yaml)」代码块是一份**设计草图** —— 该文件全仓不存在，实际是三份 `config/{analysis,data,strategy}-service.yaml`；键名也对不上（`database.name` vs 实际 `database.database`；`redis.host` / `redis.port` / `redis.password` vs 实际 `redis.url`；`app.env` / `services.*.port` 全无对应读取点）。本批只消除了段内的 `${...}` 反例并加了「这是草图、以文件为准」的提示，**整段订正未做**。⚠️ 订正时记住「改一段文档只改自己关心的行 → 那一段里往往还有别的错」：这一整段都要逐行对回 `config/*.yaml` | `docs/SPEC.md` 的 `## Configuration` 段 | SPEC 的配置段要么如实描述 `config/*.yaml` 的键，要么明确标注为设计草图 |
+| AUD-42 | ⬜ **`pkg/testutil` 是第三处手写 DSN 拼装，未转义密码、未走共享的 `storage.BuildDSN`**（AUD-39 顺带发现，非登记项）：`TestDBConfig.DSN()` 用 `fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", …)` 直接拼 —— 与 `cmd/analysis`（转义）和 `cmd/data`（不转义）曾经的三份实现同型。AUD-39 已把两个 cmd 收敛到 `storage.BuildDSN`，testutil 未动（它是测试基础设施，用独立的 `TEST_DB_*` env 命名空间与 `quant_trading_test` 库，且 `DSN()` 现在返回 `string` 无 error，改动要连签名一起考虑） | `pkg/testutil/testdb.go#L42-47` | 全仓只有一处 DSN 拼装实现；测试库密码含 `:` / `@` 时也能连上 |
 
 ## P2 — 数据与清理
 
@@ -1370,11 +1372,81 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > 坏链；`check_deploy_consistency.py` 四项全绿。三个提交：`3bb7e7d`（AUD-35）/
 > `df58af3`（AUD-36）/ `7fcf7d2`（AUD-37）。
 
-> **AUD-39 / AUD-40 为本次顺带登记，未修**：见上方待办表。AUD-39 是 AUD-35 的
-> 同类但更实在（k8s 下 DB 连接会用错密码 —— k8s 一个 `DATABASE_*` 都没给，而
-> `database.password` 是字面量 `${DATABASE_PASSWORD}`，全仓没有 env 展开器）；
-> AUD-40 是 AUD-37 撞出来的（`v.Sub("backtest")` 缺段时返回 nil → `Unmarshal`
-> 空指针 panic，而不是返回错误）。
+> **AUD-39 落地说明（2026-09-22）**：若曦裁决 **k8s 改用 `DATABASE_*` + `REDIS_URL`、
+> 统一 `quant_trading` / `postgres`、compose 密码收敛为单一变量、`${...}` 占位符一并消灭**。
+>
+> **前提核实纠正了三处登记说错 / 漏掉的地方**（登记是审查时点快照，落地要按源码重扫）：
+> ① 「compose 侧反而是对的」只对一半 —— 六项齐全的只有 analysis-service；
+> data-service 只拿到 `DATABASE_PASSWORD` + `REDIS_URL`，`DATABASE_HOST/PORT/USER/
+> DATABASE` 靠 `config/data-service.yaml` 的值兜底（P1-8 同型「碰巧能用」）。
+> ② 登记漏了 **compose 侧的真 bug**：postgres 容器读 `${DB_PASSWORD:-postgres}`、应用读
+> `${DATABASE_PASSWORD:-postgres}`，**两个独立变量**，默认值恰好相同所以能用，改成
+> 非默认值（改哪个）就必然对不上；`ADR-017` 与 `SPEC.md` 用的是第三个口径 `DB_PASSWORD`。
+> ③ 登记漏了 **值也不匹配**：configmap 是 `quantlab` / `quantlab`（StatefulSet 按此建库
+> 建用户、探针也是 `-U quantlab -d quantlab`），应用读 `quant_trading` / `postgres`
+> —— 即使键名与密码都修好，库名 / 用户名仍然对不上。另外登记写的 `engine.go:173`
+> 实际是 **180**（行号漂移）。
+>
+> **改法**：`deploy/k8s/configmap.yaml` 只保留一份**应用词汇表**（`DATABASE_HOST/PORT/
+> USER/DATABASE` + `REDIS_URL` + `DATA_SERVICE_URL` + `LOGGING_*`）；postgres 容器用
+> `configMapKeyRef` 把 `DATABASE_DATABASE` / `DATABASE_USER` 映射到它认的
+> `POSTGRES_DB` / `POSTGRES_USER` —— **一份词汇表，各自在边界上翻译**，不在同一处重复
+> 定义第二个名字。两个应用 deployment 的 `POSTGRES_PASSWORD` 改名 `DATABASE_PASSWORD`；
+> `REDIS_PASSWORD` 全部删除（redis 是 `redis-server --appendonly yes`，**没有
+> `--requirepass`**，那个 env 只是让清单**看起来**有密码保护）；StatefulSet 探针改
+> `-U postgres -d quant_trading`。compose 侧 `POSTGRES_PASSWORD` 改读
+> `${DATABASE_PASSWORD:-postgres}`、删两处零读取者的 `DB_PASSWORD`、给 data-service
+> 补齐四项。
+>
+> **新增 `pkg/storage/dsn.go`**：`cmd/analysis` 与 `cmd/data` 共用**唯一**的 DSN 拼装
+> 实现（此前两份手写，一份转义一份不转义 —— 「两个机制各自对、接起来就错」的形状）。
+> 它拒绝两种此前静默通过的配置：URL 里残留 `${...}`（`ErrDSNPlaceholder`）、凭据为空
+> （`ErrEmptyDBUser` / `ErrEmptyDBPassword`）。走 `url.UserPassword` 而不是
+> `fmt.Sprintf`，密码里的 `:` / `@` / `/` 不再能把 DSN 拆坏。
+>
+> **`config/*.yaml`**：`database.url` / `database.password` / `tushare.token` 的占位符
+> 改成空串 + 启动期校验。**有意保留的偏差**：`tushare.token` 只改空串、**不**做启动期
+> Fatal —— `buildTushareClient` 的注释明示「sync 端点会失败、read 端点仍可用」是有意的
+> 设计，改成 Fatal 会动一个产品决定，属独立议题。顺带修掉了 40101 的静默失败：viper 的
+> `allowEmptyEnv=false` 把空 env 当成「未设置」→ 回落到字面量 `${TUSHARE_TOKEN}` 当
+> token 用 —— 「未配置」伪装成「配置了一个怪值」。
+>
+> **护栏**：`tools/check_deploy_consistency.py` 新增检查 5~8 —— 5 compose ↔ k8s 的
+> `DATABASE_*` / `REDIS_URL` 值必须相同、库名 / 用户名不得与 `config/*.yaml` 漂移、密码
+> 只能有一个变量；6 注入的每个 env 名都必须有读取点（**从 Go 源码的
+> `Get*` / `UnmarshalKey` / `Sub` / `BindEnv` / `ConfigKey*` 常量推导，不是手写清单**），
+> `configMapKeyRef` 不得悬空；7 `config/*.yaml` 不得出现 `${...}`（只看 `#` 之前的部分）；
+> 8 死键负向钉（`POSTGRES_HOST/PORT`、`REDIS_HOST/PORT`、`REDIS_PASSWORD`、
+> `DB_PASSWORD` 不许回来；`POSTGRES_DB/USER/PASSWORD` 只许出现在 postgres 容器自己的
+> env 里）。
+>
+> **破坏验证**：Python 侧 **13 个用例（P1~P11）全达标** —— 键名回退 / 值回退 / 库名·
+> 用户名漂移 / 密码变量分裂 / 注入名回退 / `configMapKeyRef` 悬空 / 占位符回来 / 新增
+> 死键 / `REDIS_PASSWORD` 回来 / **把派生 env 名集合置空（破坏检查本身，证明这条检查真
+> 的有数据可查）** / 反向「注释里的 `${...}` 不算占位符 → 护栏保持绿」。Go 侧 **4 个用例
+> （G1~G4）全达标**，每个都**只红该红的**（5/6 保持绿）；G4 特意连 import 一起收干净，
+> 避免「编译失败冒充护栏生效」。**三次误判已记进 PITFALLS**：破坏没红时先怀疑破坏本身
+> —— 我把检查 5c 的触发点写成了 configmap（实际是 `config/*.yaml`），另外漏实现了检查
+> 5d。提交 `5e6da67`。
+>
+> **AUD-40 落地说明（2026-09-22）**：`v.Sub("backtest")` 在缺段时返回 **nil
+> `*viper.Viper`**，`.Unmarshal` 直接 panic（栈底 `viper.(*Viper).AllKeys` 解引用 0x0，
+> viper v1.18.2 `viper.go:2069 ← :1118`）—— **不是返回错误**，所以 `if err != nil` 永远
+> 不会救场。改成先接住 `Sub` 的返回值，nil 就跳过整段 `backtest.*` 解引用，让默认值逻辑
+> 照常生效（缺段是**合法**配置）。全仓只有这一处 `viper.Sub`（其余 30 个 `.Sub(` 都是
+> `time.Time.Sub`）。护栏 `TestNewEngine_WithoutABacktestBlockDoesNotPanic` 用
+> `viper.New()` 建引擎，断言不 panic **且**默认值落上（「没崩」与「按默认值启动」是两件
+> 事）。**破坏验证逐条 `-run` 单跑** —— 这次的失败形态是 panic，会中止整个测试二进制，
+> 一次跑全包时排在后面的用例根本不会执行，拿不到区分度证据；期望值写的是 **PANIC 而不是
+> FAIL**（断言根本没机会跑，看到 PANIC 才是「抓到了原来那个 bug」的证据）。破坏态：目标
+> 用例 PANIC，其余 5 条保持 PASS。提交 `ceff12c`。
+>
+> **AUD-39 / AUD-40 共同验证（2026-09-22）**：`gofmt -l`（本批改动文件）0 命中；
+> `go build ./...` / `go vet ./...` / `GOOS=windows go vet ./...` 全绿；
+> `go test ./... -count=1` **73 个包 ok、0 失败**；`check_doc_links.py` 52 文件无坏链；
+> `check_deploy_consistency.py` **七项全绿**。两个提交：`5e6da67`（AUD-39）/
+> `ceff12c`（AUD-40）。**新登记 AUD-41（SPEC 的 Configuration 草图）/ AUD-42
+> （testutil 第三处 DSN 拼装），本批未修。**
 
 ---
 
