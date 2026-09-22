@@ -809,7 +809,7 @@ Please continue from where we left off.
 
 | Issue | Workaround |
 |-------|-----------|
-| **Legacy HTML UI (`cmd/analysis/static/`) 仍在服役** | **已裁决（2026-09-22，TASKS AUD-18）：分阶段退役，不是现在删。** Vue SPA (`web/`) 是官方前端；legacy 页面**当前仍是唯一的服务端 UI**（compose 里没有 SPA 部署，ODR-062 取证 e），所以它现在是**活代码**：10 条路由在 `cmd/analysis/main.go:287-320`，打的是活着的 `/api/strategies` 与 `/api/copilot/*`。时间表：① [AUD-32] 先补 SPA 部署 → ② 部署完成即**冻结** legacy（只许不动，不再改）→ ③ [AUD-33] 再删。**在此之前不要动 legacy，也不要以「deprecated」为由绕过它的连带项** —— 4 条裸镜像路由（`/ohlcv/:symbol`、`POST /screen`、`/stocks/count`、`/market/index`）只被它消费，与它共存亡 |
+| **Legacy HTML UI (`cmd/analysis/static/`) 已冻结，等待退役** | **已裁决（2026-09-22，TASKS AUD-18）：分阶段退役。** 时间表第 ① 步**已完成** —— Vue SPA 的部署已补上（[AUD-32]，2026-09-22）：compose / k8s 里多了 `web` 服务，**宿主端口 8080**，由 nginx 托管 `web/dist` 并把 `/api/*` 反代到 analysis-service:8085。所以 legacy **不再**是唯一的服务端 UI。**当前状态：冻结 —— 只许不动，不再改。** 不要以「deprecated」为由顺手删它：10 条路由在 `cmd/analysis/main.go:287-320`，打的是活着的 `/api/strategies` 与 `/api/copilot/*`，且 4 条裸镜像路由（`/ohlcv/:symbol`、`POST /screen`、`/stocks/count`、`/market/index`）只被它消费 —— 删除是 [AUD-33] 的整串清单，**先删会留下「:8085 打开只剩 API」的空窗** |
 | `ChatbubbleEllipsisOutline` icon name doesn't exist | Correct name is `ChatbubbleEllipsesOutline` (with 'e' before 's') |
 | Trade markers may not render if portfolio_values is empty | Ensure backtest returns valid data before calling renderChart() |
 | **前端 AI 组件已删除** (ODR-045, 2026-07-02) | 9 个组件 P1-13 创建后 S7-P2-7 作为死代码删除; Hermes Agent 自然语言交互替代 (ODR-046). 不要重建 `web/src/components/ai/` — 使用 `pkg/tools/builtin/` MCP 工具层 |

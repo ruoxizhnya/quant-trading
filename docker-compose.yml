@@ -155,6 +155,31 @@ services:
       data-service:
         condition: service_healthy
 
+  web:
+    # AUD-32：官方前端（web/，Vue 3 + Vite）的构建与托管。
+    # 之前它只能 `npm run dev` 跑在 :5173，compose 里连个服务都没有 ——
+    # 于是 cmd/analysis/static/ 那套 legacy HTML 成了唯一的服务端 UI
+    # （ODR-062 取证 e），想删也删不掉（AUD-33 卡在这里）。
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      # AUD-13：应用服务有意绑 0.0.0.0 —— 前端本来就是要被浏览器打开的。
+      # 只有 postgres / redis 该绑回环（那条由 check_deploy_consistency.py 守）。
+      - "8080:8080"
+    depends_on:
+      # nginx 里 /api 反代到 analysis-service:8085。用 resolver + 变量
+      # 写法（见 deploy/nginx-spa.conf），后端晚起来也不会让 nginx 启动失败，
+      # 但 depends_on 仍然要写：它保证 /health 探针打过去时后端已经在听。
+      analysis-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
 volumes:
   postgres_data:
   redis_data:

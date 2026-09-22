@@ -7,21 +7,40 @@ metadata:
     app.kubernetes.io/name: quant-trading
     app.kubernetes.io/part-of: quant-trading
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
+    # AUD-32：这里原先是 `rewrite-target: /`。配合下面的 `path: /`
+    # 会把**所有** URI 重写成 `/` —— /api/health 到后端就只剩 `/` 了。
+    # SPA 的 URI 保持原样才是对的（history 回退由 web 的 nginx 做），
+    # 所以这一条被删掉，不是被改小。
     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # 数据同步的进度流是 SSE（EventSource），分钟级。默认 60s 会把流掐断，
+    # 与 deploy/nginx-spa.conf 里的 3600s 对齐。
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # SSE 不能被缓冲，否则进度条攒到最后一次跳变（同上，两层都要关）。
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
 spec:
   ingressClassName: nginx
   rules:
     - host: quant-trading.local
       http:
         paths:
-          # Main API + Vue SPA served by analysis-service (port 8085)
+          # AUD-32：前端现在是独立的 web 服务（deploy/k8s/web-deployment.yaml），
+          # 不再是 analysis-service。
+          #
+          # 这一行原先写着「Main API + Vue SPA served by analysis-service
+          # (port 8085)」—— 那是「由 Go 侧托管 SPA」方案的假设。AUD-32 裁决
+          # 采用独立的 web 服务，若只改 compose 不改这里，k8s 路径下打开
+          # quant-trading.local 拿到的会是一份**没有 SPA 的** analysis
+          # （= legacy 静态页或 404），而 compose 路径却是好的 —— 典型的
+          # 「两边各自对、接起来就错」。
+          #
+          # **不需要**额外加一条 /api 规则：web 里的 nginx 会把 /api/*
+          # 反代到 analysis-service:8085（见 deploy/nginx-spa.conf），
+          # 且反代后浏览器侧仍是同源，CORS 不用动。
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: analysis-service
+                name: web
                 port:
-                  number: 8085
+                  number: 8080

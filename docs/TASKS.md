@@ -32,14 +32,14 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | P1 | 16 | 16 | 0 | 0 | 0 | 含 P1-1 —— 子项 1a/1b/1c 均已完成 |
 | P2 | 19 | 15 | 0 | 2 | 2 | ⬜ P2-1 / P2-2；⛔ P2-8、P2-13（两者都卡在数据同步，见下） |
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
-| AUD-19~33 | 15 | 0 | 0 | 13 | 2 | ⛔ AUD-31（待 AUD-19/23 裁决）、AUD-33（待 AUD-32） |
+| AUD-19~33 | 15 | 1 | 0 | 13 | 1 | ✅ AUD-32（2026-09-22）；⛔ AUD-31（待 AUD-19/23 裁决）；AUD-33 的前置已解除 |
 
-**两处「阻塞」都不是代码问题，是同一个前置**：P2-8 / P2-13 需要库里有真数据，而
+**剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：AUD-32（SPA 部署，AUD-33 的前置）→ AUD-19（删 paper 死端点，
-顺带解除 AUD-31 的阻塞）→ AUD-33（legacy 退役）。
+**下一批建议顺序**：AUD-19（删 paper 死端点，顺带解除 AUD-31 的阻塞）→
+AUD-33（legacy 退役 —— 前置 AUD-32 已完成，SPA 已在 8080 上可用）。
 
 ### 已完成（2026-09-16，已从下方列表移出）
 
@@ -515,8 +515,7 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | AUD-29 | ⬜ **`buildRouter` 在运行期按日志格式写 gin 全局 mode**（AUD-12 顺带发现，非登记项）：`if v.GetString("logging.format") == "json" { gin.SetMode(gin.ReleaseMode) }`。两个问题：① **语义可疑** —— 日志格式与 gin 运行模式是两件事，用前者决定后者没有依据；② **运行期改进程级全局** —— 当前测试都用 `logging: level: info`，所以没触发；只要有人写一条 `format: json` 的测试并与并行测试共存，就会复现同类竞争，且这次栈里会出现**生产文件**。`cmd/data/setup.go:220`、`cmd/strategy/main.go:102` 同样写法。**决策点**：是否改由语义相符的配置项（如显式 `server.gin_mode`）决定，并在启动早期设置一次 | `cmd/analysis/setup.go#L638`、`cmd/data/setup.go#L220`、`cmd/strategy/main.go#L102` | gin mode 由语义相符的配置项决定，且在启动期设置一次 |
 | AUD-30 | ⬜ **`docs/SPEC.md` 仍按 ADR-022 定版，未反映 ADR-023/024**（AUD-14 顺带发现，非登记项）：文件头 `Version: 1.5.0 (Unified Research Platform — ADR-022)`、`Last Updated: 2026-09-15`；正文有独立的 `## Unified Research Platform (ADR-022, Proposed)` 章节（四层架构 L0-L3 / 双对等工作面 / 飞轮闭环），全文 7 处引用 ADR-022。**与 AGENTS.md 校准前的状态是同一批漂移**，但 SPEC.md 是 1660 行的 Canonical 规格、那节是独立章节不是散落引用，改动量明显更大 —— 故本次不扩大改动，单独立项。修法同 AUD-14：定位陈述切到 ADR-023/024，并核对 § 里对 API/数据模型**有约束力**的部分是否随定位变了 （ADR-024 影响策略执行载体：YAML → ExpressionStrategy，不是编译产物） | `docs/SPEC.md` 头部 + 第 70 行起的 Unified Research Platform 章节 | SPEC.md 里不再有按 ADR-022 陈述的现行定位；ADR-023/024 对 API/数据模型的约束已体现；`docs/ADR.md` 与 AGENTS.md §11 对 SPEC 的描述一致 |
 | AUD-31 | ⛔ **`LiveEngine.portfolio` 从未被更新** —— `GetPortfolio()` 恒返回「初始资金 + 空持仓」（AUD-16 逐行复核时顺带发现，非登记项）：`e.portfolio` 只在 `NewLiveEngine` 里构造一次，之后**没有任何写入点**；现金也不随成交增减（`MockTrader` 有 `m.cash` 并维护，`LiveEngine` 没有）。唯一调用方是 `cmd/analysis/handlers_paper_trading.go:266`，而那批 `/api/paper/*` 端点未在 `main.go` / `setup.go` 注册（AUD-19 的死代码）。**与 AUD-19 / AUD-23 绑在一起裁决**：若 AUD-19 删掉 paper 端点，本字段变成零调用方，直接删即可；若保留，则需决定是补现金记账让读数变诚实（现金口径要定：含不含在途、手续费是否计入成本），还是删除。注：AUD-16 只修了 `updatePortfolio()` 写回持仓估值，没动这个字段 | `pkg/live/engine.go#L20,70-74,174-176` | 要么 `GetPortfolio()` 反映真实状态（现金 + 持仓市值），要么该字段与端点一并删除；两种结局都不允许「返回初始资金」这种恒假读数 |\n
-| AUD-32 | ⬜ **补 Vue SPA 部署**（AUD-18 裁决的**先决条件**，先做这个）**：`web/` 是官方前端（13 个 `.vue` 页面，与 legacy 一一对应），但**没有任何部署** —— `docker-compose.yml` 里连一个 web 服务都没有（只有一行 CORS 注释提到 `:5173`），实际只能 `npm run dev` 本机跑。后果是 legacy 静态页成了唯一的服务端 UI（ODR-062 取证 e），`cmd/analysis/static/` 因此删不掉。要做的是「让浏览器能打开构建产物」：方案 (a) compose 加一个 web 服务（vite preview 或 nginx 托管 `web/dist`）；(b) Go 侧 `embed` 托管 `dist`（单进程，最贴合单人自托管，但要把 SPA 的 history 回退接到 `NoRoute`）；(c) 明确不部署 —— 等于把 AUD-18 永久搁置，需连同 AGENTS.md §14 的措辞一起改。**选 (a) 还是 (b) 是个决定**，涉及：CORS 与 `SERVER_CORS_ALLOWED_ORIGINS`、AUD-13 刚定的端口绑定约定（应用服务有意 `0.0.0.0`）、以及 `tools/check_deploy_consistency.py` 的 compose ↔ k8s 同步（`ALLOWED_MISSING_IN_K8S` 要跟着动） | `docker-compose.yml` + `web/` (或 `cmd/analysis/main.go`) | `docker-compose up` 后有一个端口能打开 Vue 界面，且前端能正常打到 `:8085` 的 API；护栏 `check_deploy_consistency.py` 仍绿 |
-| AUD-33 | ⛔ **legacy HTML 退役执行**（**依赖 AUD-32**，AUD-18 的第 ③ 阶段）：AUD-32 一完成就把 `cmd/analysis/static/` **冻结**（只许不动，不再改），随后删除。删除清单是连带的一整串，不是删 6 个文件：6 个文件（5 html + 1 css，124K）+ `main.go:287-320` 的 **10 条路由**（`/`、`/screen`、`/dashboard`、`/copilot`、`/strategy-selector` 各带 `.html` 变体）与 `/static` 静态目录 + **4 条裸镜像路由**（`/ohlcv/:symbol`、`POST /screen`、`/stocks/count`、`/market/index`，只被 legacy 消费，ODR-062 取证 e 已记「与 legacy 共存亡」）+ `cmd/analysis/deps_test.go:172` 的 `GET /static/*filepath` 路由断言 + AGENTS.md §14 的那一行。**顺序不能反**：先删了就会有一段「:8085 打开只剩 API」的空窗 | `cmd/analysis/static/` + `cmd/analysis/main.go` + `deps_test.go` | SPA 已在 AUD-32 上线并被实际使用过；删完后 `:8085` 不再返回 HTML、全量测试绿、4 条裸路由无引用 |
+| AUD-33 | ⬜ **legacy HTML 退役执行**（**前置 AUD-32 已于 2026-09-22 完成**，AUD-18 的第 ③ 阶段 —— 依赖已解除）：AUD-32 一完成就把 `cmd/analysis/static/` **冻结**（只许不动，不再改），随后删除。删除清单是连带的一整串，不是删 6 个文件：6 个文件（5 html + 1 css，124K）+ `main.go:287-320` 的 **10 条路由**（`/`、`/screen`、`/dashboard`、`/copilot`、`/strategy-selector` 各带 `.html` 变体）与 `/static` 静态目录 + **4 条裸镜像路由**（`/ohlcv/:symbol`、`POST /screen`、`/stocks/count`、`/market/index`，只被 legacy 消费，ODR-062 取证 e 已记「与 legacy 共存亡」）+ `cmd/analysis/deps_test.go:172` 的 `GET /static/*filepath` 路由断言 + AGENTS.md §14 的那一行。**顺序不能反**：先删了就会有一段「:8085 打开只剩 API」的空窗 | `cmd/analysis/static/` + `cmd/analysis/main.go` + `deps_test.go` | SPA 已在 AUD-32 上线并被实际使用过；删完后 `:8085` 不再返回 HTML、全量测试绿、4 条裸路由无引用 |
 ---
 
 ## P2 — 数据与清理
@@ -747,6 +746,56 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > `API = 'http://localhost:8085'` —— 这套页面**本来就只有本机能用**，部署到别的
 > 机器就坏（copilot.html / screen.html 用相对路径 `API=''`）。它的实际定位更接近
 > 「本机运维 / 调试台」，而不是日常 UI。
+
+> **AUD-32 落地说明（2026-09-22）**：若曦裁决采用 **独立 web 服务**（不是 Go 侧托管
+> `dist`），前端已在 **宿主 8080** 上线。`web/`（Vue 3 + Vite，13 个页面）此前
+> **没有任何部署** —— 只能 `npm run dev` 跑在 `:5173`，这就是 legacy 删不掉的根因。
+>
+> **新增/改动的文件**：
+> `Dockerfile.web`（node 构建 → nginx，dist 在镜像内重新构建）、
+> `deploy/nginx-spa.conf`（SPA 回退 + `/api` 反代 + SSE 无缓冲）、
+> `docker-compose.yml` 的 `web` 服务、
+> `deploy/k8s/web-deployment.yaml`（新）、`deploy/k8s/ingress.yaml`（改）。
+>
+> **⚠️ 勘察时发现一处既有矛盾**：`deploy/k8s/ingress.yaml` 原写着
+> 「Main API + Vue SPA served by analysis-service (port 8085)」—— **k8s 侧的
+> 既定假设是「Go 侧托管 SPA」**（即另一个方案）。只改 compose 不改 ingress，
+> k8s 路径下打开就是一份没有 SPA 的 analysis，而 compose 路径却是好的 ——
+> 典型的「两边各自对、接起来就错」。已把 ingress 的 `/` 改指 `web:8080`，
+> 并**删掉 `rewrite-target: /`**：配合 `path: /` 它会把所有 URI 重写成 `/`，
+> `/api/health` 到后端就只剩 `/` 了。
+>
+> **三个关键设计**（详见 `docs/guides/deploy-config.md` 的「前端 web 服务」一节）：
+>
+> 1. **由 nginx 反代 `/api` → `analysis-service:8085`**，不让前端直连。前端
+>    API 基址默认空字符串（`web/src/api/client.ts:65`），请求走相对路径；
+>    反代后浏览器侧仍是**同源**，所以**前端零改动、CORS 也不用动**
+>    （`SERVER_CORS_ALLOWED_ORIGINS` 保持留空 = 最安全）。
+> 2. **反代目标用 `resolver` + 变量，不写死域名**。写死时 nginx 只在启动时解析
+>    一次：后端晚起来会让 nginx 启动失败，后端重启换 IP 后仍打旧地址。
+>    resolver 写了 `127.0.0.11`（Docker）与 `10.96.0.10`（k8s CoreDNS 默认）。
+> 3. **SSE 必须显式关缓冲**：同步进度用 `EventSource`
+>    （`web/src/stores/sync.ts:162`），nginx 默认缓冲会把事件攒到最后一次性下发
+>    —— 前端表现是「进度条一动不动，跑完才跳到 100%」。
+>
+> **实证（本机 docker，非推断）**：镜像构建通过（1m03s，含 `vue-tsc` 类型检查）；
+> `/` → index.html、深链 `/backtest` → 回退到同一份 index.html、
+> `/api/health` → 后端收到**完整** URI（`{"path":"/api/health"}`，证明
+> `proxy_pass http://$backend$request_uri` 里的 `$request_uri` 不能省）、
+> `nginx -t` 通过。SSE 做了**破坏验证**：`proxy_buffering off` 时 2 秒窗口收到
+> 5 条事件；改成 `on` 后收到 **0** 条；恢复后又是 5 条 —— 证明那条配置真的在起作用，
+> 而不是「刚好没缓冲」。
+>
+> **⚠️ 未实证的部分**：**k8s 侧只做了配置对齐，没有集群可跑**。
+> `web-deployment.yaml` 与改动后的 `ingress.yaml` 属「按同一套约定推出来的」。
+> 首次真跑 k8s 时重点看三处：`quant-trading/web:latest` 镜像是否存在、
+> CoreDNS 地址是否为 `10.96.0.10`、ingress 去掉 `rewrite-target` 后
+> `/api/*` 是否完整透传。
+>
+> **顺带记一个护栏的边界**：`check_deploy_consistency.py` 只比对 compose 与
+> k8s **Service** 的端口，**不管 ingress 的 backend** —— 改 web 端口时漏改
+> `ingress.yaml` 不会报错，只会让 k8s 路径下前端打不开。这条已写进
+> `docs/guides/deploy-config.md` 的端口清单（第 5 步）。
 
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、

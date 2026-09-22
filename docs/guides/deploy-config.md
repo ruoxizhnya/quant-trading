@@ -92,7 +92,74 @@ configmap 里躺了很久，2026-09-18 作为死配置清掉（同 P2-7 的 ai-s
 | redis | ✅ | 用 `redis-deployment.yaml` | 同上 |
 | data-service | ✅ | ✅ | |
 | analysis-service | ✅ | ✅ | |
+| **web** | ✅ | ✅ | AUD-32 新增，前端（见下节） |
 | strategy-service | ✅ | ❌ | standby per ADR-012，k8s 不部署 |
 
 差异清单写在 `tools/check_deploy_consistency.py` 的 `ALLOWED_MISSING_IN_K8S` 里。
 **新增差异必须同步加进去并写明原因** —— 否则护栏会报漂移。
+
+---
+
+## 前端 web 服务（AUD-32）
+
+`web/`（Vue 3 + Vite）是官方前端，此前**没有任何部署** —— 只能 `npm run dev`
+跑在 `:5173`，compose 里连一个服务都没有。这让 `cmd/analysis/static/` 那套
+legacy HTML 成了唯一的服务端 UI，想删也删不掉（AUD-33 卡在这里）。
+
+现在是 compose / k8s 里的一个 `web` 服务，**宿主端口 8080**：
+
+```
+浏览器 ──:8080──▶ nginx（web 容器）
+                    ├─ /api/*  ──反代──▶ analysis-service:8085
+                    └─ 其余    ────────▶ dist/index.html（SPA history 回退）
+```
+
+### 三个「为什么这么接」
+
+**① 由 nginx 反代 `/api`，而不是让前端直连 `:8085`。**
+前端的 API 基址默认是空字符串（`web/src/api/client.ts:65`，
+`import.meta.env.VITE_API_BASE || ''`），所有请求走相对路径 `/api/...`。
+反代之后浏览器看到的仍是同源的 `/api/...`，**前端一行都不用改，CORS 也不用动**
+—— `SERVER_CORS_ALLOWED_ORIGINS` 现在是留空的（= 不回显任何 ACAO，最安全），
+同源请求根本不触发 CORS。若改成前端直连 `:8085`，就得把 `http://<host>:8080`
+加进白名单：把一个「最安全」的默认值换成「有一个源被放行」，只为省一层反代。
+
+**② nginx 里用 `resolver` + 变量写反代目标，不写死域名。**
+`proxy_pass http://analysis-service:8085;` 这种写法，nginx 只在**启动时**解析一次
+并缓存到进程退出 —— 后端晚起来会让 nginx 直接启动失败，后端重启换 IP 后 nginx
+仍在打旧地址。变量 + `resolver` 让它每次请求时解析（见 `deploy/nginx-spa.conf`
+里的注释）。resolver 写了两个地址：Docker 的 `127.0.0.11` 与 k8s CoreDNS 默认的
+`10.96.0.10` —— **k8s 集群若改过 service CIDR，这个地址要跟着改**。
+
+**③ SSE 必须显式关掉缓冲。**
+同步进度用的是 `EventSource`（`web/src/stores/sync.ts:162`）。nginx 默认缓冲上游
+响应，SSE 事件会攒在缓冲区里不往下发 —— 前端表现是「进度条一动不动，等任务跑完
+才一次性跳到 100%」。要三件事一起做：`proxy_buffering off` + 放大
+`proxy_read_timeout` + 给外层中间层发 `X-Accel-Buffering: no`（k8s 里
+ingress-nginx 在本机 nginx 之前，只关自己这层不够）。
+
+### ⚠️ web 是「改端口要动 4 个地方」的例外
+
+上面那张表的第 1 步（`config/*.yaml` 的 `server.port`）对 web **不适用** ——
+它是 nginx 不是 Go 服务，端口来自 `deploy/nginx-spa.conf` 的 `listen`。
+改 web 的端口要动：
+
+| # | 文件 | 改什么 |
+|---|---|---|
+| 1 | `deploy/nginx-spa.conf` | `listen 8080` + healthcheck 无关 |
+| 2 | `Dockerfile.web` | `EXPOSE 8080` |
+| 3 | `docker-compose.yml` | 端口映射 + healthcheck 里的端口 |
+| 4 | `deploy/k8s/web-deployment.yaml` | `containerPort`（Deployment）与 `port`（Service） |
+| 5 | `deploy/k8s/ingress.yaml` | backend 的 `number: 8080` |
+
+**第 5 步没有护栏兜** —— `check_deploy_consistency.py` 只比对 compose 与 k8s
+Service 的端口，不管 ingress 的 backend。**这条漏改不会报错，只会让 k8s 路径下
+前端打不开。**
+
+### 未实证的部分
+
+compose 侧已实证（构建 + 跑容器 + curl 验证）。**k8s 侧只做了配置对齐，没有
+集群可跑** —— `web-deployment.yaml` 与改动后的 `ingress.yaml` 属于「按同一套
+约定推出来的」，首次真跑 k8s 时请重点看：`quant-trading/web:latest` 镜像是否
+存在、CoreDNS 地址是否为 `10.96.0.10`、ingress 去掉 `rewrite-target` 后
+`/api/*` 是否完整透传。
