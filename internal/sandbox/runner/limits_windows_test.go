@@ -17,14 +17,20 @@ import (
 // 1 GiB / 25 CPU-seconds / 256 fds and got none of them, with nothing
 // in the logs. These tests pin the replacement behaviour: refuse by
 // default, and make the opt-out explicit and observable.
+//
+// AUD-26: the child is this test binary re-entering itself, not `echo`.
+// `echo` is not a Windows program — it only exists here because Git for
+// Windows happens to be on PATH, which made these tests pass on the dev
+// machine and fail on a bare Windows box.
 
 func TestRun_RefusesLimitsOnWindows(t *testing.T) {
 	t.Parallel()
 
+	opts := helperOptions("print", helperTextEnv+"=should-not-run")
+	opts.Limits = &Limits{MemoryBytes: 1 << 30}
+
 	r := New()
-	_, _, err := r.Run(context.Background(), "echo", []string{"should-not-run"}, Options{
-		Limits: &Limits{MemoryBytes: 1 << 30},
-	})
+	_, _, err := r.Run(context.Background(), helperBinary(t), nil, opts)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrLimitsUnsupported)
@@ -40,7 +46,8 @@ func TestRun_RunnerLevelLimitsAlsoRefuse(t *testing.T) {
 	t.Parallel()
 
 	r := New(WithLimits(Limits{MemoryBytes: 1 << 30, CPUSeconds: 25, OpenFiles: 256}))
-	_, _, err := r.Run(context.Background(), "echo", []string{"should-not-run"}, Options{})
+	_, _, err := r.Run(context.Background(), helperBinary(t), nil,
+		helperOptions("print", helperTextEnv+"=should-not-run"))
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrLimitsUnsupported)
@@ -55,9 +62,10 @@ func TestRun_AllowUnenforcedLimitsOptIn(t *testing.T) {
 		WithOnUnenforcedLimits(func([]string) { atomic.AddInt32(&unenforced, 1) }),
 	)
 
-	stdout, stderr, err := r.Run(context.Background(), "echo", []string{"ok"}, Options{
-		Limits: &Limits{MemoryBytes: 1 << 30},
-	})
+	opts := helperOptions("print", helperTextEnv+"=ok")
+	opts.Limits = &Limits{MemoryBytes: 1 << 30}
+
+	stdout, stderr, err := r.Run(context.Background(), helperBinary(t), nil, opts)
 	require.NoError(t, err, "stderr: %s", stderr.String())
 	assert.Equal(t, "ok\n", stdout.String())
 	assert.Equal(t, int32(1), atomic.LoadInt32(&unenforced),
@@ -75,7 +83,10 @@ func TestRun_OptInDoesNotFireForZeroLimits(t *testing.T) {
 		WithOnUnenforcedLimits(func([]string) { atomic.AddInt32(&unenforced, 1) }),
 	)
 
-	_, _, err := r.Run(context.Background(), "echo", []string{"ok"}, Options{})
+	// Limits stays nil so the runner-level (zero) limits apply — the point
+	// is that nothing was requested, so nothing was degraded.
+	_, _, err := r.Run(context.Background(), helperBinary(t), nil,
+		helperOptions("print", helperTextEnv+"=ok"))
 	require.NoError(t, err)
 	assert.Equal(t, int32(0), atomic.LoadInt32(&unenforced))
 }
