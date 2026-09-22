@@ -10,6 +10,14 @@ package main
 // These tests pin the structural invariants of the split (no
 // duplicate declarations, read/sync handler separation) and exercise
 // the pure-function builders that don't need a database.
+//
+// AUD-28 (ODR-065): gin's mode is set once in TestMain (main_test.go);
+// no test here calls gin.SetMode. These tests deliberately do NOT call
+// t.Parallel() — they drive the *global* viper (loadConfig() writes
+// defaults, TestBuildRouter_WiresCORSAllowlist does viper.Set), so
+// running them concurrently would race on viper's shared state. That is
+// a different race from the gin one AUD-28 fixes, and parallelising
+// would trade one race for another.
 
 import (
 	"net/http"
@@ -65,8 +73,9 @@ func TestLoadConfig_SetsDefaults(t *testing.T) {
 // four middleware layers (recovery, CORS, rate-limit, request-logger)
 // and returns a usable gin.Engine.
 func TestBuildRouter_HasMiddleware(t *testing.T) {
-	// loadConfig must run first so viper has the logging.level key
-	// that buildRouter consults for ReleaseMode.
+	// loadConfig must run first so viper carries the server.* keys that
+	// buildRouter reads (AUD-29: it no longer reads logging.level to pick
+	// a gin mode — that moved to applyGinMode at startup).
 	require.NoError(t, loadConfig())
 
 	r := buildRouter()
@@ -81,6 +90,28 @@ func TestBuildRouter_HasMiddleware(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestBuildRouter_DoesNotTouchGinMode is the AUD-29 regression guard.
+//
+// gin's run mode is a process-wide global, applied once at startup by
+// applyGinMode (see internal/httpserver/ginmode.go). buildRouter used to
+// write it — `if viper.GetString("logging.level") != "debug"
+// { gin.SetMode(gin.ReleaseMode) }` — which meant any test calling
+// buildRouter mutated global state mid-run.
+//
+// The config below is exactly the one the old line would have reacted to,
+// so this fails against the old code and passes against the new.
+func TestBuildRouter_DoesNotTouchGinMode(t *testing.T) {
+	require.NoError(t, loadConfig())
+	viper.Set("logging.level", "info")
+	viper.Set("logging.format", "json")
+
+	before := gin.Mode()
+	r := buildRouter()
+	require.NotNil(t, r)
+	assert.Equal(t, before, gin.Mode(),
+		"buildRouter 不得改进程级 gin mode；它由启动期的 applyGinMode 设一次")
+}
+
 // TestCorsMiddleware_SetsPreflightHeaders verifies that an allowed
 // origin's OPTIONS preflight short-circuits with 204 + CORS headers.
 //
@@ -88,7 +119,6 @@ func TestBuildRouter_HasMiddleware(t *testing.T) {
 // 现在白名单来自配置，未命中就不回显；契约测试在
 // internal/httpserver/cors_test.go，这里只守装配仍然生效。
 func TestCorsMiddleware_SetsPreflightHeaders(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(httpserver.CORS([]string{"http://localhost:5173"}))
 	r.OPTIONS("/anything", func(c *gin.Context) { c.Status(http.StatusOK) })
@@ -112,7 +142,6 @@ func TestBuildRouter_WiresCORSAllowlist(t *testing.T) {
 	viper.Set("server.cors.allowed_origins", []string{"http://localhost:5173"})
 	defer viper.Set("server.cors.allowed_origins", nil)
 
-	gin.SetMode(gin.TestMode)
 	r := buildRouter()
 	r.GET("/probe", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
 
@@ -133,7 +162,6 @@ func TestBuildRouter_WiresCORSAllowlist(t *testing.T) {
 // fixed-window rate limiter admits requests up to the burst size
 // and then rejects the next one with 429.
 func TestNewRateLimiter_AllowsBurstThenBlocks(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	// rate of 3 with a 1-second window — the 4th request within
 	// the same window must be blocked. A non-zero window is required
 	// because window=0 makes resetAt = now, which is always in the

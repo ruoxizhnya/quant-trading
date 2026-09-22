@@ -56,7 +56,7 @@ func (s *emptyFactorStore) SaveFactorCacheBatch(_ context.Context, entries []*do
 
 // factorRouter mirrors the two routes main.go registers.
 func factorRouter(fc *data.FactorComputer) *gin.Engine {
-	gin.SetMode(gin.TestMode)
+	// gin 的 mode 由 TestMain 设一次（AUD-28）—— 别在这里调 gin.SetMode。
 	r := gin.New()
 	r.POST("/sync/factors/:factor_name", syncFactorHandler(fc))
 	r.POST("/sync/factors/all", syncAllFactorsHandler(fc))
@@ -73,6 +73,7 @@ func postFactor(t *testing.T, r *gin.Engine, path string) *httptest.ResponseReco
 }
 
 func TestSyncFactorHandler_EmptyFundamentalsFails(t *testing.T) {
+	t.Parallel()
 	store := &emptyFactorStore{}
 	r := factorRouter(data.NewFactorComputer(store))
 
@@ -95,6 +96,7 @@ func TestSyncFactorHandler_EmptyFundamentalsFails(t *testing.T) {
 }
 
 func TestSyncAllFactorsHandler_ReportsSkipped(t *testing.T) {
+	t.Parallel()
 	store := &emptyFactorStore{}
 	r := factorRouter(data.NewFactorComputer(store))
 

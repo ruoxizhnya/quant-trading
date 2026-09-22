@@ -35,4 +35,12 @@ data:
   LOG_LEVEL: "info"
   LOG_FORMAT: "json"
   # Gin mode
-  GIN_MODE: "release"
+  #
+  # 这里**曾经**有 `GIN_MODE: "release"`，已移除（AUD-29）。原因不是它没用 ——
+  # 它一直有效，因为 gin 自己在 init() 里读 GIN_MODE（gin/mode.go:52）—— 而是
+  # 它给同一个决定开了第二个入口，且是全仓 grep 不到读取点的那个：只有 gin 的
+  # 内部实现知道它存在。现在 gin mode 的唯一来源是 config/*.yaml 的
+  # server.gin_mode（三个服务都是 "release"），由服务启动时调一次
+  # httpserver.ApplyGinMode 应用。config/ 已打进镜像（见各 Dockerfile），
+  # 所以 k8s 读到的就是那份文件，行为与移除前一致。
+  # 这条不变量由 tools/check_deploy_consistency.py 的检查 4 守护。

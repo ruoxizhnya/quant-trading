@@ -41,13 +41,14 @@ func postIngestRaw(t *testing.T, router *gin.Engine, body string) *httptest.Resp
 // SaveRawIngest would panic, so a 400 response is proof the request was
 // rejected before any write was attempted.
 func validationRouter() *gin.Engine {
-	gin.SetMode(gin.TestMode)
+	// gin 的 mode 由 TestMain 设一次（AUD-28）—— 别在这里调 gin.SetMode。
 	router := gin.New()
 	router.POST("/api/ingest/raw", ingestRawHandler(nil))
 	return router
 }
 
 func TestIngestRawHandler_RejectsInvalidRequests(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		body string
@@ -71,6 +72,7 @@ func TestIngestRawHandler_RejectsInvalidRequests(t *testing.T) {
 // TestParseIngestAsOf pins the two accepted wire formats and the trailing
 // error case: a payload with no single observation date stores NULL.
 func TestParseIngestAsOf(t *testing.T) {
+	t.Parallel()
 	got, err := parseIngestAsOf("")
 	require.NoError(t, err)
 	assert.Nil(t, got)
@@ -100,7 +102,6 @@ func TestIngestRawHandler_ArchivesAndIsIdempotent(t *testing.T) {
 	}
 	defer store.Close()
 
-	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.POST("/api/ingest/raw", ingestRawHandler(store))
 

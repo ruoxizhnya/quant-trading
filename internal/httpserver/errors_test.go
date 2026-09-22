@@ -13,7 +13,7 @@ import (
 
 func newRecorder(t *testing.T, h gin.HandlerFunc) *httptest.ResponseRecorder {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
+	// gin 的 mode 由 TestMain 设一次（AUD-28）—— 别在这里调 gin.SetMode。
 	r := gin.New()
 	r.GET("/x", h)
 	w := httptest.NewRecorder()
@@ -33,6 +33,7 @@ func bodyOf(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
 // 形状必须保持 {"error": ...} —— 前端一直在读这个字段（client.ts），
 // 统一出口的意义是加东西，不是换掉东西。
 func TestFail_KeepsErrorField(t *testing.T) {
+	t.Parallel()
 	w := newRecorder(t, func(c *gin.Context) {
 		Fail(c, http.StatusNotFound, "order not found")
 	})
@@ -51,6 +52,7 @@ func TestFail_KeepsErrorField(t *testing.T) {
 // 这一条是 P1-5 真正的价值：**5xx 不再把内部错误原文吐给客户端**。
 // 之前是 300 多处 `gin.H{"error": err.Error()}`，DB 报错、连接串都出去了。
 func TestError_MasksInternalDetails(t *testing.T) {
+	t.Parallel()
 	const secret = "postgres://user:pa55w0rd@db:5432/quant"
 	w := newRecorder(t, func(c *gin.Context) {
 		Error(c, http.StatusInternalServerError, errors.New(secret+" connection refused"))
@@ -73,6 +75,7 @@ func TestError_MasksInternalDetails(t *testing.T) {
 
 // 4xx 的 err 文案本来就是给人看的（"参数不对"这类），照原样回。
 func TestError_KeepsClientFacingMessage(t *testing.T) {
+	t.Parallel()
 	w := newRecorder(t, func(c *gin.Context) {
 		Error(c, http.StatusBadRequest, errors.New("invalid date format, use YYYYMMDD"))
 	})
@@ -86,6 +89,7 @@ func TestError_KeepsClientFacingMessage(t *testing.T) {
 }
 
 func TestWrap_PrefixPlusLoggedCause(t *testing.T) {
+	t.Parallel()
 	w := newRecorder(t, func(c *gin.Context) {
 		Wrap(c, http.StatusBadRequest, errors.New("boom"), "invalid request: ")
 	})
@@ -96,6 +100,7 @@ func TestWrap_PrefixPlusLoggedCause(t *testing.T) {
 }
 
 func TestFailf_Formats(t *testing.T) {
+	t.Parallel()
 	w := newRecorder(t, func(c *gin.Context) {
 		Failf(c, http.StatusBadRequest, "invalid factor type: %s", "moon_phase")
 	})
@@ -108,7 +113,7 @@ func TestFailf_Formats(t *testing.T) {
 // 兜底中间件：只接住「写了 c.Error 但没写响应」的情况，
 // 已经写过响应的不能被它覆盖 —— 覆盖会静默改写 handler 的意图。
 func TestErrorMiddleware_RendersUnwritten(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	t.Parallel()
 	r := gin.New()
 	r.Use(ErrorMiddleware())
 	r.GET("/unwritten", func(c *gin.Context) {
@@ -137,7 +142,7 @@ func TestErrorMiddleware_RendersUnwritten(t *testing.T) {
 
 // AppError 走同一出口。
 func TestErrorMiddleware_AppErrorKeepsStatus(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	t.Parallel()
 	r := gin.New()
 	r.Use(ErrorMiddleware())
 	r.GET("/x", func(c *gin.Context) {

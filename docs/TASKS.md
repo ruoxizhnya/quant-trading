@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-09-22
-verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）
+verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）
 status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有未解除的前置）" —— 见下方「状态总览」
 ---
 
@@ -32,14 +32,15 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | P1 | 16 | 16 | 0 | 0 | 0 | 含 P1-1 —— 子项 1a/1b/1c 均已完成 |
 | P2 | 19 | 15 | 0 | 2 | 2 | ⬜ P2-1 / P2-2；⛔ P2-8、P2-13（两者都卡在数据同步，见下） |
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
-| AUD-19~34 | 16 | 8 | 0 | 8 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-30 / AUD-31 / AUD-32 / AUD-33（2026-09-22）+ **AUD-34**（裁决：保留，见落地说明）；**无阻塞项** |
+| AUD-19~36 | 18 | 10 | 0 | 8 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-28 / AUD-29 / AUD-30 / AUD-31 / AUD-32 / AUD-33（2026-09-22）+ **AUD-34**（裁决：保留）；⬜ AUD-20~22 / AUD-24~26 + **AUD-35 / AUD-36**（AUD-28/29 顺带发现）；**无阻塞项** |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：AUD-28 / AUD-29（`gin.SetMode` 的两处）→ 监管规则类
-AUD-20 / AUD-21 / AUD-22 → 沙箱跨平台 AUD-24 / AUD-25 / AUD-26。
+**下一批建议顺序**：监管规则类 AUD-20 / AUD-21 / AUD-22 → 沙箱跨平台
+AUD-24 / AUD-25 / AUD-26 → 配置一致性 **AUD-35 / AUD-36**（AUD-28/29 顺带发现，
+两项同族：**配置项看着有效，却没有读取点**）。
 
 ### 已完成（2026-09-16，已从下方列表移出）
 
@@ -510,8 +511,8 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | AUD-24 | ⬜ **Windows Job Object 实现**（AUD-11 的后续增强）：`CreateJobObject` + `SetInformationJobObject`（`JOB_OBJECT_LIMIT_PROCESS_MEMORY` / `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` / `JOB_OBJECT_LIMIT_JOB_MEMORY`）+ `AssignProcessToJobObject`。做完之后 Windows 才能真正执行受限子进程，`ErrLimitsUnsupported` 就不再是常态。**注意**：Job Object 需要 `cmd.SysProcAttr.CreationFlags` 里加 `CREATE_SUSPENDED` 才能在 exec 前挂载 | `internal/sandbox/runner/rlimit_windows.go` | Windows 上 `Limits{MemoryBytes: …}` 真正生效；不需要逃生阀即可构建 |
 | AUD-25 | ⬜ **`ulimit -u` 在 dash 上不可用**（AUD-11 顺带发现，非登记项）：`ulimit -u` 的可移植性是 **bash ✅ / busybox ash ✅ / dash ❌**（Debian/Ubuntu 的 `/bin/sh` 报 "Illegal option -u"）。故 `Limits.NumProcs` 在 Debian/Ubuntu 上会让构建 fail-closed 报 `ErrLimitSetupFailed`。生产组合根没设 `NumProcs`，所以是地雷不是现患。**决策点**：① 探测 shell 能力并在缺失时报 `ErrLimitsUnsupported`（语义更准）；② 改走 cgroup `pids.max`；③ 把 `NumProcs` 从 API 移除，只留平台原生实现 | `internal/sandbox/runner/rlimit_posix.go` | Debian/Ubuntu 上设 `NumProcs` 时给出「本平台不支持」而非含糊的 setup 失败 |
 | AUD-26 | ⬜ **runner 测试在 Windows 上依赖 PATH 里有 POSIX userland**（AUD-11 顺带发现，非登记项）：`TestRun_ExitZero` 用 `echo`、`TestRun_Timeout` 用 `sleep`、`TestRun_StdinAndEnv` 用 `sh`、`TestRun_NonZeroExit` 用 `false`、`TestRunExitCode` 用 `sh -c`。本机因为装了 Git for Windows 才全绿，**裸 Windows（无 Git Bash）会失败**。CI 跑 Linux 故不影响门禁，但会让「本机全绿」这个信号在裸 Windows 上失真。修法：改成用 `os.Executable()` 自举（测试二进制支持 `-test.run=TestHelperProcess` 模式）或按平台选命令 | `internal/sandbox/runner/runner_test.go` | 裸 Windows 上 `go test ./internal/sandbox/runner/` 也全绿 |
-| AUD-28 | ⬜ **其余 5 个包仍有「测试各自调 `gin.SetMode`」的模式**（AUD-12 顺带发现，非登记项）：`cmd/data/handlers_ingest_test.go`、`cmd/data/setup_test.go`、`internal/httpserver/cors_test.go`、`internal/httpserver/errors_test.go`、`pkg/api/versioning_test.go`。**今天不报竞争** —— 实测这些包都没用 `t.Parallel()`，所以是**潜在雷**而非现患：一旦有人给这些测试加并行，就会复现 AUD-12 修掉的同类竞争。修法同 AUD-12（`TestMain` 集中设置 + 删掉逐测试调用） | 上述 5 个文件 | 这些包加 `t.Parallel()` 后 `-race` 仍绿 |
-| AUD-29 | ⬜ **`buildRouter` 在运行期按日志格式写 gin 全局 mode**（AUD-12 顺带发现，非登记项）：`if v.GetString("logging.format") == "json" { gin.SetMode(gin.ReleaseMode) }`。两个问题：① **语义可疑** —— 日志格式与 gin 运行模式是两件事，用前者决定后者没有依据；② **运行期改进程级全局** —— 当前测试都用 `logging: level: info`，所以没触发；只要有人写一条 `format: json` 的测试并与并行测试共存，就会复现同类竞争，且这次栈里会出现**生产文件**。`cmd/data/setup.go:220`、`cmd/strategy/main.go:102` 同样写法。**决策点**：是否改由语义相符的配置项（如显式 `server.gin_mode`）决定，并在启动早期设置一次 | `cmd/analysis/setup.go#L638`、`cmd/data/setup.go#L220`、`cmd/strategy/main.go#L102` | gin mode 由语义相符的配置项决定，且在启动期设置一次 |
+| AUD-35 | ⬜ **`LOG_LEVEL` / `LOG_FORMAT` 是死配置**（AUD-29 顺带发现，非登记项）：`docker-compose.yml` 里 3 个服务各一处、`deploy/k8s/configmap.yaml` 里 2 个键，**全仓无人读**。viper 的 `AutomaticEnv` + `SetEnvKeyReplacer(".", "_")` 把 `logging.level` 映射到 **`LOGGING_LEVEL`**，`LOG_LEVEL` 永远匹配不上；也没有任何 `BindEnv` 把它们接起来（全仓只有 `auth.jwt_secret` / `auth.allow_insecure` 两条 BindEnv）。症状：改了 `LOG_LEVEL` 以为改了日志级别，实际没变 —— 与 AUD-19 同族（**看着有效，零读取点**）。**决策点**：改名成 `LOGGING_LEVEL` / `LOGGING_FORMAT`，还是加 `BindEnv` 保留旧名 | `docker-compose.yml`、`deploy/k8s/configmap.yaml` | 这两个键要么真的被读到，要么被删掉；不能留着假装有效 |
+| AUD-36 | ⬜ **`cmd/strategy` 未接 `viper.AutomaticEnv()`**（AUD-29 顺带发现，非登记项）：`cmd/analysis/setup.go` 与 `cmd/data/setup.go` 都调了 `AutomaticEnv()` + `SetEnvKeyReplacer(".", "_")`，`cmd/strategy/main.go` 的 `loadConfig` **没有** → 该服务**没有任何 env 覆盖**。compose 给它设的 `DATA_SERVICE_URL` / `REDIS_URL` / `LOG_LEVEL` 全部**静默不生效**，只是恰好与 `config/strategy-service.yaml` 里的值一致才「碰巧能用」（与 P1-8 的 k8s `DATA_SERVICE_URL` 同型）。**危害方向与「配了却报未设置」同族**：照另两个服务的经验去设 env，会静默不生效。注意 `cmd/strategy` **目前没有测试包** —— 加之前先补一条「env 覆盖真的生效」的测试，否则改完无法证伪 | `cmd/strategy/main.go#L166-197` | strategy 的 `SERVER_*` env 覆盖与另两个服务一致地生效（或明确记录为有意不支持） |
 
 ## P2 — 数据与清理
 
@@ -997,6 +998,106 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 >
 > **有意不改**：`Owner: 龙少 (Longshao)` 是 `SPEC.md` / `ADR.md` / `TEST.md` 三个
 > 文件的一致约定（文档署名），属独立议题，本次不动。
+
+> **AUD-28 落地说明（2026-09-22）**：把 AUD-12 的先例推广到其余 3 个包 ——
+> `internal/httpserver`、`cmd/data`、`pkg/api` 各新增 `main_test.go` 的
+> `TestMain`（`gin.SetMode(gin.TestMode)`），删掉全部逐测试 / 逐 helper 的调用。
+>
+> **登记是快照，不是全貌（第 3 次了）**：登记列了 5 个文件，取证实测到 **6 个** ——
+> `cmd/data/handlers_factor_test.go` 的 `factorRouter()` 也调 `gin.SetMode`，
+> 不在清单里。全仓调用点共 **11 处**：6 个测试文件（10 处）+ 3 处生产代码 +
+> 2 处已合规的 `TestMain`。
+>
+> **`pkg/api` 的登记前提是错的**：它本来就用 `func init() { gin.SetMode(...) }`
+> 集中设置（该包只有 1 个调用点，且在任何测试 goroutine 之前执行）——
+> **本来就无竞争**，登记说它「测试各自调 `SetMode`」不成立。仍改成 `TestMain`，
+> 理由是 `init()` **不可 grep**：读者在测试文件里看到 `gin.SetMode` 无法判断这个
+> 包是集中设置还是逐测试调用。现在 `grep -rn "func TestMain" <pkg>/` 就能回答。
+>
+> **哪些测试加了 `t.Parallel()`**（跟着 `pkg/auth` 的先例一起留下，不是验证完就删
+> —— 没有并行测试，逐测试 `SetMode` 永远不会被 `-race` 看见）：
+> `internal/httpserver` 的 11 条（errors / cors 全部）、`cmd/data` 的 4 条
+> （handlers_factor 2 条 + handlers_ingest 2 条）。
+> **故意不加的**：
+> - `cmd/data/setup_test.go` 全部 —— 它们驱动**全局 viper**（`loadConfig()` 写
+>   默认值、`TestBuildRouter_WiresCORSAllowlist` 还 `viper.Set`），并行会把 gin
+>   的竞争换成 viper 的竞争，等于用一种竞争换另一种。
+> - `internal/httpserver/cors_test.go` 的 `TestAllowedOrigins_Parsing` —— 它用
+>   `t.Setenv`，与 `t.Parallel` 互斥（testing 直接 panic）。
+>
+> **护栏两向实证**（本机无 gcc，`-race` 走 docker + `golang:1.25`）：
+> - 修复后 `go test -count=1 -race ./internal/httpserver/... ./cmd/data/...
+>   ./pkg/api/...` → 全绿。
+> - **破坏验证**：把 `gin.SetMode(gin.TestMode)` 塞回 `newRecorder()`（即 AUD-28
+>   之前的样子）→ `-race` **变红**，栈正是登记预测的那一对 ——
+>   写 = `gin.SetMode`（`errors_test.go:17`）← `TestWrap_PrefixPlusLoggedCause`；
+>   读 = `gin.IsDebugging` ← `debugPrintWARNINGNew` ← `gin.New()` ←
+>   `TestCORS_AllowedOriginEchoed`。恢复后全绿。
+> - 这条同时证明登记的前提成立：**「潜在雷」不是猜测** —— 两个并行测试各自建一次
+>   router 就够撞上，不需要任何额外条件。
+>
+> **验证**：`go build` / `go vet` / `go test ./... -count=1` 全绿（72 包）；
+> 三道护栏全绿。
+
+> **AUD-29 落地说明（2026-09-22）**：gin 的运行模式改为**显式配置项 + 启动期设一次**。
+>
+> **原来是什么样**：三处生产代码在 `buildRouter` 里按日志配置**推断** gin mode，
+> 三个口径还不一样 —— analysis 看 `logging.format == "json"`、data 看
+> `logging.level != "debug"`、strategy 看 `config.Logging.Level != "debug"`。
+> 同一份配置能得出不同结果：`level: debug` + `format: json` → analysis 进 release、
+> data 进 debug。
+>
+> **改法**：新增 `internal/httpserver` 的 `ConfigKeyGinMode = "server.gin_mode"` +
+> `ApplyGinMode()`；三个服务在启动早期（`buildRouter` 之前）各调一次；三处运行期
+> `gin.SetMode` 全部删除。取值 `debug | release | test`，未配置 / 不认识一律
+> **release**（fail-safe：gin 自己的默认是 debug，一个笔误不该让线上进程开始打
+> 路由表）。三份 `config/*.yaml` 显式写 `gin_mode: "release"` —— 与改动前三个服务
+> 的实际生效值一致，**行为中性**。**不写 `SetDefault`**：默认值只留在
+> `ginModeFor` 的 `case ""` 一处，少一个漂移源。
+>
+> **取证时发现两个登记里没有的问题**：
+>
+> ① **`GIN_MODE` 是同一个决定的隐藏入口**：`deploy/k8s/configmap.yaml` 一直写着
+> `GIN_MODE: "release"`，而且**真的生效** —— gin 自己在 `init()` 里读这个 env
+> （`gin/mode.go:52`）。但全仓 grep 不到任何读取点，只有 gin 的内部实现知道它存在；
+> 而且只有 k8s 有（compose 没写）→ **两条部署路径的 gin mode 来源不同却不报错**
+> （与 AUD-32 第 9 例同型）。已从 configmap 移除，并把这条不变量写进
+> `tools/check_deploy_consistency.py` 的**检查 4**：部署配置里出现 `GIN_MODE` 即
+> 报错。`config/` 本来就被各 Dockerfile `COPY` 进镜像，所以 k8s 读到的仍是同一份
+> 文件，移除后行为不变。
+>
+> ② **`cmd/strategy` 没有任何 env 覆盖**：它的 `loadConfig` 没接
+> `viper.AutomaticEnv()`（analysis / data 都接了）。我一开始在
+> `config/strategy-service.yaml` 里照抄了「env 覆盖：SERVER_GIN_MODE」，**写完复核
+> 读取路径才发现是假的** —— 已改成如实说明。这是「配置里的注释陈述被否掉的方案」
+> 的又一例（同 AUD-32 第 9 例），另立 **AUD-36**。
+>
+> **顺带发现（另立 AUD-35）**：`LOG_LEVEL` / `LOG_FORMAT` 是**死配置** —— compose
+> 里 3 处、k8s configmap 里 2 个键，全仓无人读；viper AutomaticEnv 的键名是
+> `logging.level` → `LOGGING_LEVEL`，`LOG_LEVEL` 永远匹配不上。
+>
+> **护栏两向实证**：
+> - **结构性护栏** `TestGinSetModeOnlyInSanctionedPlaces`：解析 **AST**，断言
+>   `gin.SetMode` 的**调用**只出现在 `internal/httpserver/ginmode.go`，或
+>   `_test.go` 里 `TestMain` 的函数体内。
+> - **行为护栏**：`cmd/data` 与 `cmd/analysis` 各一条
+>   `TestBuildRouter_DoesNotTouchGinMode` —— 用「旧代码会因此切 ReleaseMode」的
+>   那份配置调 `buildRouter`，断言 `gin.Mode()` 没变。
+> - **破坏验证**：把旧代码那行加回 `cmd/data/setup.go` 的 `buildRouter` →
+>   结构性护栏报 `cmd/data/setup.go:240`、行为护栏报 `expected "test" / actual
+>   "release"`；在非 `TestMain` 的测试函数里插一行 → 结构性护栏报
+>   `internal/httpserver/errors_test.go:104`。两处恢复后全绿。
+> - **部署护栏破坏验证**：把 `GIN_MODE` 加回 configmap → 检查 4 报错（exit 1）；
+>   移除后 exit 0。
+>
+> **⚠️ 护栏第一版是错的（值得记）**：第一版按**文本**扫 `gin.SetMode(`，结果被
+> 自己文档注释里的引文误报 —— `cmd/analysis/middleware_test.go` 与
+> `cmd/data/setup_test.go` 的新注释里引用了旧代码那行。**字符串护栏分不清「调用」
+> 和「提到」**；改成解析 AST 后精确。这个失败本身有价值：会误报的护栏，下一个人
+> 就会把它关掉。
+>
+> **验证**：`go build` / `go vet` / `go test ./... -count=1` 全绿；`-race`
+> （docker + `golang:1.25`）四个受影响包全绿；三道护栏全绿。
 
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、

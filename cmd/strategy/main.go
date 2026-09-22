@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 
+	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy/examples"
@@ -32,6 +33,11 @@ type Config struct {
 type ServerConfig struct {
 	Host string `mapstructure:"host"`
 	Port int    `mapstructure:"port"`
+	// GinMode selects gin's run mode (debug | release | test). AUD-29:
+	// it used to be inferred from logging.level, which is a different
+	// concern. Unset/unrecognized falls back to release — see
+	// internal/httpserver/ginmode.go.
+	GinMode string `mapstructure:"gin_mode"`
 }
 
 // RedisConfig holds Redis configuration.
@@ -97,9 +103,15 @@ func main() {
 		Int("port", config.Server.Port).
 		Msg("starting strategy service")
 
-	// Create Gin router
-	if config.Logging.Level != "debug" {
-		gin.SetMode(gin.ReleaseMode)
+	// AUD-29: gin's run mode comes from server.gin_mode and is applied
+	// exactly once, here, before the router exists. It used to be keyed
+	// off logging.level, which is a different concern (and was applied
+	// inconsistently across the three services).
+	if applied, recognized := httpserver.ApplyGinMode(config.Server.GinMode); !recognized {
+		logger.Warn().
+			Str(httpserver.ConfigKeyGinMode, config.Server.GinMode).
+			Str("applied", applied).
+			Msg("unrecognized gin mode; falling back to release")
 	}
 	router := gin.New()
 	router.Use(gin.Recovery())

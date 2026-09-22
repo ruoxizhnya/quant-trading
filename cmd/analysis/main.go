@@ -253,6 +253,10 @@ func main() {
 		Store:            store,
 	}
 
+	// AUD-29: gin's run mode comes from server.gin_mode and is applied
+	// exactly once, here, before the router exists.
+	applyGinMode(v, logger)
+
 	router := buildRouter(authSvc, v, logger)
 	registerRoutes(router, deps)
 	registerAlertRoutes(router, alertLoop)

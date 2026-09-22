@@ -2,6 +2,15 @@ server:
   host: "0.0.0.0"
   port: 8085
 
+  # AUD-29: gin 的运行模式。debug | release | test。
+  # 未配置、或写了不认识的值，一律按 release 处理（fail-safe：gin 自己的
+  # 默认是 debug，一个笔误不该让线上进程开始打路由表）。
+  # 它只描述「框架的调试输出」，与日志格式/级别无关 —— 此前 analysis 由
+  # logging.format 推断、data/strategy 由 logging.level 推断，同一份配置
+  # 在三个服务上会得出不同的 gin mode。
+  # env 覆盖：SERVER_GIN_MODE
+  gin_mode: "release"
+
   # P0-4: CORS 跨源白名单。未配置（空）= 不回显任何
   # Access-Control-Allow-Origin，浏览器侧一律拦截（fail closed）。
   # 只有确实要让独立站点直连时才填，且不要写 "*" 除非有意对外开放。

@@ -11,6 +11,9 @@
      且它指向的 host:port 要真的等于 data-service 的端口
   3. postgres / redis 的端口必须**只绑回环**（AUD-13）。这条不是「两边一致」
      而是「单边不该有的暴露」，但它同属部署配置的护栏，放这里比另起脚本划算。
+  4. 部署配置里不得出现 GIN_MODE（AUD-29）。gin mode 的唯一来源是
+     config/*.yaml 的 server.gin_mode；GIN_MODE 会被 gin 自己读走，是同一个
+     决定的第二个入口，而且 grep 不到读取点。
 
 刻意不做的事：
   - 不做「一份源生成两份」。那要引入 Kompose / Helm 之类的工具，为了
@@ -139,9 +142,9 @@ def main() -> int:
             errors.append(f"{name}: 端口不一致 —— compose {cport} vs k8s {kport}")
 
     # 2) DATA_SERVICE_URL 两边必须一致，且指向的端口要对得上 data-service
+    k8s_config_text = (K8S_DIR / "configmap.yaml").read_text(encoding="utf-8")
     compose_url = find_env_value(compose_text, "DATA_SERVICE_URL")
-    k8s_url = find_env_value((K8S_DIR / "configmap.yaml").read_text(encoding="utf-8"),
-                             "DATA_SERVICE_URL")
+    k8s_url = find_env_value(k8s_config_text, "DATA_SERVICE_URL")
 
     if compose_url is None:
         errors.append("docker-compose.yml 缺 DATA_SERVICE_URL")
@@ -178,6 +181,20 @@ def main() -> int:
                     f"{svc}:{port} 绑在 {bind} —— 只允许回环地址 "
                     f"（{', '.join(sorted(LOOPBACK_BINDS))}）")
 
+    # 4) gin 的运行模式只能有一个来源：config/*.yaml 的 server.gin_mode（AUD-29）
+    #
+    # gin 自己在 init() 里读 GIN_MODE 环境变量（gin/mode.go:52），所以在部署配置里
+    # 写 GIN_MODE 等于给同一个决定开第二个入口 —— 而且是**看不见**的那个：全仓
+    # grep 不到任何读取点，只有 gin 的内部实现知道它存在。此前
+    # deploy/k8s/configmap.yaml 就写着 GIN_MODE: "release"，它确实生效，但只在
+    # k8s 生效（compose 没写）—— 两条部署路径的 gin mode 来源不同却不报错。
+    for where, text in (("docker-compose.yml", compose_text),
+                        ("deploy/k8s/configmap.yaml", k8s_config_text)):
+        if find_env_value(text, "GIN_MODE") is not None:
+            errors.append(
+                f"{where} 设置了 GIN_MODE —— gin mode 的唯一来源是 config/*.yaml 的 "
+                f"server.gin_mode（AUD-29）；gin 会自己读 GIN_MODE，写在这里会绕过它")
+
     # 输出
     for n in notes:
         print(f"· {n}")
@@ -189,6 +206,7 @@ def main() -> int:
 
     print("✓ 部署配置一致（compose ↔ k8s：服务端口 + DATA_SERVICE_URL）")
     print("✓ 数据库/缓存只绑回环（postgres / redis）")
+    print("✓ gin mode 无 GIN_MODE 旁路（唯一来源 server.gin_mode）")
     return 0
 
 

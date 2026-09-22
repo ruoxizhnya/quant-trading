@@ -100,3 +100,28 @@ logging:
 	secured.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/probe", nil))
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
+
+// TestBuildRouter_DoesNotTouchGinMode is the AUD-29 regression guard.
+//
+// gin's run mode is a process-wide global, applied once at startup by
+// applyGinMode (see internal/httpserver/ginmode.go). buildRouter used to
+// write it — `if v.GetString("logging.format") == "json"
+// { gin.SetMode(gin.ReleaseMode) }` — so any test calling buildRouter
+// mutated global state mid-run.
+//
+// The config below is exactly the one the old line would have reacted to
+// (format: json), so this fails against the old code and passes against
+// the new.
+func TestBuildRouter_DoesNotTouchGinMode(t *testing.T) {
+	before := gin.Mode()
+	r := routerWithProbe(t, auth.NewService(nil, auth.Config{}), `
+server:
+  host: 127.0.0.1
+logging:
+  level: info
+  format: json
+`)
+	require.NotNil(t, r)
+	assert.Equal(t, before, gin.Mode(),
+		"buildRouter 不得改进程级 gin mode；它由启动期的 applyGinMode 设一次")
+}

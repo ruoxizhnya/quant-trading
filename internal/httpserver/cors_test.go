@@ -19,7 +19,7 @@ import (
 // 同时守护两个服务。
 
 func newTestRouter(allowed []string) *gin.Engine {
-	gin.SetMode(gin.TestMode)
+	// gin 的 mode 由 TestMain 设一次（AUD-28）—— 别在这里调 gin.SetMode。
 	r := gin.New()
 	r.Use(CORS(allowed))
 	r.GET("/ping", func(c *gin.Context) { c.String(http.StatusOK, "pong") })
@@ -39,6 +39,7 @@ func get(t *testing.T, r *gin.Engine, origin string) *httptest.ResponseRecorder 
 }
 
 func TestCORS_AllowedOriginEchoed(t *testing.T) {
+	t.Parallel()
 	r := newTestRouter([]string{"http://localhost:5173"})
 	w := get(t, r, "http://localhost:5173")
 
@@ -47,6 +48,7 @@ func TestCORS_AllowedOriginEchoed(t *testing.T) {
 }
 
 func TestCORS_UnknownOriginNotEchoed(t *testing.T) {
+	t.Parallel()
 	r := newTestRouter([]string{"http://localhost:5173"})
 	w := get(t, r, "https://evil.example")
 
@@ -56,6 +58,7 @@ func TestCORS_UnknownOriginNotEchoed(t *testing.T) {
 }
 
 func TestCORS_EmptyAllowlistFailsClosed(t *testing.T) {
+	t.Parallel()
 	// 没配白名单 = 不信任任何跨源，连 localhost 也不回显。
 	r := newTestRouter(nil)
 	w := get(t, r, "http://localhost:5173")
@@ -64,6 +67,7 @@ func TestCORS_EmptyAllowlistFailsClosed(t *testing.T) {
 }
 
 func TestCORS_ExplicitWildcard(t *testing.T) {
+	t.Parallel()
 	// "*" 必须显式写进配置才生效，不再是默认值。
 	r := newTestRouter([]string{"*"})
 	w := get(t, r, "https://anything.example")
@@ -72,6 +76,7 @@ func TestCORS_ExplicitWildcard(t *testing.T) {
 }
 
 func TestCORS_NoOriginHeaderPassesThrough(t *testing.T) {
+	t.Parallel()
 	// 同源请求 / curl / 服务间调用没有 Origin 头：不需要 CORS 头，也不该被拦。
 	r := newTestRouter([]string{"http://localhost:5173"})
 	w := get(t, r, "")
@@ -81,6 +86,7 @@ func TestCORS_NoOriginHeaderPassesThrough(t *testing.T) {
 }
 
 func TestCORS_PreflightAllowed(t *testing.T) {
+	t.Parallel()
 	r := newTestRouter([]string{"http://localhost:5173"})
 
 	req := httptest.NewRequest(http.MethodOptions, "/order", nil)
@@ -95,6 +101,7 @@ func TestCORS_PreflightAllowed(t *testing.T) {
 }
 
 func TestCORS_PreflightRejected(t *testing.T) {
+	t.Parallel()
 	r := newTestRouter([]string{"http://localhost:5173"})
 
 	req := httptest.NewRequest(http.MethodOptions, "/order", nil)
@@ -107,6 +114,8 @@ func TestCORS_PreflightRejected(t *testing.T) {
 	assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
 }
 
+// 这一条**故意不加 t.Parallel()**：它用 t.Setenv 改进程环境，而
+// t.Setenv 与 t.Parallel 互斥（testing 会直接 panic）。子测试同理。
 func TestAllowedOrigins_Parsing(t *testing.T) {
 	// 同一个键要同时吃 YAML 列表、逗号分隔的 env 串、以及带空格的写法。
 	cases := []struct {

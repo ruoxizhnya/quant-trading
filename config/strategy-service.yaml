@@ -2,6 +2,17 @@ server:
   host: "0.0.0.0"
   port: 8082
 
+  # AUD-29: gin 的运行模式。debug | release | test。
+  # 未配置、或写了不认识的值，一律按 release 处理（fail-safe）。
+  # 此前由 logging.level != "debug" 推断（与 analysis 服务的
+  # logging.format == "json" 口径不一致）。
+  #
+  # ⚠️ 本服务**没有 env 覆盖**：cmd/strategy 的 loadConfig 未接
+  # viper.AutomaticEnv（analysis / data 都接了），所以 SERVER_GIN_MODE
+  # 在这里不生效 —— 要改只能改这份文件。改之前请先读 TASKS.md 的
+  # AUD-29 落地说明。
+  gin_mode: "release"
+
 redis:
   url: "redis://redis:6379"
 

@@ -6,6 +6,13 @@ server:
   host: "0.0.0.0"
   port: 8081
 
+  # AUD-29: gin 的运行模式。debug | release | test。
+  # 未配置、或写了不认识的值，一律按 release 处理（fail-safe）。
+  # 此前这里由 logging.level != "debug" 推断，与 analysis 服务的
+  # logging.format == "json" 口径不一致 —— 同一份配置能得出不同结果。
+  # env 覆盖：SERVER_GIN_MODE
+  gin_mode: "release"
+
   # P0-4: CORS 跨源白名单（与 analysis 服务同源，实现在
   # internal/httpserver）。留空 = 不回显任何 ACAO（fail closed）。
   # env 覆盖：SERVER_CORS_ALLOWED_ORIGINS="http://a.example,http://b.example"

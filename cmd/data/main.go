@@ -50,6 +50,10 @@ func main() {
 	// read from non-Tushare sources go through Registry.Fetch.
 	dataSourceRegistry := buildDataSourceRegistry(tushareClient, logger)
 
+	// AUD-29: gin's run mode comes from server.gin_mode and is applied
+	// exactly once, here, before the router exists.
+	applyGinMode(logger)
+
 	router := buildRouter()
 	registerRoutes(router, store, cache, tushareClient, dataCache, buildEquityDeepDictionary(logger))
 	registerRegistryRoutes(router, newRegistryHandler(dataSourceRegistry))

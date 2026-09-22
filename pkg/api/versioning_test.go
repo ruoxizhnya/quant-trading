@@ -10,10 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func init() {
-	gin.SetMode(gin.TestMode)
-}
-
 // newTestRouter builds a router with the versioning middleware + a
 // sample /api/backtest route to verify URL rewriting.
 func newTestRouter(cfg VersioningConfig) *gin.Engine {

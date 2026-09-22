@@ -631,12 +631,30 @@ func rateLimitPerMinute(v *viper.Viper) int {
 	return 100
 }
 
+// applyGinMode sets gin's process-wide run mode from server.gin_mode.
+//
+// AUD-29 (ODR-065): must run exactly once, before any router is built.
+// It used to happen inside buildRouter, keyed off logging.format — see
+// internal/httpserver/ginmode.go for why that was the wrong key and the
+// wrong place.
+func applyGinMode(v *viper.Viper, logger zerolog.Logger) {
+	raw := v.GetString(httpserver.ConfigKeyGinMode)
+	applied, recognized := httpserver.ApplyGinMode(raw)
+	if !recognized {
+		logger.Warn().
+			Str(httpserver.ConfigKeyGinMode, raw).
+			Str("applied", applied).
+			Msg("unrecognized gin mode; falling back to release")
+	}
+}
+
 // buildRouter creates the gin router with recovery, CORS, rate-limiting,
 // request logging, and auth middleware (when enabled).
+//
+// gin's run mode is deliberately NOT set here. It is a process-wide global
+// applied once at startup by applyGinMode (AUD-29); tests call buildRouter
+// directly, so mutating the global here would race with parallel tests.
 func buildRouter(authSvc *auth.Service, v *viper.Viper, logger zerolog.Logger) *gin.Engine {
-	if v.GetString("logging.format") == "json" {
-		gin.SetMode(gin.ReleaseMode)
-	}
 	router := gin.New()
 	router.Use(gin.Recovery())
 	// P0-4: CORS 按白名单回显，白名单来自 server.cors.allowed_origins。
