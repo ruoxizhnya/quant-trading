@@ -177,8 +177,18 @@ type Engine struct {
 // NewEngine creates a new backtest engine.
 func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logger) (*Engine, error) {
 	config := Config{}
-	if err := v.Sub("backtest").Unmarshal(&config); err != nil {
-		return nil, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "failed to unmarshal backtest config", "NewEngine")
+	// AUD-40: viper's Sub returns a **nil** *viper.Viper when the key is
+	// absent, and Unmarshal on it panics — the stack bottoms out in
+	// viper.(*Viper).AllKeys dereferencing 0x0 — instead of returning an
+	// error. A config with no `backtest:` block is legitimate: it should boot
+	// on the defaults applied below, not crash the process. UnmarshalKey would
+	// also do (it returns nil for a missing key), but Sub is kept because the
+	// whole `backtest.*` subtree is one section and reading it as one unit is
+	// what makes the intent obvious.
+	if sub := v.Sub("backtest"); sub != nil {
+		if err := sub.Unmarshal(&config); err != nil {
+			return nil, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "failed to unmarshal backtest config", "NewEngine")
+		}
 	}
 	// AUD-37: the A-share trading rules live at the TOP LEVEL of the service
 	// config (`trading:`), which is also the block cmd/analysis reads for the

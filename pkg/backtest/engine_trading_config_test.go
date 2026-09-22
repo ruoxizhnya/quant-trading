@@ -59,8 +59,13 @@ var tradingRulesFromYAML = map[string]any{
 }
 
 // newTradingViper returns a viper that looks like the service config: a
-// `backtest:` section (NewEngine requires one — see AUD-40) plus whatever
-// the caller adds.
+// `backtest:` section plus whatever the caller adds.
+//
+// AUD-40 note: this section used to be *required* — `v.Sub("backtest")`
+// returns nil when the key is absent and `Unmarshal` on nil panicked, so the
+// first draft of these tests crashed instead of failing an assertion. That is
+// fixed; the section stays because it mirrors the real config.
+// TestNewEngine_WithoutABacktestBlockDoesNotPanic pins the fix.
 func newTradingViper() *viper.Viper {
 	v := viper.New()
 	v.Set("backtest.initial_capital", 1000000.0)
@@ -134,6 +139,30 @@ func TestNewEngine_WithoutATradingBlockUsesDefaults(t *testing.T) {
 	eng, err := NewEngine(newTradingViper(), nil, zerolog.Nop())
 	require.NoError(t, err)
 
+	assert.Equal(t, contracts.DefaultTradingConfig(), eng.config.Trading)
+}
+
+// TestNewEngine_WithoutABacktestBlockDoesNotPanic pins AUD-40.
+//
+// `v.Sub("backtest")` returns a **nil** *viper.Viper when the key is absent,
+// and `Unmarshal` on it panics — the stack bottoms out in
+// viper.(*Viper).AllKeys dereferencing 0x0 — instead of returning an error.
+// A config without a `backtest:` block is legitimate: it must boot on the
+// defaults, not take the process down.
+//
+// The assertion is deliberately about *surviving* the call. The failure mode
+// being replaced was a panic, which `require.NoError` would never even reach
+// — the test would abort before the assertion ran.
+func TestNewEngine_WithoutABacktestBlockDoesNotPanic(t *testing.T) {
+	v := viper.New() // no `backtest:` key at all
+
+	eng, err := NewEngine(v, nil, zerolog.Nop())
+	require.NoError(t, err)
+	require.NotNil(t, eng)
+
+	// 「没崩」和「按默认值启动」是两件事 —— 后者也要钉。
+	assert.Equal(t, DefaultInitialCapital, eng.config.InitialCapital)
+	assert.Equal(t, DefaultCommissionRate, eng.config.CommissionRate)
 	assert.Equal(t, contracts.DefaultTradingConfig(), eng.config.Trading)
 }
 
