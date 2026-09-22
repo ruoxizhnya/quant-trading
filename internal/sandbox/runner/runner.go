@@ -29,20 +29,35 @@
 //     with ErrLimitsUnsupported rather than reporting a value problem.
 //     The production runtime image is Alpine, whose busybox ash has it.
 //
-//     On Windows there is no in-process equivalent (that needs a Job
-//     Object, not yet implemented), so Run REFUSES to start a child
-//     that asked for limits rather than silently dropping them — see
+//     On Windows there is no in-process equivalent, so the caps are
+//     applied by the parent just after Start, through a Job Object
+//     (AUD-24). A Job Object cannot express all five — OpenFiles and
+//     FileSize have no equivalent anywhere in the API — so a request
+//     containing them is REFUSED rather than silently dropped; see
 //     ErrLimitsUnsupported and WithAllowUnenforcedLimits.
 //
 // Threat model — what this sandbox does and does NOT do:
 //
 //	✅  Wall-clock CPU bound (timeout) — all platforms
-//	✅  Memory bound (RLIMIT_AS) — POSIX only
-//	✅  File size / open file count bound — POSIX only
-//	✅  Subprocess count bound (RLIMIT_NPROC) — POSIX only, and only
-//	    under a shell that has `ulimit -u` (bash, busybox ash; not dash)
+//	✅  Memory bound (RLIMIT_AS on POSIX; Job Object PROCESS_MEMORY on
+//	    Windows) — all platforms
+//	⚠️  CPU-seconds bound (RLIMIT_CPU on POSIX; Job Object PROCESS_TIME
+//	    on Windows) — POSIX only as a TIGHT bound. On Windows the limit
+//	    is real, but its firing point barely tracks the value: measured
+//	    at 5.3-7.2s of user time for limits of 0.1s, 1s and 3s alike.
+//	    Treat it as a backstop against a runaway build, not a budget.
+//	✅  Subprocess count bound — POSIX only, and only under a shell
+//	    that has `ulimit -u` (bash, busybox ash; not dash). On Windows a
+//	    Job Object ACTIVE_PROCESS limit does the same job, but counts
+//	    THIS JOB's processes rather than the user's, so the same number
+//	    means something different.
+//	❌  File size / open file count bound on Windows — a Job Object has
+//	    no handle-count and no file-size limit; such requests are
+//	    refused rather than dropped.
 //	✅  Process-group isolation (child in its own session/pgid, so a
-//	    group kill can never reach the daemon) — POSIX only
+//	    group kill can never reach the daemon) — POSIX only. Windows
+//	    gets the equivalent property from KILL_ON_JOB_CLOSE: a runaway
+//	    child cannot outlive the daemon that started it.
 //	❌  Network egress isolation (would need network namespaces / cgroups)
 //	❌  Filesystem chroot / bind-mount isolation (would need CAP_SYS_ADMIN)
 //	❌  Syscall filtering (would need seccomp-bpf / eBPF)
@@ -169,8 +184,13 @@ func (l Limits) IsZero() bool {
 		l.NumProcs == 0 && l.FileSize == 0
 }
 
-// describe renders the requested limits for error messages and logs.
-func (l Limits) describe() string {
+// Describe renders the requested limits for error messages, logs and
+// the degradation callback.
+//
+// Exported because a caller that learns "some limit was not enforced"
+// needs to name it in its own logs, and re-deriving the same string in
+// cmd/analysis would let the two drift.
+func (l Limits) Describe() string {
 	var parts []string
 	if l.CPUSeconds != 0 {
 		parts = append(parts, fmt.Sprintf("cpu=%ds", l.CPUSeconds))
@@ -227,10 +247,11 @@ type Runner struct {
 	onTimeout func(argv []string)
 	// onOOM is called once per OOM kill (RLIMIT_AS exceeded).
 	onOOM func(argv []string)
-	// onUnenforcedLimits is called once per run that proceeds WITHOUT
-	// the requested limits actually being enforced. Only reachable when
-	// allowUnenforcedLimits is set. Defaults to a no-op.
-	onUnenforcedLimits func(argv []string)
+	// onUnenforcedLimits is called once per run that proceeds with part
+	// or all of the requested limits NOT enforced, and is handed the
+	// subset that was dropped. Only reachable when allowUnenforcedLimits
+	// is set. Defaults to a no-op.
+	onUnenforcedLimits func(argv []string, unenforced Limits)
 	// mu protects the three callback fields above.
 	mu sync.Mutex
 }
@@ -287,11 +308,27 @@ func WithAllowUnenforcedLimits() Option {
 }
 
 // WithOnUnenforcedLimits installs a callback fired once per run that
-// proceeds with its limits NOT enforced. Wire it to a WARN log so the
-// degradation is visible; it is only reachable when
+// proceeds with some of its limits NOT enforced. Wire it to a WARN log
+// so the degradation is visible; it is only reachable when
 // WithAllowUnenforcedLimits is set.
-func WithOnUnenforcedLimits(fn func(argv []string)) Option {
+//
+// The callback receives the subset that was dropped, because "some
+// limit was not applied" is not actionable on its own — an operator
+// needs to know WHICH cap is missing. On Windows that is normally
+// OpenFiles and FileSize, which a Job Object cannot express; the other
+// three are enforced.
+func WithOnUnenforcedLimits(fn func(argv []string, unenforced Limits)) Option {
 	return func(r *Runner) { r.onUnenforcedLimits = fn }
+}
+
+// notifyUnenforced fires the degradation callback, if any.
+func (r *Runner) notifyUnenforced(argv []string, unenforced Limits) {
+	r.mu.Lock()
+	fn := r.onUnenforcedLimits
+	r.mu.Unlock()
+	if fn != nil {
+		fn(argv, unenforced)
+	}
 }
 
 // Run executes name with the given args, applying the runner's policy
@@ -300,7 +337,8 @@ func WithOnUnenforcedLimits(fn func(argv []string)) Option {
 //   - exec.LookPath error (binary not found)
 //   - ErrLimitsUnsupported (limits requested, this platform or the
 //     wrapper's shell cannot enforce them)
-//   - ErrLimitSetupFailed (limits requested, the child's ulimit was rejected)
+//   - ErrLimitSetupFailed (limits requested, the child's ulimit was rejected,
+//     or the Windows Job Object could not be applied to it)
 //   - context.DeadlineExceeded wrapped in ErrTimeout (timed out)
 //   - the child's non-zero exit error (other failure)
 func (r *Runner) Run(ctx context.Context, name string, args []string, opts Options) (stdout, stderr *bytes.Buffer, err error) {
@@ -315,7 +353,8 @@ func (r *Runner) Run(ctx context.Context, name string, args []string, opts Optio
 	// Resolve the limits into the command line BEFORE building the
 	// process. On POSIX this rewrites argv so the command runs under a
 	// `sh -c` wrapper that sets the limits in the child and then execs
-	// the target; on Windows it fails closed.
+	// the target; on Windows it fails closed for the caps a Job Object
+	// cannot express.
 	//
 	// This has to happen before exec.CommandContext, because the wrapper
 	// replaces argv[0] and LookPath must resolve the wrapper instead of
@@ -324,14 +363,6 @@ func (r *Runner) Run(ctx context.Context, name string, args []string, opts Optio
 	argv, unenforced, err := r.prepareArgv(argv, limits)
 	if err != nil {
 		return nil, nil, err
-	}
-	if unenforced {
-		r.mu.Lock()
-		fn := r.onUnenforcedLimits
-		r.mu.Unlock()
-		if fn != nil {
-			fn(argv)
-		}
 	}
 
 	cmd := exec.CommandContext(timeoutCtx, argv[0], argv[1:]...)
@@ -358,7 +389,37 @@ func (r *Runner) Run(ctx context.Context, name string, args []string, opts Optio
 		cmd.Stdin = bytes.NewReader(nil)
 	}
 
-	runErr := cmd.Run()
+	// Start and Wait are split rather than using cmd.Run() so that the
+	// platform hook below can run while the child exists. On Windows
+	// that is the only window there is: a Job Object cannot be handed
+	// to a process before it starts (see attachProcessLimits), so the
+	// caps are applied immediately after Start.
+	if startErr := cmd.Start(); startErr != nil {
+		return stdout, stderr, startErr
+	}
+
+	// Platform hook. A no-op on POSIX, where the limits are already in
+	// force inside the child before it execs the target.
+	hookUnenforced, release, attachErr := attachProcessLimits(cmd, limits, r.allowUnenforcedLimits)
+	// Must run AFTER Wait: on Windows this closes the Job Object handle,
+	// and KILL_ON_JOB_CLOSE would take the child down with it.
+	defer release()
+	if attachErr != nil {
+		// Fail closed. The child is running uncapped, so it must not be
+		// left behind.
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return stdout, stderr, attachErr
+	}
+	// mergeLimits is a field-wise union here: it answers "which caps are
+	// not in force", from both the pre-start decision (caps this
+	// platform cannot express at all) and the post-start one (caps that
+	// could not be applied to this child).
+	if unenforced = mergeLimits(unenforced, hookUnenforced); !unenforced.IsZero() {
+		r.notifyUnenforced(argv, unenforced)
+	}
+
+	runErr := cmd.Wait()
 	if runErr != nil {
 		// The wrapper's shell does not have this ulimit at all. That is
 		// a capability gap, not a rejected value, and the caller can act

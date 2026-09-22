@@ -47,6 +47,8 @@ const (
 	helperVarEnv   = "RUNNER_TEST_HELPER_VAR"
 	helperExitEnv  = "RUNNER_TEST_HELPER_EXIT"
 	helperSleepEnv = "RUNNER_TEST_HELPER_SLEEP_MS"
+	helperAllocEnv = "RUNNER_TEST_HELPER_ALLOC_MIB"
+	helperSpinEnv  = "RUNNER_TEST_HELPER_SPIN_MS"
 
 	// suiteGuardEnv is set by the normal path of TestMain and inherited by
 	// any child that was started with Options.Env == nil.
@@ -119,6 +121,58 @@ func runHelper(mode string) int {
 			fmt.Fprintln(os.Stderr, "helper:", err)
 			return 2
 		}
+		return 0
+	case "alloc":
+		// Commit and touch n MiB. Used by the Windows Job Object tests,
+		// where a memory cap must make this fail rather than merely be
+		// recorded. Touch every page: Go's allocator gets zeroed pages
+		// from the OS, so without the writes nothing would be committed
+		// and the cap would never be reached.
+		mib, err := strconv.Atoi(os.Getenv(helperAllocEnv))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "helper: bad alloc size:", err)
+			return 2
+		}
+		buf := make([]byte, mib<<20)
+		for i := 0; i < len(buf); i += 4096 {
+			buf[i] = 1
+		}
+		fmt.Println("allocated")
+		return 0
+	case "spawn":
+		// Try to start a child and report whether the OS allowed it.
+		// Used to observe JOB_OBJECT_LIMIT_ACTIVE_PROCESS, which blocks
+		// creation rather than killing anything.
+		exe, err := os.Executable()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "helper:", err)
+			return 2
+		}
+		child := exec.Command(exe)
+		child.Env = helperEnv(helperModeEnv+"=print", helperTextEnv+"=child")
+		if err := child.Run(); err != nil {
+			fmt.Println("blocked")
+			return 0
+		}
+		fmt.Println("spawned")
+		return 0
+	case "spin":
+		// Burn CPU for n milliseconds, so a CPU-seconds cap has
+		// something to bite on.
+		ms, err := strconv.Atoi(os.Getenv(helperSpinEnv))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "helper: bad spin duration:", err)
+			return 2
+		}
+		deadline := time.Now().Add(time.Duration(ms) * time.Millisecond)
+		var x uint64
+		for time.Now().Before(deadline) {
+			for i := 0; i < 4096; i++ {
+				x = x*6364136223846793005 + 1
+			}
+		}
+		_ = x
+		fmt.Println("spun")
 		return 0
 	default:
 		fmt.Fprintln(os.Stderr, "helper: unknown mode", mode)
@@ -348,12 +402,12 @@ func TestLimits_IsZero(t *testing.T) {
 	}
 }
 
-func TestLimits_describe(t *testing.T) {
+func TestLimits_Describe(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "none", Limits{}.describe())
+	assert.Equal(t, "none", Limits{}.Describe())
 
-	got := Limits{CPUSeconds: 25, MemoryBytes: 1 << 30, OpenFiles: 256}.describe()
+	got := Limits{CPUSeconds: 25, MemoryBytes: 1 << 30, OpenFiles: 256}.Describe()
 	assert.Contains(t, got, "cpu=25s")
 	assert.Contains(t, got, "mem=1073741824B")
 	assert.Contains(t, got, "nofile=256")

@@ -90,10 +90,11 @@ func newSandboxRunnerAdapter(logger zerolog.Logger) *sandboxRunnerAdapter {
 				"unset this variable outside local development")
 		opts = append(opts,
 			runner.WithAllowUnenforcedLimits(),
-			runner.WithOnUnenforcedLimits(func(argv []string) {
+			runner.WithOnUnenforcedLimits(func(argv []string, unenforced runner.Limits) {
 				logger.Warn().
 					Strs("argv", argv).
-					Msg("sandbox build ran WITHOUT resource limits")
+					Str("unenforced", unenforced.Describe()).
+					Msg("sandbox build ran with some resource limits NOT enforced")
 			}),
 		)
 	}

@@ -58,18 +58,29 @@ func configureProcessGroup(cmd *exec.Cmd) {
 // When no limits are requested argv is returned unchanged, so the
 // common case pays no shell and needs no `sh` on PATH.
 //
-// unenforced is always false: POSIX can always enforce, and a limit
-// that the kernel refuses to grant aborts the child instead.
-func (r *Runner) prepareArgv(argv []string, l Limits) ([]string, bool, error) {
+// The unenforced subset is always empty: POSIX can always enforce, and
+// a limit that the kernel or the shell refuses aborts the child
+// instead of being dropped.
+func (r *Runner) prepareArgv(argv []string, l Limits) ([]string, Limits, error) {
 	if l.IsZero() {
-		return argv, false, nil
+		return argv, Limits{}, nil
 	}
 
 	// argv[0] becomes $0 and the rest become $@, which is exactly the
 	// shape `exec "$0" "$@"` needs to re-run the original command
 	// without any quoting round-trip through the shell.
 	wrapped := append([]string{"sh", "-c", limitScript(l), argv[0]}, argv[1:]...)
-	return wrapped, false, nil
+	return wrapped, Limits{}, nil
+}
+
+// attachProcessLimits is a no-op on POSIX.
+//
+// Nothing is left for the parent to do after Start: the limits were
+// already applied inside the child by the shell wrapper, before it
+// exec'd the target. That is the entire point of the wrapper — see the
+// package comment and AUD-11.
+func attachProcessLimits(*exec.Cmd, Limits, bool) (Limits, func(), error) {
+	return Limits{}, func() {}, nil
 }
 
 // limitScript renders the sh snippet that applies l and then execs the
