@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 )
 
 // TestDBConfig holds configuration for the test database
@@ -38,12 +40,26 @@ func DefaultTestDBConfig() TestDBConfig {
 	}
 }
 
-// DSN returns the connection string for this configuration
-func (c TestDBConfig) DSN() string {
-	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%d/%s?sslmode=disable",
-		c.User, c.Password, c.Host, c.Port, c.Database,
-	)
+// DSN returns the connection string for this configuration.
+//
+// AUD-42: this used to be a third hand-rolled fmt.Sprintf — the same shape
+// cmd/analysis and cmd/data had (one escaped the password, the other did
+// not, and neither rejected an empty one). It now delegates to
+// storage.BuildDSN so "how a DSN is built" has exactly one implementation:
+// a password containing `:` / `@` / `/` is percent-escaped by the userinfo
+// rules instead of splitting the DSN, and an empty password is reported
+// rather than silently producing an unconnectable string.
+//
+// The error return is new; callers used to get a string unconditionally.
+func (c TestDBConfig) DSN() (string, error) {
+	return storage.BuildDSN(storage.DatabaseConfig{
+		Host:     c.Host,
+		Port:     c.Port,
+		User:     c.User,
+		Password: c.Password,
+		Name:     c.Database,
+		SSLMode:  "disable",
+	})
 }
 
 // TestDB provides a managed test database instance
@@ -77,7 +93,13 @@ func NewTestDB(t *testing.T) *TestDB {
 
 	ctx := context.Background()
 
-	pool, err := pgxpool.New(ctx, config.DSN())
+	dsn, err := config.DSN()
+	if err != nil {
+		t.Skipf("Skipping test: invalid test DB configuration: %v", err)
+		return nil
+	}
+
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		t.Skipf("Skipping test: cannot connect to database at %s:%d (error: %v). "+
 			"Ensure Docker Compose is running with `docker compose up -d postgres`",
@@ -242,7 +264,13 @@ func SkipIfNoDB(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, config.DSN())
+	dsn, err := config.DSN()
+	if err != nil {
+		t.Skipf("Cannot build DSN: %v", err)
+		return
+	}
+
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		t.Skipf("Cannot connect to database: %v", err)
 		return
@@ -260,7 +288,12 @@ func AssertDBAvailable(t *testing.T) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, config.DSN())
+	dsn, err := config.DSN()
+	if err != nil {
+		return false
+	}
+
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return false
 	}
