@@ -333,8 +333,9 @@ GET  /api/tools              — 列出所有工具 + schema
 GET  /api/tools/:name        — 单工具 schema
 POST /api/tools/:name        — 执行工具 (body: {"args": {...}})
 
-# Legacy HTML (deprecated — use Vue SPA instead)
-GET  /, /screen, /dashboard, /copilot, /strategy-selector
+# Legacy HTML — 已删除（AUD-33, 2026-09-22）
+# 原有 /、/screen、/dashboard、/copilot、/strategy-selector 及 /static 挂载全部移除。
+# 这些路径现在返回 404 —— 这是预期行为。前端见 web/（宿主 8080）。
 ```
 
 ### Data Service (8081)
@@ -732,7 +733,7 @@ results := engine.ExecuteSignalsViaLiveTrader(ctx, signals, prices)
 ```
 quant-trading/
 ├── cmd/
-│   ├── analysis/        — 回测 UI 服务 (:8085)
+│   ├── analysis/        — 回测/分析服务 (:8085，纯 API；UI 见 web/)
 │   ├── data/           — 数据同步服务 (:8081)
 │   └── strategy/       — 外部策略服务 (:8082, 备用)
 ├── pkg/
@@ -805,7 +806,7 @@ quant-trading/
 
 ## 前端架构 (Vue 3 SPA)
 
-> **定位**: Vue 3 SPA 是唯一正式前端，`cmd/analysis/static/` 中的 legacy HTML 已 deprecated
+> **定位**: Vue 3 SPA 是唯一前端，**宿主端口 8080**（nginx 托管，见 `docs/guides/deploy-config.md`）。`cmd/analysis/static/` 中的 legacy HTML **已于 2026-09-22 删除**（AUD-33）—— analysis-service 现在只提供 API
 
 ### 技术栈
 
@@ -892,10 +893,13 @@ Browser (:5173)                    Backend (:8085)
 开发模式: Vite dev server proxy → `http://localhost:8085`
 生产模式: `web/dist/` 由 Nginx 托管, proxy 到后端
 
-### Legacy HTML (deprecated)
+### Legacy HTML（已删除）
 
 `cmd/analysis/static/*.html` 是早期原型，功能已被 Vue SPA 完全替代。
-保留原因: 部分后端测试仍引用这些静态文件。计划在 Phase 3 移除。
+**已于 2026-09-22 删除**（AUD-33，AUD-18 分阶段退役裁决的第 ③ 阶段）——
+SPA 的部署在 AUD-32 补上（宿主 8080）后才执行的删除，所以没有出现
+「:8085 打开只剩 API」的空窗期。删除清单：6 个文件 + 10 条 HTML 路由 +
+`/static` 挂载 + 4 条只服务这些页面的裸镜像数据路由。
 
 ---
 

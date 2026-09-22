@@ -134,24 +134,10 @@ func registerProxyRoutes(router *gin.Engine, httpClient *http.Client, v *viper.V
 	// e2e, static pages and Go internals — Go side reaches L0 directly):
 	//   POST /api/sync/calendar, POST /sync/calendar (mirror),
 	//   GET  /api/v1/trading/calendar.
-	// Legacy no-prefix mirrors (/ohlcv/:symbol, /screen, /stocks/count,
-	// /market/index) are kept: they serve the built-in legacy pages in
-	// cmd/analysis/static (ODR-062 S-D ruling: coexist with legacy pages).
-
-	router.GET("/ohlcv/:symbol", func(c *gin.Context) {
-		c.Request.URL.Path = "/api/ohlcv/" + c.Param("symbol")
-		router.HandleContext(c)
-	})
-	router.POST("/screen", func(c *gin.Context) {
-		c.Request.URL.Path = "/api/screen"
-		router.HandleContext(c)
-	})
-	router.GET("/stocks/count", func(c *gin.Context) {
-		c.Request.URL.Path = "/api/stocks/count"
-		router.HandleContext(c)
-	})
-	router.GET("/market/index", func(c *gin.Context) {
-		c.Request.URL.Path = "/api/market/index"
-		router.HandleContext(c)
-	})
+	// The 4 legacy no-prefix mirrors (/ohlcv/:symbol, /screen, /stocks/count,
+	// /market/index) that used to sit here are gone as well — AUD-33
+	// (2026-09-22) retired the legacy pages they existed for. They were never
+	// anything but a convenience for cmd/analysis/static/*.html; the SPA calls
+	// the /api-prefixed routes above (web/src/api/market.ts).
+	// deps_test.go asserts these paths stay unregistered.
 }

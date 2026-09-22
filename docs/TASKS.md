@@ -32,14 +32,17 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | P1 | 16 | 16 | 0 | 0 | 0 | 含 P1-1 —— 子项 1a/1b/1c 均已完成 |
 | P2 | 19 | 15 | 0 | 2 | 2 | ⬜ P2-1 / P2-2；⛔ P2-8、P2-13（两者都卡在数据同步，见下） |
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
-| AUD-19~34 | 16 | 4 | 0 | 12 | 0 | ✅ AUD-19 / AUD-23 / AUD-31 / AUD-32（2026-09-22）；**无阻塞项**（AUD-34 为 AUD-19 顺带发现的新登记） |
+| AUD-19~34 | 16 | 5 | 0 | 11 | 0 | ✅ AUD-19 / AUD-23 / AUD-31 / AUD-32 / AUD-33（2026-09-22）；**无阻塞项**（AUD-34 为 AUD-19 顺带发现的新登记） |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：AUD-19（删 paper 死端点，顺带解除 AUD-31 的阻塞）→
-AUD-33（legacy 退役 —— 前置 AUD-32 已完成，SPA 已在 8080 上可用）。
+**下一批建议顺序**：**AUD-34**（`LiveEngine` 生产零调用方 —— 需要一次裁决：
+保留 / 删除 / 补集成测试，三者代价不同）→ **AUD-30**（`docs/SPEC.md` 仍按
+ADR-022 定版，纯文档）→ **AUD-27**（`gofmt -l .` 恒失败：blob 存 CRLF 且无
+`.gitattributes`）→ AUD-28 / AUD-29（`gin.SetMode` 的两处）→ 监管规则类
+AUD-20 / AUD-21 / AUD-22 → 沙箱跨平台 AUD-24 / AUD-25 / AUD-26。
 
 ### 已完成（2026-09-16，已从下方列表移出）
 
@@ -514,7 +517,6 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | AUD-28 | ⬜ **其余 5 个包仍有「测试各自调 `gin.SetMode`」的模式**（AUD-12 顺带发现，非登记项）：`cmd/data/handlers_ingest_test.go`、`cmd/data/setup_test.go`、`internal/httpserver/cors_test.go`、`internal/httpserver/errors_test.go`、`pkg/api/versioning_test.go`。**今天不报竞争** —— 实测这些包都没用 `t.Parallel()`，所以是**潜在雷**而非现患：一旦有人给这些测试加并行，就会复现 AUD-12 修掉的同类竞争。修法同 AUD-12（`TestMain` 集中设置 + 删掉逐测试调用） | 上述 5 个文件 | 这些包加 `t.Parallel()` 后 `-race` 仍绿 |
 | AUD-29 | ⬜ **`buildRouter` 在运行期按日志格式写 gin 全局 mode**（AUD-12 顺带发现，非登记项）：`if v.GetString("logging.format") == "json" { gin.SetMode(gin.ReleaseMode) }`。两个问题：① **语义可疑** —— 日志格式与 gin 运行模式是两件事，用前者决定后者没有依据；② **运行期改进程级全局** —— 当前测试都用 `logging: level: info`，所以没触发；只要有人写一条 `format: json` 的测试并与并行测试共存，就会复现同类竞争，且这次栈里会出现**生产文件**。`cmd/data/setup.go:220`、`cmd/strategy/main.go:102` 同样写法。**决策点**：是否改由语义相符的配置项（如显式 `server.gin_mode`）决定，并在启动早期设置一次 | `cmd/analysis/setup.go#L638`、`cmd/data/setup.go#L220`、`cmd/strategy/main.go#L102` | gin mode 由语义相符的配置项决定，且在启动期设置一次 |
 | AUD-30 | ⬜ **`docs/SPEC.md` 仍按 ADR-022 定版，未反映 ADR-023/024**（AUD-14 顺带发现，非登记项）：文件头 `Version: 1.5.0 (Unified Research Platform — ADR-022)`、`Last Updated: 2026-09-15`；正文有独立的 `## Unified Research Platform (ADR-022, Proposed)` 章节（四层架构 L0-L3 / 双对等工作面 / 飞轮闭环），全文 7 处引用 ADR-022。**与 AGENTS.md 校准前的状态是同一批漂移**，但 SPEC.md 是 1660 行的 Canonical 规格、那节是独立章节不是散落引用，改动量明显更大 —— 故本次不扩大改动，单独立项。修法同 AUD-14：定位陈述切到 ADR-023/024，并核对 § 里对 API/数据模型**有约束力**的部分是否随定位变了 （ADR-024 影响策略执行载体：YAML → ExpressionStrategy，不是编译产物） | `docs/SPEC.md` 头部 + 第 70 行起的 Unified Research Platform 章节 | SPEC.md 里不再有按 ADR-022 陈述的现行定位；ADR-023/024 对 API/数据模型的约束已体现；`docs/ADR.md` 与 AGENTS.md §11 对 SPEC 的描述一致 |
-| AUD-33 | ⬜ **legacy HTML 退役执行**（**前置 AUD-32 已于 2026-09-22 完成**，AUD-18 的第 ③ 阶段 —— 依赖已解除）：AUD-32 一完成就把 `cmd/analysis/static/` **冻结**（只许不动，不再改），随后删除。删除清单是连带的一整串，不是删 6 个文件：6 个文件（5 html + 1 css，124K）+ `main.go:287-320` 的 **10 条路由**（`/`、`/screen`、`/dashboard`、`/copilot`、`/strategy-selector` 各带 `.html` 变体）与 `/static` 静态目录 + **4 条裸镜像路由**（`/ohlcv/:symbol`、`POST /screen`、`/stocks/count`、`/market/index`，只被 legacy 消费，ODR-062 取证 e 已记「与 legacy 共存亡」）+ `cmd/analysis/deps_test.go:172` 的 `GET /static/*filepath` 路由断言 + AGENTS.md §14 的那一行。**顺序不能反**：先删了就会有一段「:8085 打开只剩 API」的空窗 | `cmd/analysis/static/` + `cmd/analysis/main.go` + `deps_test.go` | SPA 已在 AUD-32 上线并被实际使用过；删完后 `:8085` 不再返回 HTML、全量测试绿、4 条裸路由无引用 |
 | AUD-34 | ⬜ **`LiveEngine` 生产零调用方**（AUD-19 删除 paper handler 后暴露，非登记项）：`pkg/live/engine.go` 的 `LiveEngine` 现在**没有任何生产调用方** —— 唯一的生产消费者是刚被删掉的 `handlers_paper_trading.go`。活的 `/api/execution/*` 走的是 `MockTrader`（`live.LiveTrader` 的另一个实现），不经过 `LiveEngine`。剩下的调用方全在测试里（`live_test.go` / `engine_test.go`，含 AUD-16 新加的三例）。**决策点**：① 保留为「未来实盘引擎骨架」（它确实是完整的 Start/Stop/SubmitOrder/PositionManager 编排，约 450 行），但要接受「只被测试覆盖、从未被真实请求跑过」；② 删除 —— 会连带作废 AUD-16 的修复（那个修复本身是对的：`GetPositions()` 返回值拷贝导致 mark-to-market 算了就扔）与三个新测试；③ 折中：保留但补一条集成测试，从 HTTP 层真的接一次，让它至少被真实请求路径跑过一次。**注意**：`SimulatedBroker` 随本次删除已零调用方（只有 `SimulatedDataFeed` 还被测试用） | `pkg/live/engine.go`（+ `simulated_broker.go`） | 要么 `LiveEngine` 被真实请求路径跑过至少一次，要么删除并写明理由；不允许长期停在「只有测试在用」|\n---
 
 ## P2 — 数据与清理
@@ -847,6 +849,50 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > `lint` **0 errors**（714 个格式 warning 是仓内既有）、`npm test` 14 文件 161 测试
 > 全过；全仓 grep 确认 `/api/paper`、`PaperTrading`、`GetPortfolio` 无残留引用
 > （剩下的是注释与 `pkg/backtest/tracker` 的同名方法，是不同的东西）。
+
+> **AUD-33 落地说明（2026-09-22）**：legacy HTML 已删除 —— AUD-18 分阶段退役的
+> 第 ③ 阶段，前置 AUD-32（SPA 部署）已完成。
+>
+> **删除清单（全部落地）**：
+>
+> | 类别 | 内容 |
+> |---|---|
+> | 文件 | `cmd/analysis/static/` 6 个（5 html + 1 css，124K），目录一并删掉 |
+> | 路由 | `main.go` 的 `router.Static("/static")` + 10 条 HTML 路由（`/`、`/index.html`、`/screen(.html)`、`/dashboard(.html)`、`/copilot(.html)`、`/strategy-selector(.html)`） |
+> | 裸镜像 | `handlers_proxy.go` 的 4 条（`GET /ohlcv/:symbol`、`POST /screen`、`GET /stocks/count`、`GET /market/index`） |
+> | 测试 | `deps_test.go` 的 `mustHave` 去掉 `GET /` 与 `GET /static/*filepath`；**新增 `mustNotHave`** |
+> | 文档 | AGENTS.md §14、ARCHITECTURE.md（3 处）、deploy-config.md、ADR-011 尾部 Update 段 |
+>
+> **⚠️ 删除被写成了护栏，不是只删掉。** `deps_test.go` 新增 **15 条
+> `mustNotHave`**（10 条 HTML 路由 + `/static/*filepath` + 4 条裸镜像），外加
+> 4 条 `/api/` 前缀路由的**正向**断言。理由：只把 `mustHave` 里那两行删掉的话，
+> 将来有人重新加一个 catch-all `/`，两个前端就会在同一端口上悄悄分叉，而**没有
+> 任何东西会抱怨**。
+>
+> **破坏验证三处，各只红该红的**：
+>
+> | 破坏 | 结果 |
+> |---|---|
+> | 把 legacy 的 `GET /` 加回去 | 红 —— `route "GET /" belongs to the retired legacy UI (AUD-33) and must not come back` |
+> | 把裸镜像 `GET /stocks/count` 加回去 | 红 —— 同上（`route "GET /stocks/count" ...`） |
+> | 删掉 `/api/stocks/count`（模拟「顺手清理整个 proxy 块」） | 红 —— `expected /api-prefixed data route "GET /api/stocks/count" to remain registered` |
+>
+> **顺带修正 SPEC.md 的 Data Proxies 段 —— 那一整段有 7 行是错的。**
+> 4 条裸镜像（本次删的）+ **3 条 ODR-062 早已删掉的**（`POST /sync/calendar`、
+> `POST /api/sync/calendar`、`GET /api/v1/trading/calendar`）。后 3 条属
+> 「文档没跟着代码走」：ODR-062 S-C 已把它们作为死代码删除，SPEC 却一直留着。
+> 顺手核实了一个容易误判的点：`/api/sync/*path` 通配符**不会**复活
+> `/api/sync/calendar` —— data-service 只在裸路径 `/sync/calendar`
+> （`cmd/data/main.go:112`）提供日历同步，不在 `/api/sync` 前缀下。
+>
+> **⚠️ 前置「SPA 已被实际使用过」未严格满足**：整栈自 AUD-32 之后没起来过
+> （只有 postgres / redis / data-service 在跑，`web` 与 `analysis-service` 都没起）。
+> 判断它不构成阻塞的理由：① SPA 镜像在 AUD-32 已实证可用（构建 + 深链回退 +
+> 反代 URI 完整 + SSE 破坏验证全过）；② 两套 UI 都要靠一个跑起来的
+> analysis-service + 有数据的库才有意义，而库目前是空的（卡在 `TUSHARE_TOKEN`）
+> —— 也就是说此刻**两套 UI 对若曦的实际可用性都接近零**；③ 删除是 git 可逆的。
+> **若曦下次起整栈时，界面走 `http://localhost:8080`（不再是 `:8085`）** ——
+> `:8085/` 返回 404 是预期行为，不是故障。
 
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、

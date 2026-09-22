@@ -104,7 +104,8 @@ configmap 里躺了很久，2026-09-18 作为死配置清掉（同 P2-7 的 ai-s
 
 `web/`（Vue 3 + Vite）是官方前端，此前**没有任何部署** —— 只能 `npm run dev`
 跑在 `:5173`，compose 里连一个服务都没有。这让 `cmd/analysis/static/` 那套
-legacy HTML 成了唯一的服务端 UI，想删也删不掉（AUD-33 卡在这里）。
+legacy HTML 成了唯一的服务端 UI，想删也删不掉 —— 这个服务补上之后，
+AUD-33 才把 legacy 删掉（2026-09-22）。**现在 SPA 是唯一前端。**
 
 现在是 compose / k8s 里的一个 `web` 服务，**宿主端口 8080**：
 

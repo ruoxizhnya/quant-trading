@@ -284,48 +284,14 @@ func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
 
 func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 
-	router.Static("/static", "./cmd/analysis/static")
-
-	router.GET("/", func(c *gin.Context) {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./cmd/analysis/static/index.html")
-	})
-	router.GET("/screen", func(c *gin.Context) {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./cmd/analysis/static/screen.html")
-	})
-	router.GET("/screen.html", func(c *gin.Context) {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./cmd/analysis/static/screen.html")
-	})
-	router.GET("/dashboard", func(c *gin.Context) {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./cmd/analysis/static/dashboard.html")
-	})
-	router.GET("/dashboard.html", func(c *gin.Context) {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./cmd/analysis/static/dashboard.html")
-	})
-	router.GET("/copilot", func(c *gin.Context) {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./cmd/analysis/static/copilot.html")
-	})
-	router.GET("/copilot.html", func(c *gin.Context) {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./cmd/analysis/static/copilot.html")
-	})
-	router.GET("/strategy-selector", func(c *gin.Context) {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./cmd/analysis/static/strategy-selector.html")
-	})
-	router.GET("/strategy-selector.html", func(c *gin.Context) {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./cmd/analysis/static/strategy-selector.html")
-	})
-	router.GET("/index.html", func(c *gin.Context) {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.File("./cmd/analysis/static/index.html")
-	})
+	// Legacy HTML UI (cmd/analysis/static/) retired in AUD-33 (2026-09-22,
+	// the ③ stage of the AUD-18 staged-retirement ruling). web/ is the only
+	// frontend now: nginx serves it on host port 8080 (AUD-32) and it reaches
+	// this service only through /api/*.
+	//
+	// Do NOT re-add a catch-all "/" or a /static mount here. This service is
+	// an API; if it also answers "/" with HTML, the two frontends silently
+	// diverge again -- and deps_test.go's mustNotHave guard will fire.
 
 	healthHandler := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{

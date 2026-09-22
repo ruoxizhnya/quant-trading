@@ -1117,22 +1117,37 @@ GET  /backtest/:id/equity         - Get equity curve data (checks DB if not in m
 ```
 
 #### Data Proxies (→ data-service :8081)
+
+All of these are registered by `registerProxyRoutes`
+(`cmd/analysis/handlers_proxy.go`). **The SPA reaches them through the `/api`
+prefix only** — the no-prefix mirrors are gone (see "Removed" below).
+
 ```
-GET  /ohlcv/:symbol               - Get OHLCV data for symbol (legacy, no /api prefix)
-     ?start_date=2024-01-01
-     &end_date=2024-12-31
-GET  /api/ohlcv/:symbol            - Same as above, with /api prefix (preferred)
-POST /screen                      - Screen stocks by criteria (proxied, legacy)
-POST /api/screen                  - Same as above, with /api prefix
-GET  /stocks/count                - Get stock count (proxied, legacy)
-GET  /api/stocks/count            - Same as above, with /api prefix
-GET  /market/index                - Get market index data (proxied, legacy)
+GET  /api/ohlcv/:symbol           - Get OHLCV data for symbol
+     ?start_date=2024-01-01&end_date=2024-12-31
+POST /api/screen                  - Screen stocks by criteria
+GET  /api/stocks/count            - Get stock count
+GET  /api/market/index            - Get market index data
      ?symbol=000001.SH&date=2024-01-01
-GET  /api/market/index            - Same as above, with /api prefix
-POST /sync/calendar               - Sync trading calendar (proxied, legacy)
-POST /api/sync/calendar           - Same as above, with /api prefix
-GET  /api/v1/trading/calendar     - Get trading calendar (proxied)
+GET  /api/factors/:factor_name    - Read a factor_cache row (ADR-022 §5 five-tuple)
+     ?symbol=&date=
+ANY  /api/sync/*path              - Streaming reverse proxy to data-service
+                                    `/api/sync/*` (job CRUD, workers, schedules).
+                                    SSE at /api/sync/jobs/:id/progress is
+                                    deliberately unbuffered.
 ```
+
+**Removed — do not re-document these as live:**
+
+- `GET /ohlcv/:symbol`, `POST /screen`, `GET /stocks/count`, `GET /market/index`
+  — the 4 no-prefix mirrors, removed by **AUD-33 (2026-09-22)**. They existed
+  only to serve the legacy HTML pages in `cmd/analysis/static/`, retired in the
+  same change. `cmd/analysis/deps_test.go` asserts they stay unregistered.
+- `POST /sync/calendar`, `POST /api/sync/calendar`, `GET /api/v1/trading/calendar`
+  — removed as dead code in **ODR-062 (S-C)**. Note the `/api/sync/*path`
+  wildcard does **not** resurrect `/api/sync/calendar`: data-service serves
+  calendar sync only at the bare `/sync/calendar` (`cmd/data/main.go:112`),
+  which is outside that prefix.
 
 #### Batch Backtest (Phase 3)
 ```

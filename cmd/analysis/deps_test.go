@@ -137,10 +137,13 @@ func newMinimalDeps() *ServerDeps {
 }
 
 // TestRegisterRoutes_RegistersCoreEndpoints verifies that registerRoutes
-// wires the static + health + metrics + API surface without panicking,
-// even when the DB-backed service pointers are nil. The nil-safety
-// contract is: registration captures closures; services are only
-// dereferenced at request time.
+// wires the health + metrics + API surface without panicking, even when
+// the DB-backed service pointers are nil. The nil-safety contract is:
+// registration captures closures; services are only dereferenced at
+// request time.
+//
+// It also asserts the negative half: the retired legacy HTML routes
+// (AUD-33) must NOT be registered. See mustNotHave below.
 func TestRegisterRoutes_RegistersCoreEndpoints(t *testing.T) {
 	router := gin.New()
 	deps := newMinimalDeps()
@@ -168,8 +171,6 @@ func TestRegisterRoutes_RegistersCoreEndpoints(t *testing.T) {
 		"GET /api/v1",
 		"GET /api/openapi.yaml",
 		"GET /api/docs",
-		"GET /",
-		"GET /static/*filepath",
 	}
 	for _, route := range mustHave {
 		assert.True(t, seen[route],
@@ -189,6 +190,53 @@ func TestRegisterRoutes_RegistersCoreEndpoints(t *testing.T) {
 	for _, route := range handlerGroupSamples {
 		assert.True(t, seen[route],
 			"expected handler-group route %q to be registered", route)
+	}
+
+	// AUD-33 (2026-09-22): the legacy HTML UI was retired, and this asserts
+	// it *stays* retired. Both halves matter -- the HTML routes themselves,
+	// and the 4 no-prefix data mirrors that existed only to serve those
+	// pages (ODR-062 取证 e: "coexist with legacy pages").
+	//
+	// Why a negative assertion instead of merely deleting the old mustHave
+	// entries: without it, someone re-adding a catch-all "/" would silently
+	// reintroduce a second frontend on this port and nothing would complain.
+	// The SPA lives on host port 8080 (nginx, AUD-32); this service is an API.
+	//
+	// Note the /api-prefixed versions of the data routes are still live and
+	// still must be registered -- only the bare mirrors are gone.
+	mustNotHave := []string{
+		"GET /",
+		"GET /index.html",
+		"GET /static/*filepath",
+		"GET /screen",
+		"GET /screen.html",
+		"GET /dashboard",
+		"GET /dashboard.html",
+		"GET /copilot",
+		"GET /copilot.html",
+		"GET /strategy-selector",
+		"GET /strategy-selector.html",
+		"GET /ohlcv/:symbol",
+		"POST /screen",
+		"GET /stocks/count",
+		"GET /market/index",
+	}
+	for _, route := range mustNotHave {
+		assert.False(t, seen[route],
+			"route %q belongs to the retired legacy UI (AUD-33) and must not come back", route)
+	}
+
+	// Sanity: the /api-prefixed counterparts of those mirrors are still
+	// wired. If someone "cleans up" the bare mirrors by deleting the whole
+	// proxy block, this is what catches it.
+	for _, route := range []string{
+		"GET /api/ohlcv/:symbol",
+		"POST /api/screen",
+		"GET /api/stocks/count",
+		"GET /api/market/index",
+	} {
+		assert.True(t, seen[route],
+			"expected /api-prefixed data route %q to remain registered", route)
 	}
 }
 
