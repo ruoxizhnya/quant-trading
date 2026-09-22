@@ -495,6 +495,8 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | AUD-29 | **`buildRouter` 在运行期按日志格式写 gin 全局 mode**（AUD-12 顺带发现，非登记项）：`if v.GetString("logging.format") == "json" { gin.SetMode(gin.ReleaseMode) }`。两个问题：① **语义可疑** —— 日志格式与 gin 运行模式是两件事，用前者决定后者没有依据；② **运行期改进程级全局** —— 当前测试都用 `logging: level: info`，所以没触发；只要有人写一条 `format: json` 的测试并与并行测试共存，就会复现同类竞争，且这次栈里会出现**生产文件**。`cmd/data/setup.go:220`、`cmd/strategy/main.go:102` 同样写法。**决策点**：是否改由语义相符的配置项（如显式 `server.gin_mode`）决定，并在启动早期设置一次 | `cmd/analysis/setup.go#L638`、`cmd/data/setup.go#L220`、`cmd/strategy/main.go#L102` | gin mode 由语义相符的配置项决定，且在启动期设置一次 |
 | AUD-30 | **`docs/SPEC.md` 仍按 ADR-022 定版，未反映 ADR-023/024**（AUD-14 顺带发现，非登记项）：文件头 `Version: 1.5.0 (Unified Research Platform — ADR-022)`、`Last Updated: 2026-09-15`；正文有独立的 `## Unified Research Platform (ADR-022, Proposed)` 章节（四层架构 L0-L3 / 双对等工作面 / 飞轮闭环），全文 7 处引用 ADR-022。**与 AGENTS.md 校准前的状态是同一批漂移**，但 SPEC.md 是 1660 行的 Canonical 规格、那节是独立章节不是散落引用，改动量明显更大 —— 故本次不扩大改动，单独立项。修法同 AUD-14：定位陈述切到 ADR-023/024，并核对 § 里对 API/数据模型**有约束力**的部分是否随定位变了 （ADR-024 影响策略执行载体：YAML → ExpressionStrategy，不是编译产物） | `docs/SPEC.md` 头部 + 第 70 行起的 Unified Research Platform 章节 | SPEC.md 里不再有按 ADR-022 陈述的现行定位；ADR-023/024 对 API/数据模型的约束已体现；`docs/ADR.md` 与 AGENTS.md §11 对 SPEC 的描述一致 |
 | AUD-31 | **`LiveEngine.portfolio` 从未被更新** —— `GetPortfolio()` 恒返回「初始资金 + 空持仓」（AUD-16 逐行复核时顺带发现，非登记项）：`e.portfolio` 只在 `NewLiveEngine` 里构造一次，之后**没有任何写入点**；现金也不随成交增减（`MockTrader` 有 `m.cash` 并维护，`LiveEngine` 没有）。唯一调用方是 `cmd/analysis/handlers_paper_trading.go:266`，而那批 `/api/paper/*` 端点未在 `main.go` / `setup.go` 注册（AUD-19 的死代码）。**与 AUD-19 / AUD-23 绑在一起裁决**：若 AUD-19 删掉 paper 端点，本字段变成零调用方，直接删即可；若保留，则需决定是补现金记账让读数变诚实（现金口径要定：含不含在途、手续费是否计入成本），还是删除。注：AUD-16 只修了 `updatePortfolio()` 写回持仓估值，没动这个字段 | `pkg/live/engine.go#L20,70-74,174-176` | 要么 `GetPortfolio()` 反映真实状态（现金 + 持仓市值），要么该字段与端点一并删除；两种结局都不允许「返回初始资金」这种恒假读数 |\n
+| AUD-32 | **补 Vue SPA 部署**（AUD-18 裁决的**先决条件**，先做这个）**：`web/` 是官方前端（13 个 `.vue` 页面，与 legacy 一一对应），但**没有任何部署** —— `docker-compose.yml` 里连一个 web 服务都没有（只有一行 CORS 注释提到 `:5173`），实际只能 `npm run dev` 本机跑。后果是 legacy 静态页成了唯一的服务端 UI（ODR-062 取证 e），`cmd/analysis/static/` 因此删不掉。要做的是「让浏览器能打开构建产物」：方案 (a) compose 加一个 web 服务（vite preview 或 nginx 托管 `web/dist`）；(b) Go 侧 `embed` 托管 `dist`（单进程，最贴合单人自托管，但要把 SPA 的 history 回退接到 `NoRoute`）；(c) 明确不部署 —— 等于把 AUD-18 永久搁置，需连同 AGENTS.md §14 的措辞一起改。**选 (a) 还是 (b) 是个决定**，涉及：CORS 与 `SERVER_CORS_ALLOWED_ORIGINS`、AUD-13 刚定的端口绑定约定（应用服务有意 `0.0.0.0`）、以及 `tools/check_deploy_consistency.py` 的 compose ↔ k8s 同步（`ALLOWED_MISSING_IN_K8S` 要跟着动） | `docker-compose.yml` + `web/` (或 `cmd/analysis/main.go`) | `docker-compose up` 后有一个端口能打开 Vue 界面，且前端能正常打到 `:8085` 的 API；护栏 `check_deploy_consistency.py` 仍绿 |
+| AUD-33 | **legacy HTML 退役执行**（**依赖 AUD-32**，AUD-18 的第 ③ 阶段）：AUD-32 一完成就把 `cmd/analysis/static/` **冻结**（只许不动，不再改），随后删除。删除清单是连带的一整串，不是删 6 个文件：6 个文件（5 html + 1 css，124K）+ `main.go:287-320` 的 **10 条路由**（`/`、`/screen`、`/dashboard`、`/copilot`、`/strategy-selector` 各带 `.html` 变体）与 `/static` 静态目录 + **4 条裸镜像路由**（`/ohlcv/:symbol`、`POST /screen`、`/stocks/count`、`/market/index`，只被 legacy 消费，ODR-062 取证 e 已记「与 legacy 共存亡」）+ `cmd/analysis/deps_test.go:172` 的 `GET /static/*filepath` 路由断言 + AGENTS.md §14 的那一行。**顺序不能反**：先删了就会有一段「:8085 打开只剩 API」的空窗 | `cmd/analysis/static/` + `cmd/analysis/main.go` + `deps_test.go` | SPA 已在 AUD-32 上线并被实际使用过；删完后 `:8085` 不再返回 HTML、全量测试绿、4 条裸路由无引用 |
 ---
 
 ## P2 — 数据与清理
@@ -521,7 +523,7 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | **P2-12** | ~~**表达式引擎只暴露 OHLCV**（open/high/low/close/volume/turnover），因此 `value` / `quality` 类意图表达不出 —— P0-5 中它们只能明确失败，而不是套一个无关的价格表达式产出误导性回测数字~~ | **✅ 2026-09-18** `pkg/strategy/expression/data_provider.go` + `strategy.go` + `pkg/strategy/strategy.go` + `pkg/storage/fundamentals.go` + `pkg/backtest/engine.go` + `pkg/ai/yaml/generator.go` | 新增 `pe/pb/ps/roe/roa` 五个字段，**按 PIT 对齐**（`GetFundamentalsPITBulk` 返回的 Date 是可用日 `COALESCE(ann_date, trade_date)`，不是报告期；`OHLCVDataProvider.fundamentalSeries` 按每根 K 线的日期切一刀，取不到填 NaN 不是 0）。注入走 `strategy.FundamentalAware` 可选接口（`GenerateSignals` 签名没有基本面参数，不动接口；范式同 `FactorAware`），且**只有声明要财报的策略才预热**——纯价量策略不付这份查询成本。`value` → `cs_rank(neg(pe)) + cs_rank(neg(pb)) > 1.6`，`quality` → `cs_rank(roe) + cs_rank(roa) > 1.6`；`custom` 仍明确失败。**估值倍数非正一律 NaN**：PE 为负不是"便宜"是亏损，`neg(pe)` 不该把亏得最狠的排成最便宜（经典价值陷阱）；ROE/ROA 为负是真实的差，原样保留。**顺手修掉一个潜伏 bug**：`neg(x)` 的函数形式此前从未接上（`evaluateFunction` 无条件走 `applyTimeSeriesOp`），`multi_factor` 的默认表达式 `cs_rank(neg(ts_std(close,20)))` 从落地起就是「解析得过、跑不起来」—— 它只被断言过能解析，从没被求值过 |
 | **P2-13** | **验证器链缺真实回测的端到端取证**（2026-09-17 已解决一半）。缺口只剩数据：本地库 `stocks` / `trading_calendar` / `ohlcv_daily_qfq` 均 0 行。~~引擎离线跑不了~~ —— 这是误判，引擎三处 HTTP（仓位 / 择时 / 止损）**都有 in-process 分支**，`cmd/analysis/main.go:160` 也已 `SetRiskManager`；取证时用 `marketdata.NewInMemoryProvider()` + `SetRiskManager` 即可完全离线（范式见 `pkg/validation/economic_integration_test.go`） | `pkg/validation/economic_integration_test.go` | 跑数据同步补齐行情后，用同一范式接真库 |
 
-**2026-09-21 全栈审查（ODR-065）新增 5 项**（Medium/Low）—— **AUD-14 ~ AUD-17 已完成，剩 1 项**：
+**2026-09-21 全栈审查（ODR-065）新增 5 项**（Medium/Low）—— **AUD-14 ~ AUD-18 全部完成**：
 
 > **AUD-14 落地说明（2026-09-21）**：AGENTS.md 从 v3.3 升到 **v3.4**，顶层叙述整体
 > 从 ADR-022（双对等工作面 + 飞轮闭环，从未实施）切换到 **ADR-023/024 的现实**
@@ -689,14 +691,47 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > `TestCheck_DocumentedBypasses` 会失败 —— 那是**提醒你在同一次改动里更新威胁
 > 模型**，不是要你删测试。
 
+> **AUD-18 落地说明（2026-09-22）**：若曦裁决 **B —— 分阶段退役**。本次只落地
+> 「裁决 + 时间表」，**代码一行未动**。
+>
+> **⚠️ 关键勘察结论：legacy 不是死代码，不能按死代码处理。**
+> `main.go:287-320` 注册了 **10 条路由**（`/`、`/screen`、`/dashboard`、`/copilot`、
+> `/strategy-selector` 各带 `.html` 变体）+ `/static` 静态目录；打的是**活着的**
+> `/api/strategies`（handlers_strategy.go:14）与 `/api/copilot/*`
+> （handlers_copilot.go:198），**没有打已删的 :8086**。所以删它是用户可见的
+> 行为变更 —— 与 AUD-19 那批「零调用方端点」不是一个性质。
+>
+> **三处连带**（删 legacy 会一起动，不是删 6 个文件）：
+>
+> 1. **4 条裸镜像路由**（`/ohlcv/:symbol`、`POST /screen`、`/stocks/count`、
+>    `/market/index`）只被 legacy 消费 —— ODR-062 取证 e 已记「与 legacy 共存亡」；
+> 2. `cmd/analysis/deps_test.go:172` 的 `GET /static/*filepath` 路由断言；
+> 3. **compose 里根本没有 SPA 部署**（只有一行 CORS 注释提到 `:5173`）→
+>    legacy 是**当前唯一的服务端 UI**（ODR-062 取证 e）。
+>
+> **这不是第一次裁决**：ODR-062（2026-09-16）的 S-D 项若曦已选「保留」，理由正是
+> 「compose 无 SPA 部署」，并写明「legacy 退役**另立议题**，本切片不夹带」——
+> **AUD-18 就是那个议题**，现在接续。
+>
+> **时间表（已写入 AGENTS.md §14）**：
+>
+> | 阶段 | 内容 | 任务 |
+> |---|---|---|
+> | ① 先决 | 补 Vue SPA 部署（`(a)` compose 加 web 服务 / `(b)` Go embed 托管 dist —— 这是个待定的决定） | **AUD-32** |
+> | ② 冻结 | AUD-32 一完成，legacy 即冻结：只许不动，不再改 | — |
+> | ③ 删除 | 按上面的连带清单一并删除 | **AUD-33**（依赖 AUD-32） |
+>
+> **顺序不能反**：先删会有一段「`:8085` 打开只剩 API」的空窗。
+>
+> **一个说明定位的细节**：`index.html:192` / `dashboard.html:318` 硬编码
+> `API = 'http://localhost:8085'` —— 这套页面**本来就只有本机能用**，部署到别的
+> 机器就坏（copilot.html / screen.html 用相对路径 `API=''`）。它的实际定位更接近
+> 「本机运维 / 调试台」，而不是日常 UI。
+
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、
 > L3（legacy HTML 残留）。原表只有 AUD-14/AUD-15 两行却写"新增 3 项"，那第 3 项
 > 是已被判定为误报的 AUD-L1。现补为 AUD-16/17/18，24 项全部有主。
-
-| ID | 任务 | 位置 |
-|----|------|------|
-| AUD-18 | **L3 legacy HTML 去留裁决**：`cmd/analysis/static/` 已标 deprecated 但无删除时间表 —— 无限期共存等于两套 UI 都要维护。给出裁决 + 时间表 | `cmd/analysis/static/` |
 
 ---
 
