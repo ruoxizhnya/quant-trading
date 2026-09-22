@@ -1,10 +1,15 @@
+---
+status: evergreen
+last-verified: 2026-09-22
+verified-by: AUD-30 索引表与「已取代」尾注校准（2026-09-22）—— 顶层定位改 ADR-023/024；新增或取代 ADR 时要同时更新索引表与尾注，两处是两套真相来源
+---
+
 # Architecture Decision Records (ADR) & Operational Decision Records (ODR)
 
 > **Location:** `docs/adr/` — architectural ADR files | `docs/archive/odr/` — operational ODR files
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Version:** 3.21.0
 > **Created:** 2026-03-24
-> **Updated:** 2026-09-16
 
 ---
 

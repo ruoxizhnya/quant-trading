@@ -17,6 +17,12 @@
      检查 2 是 AUD-41 的教训：`docs/SPEC.md` 的 `## Configuration` 段整段描述了一个
      并不存在的 `config/global.yaml`，而那种引用**不是 Markdown 链接** ——
      检查 1 根本看不见它，所以那段草稿烂了很久没人发现。
+  3. **入口层文档必须带 R1 frontmatter**（`status` / `last-verified` / `verified-by`）。
+     检查 3 是 AUD-44 的教训：`docs/SPEC.md` / `docs/ADR.md` / `docs/TEST.md` 三份
+     文档用的是自创的 `> **Status**:` 引用块，R1 的三个字段一个都没有 ——
+     而 R1 恰恰是「文档不腐烂」的入口（没有 `last-verified` 就无法判断它是否可信）。
+     范围从 `docs/README.md` 的链接**推导**，不是手写清单（PITFALLS §41）：
+     README 是文档的唯一入口，被它链接的就是「新来的人会读的那几份」。
 
 ⚠️ 归档层（archive/）为什么也要查（AUD-14）：
 ODR 与审计报告几乎全在 `docs/archive/`，而那恰恰是**相对层级最深、改名最频繁**
@@ -117,6 +123,50 @@ def check_config_path_refs(
     return missing
 
 
+# R1（见 docs/README.md）：每份文档顶部必须写 status / last-verified / verified-by。
+# 只认文件**开头**的 `---` frontmatter 块 —— 散在正文里的 `status:` 不算数
+# （那正是 SPEC.md / TEST.md 过去的形状：自创的 `> **Status**:` 引用块）。
+_FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
+_R1_FIELDS = ("status", "last-verified", "verified-by")
+
+
+def check_entry_frontmatter(root: Path) -> list[tuple[Path, list[str]]]:
+    """入口层文档必须带 R1 frontmatter（AUD-44）。
+
+    范围从 `docs/README.md` 的链接**推导**，不是手写清单：README 是文档的唯一入口，
+    凡是被它链接的文档就是「新来的人会读的那几份」，腐烂的代价最高。这样加一份新
+    入口文档时，护栏会自动要求它也带上 frontmatter。
+    """
+    readme = root / "README.md"
+    if not readme.is_file():
+        return []
+    try:
+        text = readme.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
+    bad: list[tuple[Path, list[str]]] = []
+    for target in sorted({m.group(1) for m in LINK_RE.finditer(text)}):
+        md = (readme.parent / target).resolve()
+        if not md.is_file():
+            continue  # 文件本身不存在由检查 1 报，这里不重复
+        try:
+            body = md.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        match = _FRONTMATTER_RE.match(body)
+        if not match:
+            bad.append((md, ["（没有 frontmatter 块）"]))
+            continue
+        block = match.group(1)
+        missing = [
+            f for f in _R1_FIELDS if not re.search(rf"^{re.escape(f)}:", block, re.M)
+        ]
+        if missing:
+            bad.append((md, missing))
+    return bad
+
+
 def check(root: Path, include_archive: bool) -> list[tuple[Path, str]]:
     broken: list[tuple[Path, str]] = []
     for md in find_markdown_files(root, include_archive):
@@ -153,6 +203,7 @@ def main() -> int:
     files = find_markdown_files(root, args.include_archive)
     broken = check(root, args.include_archive)
     missing_paths = check_config_path_refs(root, repo_root, args.include_archive)
+    bad_frontmatter = check_entry_frontmatter(root)
 
     scope = "含归档层" if args.include_archive else "仅常青层与活跃层（跳过 archive/）"
     print(f"扫描 {len(files)} 个 Markdown 文件（{scope}）")
@@ -171,7 +222,17 @@ def main() -> int:
         for md, lineno, target in missing_paths:
             print(f"  {md}:{lineno} -> {target}", file=sys.stderr)
 
-    if broken or missing_paths:
+    if not bad_frontmatter:
+        print("✓ 入口层文档都带 R1 frontmatter（status / last-verified / verified-by）")
+    else:
+        print(
+            f"✗ 发现 {len(bad_frontmatter)} 份入口层文档缺 R1 frontmatter：",
+            file=sys.stderr,
+        )
+        for md, missing in bad_frontmatter:
+            print(f"  {md} -> 缺 {', '.join(missing)}", file=sys.stderr)
+
+    if broken or missing_paths or bad_frontmatter:
         print(
             "\n提示：改代码或改文档，二选一，不要两边都留着（见 docs/README.md R5）。",
             file=sys.stderr,

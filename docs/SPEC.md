@@ -1,8 +1,12 @@
+---
+status: evergreen
+last-verified: 2026-09-22
+verified-by: AUD-30 定位校准 + AUD-41 `## Configuration` 整段订正（2026-09-22）；其余段落沿用 2026-09-16 代码审查
+---
+
 # Quant Trading System - System Specification
 
-> **Status**: Active (Canonical)
 > **Version:** 1.6.0 (AI 实验员实验室 — ADR-023 / ADR-024)
-> **Last Updated:** 2026-09-22
 > **Owner:** 龙少 (Longshao) — AI Assistant
 > **Related:** [PRODUCT.md](PRODUCT.md) (top-level), [VISION.md](VISION.md) (design), [ARCHITECTURE.md](ARCHITECTURE.md) (layout), [TEST.md](TEST.md) (quality)
 >
