@@ -3,6 +3,7 @@ package fees
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestDefaultAShareFees_RegulatoryValues pins the 4 numbers
@@ -152,7 +153,15 @@ func TestValidate_AcceptsBoundary(t *testing.T) {
 func TestStampTaxRate_HistoricalTimeline(t *testing.T) {
 	// Anchor: 2008-09-19 the rate became 0.1%, sell-side only
 	// (previously 0.3% bilateral, then 0.1% bilateral).
-	const pre2023CutRate = 0.001
+	//
+	// AUD-20: this used to be a local `const pre2023CutRate = 0.001`,
+	// which meant the historical rate was pinned in two independent
+	// places (here and DefaultStampTaxRateBefore) and could drift. Now
+	// the constant is the single source and this test asserts the link.
+	const pre2023CutRate = DefaultStampTaxRateBefore
+	if pre2023CutRate != 0.001 {
+		t.Errorf("DefaultStampTaxRateBefore = %f, want 0.001 (0.1%% before 2023-08-28)", pre2023CutRate)
+	}
 	// 2023-08-28: 财政部/税务总局公告 2023 年第 39 号 halved it.
 	const post2023CutRate = 0.0005
 
@@ -169,6 +178,80 @@ func TestStampTaxRate_HistoricalTimeline(t *testing.T) {
 	const sellValue = 100_000.0
 	if got := sellValue * DefaultStampTaxRate; got != 50.0 {
 		t.Errorf("selling %.0f CNY must incur 50 CNY stamp tax; got %.2f", sellValue, got)
+	}
+}
+
+// TestStampTaxRateFor_DateSegmented is the AUD-20 guardrail for the
+// resolver itself.
+//
+// The defect it guards: DefaultStampTaxRate is a POINT-IN-TIME value, so
+// using it for a whole backtest window charges the post-cut 0.05% to
+// pre-cut sells — understating cost and overstating return. The boundary
+// cases matter as much as the middle ones: the cut took effect ON
+// 2023-08-28, so a trade dated that day pays the NEW rate, and a zero asOf
+// must resolve to current rules rather than silently picking the
+// historical rate.
+func TestStampTaxRateFor_DateSegmented(t *testing.T) {
+	cut := StampTaxCutDate
+	if cut != time.Date(2023, 8, 28, 0, 0, 0, 0, time.UTC) {
+		t.Fatalf("StampTaxCutDate = %s, want 2023-08-28 (公告 2023 年第 39 号)",
+			cut.Format("2006-01-02"))
+	}
+
+	cases := []struct {
+		name string
+		asOf time.Time
+		want float64
+	}{
+		{"day before the cut", cut.AddDate(0, 0, -1), DefaultStampTaxRateBefore},
+		{"cut day itself takes the NEW rate", cut, DefaultStampTaxRate},
+		{"day after the cut", cut.AddDate(0, 0, 1), DefaultStampTaxRate},
+		{"2015 (pre-cut)", time.Date(2015, 6, 1, 0, 0, 0, 0, time.UTC), DefaultStampTaxRateBefore},
+		{"2026 (post-cut)", time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC), DefaultStampTaxRate},
+		{"zero asOf -> current rules, never a silent historical rate", time.Time{}, DefaultStampTaxRate},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := StampTaxRateFor(tc.asOf, DefaultStampTaxRate, DefaultStampTaxRateBefore)
+			if got != tc.want {
+				t.Fatalf("StampTaxRateFor(%s) = %f, want %f",
+					tc.asOf.Format(time.RFC3339), got, tc.want)
+			}
+		})
+	}
+}
+
+// TestStampTaxRateFor_ZeroAndNegativeFallBack pins the fallback policy: a
+// caller that supplies only one side of the pair (or neither) gets the
+// package constants rather than a free sell. A NON-POSITIVE override falls
+// back too — a negative stamp tax would be a credit, which is never what a
+// caller means, so it must not be honoured.
+//
+// Policy matches resolvePriceLimit's handling of an unset STBefore in
+// pkg/backtest/pricelimit.go, deliberately: the same shape of bug should
+// have the same shape of answer.
+func TestStampTaxRateFor_ZeroAndNegativeFallBack(t *testing.T) {
+	pre := time.Date(2020, 1, 2, 0, 0, 0, 0, time.UTC)
+	post := time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC)
+
+	checks := []struct {
+		name                  string
+		asOf                  time.Time
+		current, before, want float64
+	}{
+		{"both zero, pre-cut", pre, 0, 0, DefaultStampTaxRateBefore},
+		{"both zero, post-cut", post, 0, 0, DefaultStampTaxRate},
+		{"before unset, pre-cut", pre, DefaultStampTaxRate, 0, DefaultStampTaxRateBefore},
+		{"current unset, post-cut", post, 0, DefaultStampTaxRateBefore, DefaultStampTaxRate},
+		{"negative before, pre-cut", pre, DefaultStampTaxRate, -0.001, DefaultStampTaxRateBefore},
+	}
+	for _, c := range checks {
+		t.Run(c.name, func(t *testing.T) {
+			if got := StampTaxRateFor(c.asOf, c.current, c.before); got != c.want {
+				t.Fatalf("StampTaxRateFor(%s, %f, %f) = %f, want %f",
+					c.asOf.Format("2006-01-02"), c.current, c.before, got, c.want)
+			}
+		})
 	}
 }
 

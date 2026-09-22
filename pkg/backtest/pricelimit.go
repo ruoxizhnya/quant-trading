@@ -167,44 +167,16 @@ func resolvePriceLimit(in PriceLimitInput, cfg PriceLimitConfigValues) float64 {
 // condition looked like it handled all four forms and in fact handled
 // one. Detection is now prefix-based.
 //
-// Order matters: the longer forms are checked first only for
-// readability — HasPrefix is not affected by which one matches first,
-// since all of them imply "risk warning".
+// AUD-22 (ODR-065): the implementation MOVED to pkg/marketdata (leaf)
+// because the order path needs it and pkg/backtest is a parent package —
+// pkg/live and pkg/risk cannot import it without a reverse dependency.
+// This wrapper is kept so the existing call sites in this package
+// (resolvePriceLimit, hasSTPrefix) do not churn, and so the price-limit
+// code keeps reading as "ask the board question here".
+//
+// There is exactly ONE implementation; do not re-inline it here.
 func IsRiskWarningName(name string) bool {
-	if name == "" {
-		return false
-	}
-	// Normalise: some feeds pad the name, and the marker is ASCII, so
-	// trimming leading spaces is safe and prevents " ST某某" slipping
-	// through.
-	s := trimSpace(name)
-
-	// "*ST" (退市风险警示) and "S*ST" (未股改 + 退市风险),
-	// "SST" (未股改 + 特别处理), "ST" (特别处理).
-	//
-	// Written as explicit prefixes rather than a regexp: four cases do
-	// not justify compiling a pattern on a hot path (this runs once
-	// per symbol per trading day).
-	for _, p := range []string{"*ST", "S*ST", "SST", "ST"} {
-		if len(s) >= len(p) && s[:len(p)] == p {
-			return true
-		}
-	}
-	return false
-}
-
-// trimSpace removes leading and trailing ASCII/unicode spaces without
-// pulling in strings just for TrimSpace in this file's hot path.
-func trimSpace(s string) string {
-	start := 0
-	for start < len(s) && (s[start] == ' ' || s[start] == '\t') {
-		start++
-	}
-	end := len(s)
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
-		end--
-	}
-	return s[start:end]
+	return marketdata.IsRiskWarningName(name)
 }
 
 // roundToCent rounds a price to the nearest 0.01 CNY, the tick size

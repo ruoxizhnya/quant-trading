@@ -46,6 +46,7 @@ import (
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/live"
+	"github.com/ruoxizhnya/quant-trading/pkg/risk"
 )
 
 // ─── Errors ────────────────────────────────────────────────
@@ -370,9 +371,21 @@ func (t *XTPTrader) SubmitOrder(
 		return nil, fmt.Errorf("%w: limit order requires positive price", ErrInvalidConfig)
 	}
 
-	// A-share quantity must be multiple of 100 (1 lot = 100 shares)
-	if int(quantity)%100 != 0 {
-		return nil, fmt.Errorf("xtp: quantity must be multiple of 100 (1 lot), got %v", quantity)
+	// AUD-21 (ODR-065): validate the quantity against the per-board
+	// A-share 申报数量规则 via pkg/risk — the same table the position
+	// sizer uses (risk.NormalizeOrderQuantity), so the two can no longer
+	// disagree.
+	//
+	// The previous check was a blanket `int(quantity)%100 != 0`. That is
+	// the MAIN-BOARD / ChiNext rule, not "the A-share rule": STAR
+	// (科创板) allows >=200 shares with 1-share increments and BSE
+	// (北交所) allows >=100 with 1-share increments, so the old check
+	// rejected legal orders — including ones our own sizer had just
+	// produced. It also truncated through int(), letting 100.9 shares
+	// through while refusing 250.0.
+	isSell := direction == domain.DirectionClose || direction == domain.DirectionShort
+	if err := risk.ValidateOrderQuantity(quantity, symbol, isSell); err != nil {
+		return nil, fmt.Errorf("xtp: %w", err)
 	}
 
 	// TODO: When SDK is linked:

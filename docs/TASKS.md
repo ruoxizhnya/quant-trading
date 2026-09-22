@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-09-22
-verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）
+verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）
 status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有未解除的前置）" —— 见下方「状态总览」
 ---
 
@@ -32,15 +32,16 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | P1 | 16 | 16 | 0 | 0 | 0 | 含 P1-1 —— 子项 1a/1b/1c 均已完成 |
 | P2 | 19 | 15 | 0 | 2 | 2 | ⬜ P2-1 / P2-2；⛔ P2-8、P2-13（两者都卡在数据同步，见下） |
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
-| AUD-19~36 | 18 | 10 | 0 | 8 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-28 / AUD-29 / AUD-30 / AUD-31 / AUD-32 / AUD-33（2026-09-22）+ **AUD-34**（裁决：保留）；⬜ AUD-20~22 / AUD-24~26 + **AUD-35 / AUD-36**（AUD-28/29 顺带发现）；**无阻塞项** |
+| AUD-19~37 | 19 | 13 | 0 | 6 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-28 / AUD-29 / AUD-30 / AUD-31 / AUD-32 / AUD-33 / **AUD-20 / AUD-21 / AUD-22**（2026-09-22）+ **AUD-34**（裁决：保留）；⬜ AUD-24~26 + **AUD-35 / AUD-36 / AUD-37**（AUD-28/29/20 顺带发现）；**无阻塞项** |
 
 **剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
 `docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
 
-**下一批建议顺序**：监管规则类 AUD-20 / AUD-21 / AUD-22 → 沙箱跨平台
-AUD-24 / AUD-25 / AUD-26 → 配置一致性 **AUD-35 / AUD-36**（AUD-28/29 顺带发现，
-两项同族：**配置项看着有效，却没有读取点**）。
+**下一批建议顺序**：沙箱跨平台 AUD-24 / AUD-25 / AUD-26 → 配置一致性
+**AUD-35 / AUD-36 / AUD-37**（分别由 AUD-29 / AUD-28-29 / AUD-20 顺带发现，
+三项同族：**配置项看着有效，却没有读取点**；AUD-37 是其中最实在的一条 ——
+`trading:` 块注释自称「A-share trading rules」，却是引擎读不到的死键）。
 
 ### 已完成（2026-09-16，已从下方列表移出）
 
@@ -505,14 +506,12 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 
 | ID | 任务 | 位置 | 验收 |
 |----|------|------|------|
-| AUD-20 | ⬜ **费率史按日期分段**（AUD-06 的延伸，非登记项）：`feeSchedule()` 不接收日期，回测跨费率变动日时全程用同一费率。需在 `Tracker.ExecuteTrade(timestamp)` 处按日期选档（2023-08-28 前后 0.1% / 0.05%），并考虑未来更多变动（佣金、过户费也有沿革）。**决策点**：是否值得做 —— 若曦的回测窗口是否常跨 2023-08-28 | `pkg/backtest/tracker/tracker.go#L110-117`、`pkg/fees/ashare.go` | 跨 2023-08-28 的窗口，前后卖出印花税分别为 0.1% / 0.05%；不跨的窗口行为不变 |
-| AUD-21 | ⬜ **XTP 整手检查对科创板/北交所过严**（AUD-09 的实盘侧延伸，非登记项）：`int(quantity)%100 != 0` 一律报错，但科创板允许「≥200 股、1 股递增」、北交所「≥100 股」，617 股在科创板是合法单却被拒。**待查证**：XTP 柜台是否支持科创板 1 股递增 —— 若券商柜台本身只收 100 倍数，则这是券商限制而非本仓 bug，应改为注释说明；若支持，则需按板块放宽 | `pkg/live/broker/xtp/xtp.go#L373-375` | 科创板/北交所合法单不被本地拒单；或明确记录为券商限制 |
-| AUD-22 | ⬜ **北交所风险警示股当日买入上限**（非登记项）：北交所《交易规则》4.5.4 —— 投资者当日累计买入单只风险警示股票**不得超过 20 万股**（竞价 + 大宗 + 盘后固定价格合并计算）。当前引擎无此约束，回测会允许超限买入。沪深是否有同类上限需一并查证 | 下单量校验处（与 AUD-09 同域） | 单日累计买入 ST 股超 20 万股时被拒 |
 | AUD-24 | ⬜ **Windows Job Object 实现**（AUD-11 的后续增强）：`CreateJobObject` + `SetInformationJobObject`（`JOB_OBJECT_LIMIT_PROCESS_MEMORY` / `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` / `JOB_OBJECT_LIMIT_JOB_MEMORY`）+ `AssignProcessToJobObject`。做完之后 Windows 才能真正执行受限子进程，`ErrLimitsUnsupported` 就不再是常态。**注意**：Job Object 需要 `cmd.SysProcAttr.CreationFlags` 里加 `CREATE_SUSPENDED` 才能在 exec 前挂载 | `internal/sandbox/runner/rlimit_windows.go` | Windows 上 `Limits{MemoryBytes: …}` 真正生效；不需要逃生阀即可构建 |
 | AUD-25 | ⬜ **`ulimit -u` 在 dash 上不可用**（AUD-11 顺带发现，非登记项）：`ulimit -u` 的可移植性是 **bash ✅ / busybox ash ✅ / dash ❌**（Debian/Ubuntu 的 `/bin/sh` 报 "Illegal option -u"）。故 `Limits.NumProcs` 在 Debian/Ubuntu 上会让构建 fail-closed 报 `ErrLimitSetupFailed`。生产组合根没设 `NumProcs`，所以是地雷不是现患。**决策点**：① 探测 shell 能力并在缺失时报 `ErrLimitsUnsupported`（语义更准）；② 改走 cgroup `pids.max`；③ 把 `NumProcs` 从 API 移除，只留平台原生实现 | `internal/sandbox/runner/rlimit_posix.go` | Debian/Ubuntu 上设 `NumProcs` 时给出「本平台不支持」而非含糊的 setup 失败 |
 | AUD-26 | ⬜ **runner 测试在 Windows 上依赖 PATH 里有 POSIX userland**（AUD-11 顺带发现，非登记项）：`TestRun_ExitZero` 用 `echo`、`TestRun_Timeout` 用 `sleep`、`TestRun_StdinAndEnv` 用 `sh`、`TestRun_NonZeroExit` 用 `false`、`TestRunExitCode` 用 `sh -c`。本机因为装了 Git for Windows 才全绿，**裸 Windows（无 Git Bash）会失败**。CI 跑 Linux 故不影响门禁，但会让「本机全绿」这个信号在裸 Windows 上失真。修法：改成用 `os.Executable()` 自举（测试二进制支持 `-test.run=TestHelperProcess` 模式）或按平台选命令 | `internal/sandbox/runner/runner_test.go` | 裸 Windows 上 `go test ./internal/sandbox/runner/` 也全绿 |
 | AUD-35 | ⬜ **`LOG_LEVEL` / `LOG_FORMAT` 是死配置**（AUD-29 顺带发现，非登记项）：`docker-compose.yml` 里 3 个服务各一处、`deploy/k8s/configmap.yaml` 里 2 个键，**全仓无人读**。viper 的 `AutomaticEnv` + `SetEnvKeyReplacer(".", "_")` 把 `logging.level` 映射到 **`LOGGING_LEVEL`**，`LOG_LEVEL` 永远匹配不上；也没有任何 `BindEnv` 把它们接起来（全仓只有 `auth.jwt_secret` / `auth.allow_insecure` 两条 BindEnv）。症状：改了 `LOG_LEVEL` 以为改了日志级别，实际没变 —— 与 AUD-19 同族（**看着有效，零读取点**）。**决策点**：改名成 `LOGGING_LEVEL` / `LOGGING_FORMAT`，还是加 `BindEnv` 保留旧名 | `docker-compose.yml`、`deploy/k8s/configmap.yaml` | 这两个键要么真的被读到，要么被删掉；不能留着假装有效 |
 | AUD-36 | ⬜ **`cmd/strategy` 未接 `viper.AutomaticEnv()`**（AUD-29 顺带发现，非登记项）：`cmd/analysis/setup.go` 与 `cmd/data/setup.go` 都调了 `AutomaticEnv()` + `SetEnvKeyReplacer(".", "_")`，`cmd/strategy/main.go` 的 `loadConfig` **没有** → 该服务**没有任何 env 覆盖**。compose 给它设的 `DATA_SERVICE_URL` / `REDIS_URL` / `LOG_LEVEL` 全部**静默不生效**，只是恰好与 `config/strategy-service.yaml` 里的值一致才「碰巧能用」（与 P1-8 的 k8s `DATA_SERVICE_URL` 同型）。**危害方向与「配了却报未设置」同族**：照另两个服务的经验去设 env，会静默不生效。注意 `cmd/strategy` **目前没有测试包** —— 加之前先补一条「env 覆盖真的生效」的测试，否则改完无法证伪 | `cmd/strategy/main.go#L166-197` | strategy 的 `SERVER_*` env 覆盖与另两个服务一致地生效（或明确记录为有意不支持） |
+| AUD-37 | ⬜ **回测引擎从不读 yaml 的 `trading:` 块**（AUD-20 顺带发现，非登记项）：`NewEngine` 用 `v.Sub("backtest").Unmarshal(&config)` 读的是 **`backtest.trading.*`**，而 `config/analysis-service.yaml` 把这一整块放在**顶层 `trading:`**（L140），`backtest:` 段（L117）里**没有** `trading:` 子段 → `config.Trading` 恒为零值 → `engine.go:202`（及 `:296`）`if config.Trading.StampTaxRate == 0 { config.Trading = defaultTradingConfig() }` **整体替换**为默认值。**逐键核实（2026-09-22，grep 全仓非测试代码）**：① `trading.stamp_tax_rate` / `trading.min_commission` **有人读**，但是 `cmd/analysis/setup.go#L145/L151`（analysis-service 的实盘执行路径），**不是引擎** → 引擎与实盘各用一套费率假设，今天两边都是 0.0005 所以看不出来；② `trading.transfer_fee_rate`、`trading.price_limit.*`、`trading.new_stock_days` **全仓零读取点**（引擎读的是 `backtest.trading.*`，而 yaml 里没有）→ 真死键。**为什么至今没人发现**：这 7 个键的 yaml 值**全部恰好等于** `DefaultTradingConfig()` 的对应默认值（0.0005 / 5.0 / 0.00001 / 0.10 / 0.05 / 0.20 / 60）→ 改 yaml 没有任何可观察效果，与 AUD-35 / AUD-36 同族（**看着有效，零读取点**），但危害更实在：`trading:` 块的注释写着「A-share trading rules」，是用户调回测参数的第一入口。**附带地雷**：`== 0` 判零后**整体替换**，所以将来若只补 `backtest.trading.stamp_tax_rate` 而不补其余键，其余键会**静默回落到默认值**（不是"没填"，是"被覆盖"）。**决策点**：把 yaml 的 `trading:` 段移进 `backtest:`，还是让引擎改读顶层（并保留实盘侧同一来源） | `pkg/backtest/engine.go#L173/L202/L296`、`config/analysis-service.yaml#L117-164` | 引擎的 `TradingConfig` 真的来自 yaml；`trading:` 块里每个键要么被读到、要么被删 |
 
 ## P2 — 数据与清理
 
@@ -1098,6 +1097,92 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 >
 > **验证**：`go build` / `go vet` / `go test ./... -count=1` 全绿；`-race`
 > （docker + `golang:1.25`）四个受影响包全绿；三道护栏全绿。
+
+> **AUD-20 落地说明（2026-09-22）**：若曦裁决 **做日期分段**。`pkg/fees` 新增
+> `DefaultStampTaxRateBefore = 0.001`、`StampTaxCutDate = 2023-08-28`、
+> `StampTaxRateFor(asOf, current, before)` —— 零 `asOf` 取当前值、非正覆盖值回退到常量，
+> 与 AUD-07 的 `resolvePriceLimit` **同形**（那个函数的注释早就点名了 AUD-20，
+> 设计一直在等）。`Tracker.feeSchedule()` → `feeSchedule(asOf)`，5 个调用点全部传当天
+> 日期；`TradingConfig` 加 `stamp_tax_rate_before`（`pkg/backtest/aliases.go` 双别名，
+> 同 AUD-06 先例）。
+>
+> **误差方向是这条的要害**：拿减半后的 0.05% 去算减半前的卖出 = **低估成本 → 高估收益**，
+> 与「校准优先」直接冲突。
+>
+> **三重破坏验证**：① `feeSchedule` 忽略 `asOf` → 只有 tracker 的两条日期分段测试变红；
+> ② 解析器改 `if false` → fees 两条 + tracker 两条变红；③ 两个常量合并为 0.0005 →
+> `TestStampTaxRate_HistoricalTimeline` + `TestStampTaxRate_Fractions` 变红。
+> 另把 `ashare_test.go` 里 `const pre2023CutRate = 0.001` 改为引用常量，**消掉两处独立 pin**
+> （否则改常量时测试不会跟着动）。
+>
+> **为什么不给 yaml 加键**：引擎根本不读顶层 `trading:` —— 加了也是死键，见 AUD-37。
+
+> **AUD-21 落地说明（2026-09-22）**：若曦裁决 **板块感知 + 单一权威**。
+> `pkg/risk.ValidateOrderQuantity(shares, symbol, isSell)` 成为唯一的申报量校验，
+> **复用 `lot.go`（AUD-09）那张板块表**；xtp 的 `int(quantity)%100 != 0` 改为调它。
+> 顺带修掉同一行里的两个附带缺陷：`int()` **截断**（100.9 股曾能通过这道门）与
+> **假文案**「A-share quantity must be multiple of 100 (1 lot)」—— 它不是 A 股规则，
+> 只是主板/创业板规则。卖侧一律放行：零股卖出规则需要持仓状态，交给柜台。
+>
+> **两重破坏验证**：① 恢复旧 `%100` → 只有科创板/北交所/卖侧用例变红，主板用例仍绿
+> （证明护栏有区分度，不是「全都拒」）；② 把科创板分支误用主板规则 →
+> **属性测试**自行抓出（`NormalizeOrderQuantity` 的输出必须全部通过校验，
+> 11 符号 × 16 输入），无需手写用例。
+>
+> **未实现（登记外发现，已记在 `lot.go` 注释）**：单笔申报上限 —— 沪深主板 100 万股 /
+> 创业板限价 30 万·市价 15 万 / 科创板限价 10 万·市价 5 万 / 北交所 100 万股。
+> 未建模。
+
+> **AUD-22 落地说明（2026-09-22）**：若曦裁决 **只做回测侧** —— live 侧不接，
+> 因为 `pkg/live/broker/xtp` 是**零 import 孤岛**（与 AUD-34 同族），接了就是死代码。
+>
+> `pkg/marketdata` 成为 ST 判定与上限的**唯一权威**（新文件 `riskwarning.go`）：
+> `IsRiskWarningName` 从 `pkg/backtest/pricelimit.go` 下移（AUD-08 的实现原样搬，
+> backtest 侧留薄包装以免 churn 调用点）；`RiskWarningDailyBuyCap(symbol)` 按板块给上限
+> —— 沪深/创业板 50 万、北交所 20 万、**科创板 0（豁免）**、unknown 取较严的 20 万。
+> tracker 加 `stockNames` 表 + 当日累计状态（`dailyRWBuy` / `dailyRWBuyDay`），
+> `engine.go` 在 `fetchMarketDataForDay` 之后**每日刷新**该表 —— ST 身份会变，
+> 一次性表等于把今天的 ST 名单套到 2015 年的回测上。
+>
+> **⚠️ 关键勘察：生产路径不是 `ExecuteTrade`。** `NewEngine` **无条件**
+> `executionBridge.Set(executionService)`，于是 `useExecutionService` 对非 Hold 方向
+> **恒真** → 买入走 `executeViaExecutionService` → **`Tracker.ApplyTrade`**。
+> 只在 `ExecuteTrade` 加护栏 = **单测全绿、生产空转**。故两个入口都接。
+>
+> **破坏验证（三重，并因此发现一处真缺口）**：
+>
+> - 删掉 `engine.go` 的 `SetStockNames` 调用 → AST 结构护栏变红，**只有它**变红。
+>   **AST vs 文本的取证**：该文件里 `"SetStockNames"` 共出现 **3 行**（2 处注释提及
+>   + 1 处真实调用）。注释提及保留、只删调用后，文本 grep 仍命中 **2 行**，
+>   而 AST 护栏准确报 **0 个调用点** —— 这才是「护栏没被提及骗到」的证据。
+>   ⚠️ **这条说法最初是编造的**：第一版落地说明写「注释里出现 3 次」时，该文件里
+>   其实**只有 1 行**（就是调用本身），注释根本没提到它 —— 是写记录时凭印象补的
+>   细节，事后 grep 复核才发现。已把注释改成**真的**提到该函数（本来也该提，
+>   读者一眼能对上），并**重做破坏**验证：提及 2 处 + 调用 0 处 → AST 报 0、
+>   文本命中 2。**取证细节必须当场 grep 复核，不能凭印象写**（PITFALLS §31）。
+> - 摘掉 `ApplyTrade` 的 cap 检查 → 生产路径护栏变红，但 **tracker 包整体全绿**。
+>   这暴露了一个真问题：tracker 自己的 8 条测试**只走 `ExecuteTrade`**，
+>   对 `ApplyTrade` 完全盲。已补 `TestTracker_RiskWarningDailyBuyCap_ApplyTradePath`，
+>   重跑破坏后它**唯一变红** —— 盲区补上，不是「加了一条重复测试」。
+> - 去掉科创板豁免 → 只有 STAR 相关用例变红（`marketdata` 2 条 + `tracker` 1 条），
+>   主板/北交所/重置日保持绿 —— 爆炸半径精确。
+>
+> **登记有误（登记缩小了范围）**：原登记只写北交所 20 万股、把沪深列为「需一并查证」。
+> 查证结果：**沪深也有，而且是 50 万股，已施行多年**（沪 4.4.10 / 深 4.5.4）。
+> 三所口径一致：委托买入 + 当日已买入 + 已申报未成交未撤销 ≤ 上限，**普通账户与
+> 信用账户合并计算**；例外为上市公司回购、5% 以上股东按已披露增持计划增持。
+> **科创板豁免**依据沪 6.14（科创板 ST **不进**风险警示板）。
+>
+> **未做**：live 侧（`order_manager`）；**限价委托要求**（沪 4.4.9：买卖风险警示股票与
+> 退市整理股票应当采用限价委托）未建模，已记在 `riskwarning.go` 头注释。
+>
+> **顺带发现 → 新登记 AUD-37**：引擎的 `TradingConfig` 从不读 yaml 的 `trading:` 块。
+
+> **AUD-20 / 21 / 22 共同验证（2026-09-22）**：`gofmt -l .` **0 文件**、
+> `go build ./...` / `go vet ./...` / `go test ./... -count=1` **全绿（72 包）**；
+> `-race`（docker + `golang:1.25`）覆盖 `pkg/backtest/...` / `pkg/marketdata` /
+> `pkg/risk` / `pkg/fees` 共 **17 包全绿**；两道护栏脚本
+> （`check_doc_links.py` / `check_deploy_consistency.py`）全绿。
 
 > **登记缺口（2026-09-21 复核时发现）**：ODR-065 的 24 项里有 3 项在登记环节掉了 ——
 > M4（staticcheck 可绕过）、L2（live engine 组合状态，报告自标"未逐行复核"）、

@@ -1,6 +1,7 @@
 package risk
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
@@ -95,5 +96,78 @@ func NormalizeOrderQuantity(shares float64, symbol string) float64 {
 			return LotSize
 		}
 		return lots * LotSize
+	}
+}
+
+// ValidateOrderQuantity reports whether `shares` is a quantity the
+// exchange will accept for `symbol`, returning a descriptive error if
+// not. isSell selects the sell-side rule set — pass true when the order
+// closes a long, mirroring portfolio.ComputeFees' isSell argument.
+//
+// This is the VALIDATION counterpart of NormalizeOrderQuantity, and the
+// two share the board table above so they cannot drift. The split is
+// deliberate: NormalizeOrderQuantity answers "what should I send
+// instead?", ValidateOrderQuantity answers "may I send this?". A broker
+// boundary needs the latter — silently resizing an order at the last hop
+// would hide a sizing bug instead of surfacing it.
+//
+// AUD-21 (ODR-065): pkg/live/broker/xtp used to enforce a blanket
+// `int(quantity)%100 != 0`. That is the MAIN-BOARD / ChiNext rule only,
+// so it rejected legal STAR (>=200, 1-share increments) and BSE (>=100,
+// 1-share increments) orders — including orders this package's own
+// normalizer had just produced. Two mechanisms, each correct in
+// isolation, wrong when joined (PITFALLS §1). It also truncated through
+// int(), so 100.9 shares passed a check that 250.0 shares failed.
+//
+// Sell-side asymmetry, and why it is not an oversight: 沪 3.3.8 /
+// 深 3.3.8 allow an ODD-LOT sell when it is the whole remaining balance
+// ("卖出证券时，余额不足100股（份）部分，应当一次性申报卖出"). Whether a
+// given sell is that final odd lot depends on position state this
+// function does not have, so it does not guess: for sells it checks only
+// that the quantity is a positive whole number and leaves the
+// remainder rule to the counter. Guessing "not a multiple of 100 =>
+// reject" here would re-introduce exactly the false rejection AUD-21 is
+// about, just on the other side.
+//
+// NOT enforced here: the per-order maximum (100万股 on 沪深/北交所;
+// 创业板 限价 30万 / 市价 15万; 科创板 限价 10万 / 市价 5万). That needs
+// the order type as well as the board, and is tracked separately — see
+// docs/TASKS.md AUD-22 notes.
+func ValidateOrderQuantity(shares float64, symbol string, isSell bool) error {
+	if shares <= 0 {
+		return fmt.Errorf("order quantity must be positive, got %v", shares)
+	}
+	if shares != math.Trunc(shares) {
+		return fmt.Errorf("order quantity must be a whole number of shares, got %v", shares)
+	}
+	qty := math.Trunc(shares)
+
+	if isSell {
+		// See the doc comment: the odd-lot condition needs position
+		// state, so it is left to the counter.
+		return nil
+	}
+
+	switch marketdata.ClassifySymbol(symbol) {
+	case marketdata.BoardSTAR:
+		if qty < STARMinShares {
+			return fmt.Errorf("STAR (科创板) buy orders must be at least %d shares, got %v",
+				STARMinShares, shares)
+		}
+		return nil
+
+	case marketdata.BoardBSE:
+		if qty < BSEMinShares {
+			return fmt.Errorf("BSE (北交所) buy orders must be at least %d shares, got %v",
+				BSEMinShares, shares)
+		}
+		return nil
+
+	default:
+		if math.Mod(qty, LotSize) != 0 {
+			return fmt.Errorf("main-board/ChiNext buy orders must be a multiple of %d shares (1 lot), got %v",
+				LotSize, shares)
+		}
+		return nil
 	}
 }

@@ -32,11 +32,22 @@ import (
 // under `backtest.trading`; falls back to DefaultTradingConfig() when
 // StampTaxRate is zero.
 type TradingConfig struct {
-	StampTaxRate    float64          `mapstructure:"stamp_tax_rate"`
-	MinCommission   float64          `mapstructure:"min_commission"`
-	TransferFeeRate float64          `mapstructure:"transfer_fee_rate"`
-	PriceLimit      PriceLimitConfig `mapstructure:"price_limit"`
-	NewStockDays    int              `mapstructure:"new_stock_days"`
+	StampTaxRate float64 `mapstructure:"stamp_tax_rate"`
+	// StampTaxRateBefore is the sell-side stamp tax rate in force
+	// BEFORE 2023-08-28 (0.1%). Zero falls back to the historical
+	// constant.
+	//
+	// AUD-20 (ODR-065): kept separate from StampTaxRate for exactly the
+	// reason PriceLimit.STBefore is kept separate from PriceLimit.ST —
+	// a backtest spanning the rule change must charge each sell the rate
+	// in force on that day, instead of applying one rate to the whole
+	// window. Resolution lives in fees.StampTaxRateFor; the tracker
+	// calls it per trade.
+	StampTaxRateBefore float64          `mapstructure:"stamp_tax_rate_before"`
+	MinCommission      float64          `mapstructure:"min_commission"`
+	TransferFeeRate    float64          `mapstructure:"transfer_fee_rate"`
+	PriceLimit         PriceLimitConfig `mapstructure:"price_limit"`
+	NewStockDays       int              `mapstructure:"new_stock_days"`
 }
 
 // PriceLimitConfig holds daily price-limit fractions by stock category.
@@ -122,6 +133,12 @@ const (
 	// (0.05% since 2023-08-28; it was 0.1% before).
 	DefaultStampTaxRate = fees.DefaultStampTaxRate
 
+	// DefaultStampTaxRateBefore is the stamp tax rate for selling
+	// A-shares BEFORE 2023-08-28 (0.1%). AUD-20: paired with
+	// DefaultStampTaxRate so a window spanning the cut prices each day
+	// correctly — see fees.StampTaxRateFor.
+	DefaultStampTaxRateBefore = fees.DefaultStampTaxRateBefore
+
 	// DefaultMinCommission is the minimum commission per transaction (¥5).
 	DefaultMinCommission = fees.DefaultMinCommission
 
@@ -178,9 +195,10 @@ const (
 // unchanged.
 func DefaultTradingConfig() TradingConfig {
 	return TradingConfig{
-		StampTaxRate:    DefaultStampTaxRate,
-		MinCommission:   DefaultMinCommission,
-		TransferFeeRate: DefaultTransferFeeRate,
+		StampTaxRate:       DefaultStampTaxRate,
+		StampTaxRateBefore: DefaultStampTaxRateBefore,
+		MinCommission:      DefaultMinCommission,
+		TransferFeeRate:    DefaultTransferFeeRate,
 		PriceLimit: PriceLimitConfig{
 			Normal:   DefaultPriceLimitNormal,
 			ST:       DefaultPriceLimitST,

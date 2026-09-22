@@ -279,6 +279,71 @@ func TestSubmitOrder_QuantityNotMultipleOf100(t *testing.T) {
 	assert.Contains(t, err.Error(), "multiple of 100")
 }
 
+// TestSubmitOrder_QuantityPerBoardRules is the AUD-21 guardrail at the
+// broker boundary.
+//
+// The old check was a blanket `int(quantity)%100 != 0` — the MAIN-BOARD /
+// ChiNext rule stated as if it were THE A-share rule. It rejected legal
+// STAR (科创板, >=200 shares with 1-share increments) and BSE (北交所,
+// >=100 with 1-share increments) orders, including ones
+// risk.NormalizeOrderQuantity had just produced upstream. It also went
+// through int(), so 100.9 shares passed while 250.0 was refused.
+//
+// "Accepted" is asserted by the order clearing the quantity gate and
+// failing on the NEXT thing (the SDK not being linked) — never by
+// expecting success, because SubmitOrder cannot succeed until the CGo
+// binding lands. The `assert.NotContains` on the rejection path is what
+// keeps the two directions distinguishable: a case that is supposed to be
+// refused must be refused by the QUANTITY rule, not merely "somewhere".
+func TestSubmitOrder_QuantityPerBoardRules(t *testing.T) {
+	const clearedGate = "SDK not linked"
+
+	cases := []struct {
+		name    string
+		symbol  string
+		dir     domain.Direction
+		qty     float64
+		wantMsg string // substring of the rejection; "" = must clear the gate
+	}{
+		{"main board lot 100", "000001.SZ", domain.DirectionLong, 100, ""},
+		{"main board odd 137", "000001.SZ", domain.DirectionLong, 137, "multiple of 100"},
+		{"main board 100.9 rejected, not truncated to 100", "000001.SZ", domain.DirectionLong, 100.9, "whole number"},
+		{"STAR floor 200", "688981.SH", domain.DirectionLong, 200, ""},
+		{"STAR 250 (1-share increment)", "688981.SH", domain.DirectionLong, 250, ""},
+		{"STAR 617 (the registry's case)", "688981.SH", domain.DirectionLong, 617, ""},
+		{"STAR 150 (below the 200 floor)", "688981.SH", domain.DirectionLong, 150, "at least 200"},
+		{"BSE 150 (1-share increment)", "830799.BJ", domain.DirectionLong, 150, ""},
+		{"BSE 50 (below the 100 floor)", "830799.BJ", domain.DirectionLong, 50, "at least 100"},
+		{"odd-lot SELL clears the gate", "000001.SZ", domain.DirectionClose, 137, ""},
+		{"zero", "000001.SZ", domain.DirectionLong, 0, "must be positive"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.OfflineMode = false
+			trader, err := NewXTPTrader(cfg, zerolog.Nop())
+			require.NoError(t, err)
+			trader.state.Store(int32(StateReady))
+
+			_, err = trader.SubmitOrder(context.Background(), tc.symbol,
+				tc.dir, domain.OrderTypeMarket, tc.qty, 0)
+			require.Error(t, err, "an offline-mode submit must always error")
+
+			if tc.wantMsg == "" {
+				assert.Contains(t, err.Error(), clearedGate,
+					"quantity %v on %s must clear the quantity gate and fail on the SDK; got %q",
+					tc.qty, tc.symbol, err.Error())
+				return
+			}
+			assert.Contains(t, err.Error(), tc.wantMsg)
+			assert.NotContains(t, err.Error(), clearedGate,
+				"this quantity must be refused by the quantity rule, before the SDK check")
+		})
+	}
+}
+
 func TestSubmitOrder_SDKNotLinked(t *testing.T) {
 	cfg := validConfig()
 	cfg.OfflineMode = false

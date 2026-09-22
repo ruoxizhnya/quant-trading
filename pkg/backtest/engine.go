@@ -639,10 +639,28 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		held := heldSymbols(state.Tracker)
 		universe := e.eligibleUniverse(params.StockPool, date, held)
 
-		marketDataCache, pricesCache, _, updatedPrevClose := e.fetchMarketDataForDay(
+		marketDataCache, pricesCache, stockCache, updatedPrevClose := e.fetchMarketDataForDay(
 			ctx, universe, params, date, prevCloseCache, logger,
 		)
 		prevCloseCache = updatedPrevClose
+
+		// AUD-22: hand the day's stock metadata to the tracker so it can
+		// apply the risk-warning (ST-family) daily buy cap.
+		//
+		// Refreshed every day, not set once at construction: a stock can be
+		// placed under or released from a risk warning at any time, so a
+		// one-shot table would apply today's ST list to a 2015 backtest.
+		//
+		// This is the ONLY population point for that table. If it is ever
+		// removed, Tracker.enforceRiskWarningDailyBuy degrades to a no-op
+		// that only logs a warning — see its doc comment, and
+		// TestEngine_DayLoopPopulatesTrackerStockNames (riskwarning_wiring_test.go),
+		// the structural guard that goes red when this Tracker.SetStockNames
+		// call disappears. (That guard parses the AST on purpose: a text
+		// grep for "SetStockNames" would also match this sentence and the
+		// one above it, so a text-based "exactly one" assertion would fail
+		// even in the correct state.)
+		state.Tracker.SetStockNames(stockNamesFor(stockCache))
 
 		// 摘牌之后还留在账上的持仓，趁这天处理掉。退市当天的价格通常还在
 		// （退市整理期），取不到就退回最后一次已知价 —— 与回测末尾的强平

@@ -80,6 +80,23 @@ func TestPriceLimitConfig_Fractions(t *testing.T) {
 	assert.Equal(t, DefaultPriceLimitSTBefore, DefaultTradingConfig().PriceLimit.STBefore)
 }
 
+// TestStampTaxRate_Fractions is the AUD-20 drift guard, modelled on
+// TestPriceLimitConfig_Fractions above: BOTH sides of the 2023-08-28 cut
+// are asserted, so collapsing them into one value (or swapping them) is
+// caught. Asserting only 0.0005 would not notice "the historical rate was
+// also changed to 0.0005" — which is precisely the silent failure AUD-20
+// is about.
+func TestStampTaxRate_Fractions(t *testing.T) {
+	assert.Equal(t, 0.0005, DefaultStampTaxRate, "sell-side stamp tax on/after 2023-08-28 = 0.05%")
+	assert.Equal(t, 0.001, DefaultStampTaxRateBefore, "sell-side stamp tax before 2023-08-28 = 0.1%")
+
+	// Wiring: the defaults must actually reach the resolved TradingConfig,
+	// otherwise a caller that takes the defaults silently loses the
+	// historical rate and the whole date-segmentation is a no-op.
+	assert.Equal(t, DefaultStampTaxRate, DefaultTradingConfig().StampTaxRate)
+	assert.Equal(t, DefaultStampTaxRateBefore, DefaultTradingConfig().StampTaxRateBefore)
+}
+
 // TestTradingDaysPerYear (S7-P2-1) guards the 252 convention used by
 // the tracker for daily short-selling interest accrual. The live
 // margin module uses 365 (natural days); the backtest engine advances

@@ -12,6 +12,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/fees"
+	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	"github.com/ruoxizhnya/quant-trading/pkg/portfolio"
 	"github.com/ruoxizhnya/quant-trading/pkg/settlement"
 )
@@ -49,6 +50,28 @@ type Tracker struct {
 
 	// Order log for tracking all orders
 	orderLog *OrderLog
+
+	// stockNames maps symbol -> display name, used to detect risk-warning
+	// (ST-family) stocks for the daily buy cap (AUD-22). The engine
+	// refreshes it once per trading day, because risk-warning status is
+	// not static — a stock can be placed under or released from a warning
+	// at any time, so a table set once at construction would apply
+	// today's ST list to a 2015 backtest.
+	//
+	// It is a table rather than a per-call argument because there are TWO
+	// order entry points — ExecuteTrade and ApplyTrade — and the
+	// PRODUCTION path is ApplyTrade (NewEngine always installs an
+	// execution service, so executeViaExecutionService wins whenever the
+	// direction is not Hold). Threading a name through only ExecuteTrade
+	// would have produced a guard that is green in unit tests and inert in
+	// production; see docs/TASKS.md AUD-22.
+	stockNames map[string]string
+
+	// dailyRWBuy is the number of shares of each risk-warning stock bought
+	// on dailyRWBuyDay. Reset when the trade date moves to another day.
+	// Guarded by mu.
+	dailyRWBuy    map[string]float64
+	dailyRWBuyDay time.Time
 
 	logger zerolog.Logger
 }
@@ -105,16 +128,114 @@ func (t *Tracker) GetShortSellingRate() float64 {
 // calculation primitive, ensuring tracker and mock_trader can never drift
 // on the commission/transfer/stamp formula.
 //
+// AUD-20 (ODR-065): asOf is the TRADE DATE, and it selects the stamp-tax
+// rate in force on that day. Reading t.trading.StampTaxRate directly (as
+// this method used to) charges the post-2023-08-28 rate to every sell in
+// the window, which UNDERSTATES cost — and therefore OVERSTATES return —
+// for every sell before the cut. Pass the trade's own timestamp; do NOT
+// pass time.Now() (see the asOf field comment above: a backtest has no
+// wall clock, and mixing one in is exactly the P1-12 defect).
+//
 // Callers must already hold t.mu (Lock or RLock) — this method is lock-free
 // to avoid reentrant RLock deadlock (Go's sync.RWMutex is NOT reentrant).
-func (t *Tracker) feeSchedule() fees.AShareFees {
+func (t *Tracker) feeSchedule(asOf time.Time) fees.AShareFees {
 	return fees.AShareFees{
-		CommissionRate:  t.commissionRate,
-		StampTaxRate:    t.trading.StampTaxRate,
+		CommissionRate: t.commissionRate,
+		// Date-segmented: 0.1% before 2023-08-28, 0.05% on/after it.
+		StampTaxRate:    fees.StampTaxRateFor(asOf, t.trading.StampTaxRate, t.trading.StampTaxRateBefore),
 		TransferFeeRate: t.trading.TransferFeeRate,
 		MinCommission:   t.trading.MinCommission,
 		SlippageRate:    t.slippageRate,
 	}
+}
+
+// SetStockNames replaces the symbol -> display-name table used for
+// risk-warning (ST-family) detection (AUD-22).
+//
+// engine_daily.go calls this once per trading day with that day's stock
+// metadata. It is the ONLY place that populates the table, and the
+// end-to-end test TestEngine_RiskWarningDailyBuyCap_ProductionPath pins
+// that wiring — a table nobody fills in would make the cap a silent
+// no-op, which is exactly the failure mode AUD-14 and AUD-35 were about.
+//
+// Passing nil or an empty map is legal and means "no names known"; in
+// that state no risk-warning cap is applied. That is a deliberate
+// fail-OPEN choice (an unknown name must not block legitimate trading),
+// and it is why an unknown name at buy time is logged — see
+// enforceRiskWarningDailyBuy.
+func (t *Tracker) SetStockNames(names map[string]string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.stockNames = names
+}
+
+// enforceRiskWarningDailyBuy applies the per-investor daily cumulative
+// buy cap for risk-warning stocks and records the fill when it passes.
+//
+// Regulatory basis (rule text verified 2026-09-22, see
+// pkg/marketdata/riskwarning.go for the citations):
+//
+//	沪深主板/创业板  50 万股   沪 4.4.10 / 深 4.5.4
+//	北交所           20 万股   北 4.5.4（2026-08-31 起施行）
+//	科创板           不适用    沪 6.14 科创板 ST 不进风险警示板
+//
+// 口径：委托买入 + 当日已买入 + 已申报未成交未撤销 ≤ 上限；
+// 普通账户与信用账户合并计算。例外：回购、5% 以上股东按已披露计划增持 —
+// 本函数不区分委托来源，故对例外情形会**多拦**，这是刻意的保守方向。
+//
+// Buy side only: the cap is on 买入, and a short is an opening sale.
+// Non-positive quantities and non-risk-warning names are no-ops.
+//
+// Callers must hold t.mu (Lock).
+func (t *Tracker) enforceRiskWarningDailyBuy(symbol string, qty float64, asOf time.Time) error {
+	if qty <= 0 {
+		return nil
+	}
+	name, known := t.stockNames[symbol]
+	if !known || name == "" {
+		// Fail open, but loudly: an unpopulated table means the engine
+		// forgot to call SetStockNames, and an empty name means getStock
+		// failed for this symbol (the key is present but carries a zero
+		// Stock). Silence here would look identical to "no risk warnings
+		// in this backtest", which is the one thing we must not confuse
+		// it with.
+		t.logger.Warn().
+			Str("symbol", symbol).
+			Msg("risk-warning daily buy cap not evaluated: stock name unknown " +
+				"(SetStockNames not populated, or getStock failed for this symbol)")
+		return nil
+	}
+	if !marketdata.IsRiskWarningName(name) {
+		return nil
+	}
+	capShares := marketdata.RiskWarningDailyBuyCap(symbol)
+	if capShares <= 0 {
+		return nil
+	}
+
+	// Reset the accumulator when the trading day changes. Trades are
+	// expected in non-decreasing date order (the engine advances one day
+	// at a time); an out-of-order earlier date would restart the counter,
+	// which is conservative in neither direction but cannot happen on the
+	// engine's path.
+	day := asOf.Truncate(24 * time.Hour)
+	if !day.Equal(t.dailyRWBuyDay) {
+		t.dailyRWBuy = nil
+		t.dailyRWBuyDay = day
+	}
+	if t.dailyRWBuy == nil {
+		t.dailyRWBuy = make(map[string]float64)
+	}
+
+	already := t.dailyRWBuy[symbol]
+	if already+qty > capShares {
+		return fmt.Errorf(
+			"risk-warning daily buy cap exceeded for %s (%s): already bought %.0f today, "+
+				"order for %.0f would total %.0f, cap is %.0f shares/day",
+			symbol, name, already, qty, already+qty, capShares)
+	}
+	t.dailyRWBuy[symbol] = already + qty
+	return nil
 }
 
 // GetPosition returns a copy of the position for a symbol.
@@ -257,9 +378,11 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 	tradeValue := filledQty * executionPrice
 	// S7-P1-1: delegate fee math to the shared primitive. Stamp tax
 	// applies on the sell side: closing long (DirectionClose) and opening
-	// short (DirectionShort). A-share stamp tax: 0.1% on ALL sells.
+	// short (DirectionShort). A-share stamp tax is sell-side-only and
+	// date-segmented (0.1% before 2023-08-28, 0.05% since) — the rate is
+	// resolved per trade in feeSchedule, not hard-coded here.
 	isSell := direction == domain.DirectionClose || direction == domain.DirectionShort
-	fb := portfolio.ComputeFees(tradeValue, isSell, t.feeSchedule())
+	fb := portfolio.ComputeFees(tradeValue, isSell, t.feeSchedule(timestamp))
 
 	trade := &domain.Trade{
 		ID:          uuid.New().String(),
@@ -281,6 +404,12 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 		cost := tradeValue + fb.Total()
 		if cost > t.cash {
 			return nil, fmt.Errorf("insufficient cash: required %.2f, available %.2f", cost, t.cash)
+		}
+		// AUD-22: per-investor daily cumulative buy cap for risk-warning
+		// stocks. Checked before any state mutation so a rejected order
+		// leaves the portfolio and the cash balance untouched.
+		if err := t.enforceRiskWarningDailyBuy(symbol, filledQty, timestamp); err != nil {
+			return nil, err
 		}
 		t.cash -= cost
 
@@ -393,7 +522,7 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 				// Recalculate commission, transfer fee, and stamp tax based on actualQty.
 				// S7-P1-1: closing long is a sell-side transaction (stamp tax applies).
 				actualTradeValue := actualQty * executionPrice
-				actualFb := portfolio.ComputeFees(actualTradeValue, true, t.feeSchedule())
+				actualFb := portfolio.ComputeFees(actualTradeValue, true, t.feeSchedule(timestamp))
 
 				// Update trade record
 				trade.Quantity = actualQty
@@ -404,7 +533,8 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 				// Update yesterday qty
 				pos.QuantityYesterday -= actualQty
 
-				// Closing long: apply stamp tax (0.1%) + commission, calculate PnL
+				// Closing long: apply stamp tax (date-segmented, see
+				// feeSchedule) + commission, calculate PnL
 				pnl := (executionPrice - pos.AvgCost) * actualQty
 				pos.RealizedPnL += pnl - actualFb.Commission - actualFb.StampTax
 				t.cash += actualQty*executionPrice - actualFb.Total()
@@ -417,7 +547,7 @@ func (t *Tracker) ExecuteTrade(symbol string, direction domain.Direction, quanti
 				}
 				// S7-P1-1: closing short is a buy-back (no stamp tax).
 				actualTradeValue := actualQty * executionPrice
-				actualFb := portfolio.ComputeFees(actualTradeValue, false, t.feeSchedule())
+				actualFb := portfolio.ComputeFees(actualTradeValue, false, t.feeSchedule(timestamp))
 
 				// Update trade record with actual values
 				trade.Quantity = actualQty
@@ -508,6 +638,13 @@ func (t *Tracker) ApplyTrade(trade domain.Trade) (*domain.Trade, error) {
 		if cost > t.cash {
 			return nil, fmt.Errorf("insufficient cash: required %.2f, available %.2f", cost, t.cash)
 		}
+		// AUD-22: same cap as ExecuteTrade. This is the PRODUCTION path —
+		// NewEngine always installs an execution service, so buys reach the
+		// portfolio through ApplyTrade, not ExecuteTrade. Enforcing in only
+		// one of the two would leave the other silently uncapped.
+		if err := t.enforceRiskWarningDailyBuy(symbol, quantity, timestamp); err != nil {
+			return nil, err
+		}
 		t.cash -= cost
 
 		tradeDate := timestamp.Truncate(24 * time.Hour)
@@ -590,7 +727,7 @@ func (t *Tracker) ApplyTrade(trade domain.Trade) (*domain.Trade, error) {
 
 				actualTradeValue := actualQty * executionPrice
 				// S7-P1-1: closing long is a sell-side transaction (stamp tax applies).
-				actualFb := portfolio.ComputeFees(actualTradeValue, true, t.feeSchedule())
+				actualFb := portfolio.ComputeFees(actualTradeValue, true, t.feeSchedule(timestamp))
 
 				// Override trade values with actual
 				trade.Quantity = actualQty
@@ -611,7 +748,7 @@ func (t *Tracker) ApplyTrade(trade domain.Trade) (*domain.Trade, error) {
 				}
 				// S7-P1-1: closing short is a buy-back (no stamp tax).
 				actualTradeValue := actualQty * executionPrice
-				actualFb := portfolio.ComputeFees(actualTradeValue, false, t.feeSchedule())
+				actualFb := portfolio.ComputeFees(actualTradeValue, false, t.feeSchedule(timestamp))
 
 				trade.Quantity = actualQty
 				trade.Commission = actualFb.Commission

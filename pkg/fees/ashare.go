@@ -29,13 +29,26 @@
 //     前的 sanity check。
 //
 // 4. **不变性** — 常量值按 2024-01 上交所/深交所公告：
+//
 //   - 佣金：双边 0.03% 最低 5 元（券商可打折到 0.01%）
+//
 //   - 印花税：仅卖出 0.05%（2023-08-28 起从 0.1% 减半）
+//
 //   - 过户费：双边 0.001%
+//
 //   - 滑点：默认假设 0.01%，无监管上限
+//
+//     5. **费率有沿革，回测要按交易日取档**（AUD-20）—— `DefaultStampTaxRate`
+//     是**某个时点**的值（2023-08-28 减半后的 0.05%），不是「永远的值」。
+//     跨该日期的回测窗口必须按成交日取档，否则减半前那一段的每次卖出都
+//     **低估成本 → 高估收益**。入口是 `StampTaxRateFor(asOf, current, before)`，
+//     与 `pkg/backtest/pricelimit.go` 的 `resolvePriceLimit` 同形。
 package fees
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // A-share fee rates (default values, 2024-Q1 上交所/深交所).
 const (
@@ -64,6 +77,21 @@ const (
 	// was previously overstating costs by ~5bp per round trip.
 	DefaultStampTaxRate = 0.0005
 
+	// DefaultStampTaxRateBefore is the stamp tax rate in force
+	// BEFORE StampTaxCutDate (0.1%, sell side only).
+	//
+	// AUD-20 (ODR-065): DefaultStampTaxRate is a *point-in-time*
+	// value (the post-2023-08-28 rate). A backtest window that
+	// spans the cut must charge each sell the rate in force on
+	// that day, or it silently UNDERSTATES cost — and therefore
+	// OVERSTATES return — for every pre-cut sell. Use
+	// StampTaxRateFor rather than reading either constant
+	// directly when a trade date is available.
+	//
+	// The 0.1% figure held from 2008-09-19 (when the tax became
+	// sell-side-only) to 2023-08-27 inclusive.
+	DefaultStampTaxRateBefore = 0.001
+
 	// DefaultTransferFeeRate is the per-side clearing-house
 	// transfer fee (0.001%). Charged on both buy and sell
 	// since 2022; before that it was sell-only.
@@ -88,6 +116,47 @@ const (
 	// liquidity.
 	FixedSlippageRate = 0.001
 )
+
+// StampTaxCutDate is the effective date of the stamp-tax halving
+// (0.1% -> 0.05%, sell side only), announced in 财政部 / 税务总局公告
+// 2023 年第 39 号 and effective 2023-08-28.
+//
+// Stored as a date-only value in UTC; comparisons are made against the
+// trading day the fee is being charged for, never against wall-clock
+// time. A trade dated exactly on the cut pays the NEW rate (the
+// announcement took effect that day).
+var StampTaxCutDate = time.Date(2023, 8, 28, 0, 0, 0, 0, time.UTC)
+
+// StampTaxRateFor returns the sell-side stamp tax rate in force on
+// asOf, given a caller-supplied pair of (current, before) rates.
+//
+// AUD-20 (ODR-065). Modelled on resolvePriceLimit's date-segmented ST
+// handling in pkg/backtest/pricelimit.go — same problem shape, same
+// conventions:
+//
+//   - asOf before StampTaxCutDate  -> `before`
+//   - asOf on/after StampTaxCutDate -> `current`
+//   - zero asOf -> `current` (a caller that cannot supply a date gets
+//     today's rules, not a silent historical rate)
+//   - a zero `before`/`current` falls back to the package constants,
+//     so callers that only override one side still behave sanely
+//
+// This is the ONLY place the cut date may be compared. Callers that
+// read DefaultStampTaxRate directly are asserting "the whole window
+// uses today's rate" — fine for a live trader, wrong for a backtest
+// that spans 2023-08-28.
+func StampTaxRateFor(asOf time.Time, current, before float64) float64 {
+	if before <= 0 {
+		before = DefaultStampTaxRateBefore
+	}
+	if current <= 0 {
+		current = DefaultStampTaxRate
+	}
+	if !asOf.IsZero() && asOf.Before(StampTaxCutDate) {
+		return before
+	}
+	return current
+}
 
 // AShareFees collects the four A-share fee knobs + the
 // min-commission floor + the optional slippage. Zero-value

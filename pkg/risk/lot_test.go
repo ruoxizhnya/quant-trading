@@ -380,3 +380,122 @@ func TestRiskManager_CalculatePosition_STARKeepsAboveMinimum(t *testing.T) {
 		"STAR keeps the whole-share quotient (617); a blanket "+
 			"100-multiple rule would have cut it to 600")
 }
+
+// ── ValidateOrderQuantity (AUD-21) ────────────────────────────────────
+
+// TestValidateOrderQuantity_BoardMatrix pins the per-board BUY rules at
+// the validation boundary. It mirrors TestNormalizeOrderQuantity_
+// BoardMatrix on purpose: whatever the normalizer emits for a board must
+// validate clean on that same board.
+//
+// The registry's headline case is in here — 617 shares on STAR is a legal
+// order that the old blanket `int(quantity)%100 != 0` in the XTP broker
+// refused.
+func TestValidateOrderQuantity_BoardMatrix(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		in      float64
+		symbol  string
+		wantErr bool
+	}{
+		{"main board lot", 100, symMainSH, false},
+		{"main board 1000", 1000, symMainSH, false},
+		{"main board odd 137", 137, symMainSH, true},
+		{"ChiNext lot", 300, symChi300, false},
+		{"ChiNext odd 301", 301, symChi300, true},
+		{"STAR floor 200", 200, symSTAR, false},
+		{"STAR 201 (1-share increment)", 201, symSTAR, false},
+		{"STAR 617 (the registry's case)", 617, symSTAR, false},
+		{"STAR 150 (below floor)", 150, symSTAR, true},
+		{"STAR CDR 250", 250, symSTARCD, false},
+		{"BSE floor 100", 100, symBSE8, false},
+		{"BSE 150 (1-share increment)", 150, symBSE8, false},
+		{"BSE 50 (below floor)", 50, symBSE8, true},
+		{"BSE 4-segment 101", 101, symBSE4, false},
+		{"unknown symbol falls back to the main-board rule", 137, "not-a-code", true},
+		{"unknown symbol, valid lot", 500, "not-a-code", false},
+		{"fractional 100.9 must NOT pass via truncation", 100.9, symMainSH, true},
+		{"fractional STAR 250.5", 250.5, symSTAR, true},
+		{"zero", 0, symMainSH, true},
+		{"negative", -100, symMainSH, true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateOrderQuantity(tc.in, tc.symbol, false)
+			if tc.wantErr {
+				assert.Error(t, err, "expected %v %s to be rejected", tc.in, tc.symbol)
+				return
+			}
+			assert.NoError(t, err, "expected %v %s to be accepted", tc.in, tc.symbol)
+		})
+	}
+}
+
+// TestValidateOrderQuantity_NormalizerOutputAlwaysValidates is the
+// cross-check that closes AUD-21 at the root.
+//
+// The defect was not that either half was wrong — NormalizeOrderQuantity
+// was board-correct and the broker's check was a faithful implementation
+// of the MAIN-BOARD rule. It was that the two disagreed, so the sizer
+// produced quantities the next hop refused. This test states the
+// invariant directly: normalizer output must always validate.
+//
+// It is a property test over (board × input) rather than a fixed table so
+// that adding a board or changing a floor cannot silently re-open the
+// gap — the failing pair is reported in the message.
+func TestValidateOrderQuantity_NormalizerOutputAlwaysValidates(t *testing.T) {
+	t.Parallel()
+
+	symbols := []string{
+		symMainSH, symMainSZ, symSME, symChi300, symChi301,
+		symSTAR, symSTARCD, symBSE8, symBSE4, "not-a-code", "",
+	}
+	inputs := []float64{
+		-1, 0, 0.5, 1, 50, 99, 100, 137, 199.9, 200, 201,
+		250.5, 617, 5013.7, 99_999, 1_000_000,
+	}
+
+	for _, symbol := range symbols {
+		for _, in := range inputs {
+			got := NormalizeOrderQuantity(in, symbol)
+			if got <= 0 {
+				// "not orderable at all" is a legitimate normalizer
+				// answer and is not the validator's business.
+				continue
+			}
+			assert.NoError(t, ValidateOrderQuantity(got, symbol, false),
+				"normalizer emitted %v for symbol %q (input %v) but the validator rejects it",
+				got, symbol, in)
+		}
+	}
+}
+
+// TestValidateOrderQuantity_SellAllowsOddLots pins the sell-side
+// asymmetry.
+//
+// 沪 3.3.8 / 深 3.3.8 allow an ODD-LOT sell when it is the whole
+// remaining balance ("卖出证券时，余额不足100股（份）部分，应当一次性申报
+// 卖出"). This function has no position state, so it cannot tell an
+// illegal partial odd lot from a legal final one — and it must not guess,
+// because guessing "not a multiple of 100 => reject" would re-create
+// exactly the false rejection AUD-21 is about, just on the other side.
+// Positivity and integrality still apply.
+func TestValidateOrderQuantity_SellAllowsOddLots(t *testing.T) {
+	t.Parallel()
+
+	assert.NoError(t, ValidateOrderQuantity(137, symMainSH, true), "odd-lot sell allowed")
+	assert.NoError(t, ValidateOrderQuantity(1, symMainSH, true), "1-share sell allowed")
+	assert.NoError(t, ValidateOrderQuantity(150, symSTAR, true),
+		"STAR sell below the BUY floor is allowed (may be the whole balance)")
+	assert.NoError(t, ValidateOrderQuantity(50, symBSE8, true),
+		"BSE sell below the BUY floor is allowed")
+
+	assert.Error(t, ValidateOrderQuantity(0, symMainSH, true), "zero is still invalid")
+	assert.Error(t, ValidateOrderQuantity(-100, symMainSH, true), "negative is still invalid")
+	assert.Error(t, ValidateOrderQuantity(100.9, symMainSH, true),
+		"a fractional sell is still invalid")
+}

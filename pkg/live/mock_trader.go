@@ -87,6 +87,14 @@ func NewMockTrader(config MockTraderConfig, logger zerolog.Logger) *MockTrader {
 // feeSchedule returns the trader's fee configuration as a fees.AShareFees
 // struct, for use with portfolio.ComputeFees (S7-P1-1). This bridges
 // the flat MockTraderConfig fields to the shared fee-calculation primitive.
+//
+// AUD-20: unlike Tracker.feeSchedule (which takes an asOf and segments the
+// stamp tax by date), this one deliberately uses the flat configured rate.
+// MockTrader executes in the present — there is no historical trade date to
+// segment on — so the rate in force today is the only one that can apply.
+// If this ever gains a "replay a past day" mode, it must switch to
+// fees.StampTaxRateFor(asOf, ...) like the tracker did; passing time.Now()
+// here instead would be wrong for the same reason P1-12 was wrong.
 func (m *MockTrader) feeSchedule() fees.AShareFees {
 	return fees.AShareFees{
 		CommissionRate:  m.config.CommissionRate,

@@ -132,6 +132,23 @@ func (e *Engine) fetchMarketDataForDay(
 	return marketDataCache, pricesCache, stockCache, updatedPrevClose
 }
 
+// stockNamesFor projects the day's stock metadata down to the
+// symbol -> display-name table the tracker needs for risk-warning
+// detection (AUD-22).
+//
+// Symbols whose Stock could not be fetched are included with an EMPTY
+// name rather than dropped: the tracker treats an empty name as "unknown"
+// and logs it, whereas a missing key would be indistinguishable from
+// "this backtest has no risk-warning stocks". An empty value keeps that
+// distinction visible at the point where it matters.
+func stockNamesFor(stockCache map[string]domain.Stock) map[string]string {
+	names := make(map[string]string, len(stockCache))
+	for symbol, stock := range stockCache {
+		names[symbol] = stock.Name
+	}
+	return names
+}
+
 func (e *Engine) processStockJob(
 	ctx context.Context,
 	job stockJob,

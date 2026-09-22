@@ -39,11 +39,14 @@ type (
 	BacktestResponse = contracts.BacktestResponse
 )
 
-// Const aliases. The three fee constants are double-aliased
+// Const aliases. The fee-rate constants are double-aliased
 // (contracts -> fees), preserving the single-source-of-truth invariant
-// from S7-P1-4.
+// from S7-P1-4. DefaultStampTaxRateBefore joined them with AUD-20: the
+// stamp tax is date-segmented, so the "current" rate alone is not a
+// complete description of the fee schedule.
 const (
 	DefaultStampTaxRate       = contracts.DefaultStampTaxRate
+	DefaultStampTaxRateBefore = contracts.DefaultStampTaxRateBefore
 	DefaultMinCommission      = contracts.DefaultMinCommission
 	DefaultTransferFeeRate    = contracts.DefaultTransferFeeRate
 	DefaultPriceLimitNormal   = contracts.DefaultPriceLimitNormal
