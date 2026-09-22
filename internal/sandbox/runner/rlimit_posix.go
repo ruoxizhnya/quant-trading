@@ -17,6 +17,14 @@
 // limits are in force for exactly the process we want and the parent
 // is untouched. Every ulimit is checked: a limit that cannot be set
 // aborts the run rather than leaving an unbounded child behind.
+//
+// "Cannot be set" is two different failures and they are reported
+// separately (AUD-25). Before setting a limit the wrapper probes
+// whether the shell has the option at all; a shell that does not know
+// `ulimit -u` exits with limitUnsupportedExit, and one that knows it
+// but rejects the value exits with limitSetupFailedExit. Conflating
+// them told an operator on Debian to go looking for a bad RLIMIT_NPROC
+// value when the answer was "/bin/sh is dash".
 package runner
 
 import (
@@ -66,13 +74,26 @@ func (r *Runner) prepareArgv(argv []string, l Limits) ([]string, bool, error) {
 
 // limitScript renders the sh snippet that applies l and then execs the
 // target. Exported behaviour (for tests) is the exact text below.
+//
+// Every requested limit costs two ulimit calls: a capability probe,
+// then the set. The probe is not defensive padding — `ulimit -u` is
+// genuinely missing from dash, which is /bin/sh on Debian and Ubuntu
+// (AUD-25). Without it the failure surfaced as "cannot set
+// RLIMIT_NPROC", which reads like a bad value.
 func limitScript(l Limits) string {
 	var b strings.Builder
 
-	// Every ulimit is followed by a failure branch. Silently continuing
-	// after a rejected ulimit is the exact failure mode AUD-11 is
-	// about: the caller believes the child is capped when it is not.
+	// emit sets one limit, after checking the shell can express it.
+	//
+	// Both branches write to stderr and abort: silently continuing after
+	// a rejected ulimit is the exact failure mode AUD-11 is about — the
+	// caller believes the child is capped when it is not.
+	//
+	// The probe queries with no value and discards the output. A shell
+	// that does not have the option fails here, before the target runs.
 	emit := func(flag, value, name string) {
+		fmt.Fprintf(&b, "ulimit -%s >/dev/null 2>&1 || { echo '%s%s' >&2; exit %d; }\n",
+			flag, limitUnsupportedMarker, name, limitUnsupportedExit)
 		fmt.Fprintf(&b, "ulimit -%s %s || { echo '%s%s' >&2; exit %d; }\n",
 			flag, value, limitSetupMarker, name, limitSetupFailedExit)
 	}
@@ -89,16 +110,15 @@ func limitScript(l Limits) string {
 		emit("n", strconv.Itoa(l.OpenFiles), "RLIMIT_NOFILE")
 	}
 	if l.NumProcs > 0 {
-		// `ulimit -u` is NOT portable, verified against the shells this
-		// actually runs under:
+		// `ulimit -u` is the one this file cannot take for granted.
+		// Verified against the shells it actually runs under:
 		//
-		//	bash  ✅   busybox ash  ✅   dash (Debian/Ubuntu /bin/sh)  ❌
+		//	bash  ✅   busybox ash (Alpine)  ✅   dash (Debian/Ubuntu /bin/sh)  ❌
 		//
-		// On a shell without it the ulimit fails and the run aborts
-		// with ErrLimitSetupFailed. That is noisy, but the alternative —
-		// dropping the cap silently — is the exact bug this file exists
-		// to prevent. Note the production composition root does not set
-		// NumProcs, so this is a landmine rather than a live problem.
+		// The probe above turns that ❌ into ErrLimitsUnsupported naming
+		// RLIMIT_NPROC. The production composition root does not set
+		// NumProcs and the runtime image is Alpine, so this is a
+		// landmine for a Debian-based deployment, not a live problem.
 		emit("u", strconv.Itoa(l.NumProcs), "RLIMIT_NPROC")
 	}
 	if l.FileSize > 0 {

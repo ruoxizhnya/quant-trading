@@ -23,6 +23,12 @@
 //     The caps therefore belong to the child process and never touch
 //     the long-running parent.
 //
+//     POSIX is not one capability, though. `ulimit -u` (RLIMIT_NPROC)
+//     is absent from dash — the /bin/sh on Debian and Ubuntu — so the
+//     wrapper probes for each option it is about to use and aborts
+//     with ErrLimitsUnsupported rather than reporting a value problem.
+//     The production runtime image is Alpine, whose busybox ash has it.
+//
 //     On Windows there is no in-process equivalent (that needs a Job
 //     Object, not yet implemented), so Run REFUSES to start a child
 //     that asked for limits rather than silently dropping them — see
@@ -33,7 +39,8 @@
 //	✅  Wall-clock CPU bound (timeout) — all platforms
 //	✅  Memory bound (RLIMIT_AS) — POSIX only
 //	✅  File size / open file count bound — POSIX only
-//	✅  Subprocess count bound (RLIMIT_NPROC) — POSIX only
+//	✅  Subprocess count bound (RLIMIT_NPROC) — POSIX only, and only
+//	    under a shell that has `ulimit -u` (bash, busybox ash; not dash)
 //	✅  Process-group isolation (child in its own session/pgid, so a
 //	    group kill can never reach the daemon) — POSIX only
 //	❌  Network egress isolation (would need network namespaces / cgroups)
@@ -77,14 +84,30 @@ import (
 var ErrTimeout = errors.New("runner: child exceeded timeout and was killed")
 
 // ErrLimitsUnsupported is returned when the caller asked for resource
-// limits that this platform cannot enforce and the runner was not told
-// to proceed anyway.
+// limits that cannot be enforced here and the runner was not told to
+// proceed anyway.
 //
 // Refusing is deliberate. A sandbox that silently drops the caps it was
 // asked for is worse than no sandbox at all, because every caller that
 // budgeted on those caps being real (memory headroom, fd budget,
 // runaway-build protection) is now wrong without knowing it.
-var ErrLimitsUnsupported = errors.New("runner: resource limits are not supported on this platform")
+//
+// Two different situations reach it, and they are the same thing to a
+// caller — the cap is not in force:
+//
+//   - The platform has no enforcement mechanism at all. Windows, where
+//     even MemoryBytes is unenforceable; see rlimit_windows.go.
+//   - The POSIX wrapper's shell cannot express the cap. dash — the
+//     /bin/sh on Debian and Ubuntu — has no `ulimit -u`, so a NumProcs
+//     request dies before the child starts; see rlimit_posix.go.
+//
+// WithAllowUnenforcedLimits covers only the first. It cannot cover the
+// second: that is decided inside the child, after it has already been
+// started, and by then there is no parent-side switch left to consult.
+// The escape there is to stop asking for the one cap the shell cannot
+// express — which is a real option, because a POSIX caller usually wants
+// the other four.
+var ErrLimitsUnsupported = errors.New("runner: requested resource limits cannot be enforced here")
 
 // ErrLimitSetupFailed is returned when the child could not be started
 // under the requested limits — the wrapper's ulimit call was rejected
@@ -102,6 +125,22 @@ const limitSetupFailedExit = 125
 // and this marker before reporting ErrLimitSetupFailed, so a child that
 // legitimately exits 125 on its own is not misreported.
 const limitSetupMarker = "runner: cannot set "
+
+// limitUnsupportedExit is the exit status the POSIX wrapper uses when
+// its shell cannot even express the limit — as opposed to being handed
+// a value it rejects.
+//
+// Kept distinct from limitSetupFailedExit because the two need opposite
+// answers. "cannot set RLIMIT_NPROC" reads like a bad number and sends
+// the operator hunting for a value that was never the problem; the real
+// answer is that their /bin/sh is dash.
+const limitUnsupportedExit = 126
+
+// limitUnsupportedMarker is written to stderr before exiting with
+// limitUnsupportedExit. As with limitSetupMarker, Run() requires BOTH
+// the status and the marker — 126 is a legal exit status for any
+// program.
+const limitUnsupportedMarker = "runner: shell does not support "
 
 // Limits captures the resource caps to apply to the child. Zero values
 // mean "leave that limit alone" (i.e. don't call setrlimit on it).
@@ -238,6 +277,11 @@ func WithOnOOM(fn func(argv []string)) Option {
 // development. The whole point of the default is that a caller who
 // asked for a memory cap must not be handed a process without one
 // while believing otherwise.
+//
+// It does NOT cover a POSIX shell that cannot express one of the caps
+// (dash has no `ulimit -u`). That is discovered inside the child, after
+// this decision was already made, so a NumProcs request on such a
+// system fails closed regardless. See ErrLimitsUnsupported.
 func WithAllowUnenforcedLimits() Option {
 	return func(r *Runner) { r.allowUnenforcedLimits = true }
 }
@@ -254,7 +298,8 @@ func WithOnUnenforcedLimits(fn func(argv []string)) Option {
 // and the per-run options. The returned bytes.Buffer values hold the
 // captured stdout and stderr; the err is one of:
 //   - exec.LookPath error (binary not found)
-//   - ErrLimitsUnsupported (limits requested, platform cannot enforce them)
+//   - ErrLimitsUnsupported (limits requested, this platform or the
+//     wrapper's shell cannot enforce them)
 //   - ErrLimitSetupFailed (limits requested, the child's ulimit was rejected)
 //   - context.DeadlineExceeded wrapped in ErrTimeout (timed out)
 //   - the child's non-zero exit error (other failure)
@@ -315,6 +360,14 @@ func (r *Runner) Run(ctx context.Context, name string, args []string, opts Optio
 
 	runErr := cmd.Run()
 	if runErr != nil {
+		// The wrapper's shell does not have this ulimit at all. That is
+		// a capability gap, not a rejected value, and the caller can act
+		// on the difference (drop the cap) whereas "cannot set" invites
+		// them to go looking for a bad number.
+		if isLimitUnsupportedFailure(runErr, stderr) {
+			return stdout, stderr, fmt.Errorf("%w: %s",
+				ErrLimitsUnsupported, strings.TrimSpace(stderr.String()))
+		}
 		// The POSIX wrapper aborts with a marker on stderr when a limit
 		// could not be applied. The target never ran, so report the
 		// sandbox failure rather than the wrapper's exit status.
@@ -343,6 +396,20 @@ func (r *Runner) Run(ctx context.Context, name string, args []string, opts Optio
 		}
 	}
 	return stdout, stderr, runErr
+}
+
+// isLimitUnsupportedFailure reports whether runErr is the POSIX
+// wrapper giving up because its shell does not have the ulimit the
+// caller's limits need.
+//
+// Same two-part test as isLimitSetupFailure, for the same reason: the
+// exit status alone is not evidence.
+func isLimitUnsupportedFailure(runErr error, stderr *bytes.Buffer) bool {
+	var ee *exec.ExitError
+	if !errors.As(runErr, &ee) || ee.ExitCode() != limitUnsupportedExit {
+		return false
+	}
+	return stderr != nil && strings.Contains(stderr.String(), limitUnsupportedMarker)
 }
 
 // isLimitSetupFailure reports whether runErr is the POSIX wrapper

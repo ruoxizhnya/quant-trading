@@ -3,8 +3,11 @@
 package runner
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -63,11 +66,19 @@ func TestLimitScript_ChecksEveryLimitItSets(t *testing.T) {
 	// is ignored reproduces the AUD-11 failure mode exactly: the caller
 	// believes the child is capped, the child is not, and nothing says
 	// so.
+	//
+	// Since AUD-25 each requested limit costs TWO ulimit calls — the
+	// capability probe and the set — and each has its own status, so
+	// "the shell has no such option" stays distinguishable from "the
+	// shell rejected this value".
 	script := limitScript(Limits{CPUSeconds: 25, MemoryBytes: 1 << 30, OpenFiles: 256})
 
-	assert.Equal(t, 3, strings.Count(script, "ulimit -"), "one ulimit per requested limit")
-	assert.Equal(t, 3, strings.Count(script, "exit 125"), "every ulimit must fail closed")
+	assert.Equal(t, 6, strings.Count(script, "ulimit -"),
+		"two ulimit calls per requested limit: probe, then set")
+	assert.Equal(t, 3, strings.Count(script, "exit 125"), "every set must fail closed")
+	assert.Equal(t, 3, strings.Count(script, "exit 126"), "every probe must fail closed")
 	assert.Equal(t, 3, strings.Count(script, limitSetupMarker))
+	assert.Equal(t, 3, strings.Count(script, limitUnsupportedMarker))
 }
 
 func TestLimitScript_OmitsLimitsNotRequested(t *testing.T) {
@@ -80,6 +91,143 @@ func TestLimitScript_OmitsLimitsNotRequested(t *testing.T) {
 		assert.NotContains(t, script, "ulimit "+flag,
 			"a limit the caller did not ask for must not be tightened")
 	}
+}
+
+// TestLimitScript_ProbesTheShellBeforeSettingEveryLimit pins the AUD-25
+// shape: two ulimit calls per requested limit, probe first.
+//
+// The order matters. Probing after the set would make "the shell has no
+// `ulimit -u`" and "the shell rejected this value" indistinguishable
+// again, because the set's failure is what gets reported.
+func TestLimitScript_ProbesTheShellBeforeSettingEveryLimit(t *testing.T) {
+	t.Parallel()
+
+	script := limitScript(Limits{
+		CPUSeconds:  25,
+		MemoryBytes: 1 << 30,
+		OpenFiles:   256,
+		NumProcs:    64,
+		FileSize:    1 << 20,
+	})
+	lines := strings.Split(strings.TrimRight(script, "\n"), "\n")
+
+	require.Len(t, lines, 11, "5 limits -> 5 probes + 5 sets + 1 exec, got:\n%s", script)
+
+	for i, tc := range []struct{ flag, name string }{
+		{"t", "RLIMIT_CPU"},
+		{"v", "RLIMIT_AS"},
+		{"n", "RLIMIT_NOFILE"},
+		{"u", "RLIMIT_NPROC"},
+		{"f", "RLIMIT_FSIZE"},
+	} {
+		want := fmt.Sprintf("ulimit -%s >/dev/null 2>&1 || { echo '%s%s' >&2; exit %d; }",
+			tc.flag, limitUnsupportedMarker, tc.name, limitUnsupportedExit)
+		assert.Equal(t, want, lines[2*i], "%s: the capability probe must come first", tc.name)
+
+		set := lines[2*i+1]
+		assert.True(t, strings.HasPrefix(set, "ulimit -"+tc.flag+" "),
+			"%s: the set must follow its probe, got %q", tc.name, set)
+		assert.Contains(t, set, limitSetupMarker)
+		assert.NotContains(t, set, ">/dev/null",
+			"%s: the set must not swallow the shell's complaint", tc.name)
+	}
+
+	assert.Equal(t, `exec "$0" "$@"`, lines[10])
+}
+
+// TestLimitScript_UlimitUCapabilityIsDetectedUnderRealShells runs the
+// generated script under two shells whose `ulimit -u` support differs,
+// so the probe is exercised in both directions rather than only
+// asserted as text.
+//
+// The bash half is the control and it is load-bearing: without it, a
+// script that simply always exited 126 would pass the dash half.
+//
+// Both halves run the target as a SHELL BUILTIN (`bash -c 'ulimit -u'`)
+// rather than as a Go binary. RLIMIT_NPROC is counted against the real
+// user's total process count, so a child that needs to clone a thread —
+// which any Go program does — can fail to start under a low cap. A
+// builtin forks nothing.
+func TestLimitScript_UlimitUCapabilityIsDetectedUnderRealShells(t *testing.T) {
+	t.Parallel()
+
+	dash, err := exec.LookPath("dash")
+	if err != nil {
+		t.Skip("dash is not installed in this image, so the unsupported branch cannot be exercised here")
+	}
+	bash, err := exec.LookPath("bash")
+	require.NoError(t, err, "bash is the control group; without it this test proves nothing")
+
+	const want = 64
+	script := limitScript(Limits{NumProcs: want})
+
+	run := func(t *testing.T, shell string) (stdout, stderr string, code int) {
+		t.Helper()
+		// $0 and $@ become the target, which must be a shell that HAS
+		// `ulimit -u` — otherwise the success case would fail on the
+		// inner shell and look like a wrapper bug.
+		cmd := exec.Command(shell, "-c", script, bash, "-c", "ulimit -u")
+		var out, errb bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		runErr := cmd.Run()
+		if runErr == nil {
+			return out.String(), errb.String(), 0
+		}
+		var ee *exec.ExitError
+		require.ErrorAs(t, runErr, &ee, "shell %s: %v", shell, runErr)
+		return out.String(), errb.String(), ee.ExitCode()
+	}
+
+	t.Run("dash lacks ulimit -u and the run aborts", func(t *testing.T) {
+		stdout, stderr, code := run(t, dash)
+		assert.Equal(t, limitUnsupportedExit, code, "stderr: %s", stderr)
+		assert.Contains(t, stderr, limitUnsupportedMarker+"RLIMIT_NPROC",
+			"the marker must name the missing limit")
+		assert.Empty(t, stdout, "the target must not run when the cap cannot be applied")
+	})
+
+	t.Run("bash has it and the cap reaches the target", func(t *testing.T) {
+		stdout, stderr, code := run(t, bash)
+		require.Equal(t, 0, code, "stderr: %s", stderr)
+		assert.Equal(t, strconv.Itoa(want), strings.TrimSpace(stdout),
+			"the target must observe the cap, not the shell default")
+	})
+}
+
+// TestRun_NumProcsIsEitherEnforcedOrReportedUnsupported is the contract
+// AUD-25 establishes for `ulimit -u` through the public API.
+//
+// Which branch is taken depends on which `sh` this system has — dash on
+// Debian/Ubuntu, busybox ash on Alpine — so both are asserted rather
+// than one being skipped. What must never happen is a bare "cannot set
+// RLIMIT_NPROC": that reads like a bad value and sends the operator
+// hunting for a number that was never the problem.
+func TestRun_NumProcsIsEitherEnforcedOrReportedUnsupported(t *testing.T) {
+	t.Parallel()
+
+	const want = 64
+
+	// The target is a shell builtin, not a Go program: see the note in
+	// TestLimitScript_UlimitUCapabilityIsDetectedUnderRealShells about
+	// RLIMIT_NPROC and thread creation.
+	r := New()
+	stdout, stderr, err := r.Run(context.Background(), "sh",
+		[]string{"-c", "ulimit -u"},
+		Options{Limits: &Limits{NumProcs: want}})
+
+	if err != nil {
+		assert.ErrorIs(t, err, ErrLimitsUnsupported,
+			"a shell without `ulimit -u` is a capability gap, not a rejected value; stderr: %s",
+			stderr.String())
+		assert.NotErrorIs(t, err, ErrLimitSetupFailed,
+			"reporting a value problem for a missing shell option is the AUD-25 bug")
+		assert.Empty(t, strings.TrimSpace(stdout.String()),
+			"the target must not run when the cap cannot be applied")
+		return
+	}
+
+	assert.Equal(t, strconv.Itoa(want), strings.TrimSpace(stdout.String()),
+		"a successful run must show the cap in force, not a shell default")
 }
 
 // TestRun_LimitsReachTheChild is the positive half of the contract:
@@ -178,6 +326,26 @@ func TestRun_Exit125WithoutMarkerIsNotASandboxFailure(t *testing.T) {
 	var ee *exec.ExitError
 	require.ErrorAs(t, err, &ee)
 	assert.Equal(t, 125, ee.ExitCode())
+}
+
+// TestRun_Exit126WithoutMarkerIsNotASandboxFailure is the symmetric
+// guard for the AUD-25 status: 126 is a legal exit status for any
+// program, so only the wrapper's marker may be read as "the shell has
+// no such ulimit".
+func TestRun_Exit126WithoutMarkerIsNotASandboxFailure(t *testing.T) {
+	t.Parallel()
+
+	r := New()
+	_, _, err := r.Run(context.Background(), "sh", []string{"-c", "exit 126"}, Options{})
+
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrLimitsUnsupported,
+		"a child exiting 126 on its own is not a missing shell capability")
+	assert.NotErrorIs(t, err, ErrLimitSetupFailed)
+
+	var ee *exec.ExitError
+	require.ErrorAs(t, err, &ee)
+	assert.Equal(t, 126, ee.ExitCode())
 }
 
 // TestConfigureProcessGroup_IsolatesTheChild pins the property that
