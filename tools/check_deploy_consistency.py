@@ -413,6 +413,68 @@ def check_env_wiring(
                     f"应用侧一律用 DATABASE_*（AUD-39）")
 
 
+# ── AUD-48：Dockerfile 的 COPY 源路径必须存在 ──────────────────────────
+#
+# 为什么需要这一项：**编译期没有任何东西检查 Dockerfile 里 COPY 的源路径。**
+# `go build` / `go vet` / `gofmt` / `check_doc_links.py` 都不读 Dockerfile，
+# 而 CI 又**不构建镜像** —— 于是「删掉一个目录但忘了删引用它的 COPY」会长期
+# 静默，症状不是「构建失败」，而是**那个服务从来没起来过，而且看起来没人动过它**。
+#
+# 已两次同型（第三次就得有护栏）：
+#   1. ODR-021 删 `cmd/risk` `cmd/execution` → Dockerfile.service 的构建行没跟着改
+#      （该处注释里记着「从服务合并那天起就没能构建成功过」）
+#   2. AUD-33 删 `cmd/analysis/static/` → 两处 `COPY cmd/analysis/static` 没跟着删，
+#      2026-09-22 完整部署时炸 `failed to calculate checksum: not found`
+#
+# 边界（写在这里，免得下次误报时不知道该改哪里）：
+#   - **只检查不带 `--from` 的 COPY**。带 `--from` 的源路径是**另一个构建阶段内部**
+#     的路径（镜像内的 /app/...），不是 build context 里的路径，静态检查不了。
+#   - build context 假定为**仓库根**（compose 的 `context: .` 与 Makefile 的
+#     `docker build -f cmd/analysis/Dockerfile .` 都是根）。若将来某个 Dockerfile
+#     改用别的 context，这一项会误报 —— 届时给它单独记 context。
+#   - 支持通配符（`COPY go.mod go.sum* ./`）与多源（`COPY a b dst`）。
+#   - 含 `${...}` 的源路径跳过：本仓没有 env 展开器，但那属于另一项检查的领地。
+
+def iter_dockerfiles() -> list[Path]:
+    files = sorted(ROOT.glob("Dockerfile*"))
+    files += sorted(ROOT.glob("cmd/*/Dockerfile"))
+    return [p for p in files if p.is_file()]
+
+
+def check_dockerfile_copy_sources(errors: list[str]) -> None:
+    for df in iter_dockerfiles():
+        rel = df.relative_to(ROOT).as_posix()
+        for lineno, raw in enumerate(
+                df.read_text(encoding="utf-8").splitlines(), start=1):
+            line = raw.strip()
+            if not line.startswith("COPY"):
+                continue
+            tokens = line.split()[1:]
+            # flags：--from=builder / --chown=... 一律跳过（--from 的源不在 context 里）
+            while tokens and tokens[0].startswith("--"):
+                if tokens[0].startswith("--from"):
+                    tokens = []
+                    break
+                tokens = tokens[1:]
+            if len(tokens) < 2:
+                continue
+            for src in tokens[:-1]:
+                if "$" in src or src.startswith("/"):
+                    continue
+                if src in {".", "..", "./", "../"}:
+                    # `COPY . .` —— 整个 context，必然存在（且 pathlib.glob 不接受 '.'）
+                    continue
+                if any(ch in src for ch in "*?["):
+                    matches = sorted(ROOT.glob(src))
+                else:
+                    matches = [ROOT / src] if (ROOT / src).exists() else []
+                if not matches:
+                    errors.append(
+                        f"{rel}:{lineno} 的 `COPY {src}` 源路径不存在 —— "
+                        f"删目录时要连引用它的 COPY 一起删；docker build 只在最后一步才炸，"
+                        f"而 CI 不构建镜像，所以会静默很久（AUD-48）")
+
+
 def main() -> int:
     if not COMPOSE.exists():
         print(f"✗ 找不到 {COMPOSE}")
@@ -504,6 +566,9 @@ def main() -> int:
     # 5~8) env 口径（AUD-39）
     check_env_wiring(errors, parse_compose_environment(COMPOSE), k8s_config_text)
 
+    # 9) Dockerfile 的 COPY 源路径必须存在（AUD-48）
+    check_dockerfile_copy_sources(errors)
+
     # 输出
     for n in notes:
         print(f"· {n}")
@@ -522,6 +587,7 @@ def main() -> int:
     print("✓ config/*.yaml 无 ${...} 占位符（本仓没有 env 展开器）")
     print("✓ 死键负向钉（POSTGRES_HOST/PORT、REDIS_HOST/PORT、"
           "REDIS_PASSWORD、DB_PASSWORD 均未出现）")
+    print("✓ Dockerfile 的 COPY 源路径都存在（删目录时别落下引用它的 COPY）")
     return 0
 
 

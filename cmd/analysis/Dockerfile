@@ -32,7 +32,11 @@ RUN apk add --no-cache ca-certificates curl tzdata && \
     rm -rf /var/cache/apk/*
 
 COPY --from=builder /app/analysis-service .
-COPY --from=builder /app/cmd/analysis/static ./static/
+# ⚠️ 此处曾有一行 `COPY --from=builder /app/cmd/analysis/static ./static/`。
+# AUD-33（2026-09-22）退役 legacy HTML 时把那个目录整删了，这行没跟着删 →
+# `docker build -f cmd/analysis/Dockerfile`（Makefile 的镜像目标）会在这一步炸
+# `"/cmd/analysis/static": not found`。与根 Dockerfile.service 里那处完全同型。
+# analysis 现在只提供 API，不需要静态目录。
 COPY config/ ./config/
 
 EXPOSE 8085

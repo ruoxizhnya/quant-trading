@@ -41,7 +41,16 @@ COPY --from=builder /app/analysis-service /app/analysis-service
 
 # Copy config files
 COPY config /app/config
-COPY cmd/analysis/static /app/cmd/analysis/static
+#
+# ⚠️ 此处曾有一行 `COPY cmd/analysis/static /app/cmd/analysis/static`。
+# AUD-33（2026-09-22）退役 legacy HTML 时把那个目录整删了，这行没跟着删 →
+# docker build 在最后一步炸：`failed to calculate checksum:
+# "/cmd/analysis/static": not found`，于是 analysis-service 与 strategy-service
+# 两个镜像从那天起就构建不出来（CI 不构建镜像、本地一直 go run，所以没人撞到；
+# 症状是「compose 里定义了 6 个服务，实际只起得来 3 个」）。
+# 与上面 ODR-021 那条**完全同型**：删目录时要连引用它的 Dockerfile COPY 一起删 ——
+# 编译期不检查 COPY 的源路径，只有真 build 才炸，而没人 build 就永远静默。
+# analysis-service 现在只提供 API，`:8085/` 返回 404 是预期行为，不需要静态目录。
 
 # 8083 (risk) / 8084 (execution) 已随 ODR-021 合并进 analysis 的 8085。
 EXPOSE 8081 8082 8085
