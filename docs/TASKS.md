@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-09-22
-verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）；AUD-41/42 落地（SPEC 的 `## Configuration` 段整段订正 + doc 护栏第二项检查；`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓单实现结构护栏）+ 顺带登记 AUD-43 / AUD-44（2026-09-22）；AUD-43/44/45 落地（AUD-43 前提订正后**裁决保留** `pkg/testutil` 并归并入 AUD-45；AUD-45 = 统一盘点 13 个零导入者包 + 新增 `internal/repoguard` 结构性护栏；AUD-44 = 三份入口文档补 R1 frontmatter + doc 护栏第三项检查）+ 顺带登记 AUD-46 / AUD-47（2026-09-22）；AUD-46/47 落地（AUD-46 = 删除 `pkg/metrics`（ADR-017 §1 的竞争实现，四个核心指标由 `pkg/observability` 实现）+ `internal/repoguard` 新增 `retiredPackages` 退役负向断言，`pkg/decimal` 裁决保留并标注「待采用」；AUD-47 = `docs/TEST.md` §5–§7 内容复核 —— 沙箱限制改实测值 30s/1 GiB、覆盖率目标标注为「不是门禁」、前端与 e2e 用例数改实测），2026-09-22
+last-verified: 2026-09-23
+verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）；AUD-41/42 落地（SPEC 的 `## Configuration` 段整段订正 + doc 护栏第二项检查；`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓单实现结构护栏）+ 顺带登记 AUD-43 / AUD-44（2026-09-22）；AUD-43/44/45 落地（AUD-43 前提订正后**裁决保留** `pkg/testutil` 并归并入 AUD-45；AUD-45 = 统一盘点 13 个零导入者包 + 新增 `internal/repoguard` 结构性护栏；AUD-44 = 三份入口文档补 R1 frontmatter + doc 护栏第三项检查）+ 顺带登记 AUD-46 / AUD-47（2026-09-22）；AUD-46/47 落地（AUD-46 = 删除 `pkg/metrics`（ADR-017 §1 的竞争实现，四个核心指标由 `pkg/observability` 实现）+ `internal/repoguard` 新增 `retiredPackages` 退役负向断言，`pkg/decimal` 裁决保留并标注「待采用」；AUD-47 = `docs/TEST.md` §5–§7 内容复核 —— 沙箱限制改实测值 30s/1 GiB、覆盖率目标标注为「不是门禁」、前端与 e2e 用例数改实测），2026-09-22；P2-13 接真库取证（`pkg/validation/live_backtest_integration_test.go`，实测「验证器链在真数据上否掉策略」）+ 顺带登记 AUD-49 / AUD-50（sync 的 cancel 与重启恢复两项缺陷），2026-09-23；AUD-50 落地（`pkg/sync` 补 `Queue.CleanupStaleRunning` + 从 `WorkerPool.Start` 调用 + `cmd/analysis` 补上文档承诺却从未存在的启动期一半 + `internal/repoguard` 函数级接线护栏，其第一版对目标形态是瞎的、经破坏验证修正为 `file:function`；AUD-49 仍未修），2026-09-23；AUD-49 落地（sync 的取消两半都修 —— 无条件 `UpdateSyncJob` 退役、换成 `UpdateSyncJobIfStatus` 条件写（`WHERE id=$1 AND status = ANY(...)`）且 `from` 为空报错；`RetryLater`/`CompleteJob`/`FailJob`/`Dequeue`/`CleanupStaleRunning` 全部改为条件写；`WorkerPool` 补 `jobID → cancelFunc` 注册表 + per-job ctx（原来是 `context.Background()`），`cmd/data:NewSyncHandler` 接上 `SetRunningCanceller` 并由 repoguard 钉住调用点；新增 `pkg/sync/cancel_test.go` 13 条 + `pkg/storage/sync_jobs_conditional_test.go` 6 条**真库**测试；破坏验证 S1/S2 分别只红「行」与「执行器」各自那一层）+ 顺带登记 AUD-51（测试前置条件与断言读的不是同一个东西 —— `TestHasOHLCVData` 硬编码 `600000.SH` 而前置只检查表非空，局部同步必红；同类潜伏成员 3 个）+ AUD-52（e2e 套件的前置条件不再蕴含断言 —— :8084 指向已退役的 execution 服务，永远不可能绿；strategy API 期望 200 实测 401），2026-09-23
 status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有未解除的前置）" —— 见下方「状态总览」
 ---
 
@@ -30,7 +30,7 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 |---|---|---|---|---|---|---|
 | P0 | 6 | 6 | 0 | 0 | 0 | P0-1 ~ P0-6 全关（2026-09-17） |
 | P1 | 16 | 16 | 0 | 0 | 0 | 含 P1-1 —— 子项 1a/1b/1c 均已完成 |
-| P2 | 19 | 15 | 0 | 2 | 2 | ⬜ P2-1 / P2-2；⛔ P2-8、P2-13（两者都卡在数据同步，见下） |
+| P2 | 19 | 16 | 0 | 2 | 1 | ⬜ P2-1 / P2-2；⛔ P2-8。**P2-13 已解阻并落地（2026-09-23）** —— 见下 |
 | AUD-01~18 | 18 | 18 | 0 | 0 | 0 | ODR-065 登记项全关；AUD-18 裁决为**分阶段退役**（引出 AUD-32/33） |
 | AUD-19~38 | 20 | 20 | 0 | 0 | 0 | ✅ AUD-19 / AUD-23 / AUD-27 / AUD-28 / AUD-29 / AUD-30 / AUD-31 / AUD-32 / AUD-33 / AUD-20 / AUD-21 / AUD-22（2026-09-22）+ **AUD-34**（裁决：保留）+ **AUD-24 / AUD-25 / AUD-26 / AUD-38**（2026-09-22）+ **AUD-35 / AUD-36 / AUD-37**（2026-09-22，配置一致性三项） |
 | AUD-39~40 | 2 | 2 | 0 | 0 | 0 | ✅ **AUD-39**（k8s 的 `DATABASE_*`/`REDIS_URL` 口径 + 值对齐 + 消灭 `${...}` 字面量占位符 + 部署护栏检查 5~8）+ **AUD-40**（`v.Sub` 缺段返回 nil → panic 防护），2026-09-22 |
@@ -38,9 +38,23 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 | AUD-43~45 | 3 | 3 | 0 | 0 | 0 | ✅ **AUD-43**（`pkg/testutil` 零导入者 —— 前提订正后裁决**保留**并归并入 AUD-45）+ **AUD-45**（统一盘点 **13 个**零导入者包 + 新增 `internal/repoguard` 结构性护栏「pkg/ internal/ 下的包必须有消费者，否则进白名单并写理由」，**范围从源码推导、白名单自带 stale 检测**）+ **AUD-44**（`docs/SPEC.md` / `docs/TEST.md` / `docs/ADR.md` 补 R1 frontmatter + `check_doc_links.py` 第三项检查「入口层文档必须带 R1 三字段」，**范围从 `docs/README.md` 的链接推导**），2026-09-22 |
 | AUD-46~47 | 2 | 2 | 0 | 0 | 0 | ✅ **AUD-46**（删除 `pkg/metrics` —— 它是 ADR-017 §1 的**竞争实现**，那四个核心指标由 `pkg/observability` 实现，两者同时接线会重复注册 `backtest_duration_seconds` 并 panic；`internal/repoguard` 新增 **`retiredPackages` 退役负向断言**；`pkg/decimal` 裁决**保留**并标注「待采用」）+ **AUD-47**（`docs/TEST.md` §5–§7 内容复核 —— 沙箱限制 5s/100MB → 实测 **30s/1 GiB**、覆盖率目标标注为「**不是门禁**」（CI 不设阈值）、`format.test.ts` 8→**28** 例、e2e 3 套件 22 例 → 实测 **17 spec / 160 例**），2026-09-22 |
 
-**剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 / P2-13 需要库里有真数据，而
+| AUD-48 | 1 | 1 | 0 | 0 | 0 | ✅ **AUD-48**（三处 Dockerfile 的 `COPY` 源路径已被删掉的目录 —— `cmd/analysis/static`（AUD-33 退役）与 `cmd/strategy/generated_strategies`（全仓零引用）；补 `check_deploy_consistency.py` 检查 9「Dockerfile 的 COPY 源路径必须存在」），2026-09-22。**它不是审查登记项，是本次完整部署时撞出来的**：镜像根本构建不出来，症状是「compose 定义了 6 个服务、实际只起得来 3 个」 |
+
+| AUD-49~50 | 2 | 2 | 0 | 0 | 0 | ✅ **AUD-50**（重启后 `running` 的 job 永久搁浅 —— `pkg/sync` 补 `Queue.CleanupStaleRunning` 并**从 `WorkerPool.Start` 调用**（结构上不可能忘）；`cmd/analysis` 补上文档承诺却从未存在的**启动期**那一半；新增 `internal/repoguard` 的**函数级**接线护栏 —— ⚠️ **它的第一版对目标形态是瞎的**（钉文件而非函数，原 bug 下也是绿的），已修正为 `file:function` 并重做破坏验证），2026-09-23。✅ **AUD-49**（`POST /api/sync/jobs/:id/cancel` 对 `running` 任务无效 —— **两半都修**：**行**改成条件写（`UpdateSyncJobIfStatus` 是唯一入口，`WHERE id=$1 AND status = ANY(...)`，`UpdateSyncJob` 整个退役）+ **执行器**补 per-job ctx 与 `jobID → cancelFunc` 注册表，由 `cmd/data:NewSyncHandler` 接上 `workerPool.Cancel`；新增**真库**测试证明条件真的在 SQL 里，破坏验证 S1/S2 分别只红各自那一层），2026-09-23。两项都是 2026-09-23 打通数据同步时**撞出来的**，不是审查登记项。机制、取证与修法见本文件末尾「AUD-49 / AUD-50 登记说明」与「AUD-49 落地说明」 |
+
+| AUD-51 | 1 | 0 | 0 | 1 | 0 | ⬜ **AUD-51**（测试的**前置条件与断言读的不是同一个东西** —— 于是红/绿都跟被测代码无关。**会经常红的那个**：`TestHasOHLCVData`（`pkg/storage/postgres_test.go:170`）断言 `600000.SH` 在 `ohlcv_daily_qfq` 里有数据，而它的前置 `skipIfNoSeedData` 只检查**表非空**；任何一次局部同步（同步途中、或只 `RetryJob` 了一部分 symbol）都会让它红，而失败信号不指向任何代码问题。**同类的潜伏成员 3 个**：`TestGetTradingDays` / `TestGetTradingDates` / `TestIsTradingDay` 断言读的是 `trading_calendar`，前置检查的却是 `ohlcv_daily_qfq` —— 只在「两表一空一不空」时才发作，所以一直没被发现）。2026-09-23，**撞出来的**（完整跑测试时红，且**与本轮改动无关**：改的是 `sync_jobs`，实测 `600000.SH` 在库里 0 行） |
+
+| AUD-52 | 1 | 0 | 0 | 1 | 0 | ⬜ **AUD-52**（e2e 套件的**前置条件不再蕴含它的断言** —— `e2e/tests/integration_test.go` 的 `TestMain` 只检查「analysis 可达」，可达就整套跑；但 ① `executionURL := "http://localhost:8084"`（:248）指向**已退役的服务**（ODR-021 把 execution 并进 analysis，端点在 `:8085/api/execution/*`，容器里已无 :8084），**这个测试在当前架构下永远不可能通过**；② `TestStrategyAPI_ListStrategies` 打 `:8085/api/strategies` 期望 200，实测 **401** —— 鉴权上线后套件没有配套的取 token 步骤）。2026-09-23，**撞出来的**（完整跑测试时红，**与本轮改动无关**）。**同症状不同成因，故与 AUD-51 分开登记**：AUD-51 是前置条件**写错了对象**，AUD-52 是前置条件**不够** —— 套件级的门只保证「服务在」，不保证「服务要的东西你有」 |
+
+**剩下一处「阻塞」不是代码问题，是数据前置**：P2-8 需要库里有真数据，而
 数据同步卡在 `TUSHARE_TOKEN` 未设置（凭据由若曦自己填，见
-`docs/guides/deploy-config.md`）。**这条不解除，P2-8 / P2-13 做完也验不了。**
+`docs/guides/deploy-config.md`）。**这条不解除，P2-8 做完也验不了。**
+
+> **2026-09-23 更新**：`TUSHARE_TOKEN` 已就位，同步已打通（实测：`daily` +
+> `adj_factor` 可用；`stk_factor_pro` **40203 无权限**）。**P2-13 已解阻并落地**
+> —— 它其实**从来不需要等全量同步**：65 只票有 3 年完整历史时，验证器链就已经
+> 可以接真库取证了（落地说明见本文件末尾）。**P2-8 仍待做**，但它登记的
+> 「位置 = migrations」是错的，见该行备注。
 
 **AUD 线已全部关闭**（AUD-01 ~ AUD-47，2026-09-22）—— 状态总览里的 AUD 行全部
 为 ✅，待办表里已无 AUD 项。
@@ -547,7 +561,7 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | **P2-5** | ~~废弃模块清理：`pkg/ai/agents` 标记 DEPRECATED 仍是 `cmd/ai` 主链路~~ | **✅ 2026-09-18** 删 `cmd/ai/` + `config/ai-service.yaml` + `deploy/k8s/ai-deployment.yaml` + k8s configmap/ingress 的 ai 条目 + Makefile 的 build-ai/push-ai + 更新 AGENTS.md / ARCHITECTURE.md / docker-compose.yml；改 `pkg/ai/agents/doc.go` | **删的是服务不是能力**：`pkg/ai/agents` 不能删 —— `pkg/ai/pipeline`（P1-1b 探索主链路）在用 ResearchAgent / GenerateAgent / ValidateAgent。真正的问题是 doc.go 那句 "should NOT be used in new code" 是错的并已造成误导，现在改为**分层说明**：ODR-046 废的是**交互层**（前端 AI UI 从未建成），不是**能力层**（本包仍是 pipeline 的实现细节）。`cmd/ai` 删掉的理由：只有 2 条 HTTP 路由且零调用方（前端/后端/编排都没有），没进 compose，只在 k8s 里有部署配置 |
 | **P2-6** | ~~`drift` 概念漂移检测零调用（孤儿代码）；`get_market_regime` 未进主流程~~ | **✅ 2026-09-18** `pkg/tools/builtin/strategy_health_tool.go` + `pkg/ai/drift/detector.go` | `get_market_regime` 其实**早已接线**（`cmd/analysis/setup.go` 注册 GetMarketRegimeTool），登记有误。真正剩下的是 `pkg/ai/drift` 与 `pkg/strategy/monitor` 两个零调用孤儿（约 700 行完整实现，互相配套）。接法：写 `driftAdapter` 把 drift 适配成 monitor 的本地 DriftDetector 接口（monitor 故意不 import drift 以免反向依赖），新增 MCP 工具 `monitor.strategy_health`（Group 12）。**顺手修掉一个真 bug**：三个检测方法的 threshold 语义各不一样（mean 比 p 值 / variance 比 logF / distribution 比 KS 统计量），**没有任何取值能同时让三者合理** —— 传 2.0 会让 mean 把一切都判成漂移而 distribution 永不触发（KS≤1）。现统一为 `pValue < threshold`。与稳健维不重复：稳健维看参数邻域和分年度一致性（回测内部性质），这里看时序上最近是否偏离历史（上线后才有的问题）。样本不足时如实说"判断不了"，不假装健康 |
 | **P2-7** | ~~死配置 `config/ai-service.yaml` 从未被读取~~；~~`docker-compose.services.yml` 引用不存在的 Dockerfile~~（后者已于 2026-09-18 删除，见 P1-10） | **✅ 2026-09-18** 随 P2-5 删除 | ai-service.yaml 是 `cmd/ai` 的配置，而 cmd/ai 零调用方且已删；另三个（analysis / data / strategy-service.yaml）都确实被读，不动 |
-| **P2-8** | ⛔ 幸存的前视风险复核：复权口径无 hfq 对照 | migrations |
+| **P2-8** | ⬜ 幸存的前视风险复核：复权口径无 hfq 对照 | **原登记写 `migrations` —— 这条是错的**（本仓 `migrations/` **不执行**，DDL 唯一真相在 `pkg/storage/postgres.go` 的内联数组）。真正的落点：`pkg/data/tushare.go`（复权计算）+ `pkg/storage/postgres.go`（表结构） | **原方案已被实测推翻**：登记设想的「同一个 `stk_factor_pro` 多要 4 个 `*_hfq` 字段」不可行 —— 该接口返回 **40203 无权限**。**新事实**：`daily` + `adj_factor` 两个接口都有权限，组合起来**能自己同时算出 qfq 和 hfq**（公式与官方算例见 `docs/guides/data-dependencies.md`）。当前状态：**qfq 已落 `ohlcv_daily_qfq`（回测口径不变），hfq 未落库**。⚠️ **下面的判据是分析、不是实测**（落地时要实测证伪）：qfq 与 hfq 只差一个**每股常数**（最新复权因子），故**收益率序列完全相同** → 前复权的前视成分只落在**价格水平**上，对「按收益率排序」的信号无影响；可能有实质影响的是**按股数下单**（`floor(现金/价格)`，用的是被未来事件改写过的历史价格水平）。这条成立与否决定了要不要真落一套 hfq 数据 |
 | **P2-9wire** | └ **接线**（聚合 → 循环 → 日志 → 前端）：**✅ 2026-09-18** `aggregate.go` + `pkg/ai/loop` + `handlers_explore.go` + `web/src/pages/Explore.vue` | 五片全写完时整包零调用（"5/6 片的零件 + 0 接线"）。聚合入口 `ValidateProposal` 取**各维最小值**作综合概率（合取：算术平均会让四维优秀掩盖一维致命，几何平均稀释太狠）；循环控制器**每次尝试后**跑（不是跑完整轮才跑），邻域 = 本轮已试过的参数；裁决写回 `experiments.verdict`（migration 029，`json.RawMessage` 以避免 storage→validation 成环）；偏差维按实测口径注入（前复权 + **池子按当前上市名单** = 幸存者偏差真实存在，所以每轮都会带这条 blocking —— P2-4 那笔债就该长这样）。踩过的坑：`Attempt` 是值类型，`append` 早于 `Verdict` 赋值会让库里那一版永远为空 |
 | **P2-9a** | └ **统计**：多重检验校正（试了 N 次，门槛按 N 收紧）。吃 P1-1 的实验日志 | **✅ 2026-09-17** `pkg/validation/statistical.go` | 同样 Sharpe，试 500 次必须比试 5 次更不可信 |
 | **P2-9b** | └ **经济**：扣费后净收益 | **✅ 2026-09-17** `pkg/validation/economic.go` + `turnover.go` | 毛收益扣掉手续费 / 印花税 / 过户费 / 冲击成本后仍成立；附盈亏平衡换手率 |
@@ -558,7 +572,7 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 | **P2-10** | ~~`domain.Fundamental` 数值字段是 `float64`，而表中列可为空。P0-1 中用 `COALESCE(col,0)` 兜底，导致**缺失值被当作 0 而非"未知"**（PE=0 会被误判为极便宜）~~ | **✅ 2026-09-18** `pkg/domain/market/types.go` + `pkg/storage/fundamentals.go` + `pkg/data/tushare.go` + `pkg/strategy/examples/value_momentum.go` | 两层都改了：① 类型改 `*float64`，存储层**去掉** `COALESCE(col,0)`（NULL 扫成 nil），源端缺字段也留 nil（`fieldFloatPtr`）；② 因子层显式跳过缺失：`stockFactorData.PE/PB/ROE` 也改指针，`calculateMeanStd` 只统计非 nil（此前靠 `v != 0` 近似"缺数据"，而 ROE=0 是盈亏平衡，是真值），缺项的股票在对应因子上得**中性 0 分**而不是"最便宜"。这个 bug 的杀伤力在于它会主动把人引向错误交易：PE 缺失折成 0 后在"越低越便宜"的排序里冲到第一 |
 | **P2-11** | ~~Hermes Agent 系统设计文档遗失（原在 `.trae/documents/`，目录已删）。SPEC §6 与 hermes 验收测试均引用它~~ | **✅ 2026-09-18** `docs/hermes/system-design.md` | 遗失的是 `hermes-agent-integration-system-design.md`，代码里有 4 处引用（gate.go §6.2、factor_tools/gene_pool_tools/walkforward_tool §3.2）。**从代码反推补齐**：源码注释里逐条记了「设计说 X，我们做了 Y，原因 Z」，提炼出来就是 §3.2（工具参数契约 + 3 处已记录的偏离）与 §6.2（GateDecision 门控元数据）。**只有这两节是复原的**，其余章节代码没引用就不凭空补写，并在文档头部写明这是反推而非原件 |
 | **P2-12** | ~~**表达式引擎只暴露 OHLCV**（open/high/low/close/volume/turnover），因此 `value` / `quality` 类意图表达不出 —— P0-5 中它们只能明确失败，而不是套一个无关的价格表达式产出误导性回测数字~~ | **✅ 2026-09-18** `pkg/strategy/expression/data_provider.go` + `strategy.go` + `pkg/strategy/strategy.go` + `pkg/storage/fundamentals.go` + `pkg/backtest/engine.go` + `pkg/ai/yaml/generator.go` | 新增 `pe/pb/ps/roe/roa` 五个字段，**按 PIT 对齐**（`GetFundamentalsPITBulk` 返回的 Date 是可用日 `COALESCE(ann_date, trade_date)`，不是报告期；`OHLCVDataProvider.fundamentalSeries` 按每根 K 线的日期切一刀，取不到填 NaN 不是 0）。注入走 `strategy.FundamentalAware` 可选接口（`GenerateSignals` 签名没有基本面参数，不动接口；范式同 `FactorAware`），且**只有声明要财报的策略才预热**——纯价量策略不付这份查询成本。`value` → `cs_rank(neg(pe)) + cs_rank(neg(pb)) > 1.6`，`quality` → `cs_rank(roe) + cs_rank(roa) > 1.6`；`custom` 仍明确失败。**估值倍数非正一律 NaN**：PE 为负不是"便宜"是亏损，`neg(pe)` 不该把亏得最狠的排成最便宜（经典价值陷阱）；ROE/ROA 为负是真实的差，原样保留。**顺手修掉一个潜伏 bug**：`neg(x)` 的函数形式此前从未接上（`evaluateFunction` 无条件走 `applyTimeSeriesOp`），`multi_factor` 的默认表达式 `cs_rank(neg(ts_std(close,20)))` 从落地起就是「解析得过、跑不起来」—— 它只被断言过能解析，从没被求值过 |
-| **P2-13** | ⛔ **验证器链缺真实回测的端到端取证**（2026-09-17 已解决一半）。缺口只剩数据：本地库 `stocks` / `trading_calendar` / `ohlcv_daily_qfq` 均 0 行。~~引擎离线跑不了~~ —— 这是误判，引擎三处 HTTP（仓位 / 择时 / 止损）**都有 in-process 分支**，`cmd/analysis/main.go:160` 也已 `SetRiskManager`；取证时用 `marketdata.NewInMemoryProvider()` + `SetRiskManager` 即可完全离线（范式见 `pkg/validation/economic_integration_test.go`） | `pkg/validation/economic_integration_test.go` | 跑数据同步补齐行情后，用同一范式接真库 |
+| **P2-13** | ~~**验证器链缺真实回测的端到端取证**~~（2026-09-17 已解决一半：引擎三处 HTTP 都有 in-process 分支，`SetRiskManager` 一接就能完全离线；当时「离线跑不了」是误判） | **✅ 2026-09-23** `pkg/validation/live_backtest_integration_test.go`（新建，1 例） | **登记的「等全量同步」是过度前置**：验证器链接真库**不需要 5907 只票** —— 有 65 只票带 3 年完整历史时就够取证了。新测试接**真库**（`storage.NewPostgresStore` + `marketdata.NewPostgresProvider`；**注意不是 `testutil` 的 `quant_trading_test`** —— 连错库会得到一个空库，然后以「库里没数据」skip，永远绿），跑真引擎回测再过五维验证器。**为什么不能只用合成数据**：合成行情每只票都整齐地有 252 根 K 线，证明不了真实数据的形状（稀疏 / 停牌 / 复权 / 退市 / 上市日期参差）不会把链路打崩。**首次实测：验证器链在真数据上否掉了这个策略** —— 综合概率 0.0000、3 条 blocking（统计维校正后 p=0.857 / 经济维净 -39.04% / 稳健维邻域 0% 站得住），偏差维 0.8746、冗余维 0.7044、因果维如实记未评估。取证细节见本文件末尾落地说明 |
 
 **2026-09-21 全栈审查（ODR-065）新增 5 项**（Medium/Low）—— **AUD-14 ~ AUD-18 全部完成**：
 
@@ -1677,6 +1691,313 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 > 已删）；`check_doc_links.py` 52 文件**三项检查**全绿；
 > `check_deploy_consistency.py` **七项**全绿。
 > **AUD 线到此全部关闭**（AUD-01 ~ AUD-47）。
+
+> **AUD-48 落地说明（2026-09-22 深夜）**：**不是审查登记项，是做本地完整部署时
+> 撞出来的。** 若曦问「`TUSHARE_TOKEN` 已经在 Windows 环境变量里，是不是没做最新
+> 的本地 deployment」—— 逐跳验下来 token 确实设了（len=56，注册表里读得到），
+> 但**宿主 shell 会话没继承** + `.env` 里是**空串兜底** → compose 解析成 `""`
+> → 容器里是空。于是执行完整部署，构建阶段直接炸：
+>
+> ```
+> [analysis-service stage-1 8/8] COPY cmd/analysis/static /app/cmd/analysis/static
+> ERROR: failed to calculate checksum: "/cmd/analysis/static": not found
+> ```
+>
+> **这才是「6 个服务只起得来 3 个」的真正原因 —— 不是忘了部署，是 analysis /
+> strategy 两个镜像从 AUD-33 那天起就构建不出来。** 容器 `ps -a` 里连 Exited
+> 的都没有，因为它们**从未被创建过**。
+>
+> **三处断裂（同一个病根）**：
+>
+> | 文件 | 行 | 引用了什么 | 谁用它 |
+> |---|---|---|---|
+> | `Dockerfile.service` | 44 | `cmd/analysis/static`（AUD-33 已删） | compose 的三个服务 |
+> | `cmd/analysis/Dockerfile` | 35 | 同上 | `Makefile` 的镜像目标 |
+> | `cmd/strategy/Dockerfile` | 36 | `cmd/strategy/generated_strategies/`（**全仓零引用**的孤儿） | `Makefile` 的镜像目标 |
+>
+> 前两处是护栏加上之后自己抓出来的第三处 —— 又一次印证「单一样本看起来像特例，
+> 实测常是一类里的一员」（PITFALLS §50）。
+>
+> **护栏（`check_deploy_consistency.py` 检查 9）**：解析全仓 `Dockerfile*` 与
+> `cmd/*/Dockerfile`，断言**不带 `--from` 的 `COPY`** 的源路径存在。
+> 边界写进脚本：① 带 `--from` 的源是**另一个构建阶段内部**的路径，不在 build
+> context 里，静态查不了 → 跳过；② build context 假定为仓库根（compose 的
+> `context: .` 与 Makefile 的 `docker build -f ... .` 都是根）；③ 支持通配符与
+> 多源；④ `COPY . .` 跳过（`pathlib.glob` 不接受 `.`，会抛 ValueError —— 这个
+> 坑是跑第一版时撞到的）。
+>
+> **破坏验证**：把 `COPY cmd/analysis/static` 加回 `Dockerfile.service` →
+> **红且指名 `Dockerfile.service:44`**，退出码 1，其余 7 项不受影响；反向替换恢复
+> 后回到全绿。
+>
+> **元教训（与 ODR-021 那条注释同型，已第三次）**：**删目录时，引用它的 Dockerfile
+> `COPY` 不会有任何编译期告警** —— `go build` / `go vet` / `gofmt` 都不读 Dockerfile，
+> 而 CI **不构建镜像** → 断裂长期静默，症状不是「构建失败」而是「那个服务从来没
+> 起来过，而且看起来没人动过它」。**删目录后要 grep `Dockerfile`**（现在有护栏了）。
+
+> **P2-13 落地说明（2026-09-23）**：**验证器链接真库取证**
+>（`pkg/validation/live_backtest_integration_test.go`，新建 1 例）。
+>
+> **登记的前置被放大了。** 原登记写「跑数据同步补齐行情后，用同一范式接真库」，
+> 读起来像要等 5907 只票全部同步完。实测：**有 65 只票带 3 年完整历史（725 根 K 线）
+> 时就能取证了** —— 那是同步跑到第 100 只左右的事。**「等全量」不是技术前置，
+> 是心理前置。**
+>
+> **接的是真库，不是测试库。** 用 `storage.NewPostgresStore` +
+> `marketdata.NewPostgresProvider` 连 `quant_trading`。**没有用
+> `pkg/testutil.NewTestDB`** —— 它的默认库是 `quant_trading_test`，连过去只会
+> 得到一个空库，然后测试以「库里没数据」skip，**永远绿**。这是「断言落在不是生产
+> 消费的那一层」的另一种形态：**连的库不对，测的就不是同一份数据**。
+>
+> **池子按代码顺序取，不按历史完整度排。** 按完整度排是在用未来信息挑样本
+>（排前面的必然是活到今天的票），等于把这一维要查的幸存者偏差自己造出来。
+> 按代码顺序取自然带进退市票 —— 实测 40 只池子里有 **3 只在区间内摘牌**
+>（`000004.SZ` 国华退 2026-07-14、`000005.SZ` ST星源(退) 2024-04-26 等），
+> 测试**断言这个数必须 > 0**，否则直接失败：池子被幸存者选过，这一维的结论就不成立。
+>
+> **首次实测结果：验证器链在真数据上否掉了这个策略。**
+>
+> | 维度 | 概率 | 说明 |
+> |---|---|---|
+> | statistical | 0.1434 | 3 次尝试校正后 p=0.857，Sharpe=-0.46 不显著 |
+> | economic | 0.0021 | 毛 -31.48%、成本 7.56%、净 **-39.04%**（年换手 10.5 倍 × 602 交易日） |
+> | robustness | 0.0000 | 3 个邻近参数 0% 站得住 —— 尖峰不是高原 |
+> | bias | 0.8746 | 池子含 3 只退市票（好迹象）+ 前复权自带前视成分（如实提醒） |
+> | redundancy | 0.7044 | 与同策略另一组参数的相关性 |
+> | causal | — | **如实记未评估**（要一次 LLM 调用，不拿剩下五维凑数） |
+>
+> **综合概率 0.0000、最弱维 robustness、3 条 blocking。** 这才是这一维该有的样子：
+> **它愿意说不。** 一条在真数据上只会给高分的验证器，校准不了任何东西。
+>
+> **故意留空的两个字段**：`PITVerified` / `DataLagKnown` 都没填。这次跑的 momentum
+> 只吃价量，而「引擎逐日喂 K 线、不预读未来 bar」这件事本测试**没有独立验证过**
+> —— 写 `PITVerified=true` 就是**盖一个没做过的章**（PITFALLS §53）。留空 →
+> 前视子维度记入未评估，如实暴露，并附带一条 note。
+>
+> **破坏验证（S1）**：把 `Existing: existing` 改成 `Existing: nil`（**保留变量被使用，
+> 避免变成 build failure** —— 编译不过不算护栏生效）→ `go vet` 通过、测试**只红该红的**：
+> 指名 `[redundancy]`，其余四维照旧评估。反向替换恢复后 `diff` 与备份**字节相同**、
+> `grep -c SABOTAGE` = 0、整包 `ok github.com/ruoxizhnya/quant-trading/pkg/validation 75.5s`。
+>
+> **顺带订正的取证细节**（写之前跑过命令）：`trading_calendar` 实际 **1097 行 /
+> 区间 2023-09-23 ~ 2026-09-23 / 其中 726 个交易日**。此前台账与工作记忆里的
+> 「2194」是错的 —— 该表主键是 `trade_date` 单列，**不可能有重复行**。
+
+> **AUD-49 / AUD-50 登记说明（2026-09-23）**：两项都是**打通数据同步时撞出来的**，
+> 不是审查登记项。同族 —— **「两个机制各自对、接起来就错」**（本仓已第十例）。
+>
+> **AUD-49 —— `POST /api/sync/jobs/:id/cancel` 对 `running` 任务无效。**
+>
+> 症状：接口返回 `{"message":"job cancelled","job_id":"..."}` 且 HTTP 200，
+> 但 `processed_items` **继续往上走**。现场只能 `UPDATE sync_jobs SET status='cancelled'`
+> 手工收拾。
+>
+> 机制（两层，都读过源码）：
+> ① `JobService.CancelJob`（`pkg/sync/job.go:154-177`）只把**库里的行**改成
+> `cancelled`；而 worker 手里那个 `*Job` 是 `Queue.Dequeue` 时取的内存副本，
+> 它完全不知道这件事。
+> ② 执行器每隔一秒调 `jobProgressReporter.ReportProgress` → `queue.UpdateJob(ctx, r.job)`
+> → `PostgresStore.UpdateSyncJob`，而那条 SQL 是
+> **`UPDATE sync_jobs SET status = $2, ... WHERE id = $1`** ——
+> **`WHERE` 只有 id，却把内存里的 `status`（还是 `running`）写回去**。
+> 于是**下一次进度上报必然把 `cancelled` 复活成 `running`**。
+> ③ 附带：`workerLoop` 用的是 `jobCtx := context.Background()`（`worker.go:132`），
+> **根本不存在 per-job 的取消句柄** —— 所以即使 ① 写对了，也停不下执行器。
+>
+> **AUD-50 —— 重启后 `running` 的 sync job 永久搁浅。**
+>
+> 症状：`docker restart` 之后任务永远停在 `done=20/5907`，日志里只剩 `/health`。
+>
+> 机制：`Queue.Dequeue` 每次都查库，但**只查 `pending`**
+>（`q.store.ListSyncJobs(ctx, JobStatusPending, 1)`）。进程重启时正在跑的那一行
+> 留在 `running`，**没有任何代码把它改回 `pending`**，于是三个 worker 全在
+> `WaitForJob` 上睡到天荒地老。
+>
+> ⚠️ **先例存在、也接上了线，但只接了半条**：`pkg/backtest/job` 有
+> `CleanupStaleRunning`（P0-8），且**有生产调用方** —— `cmd/analysis/setup.go:740`，
+> 在 `gracefulShutdown` 里。但它的**文档注释自己写着**「also useful as a recovery
+> tool after a hard process crash (kill -9, OOM, etc.) — **call it on startup** to
+> repair stale rows from the previous run」，而**没有任何启动期调用点**。
+> 也就是说：**文档建议的那条路，从来没人走过。** `pkg/sync` 则连函数都没有。
+>
+> 两项的修法方向（落地前先按 PITFALLS 的规矩核一遍前提）：
+> `WorkerPool` 持有 `jobID → cancelFunc` 注册表，`CancelJob` 走它去真取消；
+> 进度上报改成**条件更新**（`WHERE id = $1 AND status = 'running'`），
+> 让「已终态的行」不可能被进度上报复活；`pkg/sync` 补
+> `CleanupStaleRunning` 并**在 `cmd/data` 启动期调用**（同时给 `cmd/analysis`
+> 补上启动期那一半 —— 它现在只做了关闭期那一半）。
+
+> **AUD-50 落地说明（2026-09-23）**：**重启后 `running` 的 job 必须被回收。**
+>
+> **修法**：`pkg/sync` 新增 `Queue.CleanupStaleRunning`，把 `running` 的行标成
+> `failed`（**不是 `cancelled`** —— 没人主动停它，是被中断的；这个区别对后来读
+> 台账的人有意义。标 `failed` 也让它可以 `RetryJob`，人工能续跑）。进度字段
+>（`processed_items` / `total_items`）保留 —— 那是「中断时同步到哪」的唯一记录。
+>
+> **调用点放在 `WorkerPool.Start()` 里，不放在调用方**：worker pool 只捞
+> `pending`，所以回收必须**在任何 worker 起来之前**做完；而它只依据数据库判断，
+> 看不见内存里在飞的任务。把调用点放在 worker 起来的地方，「有人忘了调」就在
+> **结构上不可能**，而不是靠注释提醒。
+>
+> **`cmd/analysis` 补上另一半**：backtest 的 `CleanupStaleRunning` 一直只接了
+> 关闭期（`gracefulShutdown`）。它的文档注释写着「call it on startup to repair
+> stale rows from the previous run」，而**启动期调用点从来不存在**。现在
+> `buildDataServices` 里补上了。这一半**做不到**「结构上不可能忘」——
+> backtest 任务跑在自己的 goroutine 上，没有中心化的 dequeue 可以挂钩，所以
+> 「只在启动期调用」这个前提只能**写下来**，并由下面的护栏钉住调用点。
+>
+> **新增 `internal/repoguard` 的函数级接线护栏**
+>（`TestRecoveryFunctionsAreCalledFromTheRightPlace`）：判据是
+> **「从 `file:function` 里被调用」** —— 不是「函数存在」（存在正是缺陷的前提），
+> 也不是「有某个调用点」（backtest 那个一直有，只是在错的路径上）。
+>
+> ⚠️ **这条护栏的第一版是瞎的，是破坏验证抓出来的。**
+> 第一版钉的是**文件**（「`cmd/analysis/setup.go` 里有调用」）。把新加的启动期
+> 调用删掉 → **护栏仍然绿**，因为同文件的 `gracefulShutdown` 还在调同一个方法。
+> 更要紧的是：**第一版在修复前的代码上本来就是绿的**（setup.go 一直有调用，
+> 只是从不在启动期）。**一条对「它要防的那个 bug」是绿的护栏不算护栏。**
+> 改成钉 `file:function` 后重跑同一个破坏 → 红，且诊断输出正是证据：
+> `[cmd/analysis/setup.go:gracefulShutdown pkg/sync/worker.go:Start]` ——
+> 关闭期那一半在、启动期那一半缺。
+>
+> **破坏验证（S2 / S3）**：
+>
+> | 破坏 | 期望 | 实测 |
+> |---|---|---|
+> | S2：摘掉 `WorkerPool.Start` 里的回收调用 | 只有**接线测试**红 | ✅ `go vet` 通过（不是 build failure）；3 条队列级单测**保持绿**（证明它们抓不住接线断裂）；`TestWorkerPool_StartRecoversInterruptedJob` 红并指名原因；**不依赖该功能的** `StartDoesNotEatPendingJobs` 保持绿 |
+> | S3：摘掉 `buildDataServices` 里的启动期调用 | 函数级护栏红 | ⚠️ 第一版护栏**没红**（见上，已修正）→ 修正为 `file:function` 后红，并打印现有调用点 |
+>
+> **顺带**：`TestProductionCallSiteWalkerSeesTheTree` 是「护栏的护栏」——
+> 断言遍历真的走到了仓库里（否则「找不到调用点」是假的），且调用点标签确实是
+> `file:function` 形式（退化成只有文件名就会重新变瞎）。
+>
+> **护栏的已知边界（写进脚本注释）**：按**方法名**匹配、不做类型解析，所以两个
+> 不同包的同名恢复方法对遍历器不可区分（今天它们在不同文件里被调用，钉
+> `file:function` 足够）。**若哪天它们从同一个函数里被调用，这条护栏就分不出来**
+> —— 要么别这么做，要么先教会遍历器解析 receiver。
+
+> **AUD-49 落地说明（2026-09-23）**：**取消必须「行」和「执行器」两半都到位。**
+>
+> **判据取的是现场症状**，不是「接口返回什么」：`CancelJob` 一直返回成功
+> （HTTP 200 + `{"message":"job cancelled"}`），真正的症状是
+> **`processed_items` 还在往上走**。所以断言分两层，分别由两条测试守住。
+>
+> **修法（一）：把「写」变成条件写，并且只留一个入口。**
+> `pkg/storage` 的无条件 `UpdateSyncJob`（`WHERE id = $1`）**整个退役**，
+> 换成 `UpdateSyncJobIfStatus(ctx, job, from ...JobStatus) (bool, error)`：
+> `WHERE id = $1 AND status = ANY($n::text[])`，并返回 `RowsAffected() > 0`。
+> **条件必须在 SQL 里**，不能写成 Go 的「读—比—写」—— 那一对语句对每个写者都在竞争。
+> 退役做的是「一个决定只有一个入口」：全仓 `.UpdateSyncJob(` 只有 8 处调用点
+> （`pkg/sync` 6 处 + `JobService` 2 处），全部转到新方法后旧名**不再存在**，
+> 第二个入口在编译期就没了。
+> `from` 为空**报错**而不是匹配全部：`ANY('{}')` 匹配不到任何行，
+> 一个忘了传参的调用会静默退化成空操作。
+>
+> 所有 worker 侧写路径都改成条件写，来源状态一律 `running`：进度上报
+> （`UpdateRunningJob`，**替代并删除**了原来的 `Queue.UpdateJob`）、
+> `CompleteJob`、`FailJob`、`RetryLater`、`Dequeue` 的领取、`CleanupStaleRunning`。
+> 其中 **`RetryLater` 是最危险的一条**：它把行改成 `pending`，
+> 于是 worker 会**把用户已经取消的任务再跑一遍** —— 同一个缺陷换了顶帽子。
+>
+> **修法（二）：给执行器一个真句柄。**
+> `workerLoop` 原来是 `jobCtx := context.Background()`，**per-job 取消句柄在原理上
+> 就不存在** —— 所以即使数据库写对了，执行器也会继续对着 Tushare 跑几小时。
+> 现在 `WorkerPool` 持有 `jobID → *runningJob{cancel}` 注册表，`workerLoop` 用
+> `context.WithCancel(wp.ctx)` 并在 `processJob` 前后登记/注销（注销按**指针同一性**
+> 判断，避免重试后的新句柄被上一轮的清理误删）；
+> `JobService.SetRunningCanceller(workerPool.Cancel)` 由
+> `cmd/data/sync_handlers.go:NewSyncHandler` 接上，**调用点由 `internal/repoguard` 钉住**。
+>
+> **顺序：先结算行，再发信号。** 因为 worker 侧写路径全都条件于 `running`，
+> 一旦行是 `cancelled`，在飞的 worker 就再也写不回去 —— 下一次进度上报、完成、
+> 重试都不行。反过来先发信号会开一个窗口：任务合法地跑完了，而取消随后报一个
+> 令人困惑的失败。
+>
+> **`ctx` 已结束就不再写任何状态。** `processJob` 里这条规则是一句话：
+> **上下文已取消的任务不写库** —— 它的行要么已被取消者结算，要么留给
+> `CleanupStaleRunning`（AUD-50）回收。没有这条规则，被取消的任务会立刻试图用
+> **已经死掉的 ctx** 去写 `failed`（或经重试写 `pending`）：写不进，而且意图本身就是错的。
+>
+> ⚠️ **行为变更（记下来，别当没发生）**：per-job ctx 现在挂在 `wp.ctx` 下，
+> 所以 `Stop()` 会**打断在飞的任务**，而不是像以前那样无限期等它跑完。
+> 这不是新增风险：`docker stop` 本来就在 10 秒后 SIGKILL，结果一样；
+> 区别只是现在能干净退出，且被中断的行由 AUD-50 回收、可 `RetryJob` 续跑。
+>
+> **测试与分工（`pkg/sync/cancel_test.go` 13 条 + `pkg/storage/sync_jobs_conditional_test.go` 6 条）**：
+> ① 「执行器是否真的停了」由 `TestCancelRunningJob_StopsTheExecutorAndStaysCancelled`
+> 与 `TestWorkerPool_RegistersInFlightJobForCancellation` 守；
+> ② 「终态不能被写回去」由 `TestQueue_ProgressUpdateCannotResurrectSettledJob`
+> 等 5 条窄测守（进度 / 重试 / 失败 / 完成 / 领取竞争）。
+> **两层必须分开测**：只测 ① 会漏掉复活路径，只测 ② 会漏掉「执行器根本没停」。
+> 存储层的条件**真的在 SQL 里**由真库测试证明 —— 上层单测打的是 mock，
+> mock 里可以假装实现一份条件语义，SQL 写错（`ANY` 漏了、参数类型没对上）
+> 它们照样全绿，而这正是本仓反复踩的「两个机制各自对、接起来就错」。
+>
+> **破坏验证（S1 / S2 / S3）**：
+>
+> | 破坏 | 期望 | 实测 |
+> |---|---|---|
+> | S1：把进度上报的条件退化成列出全部状态（等价于无条件写） | 只有**进度复活**那条窄测红 | ✅ `vet-exit=0`（不是 build failure）；只有 `TestQueue_ProgressUpdateCannotResurrectSettledJob` 红，信息直指「这就是 AUD-49 的复活路径」；重试 / 失败 / 完成三条**保持绿**（它们走别的方法） |
+> | S2：把注册表里的 cancel 换成空函数（`Cancel` 仍返回 true） | 只有**「执行器真停了」**那两条红 | ✅ `vet-exit=0`；`TestCancelRunningJob_...` 红在「执行器没有观察到 ctx 取消」；`TestWorkerPool_RegistersInFlightJob...` 红在「任务结束后必须注销」；② 家族全绿 |
+> | S3：摘掉 `cmd/data` 的 `SetRunningCanceller` 接线 | 函数级接线护栏红 | ✅ `go build ./cmd/data/` 仍通过（setter 是可选的，所以是行为破坏不是编译错）；护栏打印 `现有生产调用点（file:function）：[]` |
+>
+> **S1 与 S2 分别只红各自那一层，是本项最有价值的一条证据**：它说明两半是
+> **独立覆盖**的，任何一半单独退化都会被抓住 —— 而不是「两条测试碰巧一起红」。
+
+> **AUD-51 登记说明（2026-09-23）**：**测试的前置条件与断言读的不是同一个东西。**
+>
+> 症状：完整跑测试时 `TestHasOHLCVData` 红，而**本轮改动与它无关**
+> （改的是 `sync_jobs`，它读的是 `ohlcv_daily_qfq`）。取证：直接查库
+> `SELECT count(*) FROM ohlcv_daily_qfq WHERE symbol='600000.SH'` → **0 行**，
+> 因为 3 年同步还在跑、才走到 `300320.SZ`（当前已同步区间 `000001.SZ`–`300320.SZ`）。
+>
+> 机制：`pkg/storage/postgres_test.go:170` 的 `TestHasOHLCVData` 断言
+> **`600000.SH` 有数据**，而它的前置 `skipIfNoSeedData(t, store, "ohlcv_daily_qfq")`
+> 只检查**这张表非空**。「表非空」与「这个 symbol 有数据」是两个不同的事实 ——
+> 于是任何**局部同步**（同步途中、或只 `RetryJob` 了一部分 symbol）都会让它红，
+> 而这条红**不指向任何代码问题**。这正是 `skipIfNoSeedData` 自己的注释所反对的
+> 「失败信号没有意义」，只是它反对的是「库是空的」，没管「库是半满的」。
+>
+> **同类的潜伏成员 3 个**（按「去数反例密度」的规矩查的，不是只看这一个样本）：
+> `TestGetTradingDays` / `TestGetTradingDates` / `TestIsTradingDay`
+> 断言读的是 **`trading_calendar`**，前置检查的却是 `ohlcv_daily_qfq`
+> （`postgres_test.go:242/256/395`）—— 表名对不上。它们至今没发作，
+> 只在「两表一空一不空」的组合下才会露出来。
+>
+> 修法方向（未落地）：前置条件改成**与断言同源** —— 要么按具体 symbol 判
+> （`HasOHLCVData("600000.SH")` 为假就 skip），要么把断言的 symbol 改成
+> **从库里查出来的**、而不是写死的。后者更好：写死常量会让测试依赖
+> 「哪只票一定在」，而这是数据同步进度决定的，不是不变量。
+
+> **AUD-52 登记说明（2026-09-23）**：**e2e 套件的前置条件不再蕴含它的断言。**
+>
+> 与 AUD-51 **同症状、不同成因**，所以分开登记（同一个桶里的东西要先按成因再分一次）：
+> AUD-51 是前置条件**写错了对象**（查 A 表、断言读 B 表），
+> AUD-52 是前置条件**不够** —— 套件级的门只保证「服务在」，
+> 不保证「服务要的东西你有」。
+>
+> 症状：完整跑测试时 `e2e/tests` 两条红，**与本轮改动无关**。
+>
+> 机制：`e2e/tests/integration_test.go` 的 `TestMain` 只有一道门 ——
+> 「analysis 可达就整套跑」（`S7-P0-8` 加它，本意是让没起 Docker 的环境
+> 退出 0 而不是 FAIL）。但 analysis 现在**是**可达的，于是整套跑，然后：
+>
+> ① **`executionURL := "http://localhost:8084"`（:248）指向已退役的服务。**
+> ODR-021 把 execution 并进 analysis，端点在 `:8085/api/execution/*`
+> （`cmd/analysis/handlers_execution.go`），容器里已无 :8084。
+> → `TestExecutionService_OrderPersistence` **在当前架构下永远不可能通过**。
+> 一条永远不可能绿的测试比没有测试更糟：它会训练人忽略红色。
+> ② **`TestStrategyAPI_ListStrategies` 期望 200，实测 401。**
+> 打 `:8085/api/strategies`，鉴权上线后套件没有配套的取 token 步骤。
+>
+> 两者的共同点：**「服务在」和「你能用这个服务」是两件事** ——
+> 与「变量『已设置』和『值抵达目的地』是两件事」同型。
+>
+> 修法方向（未落地）：① 把 :8084 改指 `:8085/api/execution/*`（或直接删掉这条
+> 已被 ODR-021 取代的用例）；② 套件启动时取一次 token（或显式
+> `E2E_FORCE_SKIP=1` 并在文档里写明它需要什么）；③ 更好的是把「这道门」也做成
+> **与断言同源** —— 门应该检查它真正需要的东西（执行端点存在、鉴权可用），
+> 而不只是「某个端口有响应」。
 
 ## 已冻结（本次定位重构后不再投入）
 

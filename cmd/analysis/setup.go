@@ -342,6 +342,33 @@ func buildDataServices(
 	jobService := backtest.NewJobService(store, engine)
 	logger.Info().Msg("Job service initialized")
 
+	// AUD-50: repair backtest rows left in `running` by a previous process.
+	//
+	// The same repair already runs on the way down (gracefulShutdown), but that
+	// only covers an orderly SIGTERM. CleanupStaleRunning's own doc comment has
+	// always said it is "also useful as a recovery tool after a hard process
+	// crash (kill -9, OOM, etc.) — call it on startup to repair stale rows from
+	// the previous run" — and no startup caller ever existed, so the
+	// recommended path was never taken. This is that call.
+	//
+	// Safe here because nothing is running yet: the HTTP server has not started
+	// and no job has been accepted, so a `running` row can only be a leftover.
+	// Unlike the sync queue this cannot be made structural by hanging it off the
+	// worker pool — backtest jobs run on their own goroutines, there is no
+	// central dequeue to hook — so the "startup only" precondition is written
+	// down instead of enforced. Calling it while jobs are in flight would fail
+	// rows that are still working.
+	//
+	// internal/repoguard pins this call site to
+	// cmd/analysis/setup.go:buildDataServices — moving it breaks the guard.
+	if n, err := jobService.CleanupStaleRunning(context.Background()); err != nil {
+		logger.Error().Err(err).
+			Msg("Stale-running cleanup failed; an interrupted backtest may stay 'running'")
+	} else if n > 0 {
+		logger.Warn().Int("recovered", n).
+			Msg("Recovered backtest jobs left 'running' by a previous process")
+	}
+
 	wfEngine := backtest.NewWalkForwardEngine(func() (*backtest.Engine, error) {
 		if newEngine == nil {
 			return engine, nil

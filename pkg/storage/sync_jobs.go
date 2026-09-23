@@ -74,24 +74,52 @@ func (s *PostgresStore) GetSyncJob(ctx context.Context, jobID string) (*sync.Job
 	return job, nil
 }
 
-// UpdateSyncJob updates an existing sync job.
-func (s *PostgresStore) UpdateSyncJob(ctx context.Context, job *sync.Job) error {
+// UpdateSyncJobIfStatus writes the job row only when the row's *current*
+// status is one of `from`, and reports whether the write actually landed.
+//
+// This is the only way to update a sync job row (AUD-49). The unconditional
+// version this replaces — `UPDATE sync_jobs SET status = $2 ... WHERE id = $1`
+// — was the load-bearing half of a real defect: the worker holds an in-memory
+// copy of the job, and every progress report wrote that copy's `status` back
+// verbatim. Cancelling a running job set the row to `cancelled`, and the next
+// progress report (at most one second later) wrote `running` again. The
+// endpoint answered 200 with `{"message":"job cancelled"}` while the job kept
+// going and the row kept saying it was running.
+//
+// The condition has to live in SQL rather than in Go (read, compare, then
+// write) because the compare-then-write pair races with every other writer.
+// RowsAffected is what makes the race observable: a caller that gets `false`
+// knows it lost and must not assume its intent took effect.
+//
+// An empty `from` is an error, not "match everything": `ANY('{}')` matches
+// nothing, so a caller that forgot the argument would see a silent no-op.
+func (s *PostgresStore) UpdateSyncJobIfStatus(ctx context.Context, job *sync.Job, from ...sync.JobStatus) (bool, error) {
+	if len(from) == 0 {
+		return false, fmt.Errorf("failed to update sync job %s: no allowed source status given", job.ID)
+	}
+
+	allowed := make([]string, len(from))
+	for i, st := range from {
+		allowed[i] = string(st)
+	}
+
 	query := `
 		UPDATE sync_jobs SET
 			status = $2, params = $3, progress_percent = $4, total_items = $5, processed_items = $6,
 			failed_items = $7, error_message = $8, result = $9, started_at = $10, completed_at = $11,
 			retry_count = $12, max_retries = $13, scheduled_at = $14, worker_id = $15
-		WHERE id = $1
+		WHERE id = $1 AND status = ANY($16::text[])
 	`
-	_, err := s.pool.Exec(ctx, query,
+	tag, err := s.pool.Exec(ctx, query,
 		job.ID, job.Status, job.Params, job.ProgressPercent, job.TotalItems,
 		job.ProcessedItems, job.FailedItems, job.ErrorMessage, job.Result,
 		job.StartedAt, job.CompletedAt, job.RetryCount, job.MaxRetries, job.ScheduledAt, job.WorkerID,
+		allowed,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update sync job: %w", err)
+		return false, fmt.Errorf("failed to update sync job: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() > 0, nil
 }
 
 // ListSyncJobs returns sync jobs filtered by status.

@@ -34,6 +34,10 @@ type jobProgressReporter struct {
 	ctx        context.Context
 	mu         sync.Mutex
 	lastReport time.Time
+	// lostRow fires once when the row stops being `running` — i.e. when a
+	// cancellation landed. Reported once so the log says why a job stopped
+	// mid-way instead of leaving a gap between "processing job" and silence.
+	lostRow sync.Once
 }
 
 func (r *jobProgressReporter) ReportProgress(processed, total, failed int) {
@@ -47,19 +51,42 @@ func (r *jobProgressReporter) ReportProgress(processed, total, failed int) {
 	r.lastReport = time.Now()
 
 	r.job.UpdateProgress(processed, total, failed)
-	if err := r.queue.UpdateJob(r.ctx, r.job); err != nil {
-		logging.Logger.Warn().Err(err).Str("job_id", r.job.ID).Msg("Failed to update job progress")
-	}
+	r.persist()
 }
 
 func (r *jobProgressReporter) ReportError(errMsg string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	r.job.ErrorMessage = errMsg
 	r.job.FailedItems++
-	if err := r.queue.UpdateJob(r.ctx, r.job); err != nil {
-		logging.Logger.Warn().Err(err).Str("job_id", r.job.ID).Msg("Failed to update job error")
+	r.persist()
+}
+
+// persist writes the in-memory job back, but only while the row is still
+// `running` (AUD-49). The in-memory copy carries `status` too, so an
+// unconditional write here would put `running` back over a `cancelled` row on
+// the next tick — the cancel endpoint would answer 200 and the job would carry
+// on regardless.
+func (r *jobProgressReporter) persist() {
+	applied, err := r.queue.UpdateRunningJob(r.ctx, r.job)
+	if err != nil {
+		logging.Logger.Warn().Err(err).Str("job_id", r.job.ID).Msg("Failed to update job progress")
+		return
 	}
+	if !applied {
+		r.lostRow.Do(func() {
+			logging.Logger.Info().
+				Str("job_id", r.job.ID).
+				Msg("Job row is no longer 'running'; stopping progress reports (cancelled elsewhere?)")
+		})
+	}
+}
+
+// runningJob is the handle to one in-flight execution. It is a pointer so the
+// pool can tell "still mine" from "already replaced" by identity.
+type runningJob struct {
+	cancel context.CancelFunc
 }
 
 // WorkerPool manages a pool of goroutines that process sync jobs.
@@ -72,6 +99,13 @@ type WorkerPool struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	numWorkers int
+
+	// running maps job ID -> handle of the execution currently in flight in
+	// this process. It exists so CancelJob can actually stop an executor
+	// (AUD-49): the row alone cannot reach a goroutine, and the executor will
+	// happily keep fetching data for hours after its row says `cancelled`.
+	runningMu sync.RWMutex
+	running   map[string]*runningJob
 }
 
 // NewWorkerPool creates a new worker pool with the specified number of workers.
@@ -87,6 +121,49 @@ func NewWorkerPool(queue *Queue, numWorkers int) *WorkerPool {
 		ctx:        ctx,
 		cancel:     cancel,
 		numWorkers: numWorkers,
+		running:    make(map[string]*runningJob),
+	}
+}
+
+// Cancel interrupts the in-flight execution of jobID if this pool owns it.
+// Returns false when no execution of that job is running here — which is the
+// normal answer for a `pending` job (nothing has started yet) and for a job
+// left `running` by a process that already died.
+//
+// Safe to call from any goroutine, including an HTTP handler.
+func (wp *WorkerPool) Cancel(jobID string) bool {
+	wp.runningMu.RLock()
+	handle, ok := wp.running[jobID]
+	wp.runningMu.RUnlock()
+	if !ok {
+		return false
+	}
+	handle.cancel()
+	return true
+}
+
+// RunningCount returns how many executions are in flight in this pool.
+func (wp *WorkerPool) RunningCount() int {
+	wp.runningMu.RLock()
+	defer wp.runningMu.RUnlock()
+	return len(wp.running)
+}
+
+// registerRunning records the handle for a job about to execute.
+func (wp *WorkerPool) registerRunning(jobID string, handle *runningJob) {
+	wp.runningMu.Lock()
+	defer wp.runningMu.Unlock()
+	wp.running[jobID] = handle
+}
+
+// unregisterRunning removes the handle, but only if it is still the one we
+// registered — a job ID that has since been re-dequeued (retry) must not have
+// its live handle deleted by the previous run's cleanup.
+func (wp *WorkerPool) unregisterRunning(jobID string, handle *runningJob) {
+	wp.runningMu.Lock()
+	defer wp.runningMu.Unlock()
+	if current, ok := wp.running[jobID]; ok && current == handle {
+		delete(wp.running, jobID)
 	}
 }
 
@@ -99,7 +176,29 @@ func (wp *WorkerPool) RegisterExecutor(executor JobExecutor) {
 }
 
 // Start begins processing jobs with the worker pool.
+//
+// AUD-50: before any worker comes up, repair rows left in `running` by a
+// previous process. The pool only ever dequeues `pending`, so without this an
+// interrupted job stays `running` forever and every worker idles in WaitForJob
+// while the job still looks alive. Doing it here — rather than asking each
+// entrypoint to remember — is what makes the recovery structural: it cannot be
+// skipped by wiring a new caller, and it is guaranteed to run before any worker
+// can claim a job.
+//
+// internal/repoguard pins this call site to pkg/sync/worker.go:Start, so moving
+// it breaks a structural guard rather than silently dropping the recovery.
 func (wp *WorkerPool) Start() {
+	if n, err := wp.queue.CleanupStaleRunning(context.Background()); err != nil {
+		// Do not abort startup: a failed repair is strictly better than a
+		// service that refuses to come up. But say so loudly, because the
+		// consequence is a job stuck at `running` until the next restart.
+		wp.logger.Error().Err(err).
+			Msg("Stale-running cleanup failed; an interrupted job may stay 'running' until the next restart")
+	} else if n > 0 {
+		wp.logger.Warn().Int("recovered", n).
+			Msg("Recovered jobs left 'running' by a previous process")
+	}
+
 	wp.logger.Info().Int("workers", wp.numWorkers).Msg("Starting sync worker pool")
 	for i := 0; i < wp.numWorkers; i++ {
 		wp.wg.Add(1)
@@ -128,15 +227,27 @@ func (wp *WorkerPool) workerLoop(workerID int) {
 		default:
 		}
 
-		// Try to dequeue a job
-		jobCtx := context.Background()
+		// Try to dequeue a job.
+		//
+		// AUD-49: the per-job context is derived from the pool's context and
+		// registered under the job ID, so it can be cancelled from outside
+		// (CancelJob -> WorkerPool.Cancel). It used to be context.Background(),
+		// which meant no handle existed at all and cancelling was impossible in
+		// principle, no matter what the database said. Deriving from wp.ctx
+		// also means Stop() reaches in-flight executors instead of waiting on
+		// them; an aborted job is left `running` and is reaped by
+		// CleanupStaleRunning (AUD-50) on the next start, so it stays
+		// recoverable.
+		jobCtx, cancelJob := context.WithCancel(wp.ctx)
 		job, err := wp.queue.Dequeue(jobCtx)
 		if err != nil {
+			cancelJob()
 			logger.Error().Err(err).Msg("Failed to dequeue job")
 			time.Sleep(5 * time.Second)
 			continue
 		}
 		if job == nil {
+			cancelJob()
 			// No jobs available, wait for notification or timeout
 			if !wp.queue.WaitForJob(wp.ctx) {
 				// Context cancelled
@@ -147,11 +258,23 @@ func (wp *WorkerPool) workerLoop(workerID int) {
 
 		// Process the job
 		job.WorkerID = fmt.Sprintf("worker-%d", workerID)
+		handle := &runningJob{cancel: cancelJob}
+		wp.registerRunning(job.ID, handle)
 		wp.processJob(jobCtx, job, logger)
+		wp.unregisterRunning(job.ID, handle)
+		cancelJob()
 	}
 }
 
 // processJob executes a single job using the appropriate executor.
+//
+// One rule governs every terminal write below: a job whose context is already
+// done writes nothing. Its row was settled by whoever cancelled it, or it is
+// left `running` and reaped by CleanupStaleRunning (AUD-50) on the next start.
+// Without that rule a cancelled job would immediately try to write `failed` —
+// or worse, `pending` via retry — over the `cancelled` row, using a context
+// that is already dead. The conditional SQL would refuse the write anyway; the
+// rule exists so the log says why instead of showing a confusing error.
 func (wp *WorkerPool) processJob(ctx context.Context, job *Job, logger zerolog.Logger) {
 	// Recover from panics to prevent worker crash
 	defer func() {
@@ -160,7 +283,12 @@ func (wp *WorkerPool) processJob(ctx context.Context, job *Job, logger zerolog.L
 				Interface("panic", r).
 				Str("job_id", job.ID).
 				Msg("Executor panicked, recovering worker")
-			if err := wp.queue.FailJob(ctx, job, fmt.Sprintf("executor panic: %v", r)); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				logger.Warn().Str("ctx_err", ctxErr.Error()).
+					Msg("Job context already done; leaving the row to the stale-running reaper")
+				return
+			}
+			if _, err := wp.queue.FailJob(ctx, job, fmt.Sprintf("executor panic: %v", r)); err != nil {
 				logger.Error().Err(err).Msg("Failed to mark job as failed after panic")
 			}
 		}
@@ -181,7 +309,7 @@ func (wp *WorkerPool) processJob(ctx context.Context, job *Job, logger zerolog.L
 	if !ok {
 		errMsg := fmt.Sprintf("no executor registered for job type: %s", job.JobType)
 		logger.Error().Msg(errMsg)
-		if err := wp.queue.FailJob(ctx, job, errMsg); err != nil {
+		if _, err := wp.queue.FailJob(ctx, job, errMsg); err != nil {
 			logger.Error().Err(err).Msg("Failed to mark job as failed")
 		}
 		return
@@ -197,13 +325,22 @@ func (wp *WorkerPool) processJob(ctx context.Context, job *Job, logger zerolog.L
 	// Execute the job
 	result, err := executor.Execute(ctx, job, reporter)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			// Cancelled, or the pool is shutting down. Deliberately no status
+			// write: marking it `failed` would blame the data source for a stop
+			// the user asked for, and requeueing it (the retry branch below)
+			// would make the worker run it a second time.
+			logger.Info().Str("ctx_err", ctxErr.Error()).
+				Msg("Job aborted: context cancelled, leaving the row as it is")
+			return
+		}
 		// Check if we should retry
 		if job.RetryCount < job.MaxRetries {
-			if retryErr := wp.queue.RetryLater(ctx, job, err.Error()); retryErr != nil {
+			if _, retryErr := wp.queue.RetryLater(ctx, job, err.Error()); retryErr != nil {
 				logger.Error().Err(retryErr).Msg("Failed to schedule retry")
 			}
 		} else {
-			if failErr := wp.queue.FailJob(ctx, job, err.Error()); failErr != nil {
+			if _, failErr := wp.queue.FailJob(ctx, job, err.Error()); failErr != nil {
 				logger.Error().Err(failErr).Msg("Failed to mark job as failed")
 			}
 		}
@@ -217,7 +354,7 @@ func (wp *WorkerPool) processJob(ctx context.Context, job *Job, logger zerolog.L
 		resultJSON, marshalErr = json.Marshal(result)
 		if marshalErr != nil {
 			logger.Error().Err(marshalErr).Msg("Failed to marshal job result")
-			if failErr := wp.queue.FailJob(ctx, job, fmt.Sprintf("failed to marshal result: %v", marshalErr)); failErr != nil {
+			if _, failErr := wp.queue.FailJob(ctx, job, fmt.Sprintf("failed to marshal result: %v", marshalErr)); failErr != nil {
 				logger.Error().Err(failErr).Msg("Failed to mark job as failed")
 			}
 			return
@@ -225,8 +362,17 @@ func (wp *WorkerPool) processJob(ctx context.Context, job *Job, logger zerolog.L
 	}
 
 	// Mark job as completed
-	if completeErr := wp.queue.CompleteJob(ctx, job, resultJSON); completeErr != nil {
+	applied, completeErr := wp.queue.CompleteJob(ctx, job, resultJSON)
+	if completeErr != nil {
 		logger.Error().Err(completeErr).Msg("Failed to mark job as completed")
+		return
+	}
+	if !applied {
+		// The row was settled while the executor was finishing. Almost always a
+		// cancellation; either way this run no longer owns the row, so claiming
+		// success would be false.
+		logger.Warn().Msg("Job finished but its row was already settled; not reporting success")
+		return
 	}
 
 	logger.Info().Msg("Job processed successfully")

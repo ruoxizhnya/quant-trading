@@ -39,6 +39,11 @@ func NewSyncHandler(store *storage.PostgresStore, tc *data.TushareClient, dc *da
 	// workers blocked in WaitForJob never dequeue HTTP-created jobs.
 	jobService.SetPendingNotifier(queue.NotifyJobAvailable)
 	workerPool := sync.NewWorkerPool(queue, 3)
+	// AUD-49: cancelling a running job has to reach the goroutine that is
+	// executing it. Settling the row is not enough — the executor keeps going
+	// until its context is cancelled, which is why the endpoint used to answer
+	// 200 while `processed_items` kept climbing. This is the other half.
+	jobService.SetRunningCanceller(workerPool.Cancel)
 	scheduler := sync.NewScheduler(store, queue)
 
 	// Register job types for scheduler

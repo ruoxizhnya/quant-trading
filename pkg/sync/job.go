@@ -60,7 +60,12 @@ type Job = types.Job
 type JobStore interface {
 	CreateSyncJob(ctx context.Context, job *Job) error
 	GetSyncJob(ctx context.Context, jobID string) (*Job, error)
-	UpdateSyncJob(ctx context.Context, job *Job) error
+	// UpdateSyncJobIfStatus persists the job only when its *current* status is
+	// one of `from`, reporting whether the write landed. There is deliberately
+	// no unconditional update: every writer here is racing someone else
+	// (progress reports vs. cancel vs. a second worker), and an unconditional
+	// write silently wins that race with stale in-memory state. See AUD-49.
+	UpdateSyncJobIfStatus(ctx context.Context, job *Job, from ...JobStatus) (bool, error)
 	ListSyncJobs(ctx context.Context, status JobStatus, limit int) ([]*Job, error)
 	ListSyncJobsByType(ctx context.Context, jobType JobType, limit int) ([]*Job, error)
 	DeleteSyncJob(ctx context.Context, jobID string) error
@@ -68,9 +73,10 @@ type JobStore interface {
 
 // JobService handles sync job lifecycle management.
 type JobService struct {
-	store     JobStore
-	logger    zerolog.Logger
-	onPending func() // optional; invoked when a job transitions to pending
+	store       JobStore
+	logger      zerolog.Logger
+	onPending   func()            // optional; invoked when a job transitions to pending
+	onCancelRun func(string) bool // optional; interrupts a job executing in this process
 }
 
 // NewJobService creates a new JobService.
@@ -95,6 +101,22 @@ func (s *JobService) notifyPending() {
 	if s.onPending != nil {
 		s.onPending()
 	}
+}
+
+// SetRunningCanceller registers the callback CancelJob uses to interrupt a job
+// that is executing *right now* in this process. It returns true when the job
+// was found running here and its context was cancelled.
+//
+// Why this exists (AUD-49): marking the row `cancelled` only tells the
+// database. The executor is a separate goroutine holding its own context and
+// its own copy of the job, and nothing short of cancelling that context makes
+// it stop — the endpoint would answer 200 while the sync kept hammering
+// Tushare. A job that is `pending` has no in-flight context yet, so a false
+// return is normal there, not an error.
+//
+// Must be set once during wiring, before concurrent use.
+func (s *JobService) SetRunningCanceller(fn func(jobID string) bool) {
+	s.onCancelRun = fn
 }
 
 // CreateJob creates a new sync job.
@@ -152,6 +174,19 @@ func (s *JobService) ListJobsByType(ctx context.Context, jobType JobType, limit 
 }
 
 // CancelJob cancels a pending or running job.
+//
+// AUD-49. Two halves are needed and neither is sufficient alone:
+//
+//	① the row must become `cancelled` and *stay* that way — which is why the
+//	   write is conditional (only from pending/running) and why every
+//	   worker-side write is conditional on `running` too;
+//	② the executor must actually stop — which is why the canceller is invoked.
+//
+// Order: settle the row first, then signal. Because every worker-side write is
+// conditional on `running`, once the row says `cancelled` the in-flight worker
+// can no longer overwrite it — not on its next progress report, not on its
+// completion, not via a retry. Signalling first would open a window where the
+// job completes legitimately and the cancel then reports a confusing failure.
 func (s *JobService) CancelJob(ctx context.Context, jobID string) error {
 	job, err := s.store.GetSyncJob(ctx, jobID)
 	if err != nil {
@@ -164,15 +199,42 @@ func (s *JobService) CancelJob(ctx context.Context, jobID string) error {
 		return fmt.Errorf("job is already in terminal state: %s", job.Status)
 	}
 
+	wasRunning := job.Status == JobStatusRunning
+
 	job.Status = JobStatusCancelled
 	now := time.Now()
 	job.CompletedAt = &now
 
-	if err := s.store.UpdateSyncJob(ctx, job); err != nil {
+	applied, err := s.store.UpdateSyncJobIfStatus(ctx, job, JobStatusPending, JobStatusRunning)
+	if err != nil {
 		return fmt.Errorf("failed to cancel job: %w", err)
 	}
+	if !applied {
+		// The job moved between our read and our write — it finished, failed,
+		// or another canceller got there first. Report what it actually is
+		// instead of claiming a cancellation that did not happen.
+		current, getErr := s.store.GetSyncJob(ctx, jobID)
+		if getErr == nil && current != nil {
+			return fmt.Errorf("job is already in terminal state: %s", current.Status)
+		}
+		return fmt.Errorf("failed to cancel job %s: status changed concurrently", jobID)
+	}
 
-	s.logger.Info().Str("job_id", jobID).Msg("Sync job cancelled")
+	if wasRunning && s.onCancelRun != nil {
+		if !s.onCancelRun(jobID) {
+			// The row said `running` but no live execution owns it here. That
+			// is the state a crashed process leaves behind, and AUD-50's
+			// CleanupStaleRunning reaps it on the next start. Worth a warning:
+			// the row is cancelled either way, but nothing was actually
+			// interrupted.
+			s.logger.Warn().
+				Str("job_id", jobID).
+				Msg("Job was marked cancelled but no in-flight execution was found to interrupt; " +
+					"it was probably left 'running' by a previous process (see AUD-50)")
+		}
+	}
+
+	s.logger.Info().Str("job_id", jobID).Bool("was_running", wasRunning).Msg("Sync job cancelled")
 	return nil
 }
 
@@ -189,6 +251,10 @@ func (s *JobService) RetryJob(ctx context.Context, jobID string) (*Job, error) {
 		return nil, fmt.Errorf("job cannot be retried (status=%s, retries=%d/%d)", job.Status, job.RetryCount, job.MaxRetries)
 	}
 
+	// Capture the status we read before overwriting it: the conditional write
+	// below has to name the states we are allowed to move out of.
+	fromStatus := job.Status
+
 	job.Status = JobStatusPending
 	job.RetryCount++
 	job.ErrorMessage = ""
@@ -197,8 +263,15 @@ func (s *JobService) RetryJob(ctx context.Context, jobID string) (*Job, error) {
 	job.FailedItems = 0
 	job.WorkerID = ""
 
-	if err := s.store.UpdateSyncJob(ctx, job); err != nil {
+	applied, err := s.store.UpdateSyncJobIfStatus(ctx, job, fromStatus)
+	if err != nil {
 		return nil, fmt.Errorf("failed to retry job: %w", err)
+	}
+	if !applied {
+		// Someone else moved the job (typically a worker already picked it up
+		// after another retry). Resetting it to pending here would clobber
+		// live progress and could run the same job twice.
+		return nil, fmt.Errorf("failed to retry job %s: status changed concurrently", jobID)
 	}
 
 	s.logger.Info().

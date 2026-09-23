@@ -313,14 +313,28 @@ func (m *mockJobStore) GetSyncJob(_ context.Context, jobID string) (*Job, error)
 	return nil, nil
 }
 
-func (m *mockJobStore) UpdateSyncJob(_ context.Context, job *Job) error {
+// UpdateSyncJobIfStatus mirrors the Postgres implementation's contract: the
+// condition is evaluated against the *stored* status, and the job is written
+// only when it matches. An empty `from` is an error there, so it is an error
+// here too — a fake that is more permissive than the real store lets tests
+// pass on behaviour production does not have.
+func (m *mockJobStore) UpdateSyncJobIfStatus(_ context.Context, job *Job, from ...JobStatus) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.jobs[job.ID]; !ok {
-		return fmt.Errorf("sync job not found: %s", job.ID)
+	if len(from) == 0 {
+		return false, fmt.Errorf("failed to update sync job %s: no allowed source status given", job.ID)
 	}
-	m.jobs[job.ID] = job.Clone()
-	return nil
+	current, ok := m.jobs[job.ID]
+	if !ok {
+		return false, fmt.Errorf("sync job not found: %s", job.ID)
+	}
+	for _, st := range from {
+		if current.Status == st {
+			m.jobs[job.ID] = job.Clone()
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (m *mockJobStore) ListSyncJobs(_ context.Context, status JobStatus, limit int) ([]*Job, error) {
