@@ -278,7 +278,23 @@ func formatDate(s string) string {
 	return s
 }
 
-// FetchDailyOHLCV retrieves daily OHLCV data from tushare using stk_factor_pro API with 前复权 (qfq) adjustment.
+// FetchDailyOHLCV retrieves daily OHLCV data, 前复权 (qfq) adjusted.
+//
+// 复权怎么来的：**不再用 stk_factor_pro**，改为 `daily`（不复权行情）+ `adj_factor`
+// （复权因子）自己算。原因：stk_factor_pro 是专业版接口，权限不足时返回 40203
+// 「您没有接口(stk_factor_pro)访问权限」—— 那不是 token 无效（40101 才是），而是
+// 该接口没开通；本仓默认走的那条路因此从一开始就拿不到行情（同步 job 会 100% 失败，
+// 5568 只股票一只都进不来）。而 `daily` 与 `adj_factor` 都在同一个 token 的权限内。
+//
+// 换算口径取自 Tushare 官方 `adj_factor` 接口文档的示例 4（**别凭记忆改**）：
+//
+//	前复权价 = 当日价格 × 当日复权因子 / 最新复权因子
+//	后复权价 = 当日价格 × 当日复权因子          （基准 = 上市日，基准因子为 1）
+//
+// 官方文档同时点明两件事，实现里都照做了：
+//  1. adj_factor 是「**累计后复权因子**」，每日 8:30-9:30 更新；
+//  2. **停牌日 adj_factor 会补齐，而 daily 没有行情** —— 两个序列按日期并不对齐，
+//     所以以 daily 为准逐日取因子，取不到的那天**跳过**而不是补 1。
 func (c *TushareClient) FetchDailyOHLCV(ctx context.Context, symbol string, startDate, endDate string) ([]domain.OHLCV, error) {
 	params := map[string]interface{}{
 		"ts_code":    symbol,
@@ -286,12 +302,17 @@ func (c *TushareClient) FetchDailyOHLCV(ctx context.Context, symbol string, star
 		"end_date":   formatDate(endDate),
 	}
 
-	resp, err := c.call(ctx, "stk_factor_pro", params, "ts_code,trade_date,open_qfq,high_qfq,low_qfq,close_qfq,vol,amount")
+	resp, err := c.call(ctx, "daily", params, "ts_code,trade_date,open,high,low,close,vol,amount")
 	if err != nil {
 		return nil, err
 	}
 
-	records := c.normalizeDailyOHLCV(resp, symbol)
+	factors, err := c.fetchAdjFactors(ctx, symbol, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+
+	records := c.normalizeDailyOHLCV(resp, symbol, factors)
 	if len(records) == 0 {
 		return nil, nil
 	}
@@ -309,10 +330,78 @@ func (c *TushareClient) FetchDailyOHLCV(ctx context.Context, symbol string, star
 	return records, nil
 }
 
-// normalizeDailyOHLCV converts tushare stk_factor_pro response to domain.OHLCV.
-// stk_factor_pro fields: ts_code, trade_date, open_qfq, high_qfq, low_qfq, close_qfq, vol, amount
-func (c *TushareClient) normalizeDailyOHLCV(resp *TushareResponse, symbol string) []domain.OHLCV {
+// fetchAdjFactors returns a trade_date (YYYYMMDD) → adj_factor map for the range.
+//
+// adj_factor 是「累计后复权因子」，配合不复权行情算出前/后复权价（口径见
+// FetchDailyOHLCV）。因子 <= 0 视为脏数据、不进 map —— 它既不是「没除权」
+// （那在 1.0 附近），也不是「没有数据」（那是 key 不存在），混进来会污染基准。
+func (c *TushareClient) fetchAdjFactors(ctx context.Context, symbol string, startDate, endDate string) (map[string]float64, error) {
+	params := map[string]interface{}{
+		"ts_code":    symbol,
+		"start_date": formatDate(startDate),
+		"end_date":   formatDate(endDate),
+	}
+
+	resp, err := c.call(ctx, "adj_factor", params, "ts_code,trade_date,adj_factor")
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(map[string]float64, len(resp.Data.Items))
+	for _, item := range resp.Data.Items {
+		if len(item) < 3 {
+			continue
+		}
+		d := c.fieldStr(item, 1)
+		if d == "" {
+			continue
+		}
+		f := c.fieldFloat(item, 2)
+		if f <= 0 {
+			continue
+		}
+		out[d] = f
+	}
+	return out, nil
+}
+
+// normalizeDailyOHLCV converts a `daily` response into 前复权 (qfq) OHLCV rows.
+//
+// daily fields: ts_code, trade_date, open, high, low, close, vol, amount
+// 四个价格按 qfq 口径换算：raw × 当日因子 / 最新因子。成交量**不**调整 ——
+// tushare 的 vol/amount 本来就是原始成交量，前复权不改它（stk_factor_pro 亦同）。
+//
+// 刻意严格的两处（同 P2-10 的教训：缺失值折成某个默认值 = 编数据）：
+//   - 某天取不到因子 → **跳过这一行**，不补 1.0。补 1.0 等于宣称「这天没除权」，
+//     在除权日附近会造出假跳空，而回测会把它当成真信号；
+//   - 因子 <= 0 → 同样跳过（它不可能是合法的复权因子）。
+func (c *TushareClient) normalizeDailyOHLCV(resp *TushareResponse, symbol string, factors map[string]float64) []domain.OHLCV {
+	if len(factors) == 0 {
+		c.logger.Warn().Str("symbol", symbol).
+			Msg("no adj_factor for the range — refusing to store unadjusted prices as qfq")
+		return nil
+	}
+
+	// 前复权基准 = **区间内**最新交易日的因子（不是「今天」，也不是首日）。
+	// 由此带来一个必须知道的性质：qfq 是相对基准的，将来同步到更晚的日期时，
+	// 历史数据的 qfq 会整体变动 —— 这是复权口径的固有性质（Tushare 官方对
+	// stk_factor 也明确写了「前复权是历史快照、数据不更新」），不是本实现引入的。
+	// YYYYMMDD 的字典序 == 时间序，可以直接比字符串。
+	latest := ""
+	for d := range factors {
+		if d > latest {
+			latest = d
+		}
+	}
+	base := factors[latest]
+	if base <= 0 {
+		c.logger.Warn().Str("symbol", symbol).Str("latest_date", latest).
+			Msg("latest adj_factor is not positive — skipping")
+		return nil
+	}
+
 	var records []domain.OHLCV
+	skipped := 0
 	c.logger.Debug().Int("items_count", len(resp.Data.Items)).Msg("normalizeDailyOHLCV start")
 	for _, item := range resp.Data.Items {
 		if len(item) < 8 {
@@ -330,18 +419,30 @@ func (c *TushareClient) normalizeDailyOHLCV(resp *TushareResponse, symbol string
 			continue
 		}
 
+		f, ok := factors[tradeDate]
+		if !ok || f <= 0 {
+			skipped++
+			continue
+		}
+
+		scale := f / base
 		ohlcv := domain.OHLCV{
 			Symbol:    symbol,
 			Date:      t,
-			Open:      c.fieldFloat(item, 2), // open_qfq
-			High:      c.fieldFloat(item, 3), // high_qfq
-			Low:       c.fieldFloat(item, 4), // low_qfq
-			Close:     c.fieldFloat(item, 5), // close_qfq
-			Volume:    c.fieldFloat(item, 6), // vol
-			Turnover:  c.fieldFloat(item, 7), // amount
-			TradeDays: 0,                     // not available from stk_factor_pro
+			Open:      c.fieldFloat(item, 2) * scale, // open
+			High:      c.fieldFloat(item, 3) * scale, // high
+			Low:       c.fieldFloat(item, 4) * scale, // low
+			Close:     c.fieldFloat(item, 5) * scale, // close
+			Volume:    c.fieldFloat(item, 6),         // vol（不复权）
+			Turnover:  c.fieldFloat(item, 7),         // amount（不复权）
+			TradeDays: 0,                             // not available from daily
 		}
 		records = append(records, ohlcv)
+	}
+	if skipped > 0 {
+		c.logger.Warn().Str("symbol", symbol).Int("skipped", skipped).
+			Msg("rows skipped: no usable adj_factor on that trade_date " +
+				"(storing them unadjusted would fake a gap)")
 	}
 	return records
 }
