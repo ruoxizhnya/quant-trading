@@ -318,13 +318,15 @@ func (e *Engine) processSignalsAndExecuteTrades(
 			state.TargetPositions[signal.Symbol] = tp
 		}
 
-		effectiveTarget := e.computeEffectiveTarget(tp, targetQty, signal.Direction, date, logger)
+		// 先把策略今天的目标落账，再算实际要下的量 —— 这样即使下面 skip
+		// （已达标 / 已超配），`TargetPosition` 记的也是**今天**的目标（AUD-55）。
+		tp.TargetQty = targetQty
+		tp.LastUpdated = date
+
+		effectiveTarget := e.computeEffectiveTarget(state, tp, targetQty, signal.Direction, date, logger)
 		if effectiveTarget < 0 {
 			continue
 		}
-
-		tp.TargetQty = targetQty
-		tp.LastUpdated = date
 
 		if effectiveTarget > 0 {
 			e.executeSignalTrade(state, signal, effectiveTarget, pricesCache, date, execOpts, tp, logger)
@@ -376,54 +378,120 @@ func (e *Engine) processSignalsFallback(
 			}
 			state.TargetPositions[signal.Symbol] = tp
 		}
-		effectiveTarget := e.computeEffectiveTarget(tp, targetQty, signal.Direction, date, logger)
+		tp.TargetQty = targetQty
+		tp.LastUpdated = date
+
+		effectiveTarget := e.computeEffectiveTarget(state, tp, targetQty, signal.Direction, date, logger)
 		if effectiveTarget < 0 {
 			continue
 		}
-		tp.TargetQty = targetQty
-		tp.LastUpdated = date
+
 		if effectiveTarget > 0 {
 			e.executeSignalTrade(state, signal, effectiveTarget, pricesCache, date, execOpts, tp, logger)
 		}
 	}
 }
 
+// computeEffectiveTarget 决定一条 Long / Short 信号**实际**要下多少量。
+//
+// AUD-55（AUD-53 的根因）：原实现只在 `tp.PendingQty > 0` 时才做
+// 「目标 − 已持」抵扣，而 `PendingQty` 是**上一次成交后写下的缓存值** ——
+// 恰好达标时它等于 0、超配时它小于 0，两种情况下抵扣都不生效。配上一个
+// **无状态**策略（`momentum` 每天对 top-N 重发全量 `Long`、从不读持仓），
+// 后果是**每天重发一次全量买单、每天被 `insufficient cash` 拒一次**。
+// 这就是 AUD-53「回测结果随价格水平 / 资金量级漂移 20 个百分点」的通道。
+//
+// 修法有两半，缺一不可：
+//
+//  1. 抵扣**无条件**执行 —— 不再看 `PendingQty` 的符号。
+//  2. 已持仓**每次实时问 tracker**，不读 `tp.ActualQty` 这个缓存。
+//     能改持仓的路径不止 `executeSignalTrade`：止损 / 止盈平仓、拆股、
+//     退市强平都直接落在 tracker 上。逐一在每处补同步是「靠记得」，
+//     漏一处就退化回原 bug；读真值则结构上不可能漏（AUD-50 的同一教训）。
+//
+// 返回值 < 0 表示「本条信号不产生委托」（已达标或已超配）。
 func (e *Engine) computeEffectiveTarget(
+	state *BacktestState,
 	tp *domain.TargetPosition,
 	targetQty float64,
 	direction domain.Direction,
 	date time.Time,
 	logger zerolog.Logger,
 ) float64 {
-	effectiveTarget := targetQty
-	if tp.PendingQty > 0 && (direction == domain.DirectionLong || direction == domain.DirectionShort) {
-		if tp.ActualQty >= targetQty {
-			effectiveTarget = 0
-		} else {
-			effectiveTarget = targetQty - tp.ActualQty
-		}
-		if effectiveTarget <= 0 {
-			logger.Info().
-				Str("symbol", tp.Symbol).
-				Float64("actual_qty", tp.ActualQty).
-				Float64("pending_qty", tp.PendingQty).
-				Float64("new_target", targetQty).
-				Time("date", date).
-				Msg("Signal skipped: already at or above target")
-			return -1
-		}
-		if effectiveTarget < targetQty {
-			logger.Info().
-				Str("symbol", tp.Symbol).
-				Float64("actual_qty", tp.ActualQty).
-				Float64("pending_qty", tp.PendingQty).
-				Float64("new_target", targetQty).
-				Float64("effective_target", effectiveTarget).
-				Time("date", date).
-				Msg("Adjusted target: netting actual owned qty")
-		}
+	// Close / Hold 不走「目标 − 已持」：Close 是全平（`executeSignalTrade`
+	// 直接调 `Tracker.ClosePosition`，不看这个数），Hold 是空信号。
+	if direction != domain.DirectionLong && direction != domain.DirectionShort {
+		return targetQty
+	}
+
+	held := e.heldQty(state, tp.Symbol)
+	effectiveTarget := targetQty - held
+	if effectiveTarget <= 0 {
+		logger.Info().
+			Str("symbol", tp.Symbol).
+			Float64("actual_qty", held).
+			Float64("pending_qty", tp.PendingQty).
+			Float64("new_target", targetQty).
+			Time("date", date).
+			Msg("Signal skipped: already at or above target")
+		return -1
+	}
+	if effectiveTarget < targetQty {
+		logger.Info().
+			Str("symbol", tp.Symbol).
+			Float64("actual_qty", held).
+			Float64("pending_qty", tp.PendingQty).
+			Float64("new_target", targetQty).
+			Float64("effective_target", effectiveTarget).
+			Time("date", date).
+			Msg("Adjusted target: netting actual owned qty")
 	}
 	return effectiveTarget
+}
+
+// heldQty 读 tracker 里的**真实**持仓量，负数（空头）按 0 处理 ——
+// 本函数只服务多头 / 空头的**加仓差额**，不承担反向平仓的推理。
+func (e *Engine) heldQty(state *BacktestState, symbol string) float64 {
+	if state == nil || state.Tracker == nil {
+		return 0
+	}
+	pos, ok := state.Tracker.GetPosition(symbol)
+	if !ok || pos == nil || pos.Quantity < 0 {
+		return 0
+	}
+	return pos.Quantity
+}
+
+// reconcileTargetPosition 把 `TargetPosition` 与 tracker 的真实持仓对齐。
+//
+// 供**引擎外**改持仓的路径调用：止损 / 止盈平仓（本文件 `processStopLosses`）、
+// 拆股（`ProcessSplit`）、退市强平（`forceCloseDelisted`）。它只负责那份
+// **对外可见的账**（回测结果 / 日志），不参与下单决策 —— 决策侧已经实时读
+// tracker，见 `computeEffectiveTarget`。
+func (e *Engine) reconcileTargetPosition(
+	state *BacktestState,
+	symbol string,
+	date time.Time,
+	logger zerolog.Logger,
+) {
+	tp, ok := state.TargetPositions[symbol]
+	if !ok {
+		return
+	}
+	held := e.heldQty(state, symbol)
+	if held == tp.ActualQty {
+		return
+	}
+	logger.Info().
+		Str("symbol", symbol).
+		Float64("stale_actual_qty", tp.ActualQty).
+		Float64("actual_qty", held).
+		Float64("target_qty", tp.TargetQty).
+		Time("date", date).
+		Msg("Target position reconciled with tracker holdings")
+	tp.ActualQty = held
+	tp.PendingQty = tp.TargetQty - tp.ActualQty
+	tp.LastUpdated = date
 }
 
 func (e *Engine) executeSignalTrade(
@@ -665,23 +733,29 @@ func (e *Engine) processStopLosses(
 	}
 
 	for _, event := range stopLossEvents {
-		if event.Type == "stop_loss" || event.Type == "take_profit" {
-			_, err := state.Tracker.ExecuteTrade(
-				event.Symbol,
-				domain.DirectionClose,
-				event.Quantity,
-				event.Price,
-				date,
-				nil,
-			)
-			if err != nil {
-				logger.Warn().
-					Str("symbol", event.Symbol).
-					Str("type", event.Type).
-					Err(err).
-					Msg("Failed to execute stop loss")
-			}
+		if event.Type != "stop_loss" && event.Type != "take_profit" {
+			continue
 		}
+		_, err := state.Tracker.ExecuteTrade(
+			event.Symbol,
+			domain.DirectionClose,
+			event.Quantity,
+			event.Price,
+			date,
+			nil,
+		)
+		if err != nil {
+			logger.Warn().
+				Str("symbol", event.Symbol).
+				Str("type", event.Type).
+				Err(err).
+				Msg("Failed to execute stop loss")
+			continue
+		}
+		// AUD-55 的耦合点：止损 / 止盈是**引擎外**平仓 —— 它直接落在 tracker 上，
+		// 不经过 `executeSignalTrade` / `updateTargetPositionAfterTrade`。
+		// 不在这里对齐，`TargetPosition` 那份账就会停在旧持仓上。
+		e.reconcileTargetPosition(state, event.Symbol, date, logger)
 	}
 }
 
@@ -703,7 +777,10 @@ func (e *Engine) processCorporateActions(
 		for _, s := range splits {
 			if err := state.Tracker.ProcessSplit(s.Symbol, *s); err != nil {
 				logger.Warn().Str("symbol", s.Symbol).Err(err).Msg("Failed to process split")
+				continue
 			}
+			// 拆股改的是**股数** —— 与止损平仓同属「引擎外改持仓」（AUD-55）。
+			e.reconcileTargetPosition(state, s.Symbol, truncatedDate, logger)
 		}
 	}
 }
@@ -822,6 +899,9 @@ func (e *Engine) forceCloseDelisted(
 				Time("date", date).
 				Msg("Force closed delisted position")
 		}
+		// 摘牌强平同样是「引擎外改持仓」（AUD-55）：票已经从 universe 里消失，
+		// 不会再有信号，但那份 `TargetPosition` 账得跟着清掉。
+		e.reconcileTargetPosition(state, symbol, date, logger)
 	}
 }
 

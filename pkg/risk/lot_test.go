@@ -499,3 +499,60 @@ func TestValidateOrderQuantity_SellAllowsOddLots(t *testing.T) {
 	assert.Error(t, ValidateOrderQuantity(100.9, symMainSH, true),
 		"a fractional sell is still invalid")
 }
+
+// TestRiskManager_PositionSizeWeightCanContradictItsOwnSize documents an
+// inconsistency between the two halves of the same return value, which
+// the "lift to minimum" rule above makes possible:
+//
+//	PositionSize.Weight is clamped to MaxPositionWeight, but
+//	PositionSize.Size × price is NOT — lifting a sub-lot target to one
+//	whole lot makes the real notional 100 × price, which can exceed the
+//	position budget (TotalValue × MaxPositionWeight) by an unbounded
+//	factor as price rises or capital falls.
+//
+// The two fields therefore disagree, and they disagree more the higher
+// the price — i.e. the disagreement is a function of price level. This
+// matters beyond bookkeeping: `Weight` is served straight out through
+// the HTTP surface (cmd/analysis/handlers_risk.go), so a caller sizing
+// on it sees a position within the cap while the engine actually bought
+// several times that.
+//
+// It is NOT fixed here. Both available fixes change behaviour in ways
+// that need a decision first: changing the lift policy touches live
+// trading (ValidateOrderQuantity is the broker-boundary counterpart,
+// see AUD-21), and changing what `Weight` reports changes an external
+// contract. This guard exists so the inconsistency cannot be forgotten
+// or silently widened. See TASKS.md AUD-53.
+func TestRiskManager_PositionSizeWeightCanContradictItsOwnSize(t *testing.T) {
+	t.Parallel()
+
+	rm, err := NewRiskManager(normalizationConfig(), zerolog.Nop())
+	require.NoError(t, err)
+
+	regime := &domain.MarketRegime{Trend: "sideways", Volatility: "medium"}
+	// MaxPositionWeight is 0.05 in normalizationConfig, so the budget is
+	// 5% of TotalValue and the cap that `Weight` reports is 0.05.
+	const totalValue = 1_000_000.0
+	const price = 5000.0 // budget/price = 10 shares → lifted to 100
+	budget := totalValue * 0.05
+
+	signal := domain.Signal{Symbol: symMainSH, Direction: domain.DirectionLong, Strength: 1.0}
+	ps, err := rm.CalculatePosition(
+		context.Background(), signal,
+		&domain.Portfolio{TotalValue: totalValue},
+		regime, price, generateTestOHLCV(30, price, 0.02))
+	require.NoError(t, err)
+
+	require.InDelta(t, 0.05, ps.Weight, 1e-9, "Weight stays clamped to the configured cap")
+	require.InDelta(t, 100, ps.Size, 1e-9, "a sub-lot target is lifted to one whole lot")
+
+	actualNotional := ps.Size * price
+	actualWeight := actualNotional / totalValue
+
+	assert.Greater(t, actualNotional, budget,
+		"the lifted order exceeds the very budget the cap was computed from")
+	assert.InDelta(t, 0.50, actualWeight, 1e-9,
+		"the real weight is 10x the reported one; the two fields contradict")
+	t.Logf("预算 %.0f（%.0f × 0.05）→ 抬升后实际下单 %.0f → 实际权重 %.3f，而报告权重 %.3f（%.1f 倍）",
+		budget, totalValue, actualNotional, actualWeight, ps.Weight, actualWeight/ps.Weight)
+}

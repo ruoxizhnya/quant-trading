@@ -1,7 +1,7 @@
 ---
 status: evergreen
-last-verified: 2026-09-22
-verified-by: AUD-44 路径引用复核 + AUD-47 §5–§7 内容复核（2026-09-22）—— ① 路径：`pkg/tracker` 已迁至 `pkg/backtest/tracker`、`docs/phase-gate-reviews.md` 已归档至 `docs/archive/research-2026-Q2/`、§4 的 CLI 示例标注为非真实接口；② 内容：§5 沙箱限制改为实测值（30s CPU + 1 GiB，ODR-020）、§6 覆盖率目标标注为「目标不是门禁」（CI 不设阈值）、§7.1 `format.test.ts` 8→28 例、§7.2 e2e 改为实测 17 spec / 160 例、`--project=chrome`→`chromium`
+last-verified: 2026-09-24
+verified-by: AUD-44 路径引用复核 + AUD-47 §5–§7 内容复核（2026-09-22）+ AUD-56 新增 §2.0「本机运行前置」（2026-09-24）—— ① 路径：`pkg/tracker` 已迁至 `pkg/backtest/tracker`、`docs/phase-gate-reviews.md` 已归档至 `docs/archive/research-2026-Q2/`、§4 的 CLI 示例标注为非真实接口；② 内容：§5 沙箱限制改为实测值（30s CPU + 1 GiB，ODR-020）、§6 覆盖率目标标注为「目标不是门禁」（CI 不设阈值）、§7.1 `format.test.ts` 8→28 例、§7.2 e2e 改为实测 17 spec / 160 例、`--project=chrome`→`chromium`；③ §2.0：记下本机跑全仓测试的两个环境前置（`PATH` 里要有 `go`、`GOPROXY=off`），两者都会造成「红了但不指向代码」的假信号 —— 取证见 TASKS.md 的 AUD-56
 ---
 
 # Test Plan & Quality Assurance (TEST.md)
@@ -37,6 +37,32 @@ all_trades.have_timestamp        // Every trade is time-stamped
 ---
 
 ## 2. Test Categories
+
+### 2.0 本机运行前置（Windows / 离线环境）
+
+宿主**没有原装 Go**（只有免安装版），且到 `proxy.golang.org` 的网络**不通**。这两件事
+各会制造一种「红了，但失败信号不指向任何代码问题」。跑全仓测试前先备好环境：
+
+```bash
+export GOROOT="C:/Users/ruoxi/.workbuddy/binaries/go/go"
+export GOMODCACHE="C:/Users/ruoxi/.workbuddy/binaries/go/modcache"
+export GOCACHE="C:/Users/ruoxi/.workbuddy/binaries/go/buildcache"
+export GOTOOLCHAIN=local CGO_ENABLED=0 GOFLAGS=-mod=mod
+export PATH="/c/Users/ruoxi/.workbuddy/binaries/go/go/bin:$PATH"   # 子进程按 PATH 找 go
+export GOPROXY=off
+go test ./...
+```
+
+- **`PATH` 必须带上 `go` 所在的目录**：`pkg/ai/pipeline` 的 `validateCompilation` 会
+  `exec.Command("go", "build", ...)`，子进程按 **PATH** 找 `go` —— 只设 `GOROOT` 不够。
+- **`GOPROXY=off` 是必需的**：同一个测试用 `import "github.com/nonexistent/fakepkg"`
+  去逼 `go build` 失败，而 `go build` 解析这个 import 时会**联网**。墙内不通时它一直等，
+  整仓测试就挂在超时上（实测 `go test ./...` **601s 被杀**、单跑 70s
+  `panic: test timed out`）。设 `GOPROXY=off` 后同一条测试 **0.976s** 通过，
+  全仓 **74 包 57s** 全绿。根因、取证与三条修法登记为 **AUD-56**（见 `TASKS.md`）。
+- **真库（PostgreSQL）测试本机跑不了**：`wsl.exe` 被安全策略列入程序黑名单 → Docker
+  Desktop 起不来。这类测试会走 skip；受影响的是 `pkg/storage` 等的集成用例，
+  纯合成 / 单元测试不受影响。
 
 ### 2.1 Unit Tests — `pkg/*`
 
