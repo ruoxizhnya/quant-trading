@@ -153,7 +153,7 @@
 | `pkg/ai/metrics/ic.go` | ✅ 存在 | 通过 |
 | `pkg/ai/metrics/turnover.go` | ✅ 存在 | 通过 |
 | `cmd/ai/main.go` | ✅ 存在 | 通过 |
-| `config/ai-service.yaml` | ✅ 存在 | 通过 |
+| `config/ai-service.yaml` | ✅ 存在（2026-05-06 审计快照） | 通过 —— 后续：该文件已于 2026-09-18 删除（TASKS P2-5） |
 | `web/src/components/ai/FactorLab.vue` | ✅ 存在 | 通过 |
 | `web/src/components/ai/StrategyWorkshop.vue` | ✅ 存在 | 通过 |
 | `web/src/components/ai/EvolutionObs.vue` | ✅ 存在 | 通过 |

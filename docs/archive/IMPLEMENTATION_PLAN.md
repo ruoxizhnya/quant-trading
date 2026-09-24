@@ -743,7 +743,7 @@ web/src/components/ai/GenealogyTree.vue   # Genealogy tree visualization
 web/src/components/ai/FitnessChart.vue    # Fitness evolution chart
 web/src/pages/AIResearch.vue              # AI Research main page
 cmd/ai/main.go                    # AI Research Service entry point
-config/ai-service.yaml            # AI Service configuration
+config/ai-service.yaml            # AI Service configuration（已于 2026-09-18 删除，见 TASKS P2-5）
 ```
 
 ### New Files (Infrastructure — Phases 1-4)

@@ -168,7 +168,7 @@ docker compose up -d ai-research-service
 
 #### Configuration
 
-Create `config/ai-service.yaml`:
+Create `config/ai-service.yaml`（⚠️ 该文件已于 2026-09-18 随 `cmd/ai` 删除，见 TASKS P2-5；本节是**历史步骤**，恢复 AI 服务时才需要）:
 
 ```yaml
 service:
@@ -446,7 +446,7 @@ If migration fails:
 
 3. **Remove Configuration**:
    ```bash
-   rm config/ai-service.yaml
+   rm config/ai-service.yaml    # 已于 2026-09-18（TASKS P2-5）删除；此行保留为历史回滚步骤
    ```
 
 4. **Revert Docker Compose**:
@@ -476,7 +476,7 @@ If migration fails:
 export LLM_API_KEY=sk-...
 
 # Verify config
-cat config/ai-service.yaml | grep api_key
+cat config/ai-service.yaml | grep api_key    # 该文件已于 2026-09-18（TASKS P2-5）删除
 ```
 
 #### Database Connection Failed

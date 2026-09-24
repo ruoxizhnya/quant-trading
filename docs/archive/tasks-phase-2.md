@@ -23,7 +23,7 @@
 | S7-7 | Create `pkg/ai/agents/research.go` — Research Agent MVP | New | 1d | ✅ |
 | S7-8 | Create `pkg/ai/prompts/factor_research.txt` — Prompt template | New | 0.5d | ✅ |
 | S7-9 | Create `cmd/ai/main.go` — AI Research Service entry point | New | 0.5d | ✅ |
-| S7-10 | Create `config/ai-service.yaml` — AI Service configuration | New | 0.5d | ✅ |
+| S7-10 | Create `config/ai-service.yaml` — AI Service configuration（该文件已于 2026-09-18 删除，见 TASKS P2-5） | New | 0.5d | ✅ |
 | S7-11 | Unit tests for expression engine | New tests | 1d | ✅ |
 | ~~S7-D6-1~~ | ~~LLM 意图解析 (中文自然语言 → 策略参数)~~ | ~~`pkg/ai/intent/parser.go`~~ | ~~—~~ | ✅ |
 | ~~S7-D6-2~~ | ~~YAML 生成 (参数 → YAML 配置)~~ | ~~`pkg/ai/yaml/generator.go`~~ | ~~—~~ | ✅ |
