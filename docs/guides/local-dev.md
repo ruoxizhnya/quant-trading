@@ -1,8 +1,11 @@
 ---
 status: evergreen
 type: how-to
-last-verified: 2026-09-17
-verified-by: 实际命令核对（Makefile / docker-compose.yml / go.mod / cmd/）+ P0-4 启动门禁运行时取证
+last-verified: 2026-09-25
+verified-by: 实际命令逐条复核（`find -name '*_test.go'` 实测 273、`.gitignore` 已无 `*_test.go` 规则、
+  `ls cmd/` 只有 analysis/data/strategy、`docker compose` 实测报 `'compose' is not a docker command`
+  而 `docker-compose` v2.32.1 可用、`C:\Users\ruoxi\sdk\go1.25.0\bin\go.exe` 实测存在且能离线编译全仓）＋
+  AUD-51 自灌自证改造后同步「已知陷阱」
 ---
 
 # 本地开发指南（How-to）
@@ -39,8 +42,8 @@ docker-compose up -d postgres redis
 > `${JWT_SECRET:?...}` 必填插值 —— 没配的话连 `docker-compose up -d postgres`
 > 都会在解析阶段报错（这是刻意的：analysis 监听 0.0.0.0，无鉴权不能起）。
 
-> ⚠️ **必须用带连字符的 `docker-compose`**。本机 Docker 27.4.1 不支持 `docker compose`
-> （空格写法会报 `'compose' is not a docker command`）。
+> ⚠️ **必须用带连字符的 `docker-compose`**。本机 Docker CLI（27.5）没装 `compose`
+> 插件，空格写法会报 `'compose' is not a docker command`；`docker-compose` v2.32.1 可用。
 
 连接串：`postgres://postgres:postgres@localhost:5432/quant_trading?sslmode=disable`
 （见 `pkg/storage/postgres_test.go` 的 `testStore()`）。库表会在首次连接时自动建
@@ -77,10 +80,10 @@ JWT_SECRET=$(openssl rand -hex 32) go run ./cmd/analysis   # :8085 主服务（�
 
 go run ./cmd/data        # :8081
 go run ./cmd/strategy    # :8082
-go run ./cmd/ai          # :8086  AI 研究服务
 ```
 
-> ⚠️ **`cmd/ai` 没有 Dockerfile，也不在 `docker-compose.yml` 里**——只能本地 `go run`。（见 TASKS P1-11）
+> `cmd/ai`（:8086）已于 2026-09-18 **删除**（TASKS P2-5）：零调用方，且建在废弃交互层的
+> 定位上。AI 能力走 `cmd/analysis` 的 MCP 工具层，不再是独立服务。
 
 ### analysis 服务的两种启动姿势
 
@@ -123,10 +126,11 @@ go test ./...                                  # 全量
 go test ./pkg/... -coverprofile=coverage.out   # 带覆盖率
 ```
 
-现有 186 个 `*_test.go`。
+现有 **273** 个 `*_test.go`（`find . -name '*_test.go' -not -path './web/*' -not -path './e2e/*' | wc -l`）。
 
-> ⚠️ **`.gitignore:29` 的 `*_test.go` 规则会忽略所有新建的测试文件**。
-> 新建测试后若 `git status` 看不到它，需 `git add -f path/to/file_test.go`。（见 TASKS P0-3）
+> 跑全仓测试前把 Go 的 bin 目录放进 `PATH`，并设 `GOPROXY=off` —— 见 `docs/TEST.md` §2.0
+> 「本机运行前置」。缺前者会让 `pkg/ai/pipeline` 的子进程找不到 `go`，缺后者会让它联网
+> 解析 import 而挂到超时（AUD-56）。
 
 ---
 
@@ -135,7 +139,7 @@ go test ./pkg/... -coverprofile=coverage.out   # 带覆盖率
 | 坑 | 现象 | 处置 |
 |---|---|---|
 | **测试"通过"但其实没跑** | 连不上库时 `testStore()` 会 `t.Skip`。CI 日志里看到 SKIP 要警惕 | 起 Postgres 再跑；`go test -v` 看 SKIP 数 |
-| **新库是空的** | `TestGetAllStocks` / `TestHasOHLCVData` / `TestGetTradingDays` / `TestIsTradingDay` / `TestGetTradingDates` 需要预置行情数据，空库下会误报失败 | 已加 `skipIfNoSeedData` 守卫，空库时跳过而非失败 |
+| **新库是空的** | 少数依赖预置数据的测试在空库下会走 `t.Skip`（例如 `TestGetAllStocks`） | 起 Postgres 并跑一次数据同步；`go test -v` 看 SKIP 数。**依赖行情/日历的存储层测试已改为自灌自证**（自己写数据、自己清理），不再需要预置数据 —— 见 TASKS AUD-51 |
 | **Windows 特有的测试失败** | 写死 POSIX 路径（`/tmp`、`/nonexistent/path`）在 Windows 下语义不同 | 已修；新增测试请用 `t.TempDir()` |
 | **`make build` 会失败** | Makefile 仍 build `cmd/execution`、`cmd/risk`，这两个目录早在 ODR-021 合并进 analysis 后**已不存在** | 用 `go build ./...` 代替；或修 Makefile（TASKS P1-10） |
 | **两份 compose 文件互相漂移** | `docker-compose.yml` 与 `docker-compose.services.yml` 重复定义同批服务且版本标签不一致；后者还引用不存在的 Dockerfile | 只用 `docker-compose.yml`（TASKS P1-8） |
