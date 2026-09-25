@@ -140,11 +140,21 @@ services:
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
       # ── P0-4 鉴权：两种模式**二选一**，默认是本地 open-access ──────────
       #
-      # 本地默认走 open-access，理由不是图方便：**前端没有登录页、没有 auth
-      # store，api client 是裸 fetch 不带 token**（web/src/api/client.ts），
-      # 且**没有首个管理员的引导**（CreateUser 只在 RequireRole(admin) 后面 ——
-      # 鸡生蛋）。所以鉴权一开，整个 SPA 与 e2e 套件（160 条 Playwright）全站
-      # 401，服务"起得来但用不了"。
+      # 本地默认走 open-access。**理由已经变了**（2026-09-25，ADR-026）：
+      # 原先的理由是「前端没有登录页、没有 auth store、api client 是裸 fetch
+      # 不带 token（web/src/api/client.ts），且没有首个管理员的引导
+      # （CreateUser 只在 RequireRole(admin) 后面 —— 鸡生蛋）」，所以鉴权一开
+      # 整个 SPA 全站 401，服务"起得来但用不了"。
+      #
+      # **那个缺口已经补上了**：公开的 GET /api/auth/status 让 SPA 在无凭据时
+      # 问出姿势、一次性 POST /api/auth/bootstrap 在浏览器里建首个管理员、
+      # 前端有登录页 + 守卫 + 401 刷新。默认仍是 open-access —— 但这次是**选择**
+      # （本地开发图省事），不再是"没得选"。要走鉴权见 guides/local-dev.md 的
+      # 「① 带鉴权」。
+      #
+      # ⚠️ **整套 playwright 仍然必须跑 open-access**：其余用例都假定「打开就是
+      # 控制台」，鉴权形态下会被守卫全数拦到登录页（只有
+      # e2e/tests/auth-login-flow.spec.ts 两种形态都成立）。
       #
       # 基础不变量仍然保留（这是 P0-4 的要点，没有被削弱）：**open-access
       # 绝不能从其他主机到达**。改动只是把判据从「绑定地址」换成「发布层」——

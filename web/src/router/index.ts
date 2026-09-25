@@ -1,7 +1,18 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { authGuard } from './authGuard'
 
 const routes: RouteRecordRaw[] = [
+  {
+    // 登录页在 AppLayout **之外**：没有侧边栏/顶栏可点，也不该有 —— 那时
+    // 用户还没有任何可导航的身份。
+    path: '/login',
+    name: 'login',
+    component: () => import('@/pages/Login.vue'),
+    // public 由下面的守卫读：这一条是唯一允许「未登录也能停在上面」的路由，
+    // 少了它就会守卫把自己重定向到自己的死循环。
+    meta: { title: '登录', public: true },
+  },
   {
     path: '/',
     component: () => import('@/components/layout/AppLayout.vue'),
@@ -102,8 +113,12 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to) => {
+// 守卫本体在 ./authGuard.ts（单独成文件是为了能被单测直接调用）。
+// useAuthStore() 在守卫里是安全的：main.ts 先 app.use(createPinia()) 再
+// app.use(router)，首次导航在 mount 时才发生。
+router.beforeEach(async (to) => {
   document.title = `${to.meta.title || 'Quant Lab'} — Quant Lab`
+  return authGuard(to)
 })
 
 export default router

@@ -94,6 +94,10 @@ var (
 	ErrInvalidToken       = errors.New("auth: invalid or expired token")
 	ErrUserDisabled       = errors.New("auth: user account is disabled")
 	ErrInvalidRole        = errors.New("auth: invalid role")
+	// ErrBootstrapClosed means the one-time first-admin window is shut: either
+	// JWT auth is disabled (there is nothing to bootstrap), or a user already
+	// exists (the window closes permanently after the first successful call).
+	ErrBootstrapClosed = errors.New("auth: bootstrap window is closed")
 )
 
 // BcryptCost is the work factor used for new password hashes. 12 is the
@@ -221,6 +225,118 @@ func isNoRows(err error) bool {
 	}
 	msg := err.Error()
 	return msg == "no rows in result set" || msg == "ErrNoRows"
+}
+
+// bootstrapLockKey is the advisory-lock key serialising concurrent bootstrap
+// attempts. Any constant works as long as this repo uses only one.
+const bootstrapLockKey int64 = 7215001
+
+// CountUsers returns the number of rows in `users`.
+func (s *Service) CountUsers(ctx context.Context) (int, error) {
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("auth: count users: %w", err)
+	}
+	return n, nil
+}
+
+// BootstrapRequired reports whether the one-time first-admin bootstrap is still
+// open, i.e. auth is enabled and no user exists yet.
+//
+// When auth is disabled this answers (false, nil) *without touching the
+// database*: an open-access instance needs no bootstrap, and callers (the
+// status endpoint) should not need a reachable database just to say so. That
+// is also a load-bearing property for the dev/test posture, where the whole
+// point is that nothing requires credentials.
+func (s *Service) BootstrapRequired(ctx context.Context) (bool, error) {
+	if !s.Enabled() {
+		return false, nil
+	}
+	n, err := s.CountUsers(ctx)
+	if err != nil {
+		return false, err
+	}
+	return n == 0, nil
+}
+
+// CreateFirstAdmin creates the initial admin account, but only while the
+// `users` table is empty. Once any user exists the window is closed for good
+// and ErrBootstrapClosed is returned — for every caller, permanently.
+//
+// This is the only unauthenticated write path in the system, so the narrow
+// condition it rests on is machine-checked rather than merely documented: an
+// empty table IS the authorisation. Two consequences are worth stating out
+// loud instead of discovering later.
+//
+//   - Whoever can reach the instance first can claim the admin account. That is
+//     inherent to self-service bootstrap; it is why the local stack publishes on
+//     loopback only (ADR-025) and why an operator exposing this instance to a
+//     LAN should bootstrap it before doing so.
+//   - The window closes by itself after the first user exists, so an instance
+//     that has ever been bootstrapped cannot be re-bootstrapped by an attacker
+//     even while the endpoint stays routable.
+//
+// Concurrency: check-then-insert is not atomic. Under READ COMMITTED, two
+// requests can both see an empty table and both insert, yielding two first
+// admins. A transaction-scoped advisory lock turns the count and the insert
+// into one critical section, so the loser re-reads the count after the winner
+// commits and gets ErrBootstrapClosed instead of a second admin row.
+func (s *Service) CreateFirstAdmin(ctx context.Context, username, password string) (*User, error) {
+	if !s.Enabled() {
+		return nil, ErrBootstrapClosed
+	}
+	if username == "" || len(password) < 8 {
+		return nil, fmt.Errorf("auth: username required and password must be ≥8 chars")
+	}
+	// Hash before taking the lock: bcrypt at cost 12 takes ~250ms and the
+	// critical section should cover only the check-and-insert.
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), BcryptCost)
+	if err != nil {
+		return nil, fmt.Errorf("auth: bcrypt failed: %w", err)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("auth: begin: %w", err)
+	}
+	// Rollback after a successful commit is a no-op, so this is safe to defer
+	// unconditionally and covers every early return above.
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, bootstrapLockKey); err != nil {
+		return nil, fmt.Errorf("auth: bootstrap lock: %w", err)
+	}
+
+	var n int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
+		return nil, fmt.Errorf("auth: count users: %w", err)
+	}
+	if n > 0 {
+		return nil, ErrBootstrapClosed
+	}
+
+	var id int64
+	err = tx.QueryRow(ctx, `
+		INSERT INTO users (username, password_hash, role)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (username) DO NOTHING
+		RETURNING id`,
+		username, string(hash), string(RoleAdmin),
+	).Scan(&id)
+	if err != nil {
+		// ON CONFLICT DO NOTHING returns no row when the name was taken between
+		// the count and the insert (only reachable through a writer that does
+		// not take the advisory lock). Either way the window is shut.
+		if isNoRows(err) {
+			return nil, ErrBootstrapClosed
+		}
+		return nil, fmt.Errorf("auth: insert first admin: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("auth: commit bootstrap: %w", err)
+	}
+	return s.GetUserByID(ctx, id)
 }
 
 // Authenticate verifies the username/password and returns the user on success.

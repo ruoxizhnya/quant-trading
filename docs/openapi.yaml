@@ -1356,6 +1356,102 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/auth/status:
+    get:
+      tags: [Auth]
+      summary: Auth posture of this instance (public)
+      operationId: authStatus
+      description: |
+        **Deliberately unauthenticated** (ADR-026). The SPA must choose between
+        rendering a login form and a "create the first administrator" form
+        *before* it holds any credential, so this endpoint has to answer without
+        one. It discloses only what is externally observable anyway: whether the
+        instance is open-access, and whether the first-admin window is still open.
+
+        Returns 500 when auth is enabled but the database is unreachable — the
+        SPA fails closed (renders an "unreachable" state, never a credential form)
+        rather than being told a made-up answer. When auth is **disabled** it
+        answers without touching the database.
+
+        **Exempt from the gateway rate limiter** (ADR-026 §5, AUD-57), alongside
+        `/health`. Rationale: throttling it makes a well-behaved client unable to
+        tell `429` apart from `401`, and the SPA's fail-closed probe then reads a
+        rate-limited answer as "not authenticated" and bounces the whole app to
+        the login page (measured: 130 rapid calls → 93x `200` / 37x `429`). This
+        is the only `/api/auth/*` path that is exempt — `/api/auth/login` and
+        `/api/auth/refresh` stay rate-limited, since that limiter is the first
+        line of defence against credential stuffing.
+      responses:
+        '200':
+          description: Current auth posture
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [auth_enabled, bootstrap_required]
+                properties:
+                  auth_enabled:
+                    type: boolean
+                    description: JWT issuance is configured (`auth.jwt_secret` set)
+                  bootstrap_required:
+                    type: boolean
+                    description: Auth is on AND the `users` table is empty
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/auth/bootstrap:
+    post:
+      tags: [Auth]
+      summary: Create the FIRST administrator, once (public)
+      operationId: bootstrapFirstAdmin
+      description: |
+        **The only unauthenticated write path in the system** (ADR-026). The
+        authorisation is not a credential but a state: the `users` table being
+        empty. It is checked inside a transaction under
+        `pg_advisory_xact_lock(7215001)`, so concurrent callers cannot both win.
+
+        The window closes permanently after the first successful call — every
+        later call returns 403, for every caller. Whoever reaches the instance
+        first can claim admin; that is inherent to self-service bootstrap (the
+        local stack publishes on loopback only, ADR-025).
+
+        On success the caller is logged in immediately (the response is a full
+        token pair), and the attempt leaves a row in `audit_logs`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+      responses:
+        '201':
+          description: First administrator created and logged in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: >
+            Bootstrap window is closed — either a user already exists, or auth is
+            disabled. One message for both: neither is actionable by an anonymous
+            caller, and distinguishing them would disclose whether any account exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/auth/admin/users:
     get:
       tags: [Auth]

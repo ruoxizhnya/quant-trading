@@ -429,12 +429,33 @@ npm run test:watch    # Watch mode
 npm run test:coverage # With coverage report
 ```
 
-**Test Files:**
-| File | Coverage | Description |
-|------|----------|-------------|
-| `src/utils/format.test.ts` | 28 tests | fmtPercent, fmtNumber, fmtCurrency, formatDate, fmtVolume, fmtMetric |
-| `src/stores/backtest.test.ts` | 11 tests | addToHistory, trades mapping, deduplication, clearHistory |
-| `src/components/backtest/EquityChart.test.ts` | 11 tests | buildTradeMarkers (buy/sell/short/empty/filter/fallback) |
+> ⚠️ **Windows 下别直接用 `node_modules/.bin/vitest`**：那是 POSIX shell 脚本，
+> 经 `CreateProcess` 起会报 `OSError: [WinError 193] %1 不是有效的 Win32 应用程序`；
+> 加 `./` 前缀的 `.cmd` 在 cmd.exe 里又会报 `'.' 不是内部或外部命令`。
+> 稳的写法是**直接跑入口**：`node node_modules/vitest/vitest.mjs run <path>`。
+
+**Test Files:** **18 个文件 / 208 条**（2026-09-25 实测 `vitest run`）：
+
+| File | Tests | Description |
+|---|---|---|
+| `src/utils/format.test.ts` | 28 | fmtPercent, fmtNumber, fmtCurrency, formatDate, fmtVolume, fmtMetric |
+| `src/api/client.test.ts` | 24 | HTTP 出口的基础行为（URL 拼接、错误映射、blob 下载） |
+| `src/stores/auth.test.ts` | 18 | 姿势探测、登录/引导、登出；**`unavailable` ≠ `anonymous`** |
+| `src/utils/pairTrades.test.ts` | 18 | 成交配对 |
+| `src/test-lint.test.ts` | 18 | 工程约定（测试写法自身的 lint 形态） |
+| `src/composables/useSuitability.test.ts` | 12 | 适当性校验 |
+| `src/api/client.auth.test.ts` | 11 | **鉴权注入 + 401 → 刷新 → 重放** |
+| `src/components/backtest/EquityChart.test.ts` | 11 | buildTradeMarkers (buy/sell/short/empty/filter/fallback) |
+| `src/stores/backtest.test.ts` | 11 | addToHistory、成交映射、去重、clearHistory |
+| `src/composables/useAsyncBacktest.test.ts` | 11 | 异步回测编排 |
+| `src/stores/sync.test.ts` | 10 | 同步任务状态 |
+| `src/router/authGuard.test.ts` | 9 | 守卫分支顺序、fail closed、`unavailable` 自愈 |
+| `src/components/factor/FactorCitation.test.ts` | 7 | 因子引用 |
+| `src/components/evidence/EvidenceLookup.test.ts` | 6 | 证据查询（404 = 「未入库」，是答案不是错误） |
+| `src/pages/Login.test.ts` | 5 | 登录页两态 + **离线态**（连不上时不摆凭据表单） |
+| `src/api/evidence.test.ts` | 3 | 证据 API |
+| `src/api/factor.test.ts` | 3 | 因子 API |
+| `src/components/paper/EmergencyFlatten.test.ts` | 3 | 紧急平仓 |
 
 **Key Test Scenarios:**
 - `buildTradeMarkers`: Buy (long), Sell (close), Short directions handled correctly
@@ -442,6 +463,24 @@ npm run test:coverage # With coverage report
 - `buildTradeMarkers`: Fallback to entry_date/exit_date when timestamp missing
 - `useBacktestStore`: Trades correctly attached to history items via computed
 - `fmtPercent`: Handles null, undefined, NaN, positive, negative, zero
+
+**鉴权相关（ADR-026 落地 + AUD-57 修复，共 43 条）** —— 这几条守的是「配了鉴权
+不等于关掉 UI」和「瞬时失败不等于登出」两件事：
+
+- `client.auth.test.ts`：**没有 token 时不带 `Authorization` 头**（open-access 与
+  加鉴权之前逐字节相同的不变量）；显式 `init.headers` **压过**自动注入（`execution.ts`
+  带的是交易用 emergency token）；`download()` 也注入；401 → 刷新 → 重放；
+  刷新被拒才丢 token；**重放后仍 401 不再次刷新**；**不带 token 发出的 401 不触发
+  会话失效**（登录页密码错了不是「会话过期」）；**刷新因网络失败时保留凭据**；
+  并发 3 个 401 **只刷新一次**。
+- `stores/auth.test.ts`：`probe` 的四种结局；**429 / 5xx / 断网 ⇒ `unavailable`**，
+  不是 `anonymous`；`unavailable` **可再探**；已有答复的状态不被无谓重探。
+- `authGuard.test.ts`：`isOpenAccess` 必须**先判**（否则默认形态被拦）；`meta.public`
+  必须**第二判**（否则守卫重定向到自己）；429 时仍然拦住**但不清凭据**；
+  后端恢复后**自动放行**（不需要用户刷新页面）。
+- `Login.test.ts`：`unavailable` 下**三个入口一个都不许在**（账号/密码/提交），
+  改为「连不上 + 重试」；`unavailable` **优先于**「创建首个管理员」（`bootstrapRequired`
+  可能是上一次成功探测留下的陈旧值）。
 
 ### 7.2 E2E Tests — Playwright
 

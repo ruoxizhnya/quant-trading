@@ -5,7 +5,8 @@ last-verified: 2026-09-25
 verified-by: 实际命令逐条复核（`find -name '*_test.go'` 实测 273、`.gitignore` 已无 `*_test.go` 规则、
   `ls cmd/` 只有 analysis/data/strategy、`docker compose` 实测报 `'compose' is not a docker command`
   而 `docker-compose` v2.32.1 可用、`C:\Users\ruoxi\sdk\go1.25.0\bin\go.exe` 实测存在且能离线编译全仓）＋
-  AUD-51 自灌自证改造后同步「已知陷阱」
+  AUD-51 自灌自证改造后同步「已知陷阱」＋ ADR-026 / AUD-57 落地后同步鉴权与限流两节
+  （`*_test.go` 实测 **275**、前端 `vitest` 实测 **208 条 / 18 文件**、探针连打 130 次实测 `200×130 / 429×0`）
 ---
 
 # 本地开发指南（How-to）
@@ -118,7 +119,8 @@ go run ./cmd/strategy    # :8082
 ```
 
 > 若一定要带鉴权跑：`JWT_SECRET=$(openssl rand -hex 32) go run ./cmd/analysis`
-> —— 但本地前端与 e2e 都拿不到 token，见上文「两种启动姿势」的说明。
+> —— **前端能用了**（浏览器里创建首个管理员即可），但整套 playwright 用不了，
+> 见下文「两种启动姿势」① 的说明。
 
 > `cmd/ai`（:8086）已于 2026-09-18 **删除**（TASKS P2-5）：零调用方，且建在废弃交互层的
 > 定位上。AI 能力走 `cmd/analysis` 的 MCP 工具层，不再是独立服务。
@@ -134,10 +136,26 @@ export JWT_SECRET=$(openssl rand -hex 32)
 生效后 `/api/*` 需要 `Authorization: Bearer <access_token>`，
 token 从 `POST /api/auth/login` 拿。不设就直接 `auth: JWT secret missing` 退出。
 
-> ⚠️ **本地全栈不要用这个姿势**：前端没有登录页、`web/src/api/client.ts` 是裸
-> `fetch` 不带 token，系统也没有首个管理员的引导（`CreateUser` 在
-> `RequireRole(admin)` 后面 —— 鸡生蛋）。所以开了鉴权 = 整个 SPA 与 e2e
-> 全站 401，服务"起得来但用不了"。要对外访问才用它，见 ② 的说明。
+**首个管理员怎么来**（ADR-026）：不用命令行、不用环境变量，在浏览器里建 ——
+
+1. SPA 启动时问 `GET /api/auth/status`（公开），拿到
+   `{auth_enabled: true, bootstrap_required: ?}`；
+2. `bootstrap_required=true` ⟺ `users` 表为空 ⇒ 登录页显示「创建首个管理员」；
+3. 提交 `POST /api/auth/bootstrap`（公开，**只在空表时可用**）⇒ 直接签发 token
+   并进入控制台。**窗口此后永久关闭**，同一个端点一律 403；
+4. 之后新建账号只走 `POST /api/auth/admin/users`（admin 权限）。
+
+> ⚠️ 这条路径的授权条件是**状态**而不是凭据：谁先到达实例谁就能拿到 admin。
+> 本地 compose 默认只发布到回环（ADR-025），所以先引导、再把实例暴露出去。
+> 每次 bootstrap 尝试都会在 `audit_logs` 留一行（`endpoint=/api/auth/bootstrap`）。
+
+> ⚠️ 这个姿势要求 `users` 表**可读**：库连不上时 `/api/auth/status` 返回 500，
+> 前端按 fail closed 处理（当成需要登录）。open-access 形态没有这个依赖 ——
+> 没配密钥时它连库都不碰。
+
+> ⚠️ **开了鉴权就别指望整套 playwright**：`dashboard.spec.ts` 之类都假定
+> 「打开就是控制台」，全会被守卫拦到登录页。这时只跑
+> `e2e/tests/auth-login-flow.spec.ts`（它是唯一两种形态都成立的）。
 
 **② 无鉴权的本地模式（仅开发，也是本地默认）**
 
@@ -189,7 +207,7 @@ go test ./...                                  # 全量
 go test ./pkg/... -coverprofile=coverage.out   # 带覆盖率
 ```
 
-现有 **273** 个 `*_test.go`（`find . -name '*_test.go' -not -path './web/*' -not -path './e2e/*' | wc -l`）。
+现有 **275** 个 `*_test.go`（`find . -name '*_test.go' -not -path './web/*' -not -path './e2e/*' | wc -l`）。
 
 > 跑全仓测试前把 Go 的 bin 目录放进 `PATH`，并设 `GOPROXY=off` —— 见 `docs/TEST.md` §2.0
 > 「本机运行前置」。缺前者会让 `pkg/ai/pipeline` 的子进程找不到 `go`，缺后者会让它联网
@@ -209,7 +227,7 @@ go test ./pkg/... -coverprofile=coverage.out   # 带覆盖率
 | **AI pipeline 编译后不加载** | `go build` 真跑，但产物从未 `plugin.Open`，回测必然 `strategy not found` | 见 TASKS P0-5 |
 | **容器里连不上数据库/缓存** | 应用日志 `connection refused` 指向 `localhost:5432` —— 说明容器用了容器自己的 localhost | 容器内必须用 **`host.docker.internal`**。`docker-compose.yml` 已为三个服务显式注入；漏注入时护栏会报（`check_deploy_consistency.py` 检查 3） |
 | **服务起不来：`Failed to connect to PostgreSQL`** | 应用连不上库是 `logger.Fatal()` 直接退出、**没有重试**（`cmd/data/setup.go:137` / `:146`） | 先 `tools/local-infra.sh status` 确认原生库在跑。容器启动时由 `deploy/wait-for-deps.sh` 有界等待（默认 60s） |
-| **服务起不来：`auth: JWT secret missing`** | P0-4 之后没有密钥就拒绝启动（此前是静默 open-access） | 见下方「启动后端」 |
+| **服务起不来：`auth: JWT secret missing`** | P0-4 之后没有密钥就拒绝启动（此前是静默 open-access） | 见上方「analysis 服务的两种启动姿势」的 **① 带鉴权**（或 ② 本地无鉴权） |
 
 ---
 
@@ -221,3 +239,33 @@ cd web && npm install && npm run dev    # :5173
 
 Dev 下 Vite 只代理 `/api`（见 `web/vite.config.ts`），
 因此 `/alerts`、`/compliance` 等缺少 `/api` 前缀的调用会 404（TASKS P1-9）。
+
+**鉴权相关（ADR-026）**：`web/src/api/client.ts` 是全前端唯一的 HTTP 出口
+（两处 `fetch`：`request()` / `download()`），`Authorization: Bearer` 在那里
+注入一次。**没有 token 时不带头** —— 这是 open-access 形态与加鉴权之前
+"逐字节相同"的依据，别改成"总是带上、值可能为空串"。
+
+401 的处理是「换令牌 → 重放」，结局分三态（`refreshed` / `rejected` /
+`unavailable`）：只有服务端明确拒绝才算会话失效；断网不登出。见
+`web/src/api/client.auth.test.ts`。
+
+**姿势探测也是四态**（`web/src/stores/auth.ts` 的 `probe`）：`unknown` /
+`open-access` / `anonymous` / `unavailable`。后两者**不能合并** ——
+`anonymous` 是「后端**说了**要凭据」，`unavailable` 是「后端**没说话**」
+（429 / 5xx / 断网）。合并的后果是一次限流把已登录用户弹到登录页（AUD-57）。
+`unavailable` 仍然 **fail closed**（受保护页面照样拦），但界面说的是
+「连不上 + 重试」，不是一个按下去也不会成功的凭据表单；而且它是**可再探**
+状态 —— 后端一恢复，下一次跳转就把会话接回来，不需要手动刷新页面。
+
+> `/api/auth/status` 在 `cmd/analysis` 里**被限流豁免**（与 `/health` 同理）：
+> 它必须答得出来，否则前端分不清「被限流」和「未认证」。别把 `/api/auth`
+> 前缀整个放开 —— `/api/auth/login` 与 `/api/auth/refresh` **必须继续限流**
+> （口令爆破的第一道闸）。名单在 `cmd/analysis/middleware.go` 的
+> `rateLimitExemptPaths`（逐字相等匹配），护栏
+> `cmd/analysis/rate_limit_exempt_test.go`。
+
+```bash
+cd web && npm run typecheck && npm test      # 208 条（含鉴权 43 条）
+# ⚠️ Windows 下别直接跑 node_modules/.bin/vitest（POSIX 脚本，报 WinError 193）：
+node node_modules/vitest/vitest.mjs run src/api/client.auth.test.ts
+```

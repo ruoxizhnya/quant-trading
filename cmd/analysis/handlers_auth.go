@@ -18,6 +18,11 @@ func registerAuthRoutes(router *gin.Engine, svc *auth.Service, logger zerolog.Lo
 	{
 		g.POST("/login", loginHandler(svc, logger))
 		g.POST("/refresh", refreshHandler(svc, logger))
+		// Both of these are deliberately public. See their doc comments: the
+		// SPA cannot decide whether to render a login page before it knows the
+		// posture, and a first-run instance has no credential to ask with.
+		g.GET("/status", authStatusHandler(svc))
+		g.POST("/bootstrap", bootstrapHandler(svc, logger))
 	}
 
 	// Authenticated self-service endpoints.
@@ -106,6 +111,113 @@ func refreshHandler(svc *auth.Service, logger zerolog.Logger) gin.HandlerFunc {
 			RefreshToken: refresh,
 			TokenType:    "Bearer",
 			ExpiresIn:    int(svc.AccessTTL().Seconds()),
+		})
+	}
+}
+
+// authStatusResponse is the payload of GET /api/auth/status. Two booleans, no
+// identifiers: it deliberately says nothing about *who* exists.
+type authStatusResponse struct {
+	AuthEnabled       bool `json:"auth_enabled"`
+	BootstrapRequired bool `json:"bootstrap_required"`
+}
+
+// authStatusHandler serves GET /api/auth/status.
+//
+// Public by necessity, not by convenience. The SPA has to choose between
+// rendering a login form and rendering a "create the first administrator" form
+// *before* it holds any credential — the branch it takes is exactly "do I have a
+// token", and the answer to "how do I get one" depends on this endpoint. Any
+// design that gates it behind a token is unenterable on a fresh instance.
+//
+// It discloses one bit that is already externally observable — whether the
+// instance is open-access — plus whether the first-admin window is still open.
+// Neither is a secret: an open-access instance answers every /api/* call with
+// 200 to anyone, and a not-yet-bootstrapped instance is by definition one that
+// has never been used.
+//
+// When auth is disabled this answers without touching the database (see
+// auth.Service.BootstrapRequired), which keeps the dev/CI posture working on a
+// machine with no database at all. When auth is enabled but the database is
+// unreachable it returns 500 rather than guessing: the SPA must fail closed
+// (assume auth is on, show the login form), and a made-up 200 would send it
+// chasing a login that cannot succeed.
+func authStatusHandler(svc *auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !svc.Enabled() {
+			c.JSON(http.StatusOK, authStatusResponse{AuthEnabled: false, BootstrapRequired: false})
+			return
+		}
+		need, err := svc.BootstrapRequired(c.Request.Context())
+		if err != nil {
+			httpserver.Error(c, http.StatusInternalServerError, err)
+			return
+		}
+		c.JSON(http.StatusOK, authStatusResponse{AuthEnabled: true, BootstrapRequired: need})
+	}
+}
+
+type bootstrapRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required,min=8"`
+}
+
+// bootstrapHandler serves POST /api/auth/bootstrap: the one-time creation of
+// the first administrator.
+//
+// This is the only unauthenticated write path in the system. The authorisation
+// is not a credential but a state — the `users` table being empty — and that
+// state is checked inside a transaction by auth.Service.CreateFirstAdmin.
+// Whoever reaches the instance first can claim admin; that is inherent to
+// self-service bootstrap, and it is why the local stack publishes on loopback
+// only (ADR-025).
+//
+// On success the caller is logged in immediately. Round-tripping back through
+// /login would add no security (the caller just proved it can reach an unclaimed
+// instance) and one more way to get stuck — e.g. a mistyped username, which
+// would send it to /login with credentials that do not exist.
+//
+// This path *is* covered by AuditMiddleware, so every bootstrap attempt that
+// gets past the middleware leaves an audit_logs row (user_id NULL on failure to
+// authenticate; the endpoint and method are what identify it).
+func bootstrapHandler(svc *auth.Service, logger zerolog.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req bootstrapRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			httpserver.Fail(c, http.StatusBadRequest, "username and password (≥8 chars) required")
+			return
+		}
+		u, err := svc.CreateFirstAdmin(c.Request.Context(), req.Username, req.Password)
+		if err != nil {
+			if errors.Is(err, auth.ErrBootstrapClosed) {
+				// One message for both "someone already exists" and "auth is
+				// disabled": neither is actionable by the caller, and naming
+				// which one it is would tell an anonymous caller whether any
+				// account exists.
+				httpserver.Fail(c, http.StatusForbidden, "bootstrap window is closed")
+				return
+			}
+			logger.Error().Err(err).Msg("auth: bootstrap failed")
+			httpserver.Fail(c, http.StatusInternalServerError, "bootstrap failed")
+			return
+		}
+		access, refresh, err := svc.IssueTokens(u)
+		if err != nil {
+			// The admin exists now; only the token mint failed. Report it
+			// plainly and let the caller log in normally rather than rolling
+			// the account back.
+			logger.Error().Err(err).Msg("auth: IssueTokens after bootstrap failed")
+			httpserver.Fail(c, http.StatusInternalServerError, "account created but token issuance failed; please log in")
+			return
+		}
+		logger.Warn().Str("username", u.Username).Msg("auth: first administrator bootstrapped")
+		c.JSON(http.StatusCreated, tokenResponse{
+			AccessToken:  access,
+			RefreshToken: refresh,
+			TokenType:    "Bearer",
+			ExpiresIn:    int(svc.AccessTTL().Seconds()),
+			Username:     u.Username,
+			Role:         string(u.Role),
 		})
 	}
 }

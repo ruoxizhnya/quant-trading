@@ -15,6 +15,26 @@
           <template #icon><TimeOutline :size="13" /></template>
           {{ currentTime }}
         </n-tag>
+        <!--
+          身份区只在**已登录**时存在。
+
+          条件必须是 isAuthenticated 而不是 authEnabled：open-access（没配
+          JWT_SECRET）的部署下这里必须一个节点都不多渲染 —— 那是本地默认形态，
+          也是 playwright 视觉回归与其余 UI 用例跑的那个形态。
+        -->
+        <template v-if="auth.isAuthenticated">
+          <n-tag size="small" round :bordered="false" type="info" data-testid="header-user">
+            {{ auth.username }} · {{ roleLabel }}
+          </n-tag>
+          <n-tooltip trigger="hover">
+            <template #trigger>
+              <n-button quaternary circle size="small" data-testid="header-logout" @click="handleLogout">
+                <template #icon><LogOutOutline :size="17" /></template>
+              </n-button>
+            </template>
+            退出登录
+          </n-tooltip>
+        </template>
         <n-tooltip trigger="hover">
           <template #trigger>
             <n-button quaternary circle size="small" @click="toggleTheme">
@@ -29,21 +49,38 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { NButton, NTag, NTooltip, NSpace, useMessage } from 'naive-ui'
 import {
-  MenuOutline, MoonOutline,
+  LogOutOutline, MenuOutline, MoonOutline,
   TrendingUpOutline, TimeOutline,
 } from '@vicons/ionicons5'
+import { useAuthStore } from '@/stores/auth'
 
 const emit = defineEmits(['toggle-sidebar'])
 const message = useMessage()
+const auth = useAuthStore()
+const router = useRouter()
 const apiOnline = ref(true)
 const currentTime = ref('')
 let timer: ReturnType<typeof setInterval>
 
+const ROLE_LABELS: Record<string, string> = {
+  viewer: '只读',
+  trader: '交易员',
+  admin: '管理员',
+}
+const roleLabel = computed(() => (auth.role ? ROLE_LABELS[auth.role] || auth.role : ''))
+
 function toggleSidebar() { emit('toggle-sidebar') }
 function toggleTheme() { message.info('主题切换功能开发中') }
+
+function handleLogout() {
+  // 纯本地动作：后端没有会话表可撤销（见 stores/auth.logout 的注释）。
+  auth.logout()
+  void router.replace({ name: 'login' })
+}
 
 function updateClock() {
   const now = new Date()

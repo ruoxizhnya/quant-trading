@@ -215,18 +215,41 @@ func RoleFromContext(c *gin.Context) (Role, bool) {
 	return r, ok
 }
 
+// publicPaths are the request paths that bypass the JWT middleware. They are
+// whitelisted *before* route matching, so a path missing from this list 401s
+// even if it is registered — and even if it does not exist at all.
+//
+// This list is a hand-maintained mirror of the route table in
+// cmd/analysis.registerAuthRoutes. The mirror is the hazard: adding a route
+// there and forgetting it here produces a silent 401, which is exactly how a
+// login page would end up unable to ask whether it should be a login page.
+// cmd/analysis/auth_public_paths_test.go scans the route table and fails if the
+// two disagree — do not rely on remembering.
+var publicPaths = []string{
+	"/api/auth/login",
+	"/api/auth/refresh",
+	// The SPA must be able to ask "is auth on, and is the first-admin window
+	// still open?" before it holds any credential, and must be able to claim
+	// that window on a fresh instance. See the handlers for why.
+	"/api/auth/status",
+	"/api/auth/bootstrap",
+	"/health",
+	"/api/health",
+	"/metrics",
+}
+
+// PublicPaths returns a copy of the unauthenticated path whitelist. Exported so
+// the route table can be machine-checked against it (see publicPaths).
+func PublicPaths() []string {
+	out := make([]string, len(publicPaths))
+	copy(out, publicPaths)
+	return out
+}
+
 // isPublicPath returns true for routes that are always unauthenticated
-// (login, refresh, health, metrics). Keep this list in sync with the
-// routes registered in main.go.
+// (login, refresh, status, bootstrap, health, metrics).
 func isPublicPath(path string) bool {
-	public := []string{
-		"/api/auth/login",
-		"/api/auth/refresh",
-		"/health",
-		"/api/health",
-		"/metrics",
-	}
-	for _, p := range public {
+	for _, p := range publicPaths {
 		if path == p {
 			return true
 		}
