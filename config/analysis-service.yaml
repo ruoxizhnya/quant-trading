@@ -65,9 +65,18 @@ database:
   database: "quant_trading"
   sslmode: "disable"
 
+# 地址口径（2026-09-25 定，见 docker-compose.yml 文件头）：
+# **这份 yaml 是「在宿主机上直接跑」的视角 —— 数据库/缓存在 localhost。**
+# 容器内的视角由 docker-compose.yml / deploy/k8s 的 environment 覆盖
+# （容器里用 host.docker.internal，k8s 里用 postgres）。上面 database.host
+# 已经是 localhost，与 data-service.yaml 口径一致；redis 这里对齐。
 redis:
-  url: "redis://redis:6379"
+  url: "redis://localhost:6379"
 
+# 服务间地址**保持容器视角**（compose 服务名），与上面 DB/Redis 的口径不同。
+# 理由：本轮改造只把数据库/缓存移出容器，服务仍然全部跑在容器里 ——
+# 这一跳没有变。宿主机的 localhost:8081 上没有 data-service，改成 localhost
+# 反而会打断容器间的调用。compose 与 k8s 都会用同名 env 覆盖这两项。
 data_service:
   url: "http://data-service:8081"
 

@@ -15,9 +15,15 @@ server:
   # 见 cmd/strategy/main.go 的 loadConfig 与 cmd/strategy/main_test.go。
   gin_mode: "release"
 
+# 地址口径（2026-09-25 定，见 docker-compose.yml 文件头）：
+# **这份 yaml 是「在宿主机上直接跑」的视角 —— 缓存在 localhost。**
+# 容器由 docker-compose.yml 注入 redis://host.docker.internal:6379。
 redis:
-  url: "redis://redis:6379"
+  url: "redis://localhost:6379"
 
+# 注意这一项**保持容器视角**（compose 服务名）：服务全部跑在容器里，
+# 服务之间的这一跳没有变。宿主机的 localhost:8081 上没有 data-service，
+# 所以不要跟着 redis 一起改成 localhost。
 data_service:
   url: "http://data-service:8081"
 

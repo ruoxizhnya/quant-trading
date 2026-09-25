@@ -24,6 +24,11 @@ import (
 // TestLoadConfig_ReadsYAML pins the baseline: with no env set, the values
 // come from config/strategy-service.yaml (found via the "../../config"
 // search path, since the test cwd is cmd/strategy/).
+//
+// 2026-09-25: redis.url 的基线值从 `redis://redis:6379` 改成
+// `redis://localhost:6379` —— 部署形态改为「数据库/缓存跑宿主机、服务跑容器」后，
+// config/*.yaml 的口径统一为**宿主机视角**（容器视角由 docker-compose 的 env
+// 注入）。data_service.url 保持容器名不变（服务全在容器里），所以下面那条没动。
 func TestLoadConfig_ReadsYAML(t *testing.T) {
 	viper.Reset()
 
@@ -34,7 +39,7 @@ func TestLoadConfig_ReadsYAML(t *testing.T) {
 	assert.Equal(t, "0.0.0.0", cfg.Server.Host)
 	assert.Equal(t, 8082, cfg.Server.Port)
 	assert.Equal(t, "release", cfg.Server.GinMode)
-	assert.Equal(t, "redis://redis:6379", cfg.Redis.URL)
+	assert.Equal(t, "redis://localhost:6379", cfg.Redis.URL)
 	assert.Equal(t, "http://data-service:8081", cfg.DataService.URL)
 	assert.Equal(t, "info", cfg.Logging.Level)
 	assert.Equal(t, "json", cfg.Logging.Format)

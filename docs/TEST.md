@@ -41,9 +41,12 @@ all_trades.have_timestamp        // Every trade is time-stamped
 ### 2.0 本机运行前置（Windows / 离线环境）
 
 宿主有两套 Go：`C:\Users\ruoxi\sdk\go1.25.0`（**原装，离线能编译全仓**，但**不在 PATH** ——
-早先「宿主没有原装 Go」的结论是错的，2026-09-25 订正）与下方这个免安装版；到
-`proxy.golang.org` 的网络**不通**。这几件事各会制造一种「红了，但失败信号不指向任何
-代码问题」。跑全仓测试前先备好环境：
+早先「宿主没有原装 Go」的结论是错的，2026-09-25 订正）与下方这个免安装版。
+~~到 `proxy.golang.org` 的网络不通~~ —— **2026-09-25 订正：网络是通的**
+（`curl https://proxy.golang.org/` 返 HTTP 200，`docker build` 里的 `go mod download`
+正常完成）。下面仍然带 `GOPROXY=off`，理由变成「不让任何子进程有机会联网挂住」，
+不再是「离线」。这几件事各会制造一种「红了，但失败信号不指向任何代码问题」。
+跑全仓测试前先备好环境：
 
 ```bash
 export GOROOT="C:/Users/ruoxi/.workbuddy/binaries/go/go"
@@ -101,7 +104,62 @@ printf 'postgres\n' > "$ROOT/pw.txt"
 
 > **Redis 未起也能跑手动测试**：`cmd/analysis/*.go` 里零 Redis 引用（redis 只出现在
 > `pkg/storage/redis.go` / `pkg/live/redis_order_store.go` / `pkg/marketdata/cached_provider.go`）。
-> compose 里的 `depends_on: redis` 只约束容器编排，不约束本地 `go run`。
+> 只有 `cmd/data` 启动期硬依赖它（`cmd/data/setup.go:146` 连不上直接 Fatal）。
+> ~~compose 里的 `depends_on: redis` 只约束容器编排、不约束本地 `go run`~~ ——
+> 2026-09-25 起 `redis` 不再是 compose 服务，那条 `depends_on` 已不存在；容器侧的
+> 等待改由 `deploy/wait-for-deps.sh` 承担。
+
+#### 2.0.2 原生 Redis 7.4.11（2026-09-25 新增）
+
+「数据库与缓存跑宿主机、服务跑容器」定案之后，Redis 也必须对齐版本 ——
+否则会出现「本地通过、容器里失败」。原先是 **tporadowski 的 5.0.14 移植版**
+（那个项目已停更在 5.0），现在换装与 compose 同线（`redis:7-alpine` → 7.x）的 **7.4.11**：
+
+```
+二进制   C:/Users/ruoxi/.workbuddy/binaries/redis-7.4.11/
+数据目录 C:/Users/ruoxi/.workbuddy/binaries/redis-7.4.11/data
+连接     redis://127.0.0.1:6379      （无 requirepass，与本项目一贯一致）
+```
+
+来源是 `redis-windows/redis-windows` 的 MSYS2 构建（官方 Redis 不支持 Windows）。
+旧的 5.0.14 目录 `~/.workbuddy/binaries/redis/` **保留着做回退**，没有删。
+
+> **命令兼容性实测**：全仓用到的 Redis 命令只有
+> `Get / Set / Del / Exists / Scan / Keys / Ping`（`pkg/storage/redis.go`、
+> `pkg/live/redis_order_store.go`、`pkg/marketdata/cached_provider.go`），
+> 都在 5.0 就已存在，5→7 没有破坏性变更。
+
+> ⚠️ **它是 MSYS2 构建，不认 Git Bash 路径**（2026-09-25 实测两种写法都失败）：
+> `/c/Users/...` → `can't open config file '/c/Users/...'`（当成 msys 根）；
+> `C:/Users/...` → 被当成**相对 cwd 的路径**拼上去，报
+> `'/cygdrive/c/.../quant-trading/C:/Users/.../redis.conf'`。
+> **唯一稳的姿势是 `cd` 进目录再给相对路径** —— `tools/local-infra.sh` 已经这么写，
+> 别「顺手」改成绝对路径。
+
+#### 2.0.3 「起来了」的判据（2026-09-25 新增）
+
+```bash
+tools/local-infra.sh start     # 原生 PostgreSQL 17.5 + Redis 7.4.11
+docker-compose up -d           # 应用服务（data / strategy / analysis / web）
+```
+
+> **为什么不能只看 `docker-compose up` 的退出码**：它返回 0 只代表容器被
+> **创建**了。应用连不上 PG/Redis 是 `logger.Fatal()` **无重试**
+> （`cmd/data/setup.go:137/:146`），容器会立刻退出；健康检查还有 `start_period`，
+> up 刚返回时状态还是 `starting`；而且 **Docker Desktop 在本机还会自发退出**
+> （2026-09-25 实测：10:24 还在跑，10:27 命名管道就没了）。所以要等
+> `docker ps` 里的服务真的变成 `healthy` —— 容器内的等待由
+> `deploy/wait-for-deps.sh` 有界承担（默认 60s）。
+
+> **Docker 引擎探不到就停下**：那个失败的症状（
+> `open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file
+> specified`）读起来像路径问题，而真因是引擎没了。启动 Docker Desktop 会拉起
+> `wsl.exe`，而它在沙箱的程序黑名单里（报错明写「不可批准、不可绕过」）——
+> **Agent 无法自救，只有你自己能解**。
+
+AUD-13 的运行时那一半（数据库/缓存只监听回环）读真实 `netstat` 断言，
+由 `tools/local-infra.sh status` 承担 —— 原先是 `check_deploy_consistency.py`
+守 compose 的端口映射，服务移出 compose 后挪到了机器上。
 
 ### 2.1 Unit Tests — `pkg/*`
 

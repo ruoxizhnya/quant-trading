@@ -19,10 +19,15 @@ verified-by: 实际命令逐条复核（`find -name '*_test.go'` 实测 273、`.
 | 项 | 版本 | 来源 |
 |---|---|---|
 | Go | **1.25** | `go.mod` |
-| PostgreSQL | 16 | `docker-compose.yml` |
-| Redis | 7 | `docker-compose.yml` |
+| PostgreSQL | **17.5**（宿主机原生） | `~/.workbuddy/binaries/postgres/` |
+| Redis | **7.4.11**（宿主机原生） | `~/.workbuddy/binaries/redis-7.4.11/` |
 | Node | 22（仅前端） | — |
 | Python | 3.12（仅文档校验脚本） | `tools/check_doc_links.py` |
+
+> **数据库与缓存是宿主机原生安装，不是容器**（2026-09-25 定案，见
+> `docker-compose.yml` 文件头）。原因：Docker Desktop 在本机受沙箱限制
+> （启动时拉起的 `wsl.exe` 在程序黑名单里，且起来后还会自发退出），不该把
+> 最该稳的一层挂在最不稳的一层上。**服务仍然全部跑在容器里。**
 
 > ⚠️ **Go 不在 PATH**：本机装在 `C:\Users\ruoxi\sdk\go1.25.0`。跑任何 Go 命令前先：
 > ```bash
@@ -34,15 +39,34 @@ verified-by: 实际命令逐条复核（`find -name '*_test.go'` 实测 273、`.
 ## 起基础设施
 
 ```bash
-cp .env.example .env     # 一次性：至少把 JWT_SECRET 换成 openssl rand -hex 32
-docker-compose up -d postgres redis
+cp .env.example .env         # 一次性：至少把 JWT_SECRET 换成 openssl rand -hex 32
+tools/local-infra.sh start   # 原生 PostgreSQL 17.5 + Redis 7.4.11（不再由 compose 托管）
+docker-compose up -d         # 应用服务（data / strategy / analysis / web）
 ```
 
-> ⚠️ **必须先有 `.env`**。P0-4 之后 `docker-compose.yml` 对 `JWT_SECRET` 用了
-> `${JWT_SECRET:?...}` 必填插值 —— 没配的话连 `docker-compose up -d postgres`
-> 都会在解析阶段报错（这是刻意的：analysis 监听 0.0.0.0，无鉴权不能起）。
+`tools/local-infra.sh {start|stop|status}` 只管**原生**那半（PG + Redis），
+`status` 会断言 AUD-13（数据库/缓存只监听回环）—— 这条断言原先在
+`tools/check_deploy_consistency.py` 里守 compose 的端口映射，服务移出 compose 后
+挪到了这里，改为断言真实的 netstat 监听 socket（`listen_addresses` 由脚本用
+`-c` 显式指定，不靠配置文件默认值）。
 
-> ⚠️ **必须用带连字符的 `docker-compose`**。本机 Docker CLI（27.5）没装 `compose`
+> ⚠️ **`up` 返回 0 只代表容器被创建了**。应用连不上 PG/Redis 是 `logger.Fatal()`
+> **没有重试**（`cmd/data/setup.go:137` / `:146`），容器会立刻退出；健康检查还有
+> `start_period`，`up` 刚返回时状态还是 `starting`。所以起完要看
+> `docker ps` 里的服务是否已成 `healthy` —— 容器内的等待由
+> `deploy/wait-for-deps.sh` 有界承担（默认 60s），它替换掉了被移除的
+> `depends_on: {condition: service_healthy}`。
+
+> ⚠️ **`local-infra.sh start` 在 Agent 沙箱里跑会被回收**：沙箱按进程组清理整棵
+> 进程树，`nohup ... &` 起的进程随那次工具调用一起消失（实测 `pg_ctl start` /
+> `nohup &` / `Start-Process` 三者在这个环境下都无效）。那种情况下要改用
+> 「后台任务」姿势直接 exec 两个二进制。**在你自己开的终端里正常。**
+
+> ⚠️ **必须先有 `.env`**。P0-4 之后 `docker-compose.yml` 对 `JWT_SECRET` 用了
+> `${JWT_SECRET:?...}` 必填插值 —— 没配的话连 `docker-compose up -d` 都会在解析
+> 阶段报错（这是刻意的：analysis 监听 0.0.0.0，无鉴权不能起）。
+
+> ⚠️ **必须用带连字符的 `docker-compose`**。本机 Docker CLI 没装 `compose`
 > 插件，空格写法会报 `'compose' is not a docker command`；`docker-compose` v2.32.1 可用。
 
 连接串：`postgres://postgres:postgres@localhost:5432/quant_trading?sslmode=disable`
@@ -68,7 +92,8 @@ python tools/check_doc_links.py
 `go test` 需要 Postgres 在跑，否则存储层测试会静默 skip（**跳过不是通过**，
 PIT 回归测试就跑不到了）。
 
-`docker-compose.yml` 中的服务：`postgres` / `redis` / `data-service` / `strategy-service` / `analysis-service`。
+`docker-compose.yml` 中的服务：`data-service` / `strategy-service` / `analysis-service` / `web`。
+**数据库与缓存不在 compose 里** —— 它们是宿主机原生安装（见上）。
 
 ---
 
@@ -144,6 +169,8 @@ go test ./pkg/... -coverprofile=coverage.out   # 带覆盖率
 | **`make build` 会失败** | Makefile 仍 build `cmd/execution`、`cmd/risk`，这两个目录早在 ODR-021 合并进 analysis 后**已不存在** | 用 `go build ./...` 代替；或修 Makefile（TASKS P1-10） |
 | **两份 compose 文件互相漂移** | `docker-compose.yml` 与 `docker-compose.services.yml` 重复定义同批服务且版本标签不一致；后者还引用不存在的 Dockerfile | 只用 `docker-compose.yml`（TASKS P1-8） |
 | **AI pipeline 编译后不加载** | `go build` 真跑，但产物从未 `plugin.Open`，回测必然 `strategy not found` | 见 TASKS P0-5 |
+| **容器里连不上数据库/缓存** | 应用日志 `connection refused` 指向 `localhost:5432` —— 说明容器用了容器自己的 localhost | 容器内必须用 **`host.docker.internal`**。`docker-compose.yml` 已为三个服务显式注入；漏注入时护栏会报（`check_deploy_consistency.py` 检查 3） |
+| **服务起不来：`Failed to connect to PostgreSQL`** | 应用连不上库是 `logger.Fatal()` 直接退出、**没有重试**（`cmd/data/setup.go:137` / `:146`） | 先 `tools/local-infra.sh status` 确认原生库在跑。容器启动时由 `deploy/wait-for-deps.sh` 有界等待（默认 60s） |
 | **服务起不来：`auth: JWT secret missing`** | P0-4 之后没有密钥就拒绝启动（此前是静默 open-access） | 见下方「启动后端」 |
 
 ---

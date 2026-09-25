@@ -9,13 +9,26 @@
   1. 服务名 → 端口（公共服务必须一致）
   2. DATA_SERVICE_URL：compose 的 environment 与 k8s configmap 必须一致，
      且它指向的 host:port 要真的等于 data-service 的端口
-  3. postgres / redis 的端口必须**只绑回环**（AUD-13）。这条不是「两边一致」
-     而是「单边不该有的暴露」，但它同属部署配置的护栏，放这里比另起脚本划算。
+  3. 数据库/缓存必须来自**宿主机原生安装**，且容器**显式**指向它（AUD-13 改写）。
+     2026-09-25 之前这条是「compose 的 postgres / redis 服务端口只绑回环」——
+     那两个服务已移出 compose（改由宿主机原生安装），端口映射这个**检查对象
+     本身不存在了**。新的等价断言有两半：
+       a) compose 里不得再出现 postgres / redis 服务（留着会与原生进程抢端口）；
+       b) 应用侧的 DATABASE_HOST / REDIS_URL 必须指向 host.docker.internal。
+     后半条接替了被移除的 `depends_on + service_healthy`：容器里的 localhost
+     指容器自己，写成 localhost 语法完全合法、启动才失败。
+     原生进程的 listen_addresses / bind 由 tools/local-infra.sh 在机器上断言 ——
+     绑定的真身在仓外，静态脚本管不到它，写在这里只会变成假护栏。
   4. 部署配置里不得出现 GIN_MODE（AUD-29）。gin mode 的唯一来源是
      config/*.yaml 的 server.gin_mode；GIN_MODE 会被 gin 自己读走，是同一个
      决定的第二个入口，而且 grep 不到读取点。
-  5. compose ↔ k8s 的数据库/缓存 env **口径与值**必须一致，且库名/用户名
+  5. compose ↔ k8s 的数据库/缓存 env **口径**必须一致，且库名/用户名
      不能与 config/*.yaml 漂移（AUD-39）。
+     2026-09-25 **放宽**：地址（DATABASE_HOST / REDIS_URL 的 host）不再比对 ——
+     数据库移到宿主机后容器内必然是 host.docker.internal，而 k8s 里是 Service
+     名 postgres，两者**必然不同**，比它只会逼出一个恒假的断言。仍然比对：
+     库名、用户名、端口，以及密码取自同一个变量。config/*.yaml 的 host 现在是
+     宿主机视角（localhost），同样不参与比对。
   6. 注入到应用容器的每个 env 名都必须有读取点（AUD-39）。读取点从 Go 源码
      的 Get*/UnmarshalKey/BindEnv/Sub 调用点推导，不是维护一张手写清单。
   7. config/*.yaml 里不得出现 ${...}（AUD-39）。本仓没有 env 展开器，占位符
@@ -54,23 +67,43 @@ COMPOSE = ROOT / "docker-compose.yml"
 K8S_DIR = ROOT / "deploy" / "k8s"
 
 # k8s 里有意不部署的服务（及其原因）。改这个清单本身就该被 review。
+#
+# ⚠️ postgres / redis 两条已于 2026-09-25 删除：它们不再是 compose 服务
+# （改由宿主机原生安装），所以检查 1 根本遍历不到它们 —— 留着是**死条目**，
+# 看起来在解释什么、实际永远查不到。「它们不许回到 compose」这件事现在由
+# 检查 3a 正向断言。
 ALLOWED_MISSING_IN_K8S = {
     "strategy-service": "standby per ADR-012，k8s 里不部署",
-    "postgres": "k8s 用 postgres-statefulset.yaml，不走 Deployment/Service",
-    "redis": "k8s 用 redis-deployment.yaml",
 }
 
 # 两边都可能不配的最小集合（比如只在本地跑的辅助容器）
 IGNORED_SERVICES = {"equitydeep-research"}
 
-# AUD-13：只该绑回环的服务 —— 数据库与缓存不该出现在局域网上。
-# 应用服务（data / strategy / analysis）**有意不在**此列：它们本来就是要被
-# 访问的（analysis 另有 JWT fail-closed 兜底）。
-LOOPBACK_ONLY = {"postgres", "redis"}
+# AUD-13（2026-09-25 改写）：数据库/缓存不再由 compose 托管，改由宿主机原生
+# 安装提供（PostgreSQL 17.5 / Redis 7.4.11，见 docker-compose.yml 文件头）。
+#
+# 原来这里有一对常量（LOOPBACK_ONLY / LOOPBACK_BINDS）守的是 compose 的 ports
+# 映射 —— 那两个服务已从 compose 移除，**检查对象不存在了**。留着不改的后果不是
+# 报错，而是检查 3 空转：循环体一次都不进，脚本照常打「✓ 数据库/缓存只绑回环」。
+# 那是典型的假护栏（比没护栏更糟）。
+#
+# 换成下面这组：守「基础设施确实在仓外」+「容器确实指向它」。
+NATIVE_DB_DEPS = ("postgres", "redis")
 
-# 可接受的「回环」写法。写成 0.0.0.0 / 具体网卡 IP / 干脆不写宿主地址，
-# 都算暴露到局域网。
-LOOPBACK_BINDS = {"127.0.0.1", "::1", "localhost"}
+# 容器内用来指宿主机的名字。**不能是 localhost** —— 容器里的 localhost 指容器
+# 自己。实测（2026-09-25）：Docker Desktop 默认把它解析成 IPv4 192.168.65.254，
+# 且能连到宿主机回环上监听的服务。
+CONTAINER_HOST_ALIAS = "host.docker.internal"
+
+# 每个应用服务**必须显式**注入的基础设施 env：(env 名, 断言方式)。
+# 这是本轮改造后的承重项 —— config/*.yaml 现在的口径是宿主机视角（localhost），
+# 容器服务一旦漏注入就会静默回落到 localhost 并连到容器自己；compose 语法合法、
+# 启动日志也只是一句连接失败。此前这层保证由 depends_on 提供，现在没有了。
+INFRA_ENV_REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
+    "data-service": (("DATABASE_HOST", "host"), ("REDIS_URL", "url")),
+    "analysis-service": (("DATABASE_HOST", "host"), ("REDIS_URL", "url")),
+    "strategy-service": (("REDIS_URL", "url"),),
+}
 
 
 # 端口映射的三种写法都要认：
@@ -172,9 +205,12 @@ _GO_GETENV_CALL = re.compile(r'os\.Getenv\(\s*"([A-Z0-9_]+)"')
 # 正则抓不到 —— 把常量定义一起收进来，而不是维护一张手写清单。
 _GO_CONFIG_KEY_CONST = re.compile(r'ConfigKey[A-Za-z0-9_]*\s*=\s*"([a-z0-9_.]+)"')
 
-# 应用读的数据库/缓存 env 名。host/port 允许在 config/*.yaml 里保留「本地开发
-# 默认值」（analysis 的 database.host 就是 localhost），所以只在 compose ↔ k8s
-# 之间比对（两边都是容器环境）；user/database 是**身份**字段，三边都要一致。
+# 应用读的数据库/缓存 env 名（5a 用它断言「必备键都在」）。
+#
+# 注意 5b **不再**拿这个清单去逐一比值：DATABASE_HOST / REDIS_URL 在三处口径
+# 不同且都正确 —— config/*.yaml 是宿主机视角（localhost）、compose 是
+# host.docker.internal、k8s 是 Service 名 postgres。比值的清单见 5b 里那几个
+# 身份字段（库名 / 用户名 / 端口）。
 APP_DB_ENV_KEYS = [
     "DATABASE_HOST",
     "DATABASE_PORT",
@@ -182,6 +218,10 @@ APP_DB_ENV_KEYS = [
     "DATABASE_DATABASE",
     "REDIS_URL",
 ]
+
+# 5b 真正拿来比值的「身份」字段：连过去之后必须对得上的东西。
+# 刻意**不含** DATABASE_HOST / REDIS_URL 的 host —— 它们按环境各写一份是对的。
+IDENTITY_ENV_KEYS = ["DATABASE_USER", "DATABASE_DATABASE", "DATABASE_PORT"]
 APP_ENV_SERVICES = ["analysis-service", "data-service"]
 
 # 在部署配置里**不许出现**的 env 名 —— 每一条都是「曾经存在过的死键」。
@@ -326,34 +366,70 @@ def check_env_wiring(
                 f"deploy/k8s/configmap.yaml 缺 {key} —— 应用读的是这个 env 名；"
                 f"缺了它会静默回落到镜像内的 config/*.yaml（AUD-39）")
 
-    # 5b) compose ↔ k8s 的值必须逐一相等
-    for key in APP_DB_ENV_KEYS:
-        c = compose_env.get("analysis-service", {}).get(key)
-        k = cm_keys.get(key)
-        if c is not None and k is not None and c != k:
-            errors.append(f"{key} 不一致 —— compose {c} vs k8s {k}（AUD-39）")
+    # 5b) compose ↔ k8s 的**身份**字段必须相等；**地址不比**（2026-09-25 放宽）
+    #
+    # 数据库移到宿主机后：容器内必然是 host.docker.internal，k8s 里是 Service 名
+    # postgres —— 两者必然不同。继续比 DATABASE_HOST / REDIS_URL 的 host 只会逼出
+    # 一个恒假的断言，那比没有断言更糟（要么被无视，要么被「修」成错的）。
+    # 保留的是「连过去之后必须对得上」的那部分：库名、用户名、端口。
+    #
+    # ⚠️ 这里的**逐服务循环**是破坏验证逼出来的（2026-09-25）：原实现只拿
+    # `compose_env.get("analysis-service")` 去对 k8s，于是 **data-service 的
+    # 库名/用户名漂移完全没人查** —— 把它改成 somebody 后检查器照旧全绿。
+    # 护栏只守一半比不守更容易让人放心，所以改成对每个应用服务都比。
+    for svc in APP_ENV_SERVICES:
+        env = compose_env.get(svc, {})
+        for key in IDENTITY_ENV_KEYS:
+            c = env.get(key)
+            k = cm_keys.get(key)
+            if c is not None and k is not None and c != k:
+                errors.append(
+                    f"{svc} 的 {key} 不一致 —— compose {c} vs k8s {k}（AUD-39）")
+
+    # 5b-2) REDIS_URL 只比**端口**，不比 host —— host 各自不同是预期的。
+    for svc in APP_ENV_SERVICES:
+        c_redis = compose_env.get(svc, {}).get("REDIS_URL", "")
+        k_redis = cm_keys.get("REDIS_URL", "")
+        c_port = re.search(r":(\d+)\s*$", c_redis)
+        k_port = re.search(r":(\d+)\s*$", k_redis)
+        if c_port and k_port and c_port.group(1) != k_port.group(1):
+            errors.append(
+                f"{svc} 的 REDIS_URL 端口不一致 —— compose {c_port.group(1)} vs "
+                f"k8s {k_port.group(1)}（host 部分各自不同是预期的，不参与比对）（AUD-39）")
 
     # 5c) DB 身份不能与 config/*.yaml 漂移（库名/用户名对不上 = 连不到库）
-    for name in ("analysis-service", "data-service"):
+    #
+    # ⚠️ 同 5b：原实现循环 `name` 遍历两个服务、却固定拿
+    # `compose_env.get("analysis-service")` 当对比值 —— 于是 data-service
+    # 的 yaml 永远在跟 **analysis-service 的 env** 比，而不是跟它自己的。
+    # 现在各比各的。破坏验证（2026-09-25）验证过改坏能被抓到。
+    for name in APP_ENV_SERVICES:
         text = (ROOT / "config" / f"{name}.yaml").read_text(encoding="utf-8")
         for yaml_key, env_key in (("user", "DATABASE_USER"),
                                   ("database", "DATABASE_DATABASE")):
             value = find_nested_value(text, "database", yaml_key)
-            want = compose_env.get("analysis-service", {}).get(env_key)
+            want = compose_env.get(name, {}).get(env_key)
             if value and want and value != want:
                 errors.append(
-                    f"config/{name}.yaml 的 database.{yaml_key}={value} 与部署环境的 "
+                    f"config/{name}.yaml 的 database.{yaml_key}={value} 与它自己的部署 env "
                     f"{env_key}={want} 不一致 —— 应用会去连不存在的库/用户（AUD-39）")
 
-    # 5d) 密码只能有**一个**变量：postgres 容器与应用侧读同一个
-    # ${DATABASE_PASSWORD}。此前 postgres 读 ${DB_PASSWORD}、应用读
-    # ${DATABASE_PASSWORD}，两个独立变量，默认值恰好相同所以能用 —— 改成非
-    # 默认值（改哪个）就必然对不上。
-    pg_password = compose_env.get("postgres", {}).get("POSTGRES_PASSWORD", "")
-    if "DATABASE_PASSWORD" not in pg_password:
-        errors.append(
-            f"docker-compose.yml 的 postgres 服务用 {pg_password or '(缺失)'} 取密码 —— "
-            f"必须与应用侧同一个变量 DATABASE_PASSWORD，否则改密码时两边不一致（AUD-39）")
+    # 5d) 密码只能有**一个**变量（2026-09-25 改写）。
+    #
+    # 原文守的是「compose 的 postgres 服务与应用侧读同一个 ${DATABASE_PASSWORD}」。
+    # postgres 服务已移出 compose，那句话失去了对象 —— 不断言就等于静默丢了一条
+    # 护栏。新形态下照着写：**应用侧**（compose 的两个服务）都必须从
+    # DATABASE_PASSWORD 取密码，而不是内联字面量。
+    #
+    # k8s 侧不在此列：configmap 里本来就没有密码（它在 Secret 里），由
+    # postgres-statefulset 与两个 deployment 各自 configMapKeyRef/secretKeyRef 取。
+    for svc in ("analysis-service", "data-service"):
+        value = compose_env.get(svc, {}).get("DATABASE_PASSWORD", "")
+        if "DATABASE_PASSWORD" not in value:
+            errors.append(
+                f"docker-compose.yml 的 {svc} 的 DATABASE_PASSWORD 取的是 "
+                f"{value or '(缺失)'} —— 必须引用同一个变量 DATABASE_PASSWORD，"
+                f"否则改密码时各处不一致（AUD-39）")
 
     # 6) env 可达性：注入的每个 env 名都要有读取点
     names, prefixes = derive_readable_env_names()
@@ -475,6 +551,48 @@ def check_dockerfile_copy_sources(errors: list[str]) -> None:
                         f"而 CI 不构建镜像，所以会静默很久（AUD-48）")
 
 
+# ── AUD-13（2026-09-25 改写）：基础设施必须真在仓外，且容器显式指向它 ──────
+#
+# 这一类失败全是**静默**的：compose 语法合法、容器也能起来，只在第一次连库时
+# 失败。而「Docker Desktop 不稳定 → 把数据库挪到宿主机」这个决定本身，如果
+# compose 里还留着 postgres / redis 服务，就会变成两个进程抢同一个端口 ——
+# 表现为「有时连得上、有时连错库」，比干脆连不上更难查。
+
+def check_infra_is_external(
+    errors: list[str],
+    compose_env: dict[str, dict[str, str]],
+    compose_bindings: dict[str, list[tuple[str | None, int]]],
+) -> None:
+    """检查 3：数据库/缓存不得由 compose 托管，且应用容器必须指向宿主机。"""
+    # 3a) compose 里不得再有 postgres / redis 服务
+    for svc in NATIVE_DB_DEPS:
+        if svc in compose_env or svc in compose_bindings:
+            errors.append(
+                f"docker-compose.yml 仍有 {svc} 服务 —— 数据库/缓存已改为宿主机原生"
+                f"安装（见文件头），容器版会与原生进程抢同一个端口（AUD-13）")
+
+    # 3b) 应用服务必须显式注入宿主机地址，且值必须指向宿主机
+    for svc, required in sorted(INFRA_ENV_REQUIRED.items()):
+        env = compose_env.get(svc, {})
+        for key, kind in required:
+            value = env.get(key)
+            if value is None:
+                errors.append(
+                    f"docker-compose.yml 的 {svc} 缺 {key} —— config/*.yaml 现在存的是"
+                    f"宿主机视角（localhost），漏注入会让容器回落到 localhost 并连到"
+                    f"容器自己（AUD-13）")
+                continue
+            if kind == "host" and value != CONTAINER_HOST_ALIAS:
+                errors.append(
+                    f"docker-compose.yml 的 {svc} 的 {key}={value} —— 容器内必须指向 "
+                    f"{CONTAINER_HOST_ALIAS}（容器里的 localhost 是容器自己）（AUD-13）")
+            if kind == "url" and CONTAINER_HOST_ALIAS not in value:
+                errors.append(
+                    f"docker-compose.yml 的 {svc} 的 {key}={value} —— URL 里必须出现 "
+                    f"{CONTAINER_HOST_ALIAS}（容器里的 localhost 是容器自己）（AUD-13）")
+
+
+
 def main() -> int:
     if not COMPOSE.exists():
         print(f"✗ 找不到 {COMPOSE}")
@@ -537,17 +655,9 @@ def main() -> int:
             errors.append(
                 f"{where}: DATA_SERVICE_URL 指向 {host}:{port}，而 {host} 实际端口是 {actual}")
 
-    # 3) 数据库 / 缓存必须只绑回环（AUD-13）
-    for svc in sorted(LOOPBACK_ONLY):
-        for bind, port in compose_bindings.get(svc, []):
-            if bind is None:
-                errors.append(
-                    f"{svc}:{port} 绑在 0.0.0.0（端口映射没写宿主地址）—— "
-                    f"数据库/缓存会暴露到局域网，改成 \"127.0.0.1:{port}:{port}\"")
-            elif bind not in LOOPBACK_BINDS:
-                errors.append(
-                    f"{svc}:{port} 绑在 {bind} —— 只允许回环地址 "
-                    f"（{', '.join(sorted(LOOPBACK_BINDS))}）")
+    # 3) 数据库 / 缓存必须真在仓外，且应用容器显式指向宿主机（AUD-13 改写）
+    compose_env = parse_compose_environment(COMPOSE)
+    check_infra_is_external(errors, compose_env, compose_bindings)
 
     # 4) gin 的运行模式只能有一个来源：config/*.yaml 的 server.gin_mode（AUD-29）
     #
@@ -564,7 +674,7 @@ def main() -> int:
                 f"server.gin_mode（AUD-29）；gin 会自己读 GIN_MODE，写在这里会绕过它")
 
     # 5~8) env 口径（AUD-39）
-    check_env_wiring(errors, parse_compose_environment(COMPOSE), k8s_config_text)
+    check_env_wiring(errors, compose_env, k8s_config_text)
 
     # 9) Dockerfile 的 COPY 源路径必须存在（AUD-48）
     check_dockerfile_copy_sources(errors)
@@ -579,10 +689,10 @@ def main() -> int:
         return 1
 
     print("✓ 部署配置一致（compose ↔ k8s：服务端口 + DATA_SERVICE_URL）")
-    print("✓ 数据库/缓存只绑回环（postgres / redis）")
+    print("✓ 数据库/缓存已移出 compose，应用容器显式指向 host.docker.internal（AUD-13 改写）")
     print("✓ gin mode 无 GIN_MODE 旁路（唯一来源 server.gin_mode）")
-    print("✓ env 口径一致（compose ↔ k8s 的 DATABASE_*/REDIS_URL 值相同，"
-          "且与 config/*.yaml 的库名/用户名一致）")
+    print("✓ env 口径一致（compose ↔ k8s 的库名/用户名/端口相同 —— 地址按环境各写"
+          "一份，刻意不比；且与 config/*.yaml 的库名/用户名一致）")
     print("✓ 注入的每个 env 都有读取点（configmap 键 + 应用 deployment 的 env）")
     print("✓ config/*.yaml 无 ${...} 占位符（本仓没有 env 展开器）")
     print("✓ 死键负向钉（POSTGRES_HOST/PORT、REDIS_HOST/PORT、"

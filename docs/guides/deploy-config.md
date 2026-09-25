@@ -1,8 +1,11 @@
 ---
 status: evergreen
 type: how-to
-last-verified: 2026-09-21
-verified-by: P1-8 收口时逐项核对 docker-compose.yml / deploy/k8s/*.yaml / cmd/{analysis,data}/setup.go；AUD-13 补端口绑定约定并实测
+last-verified: 2026-09-25
+verified-by: 2026-09-25 部署形态改为「数据库/缓存原生 + 服务容器」后逐项复核 ——
+  docker-compose.yml 已无 postgres/redis 服务、config/*.yaml 口径改为宿主机视角、
+  check_deploy_consistency.py 的检查 3/5 已改写并跑过 6 项破坏验证（改坏必变红、还原必回绿）、
+  容器经 host.docker.internal 连原生 5432/6379 实测可达（并带 localhost 反证腿）
 ---
 
 # 部署配置：改哪里
@@ -10,6 +13,27 @@ verified-by: P1-8 收口时逐项核对 docker-compose.yml / deploy/k8s/*.yaml /
 > 本地开发走 `docker-compose.yml`，生产走 `deploy/k8s/`。**两套独立维护**，
 > 这是有意的（不引入 Kompose / Helm 那套生成链：为几处配置给单人自托管项目
 > 加一整套工具，收益不抵复杂度）。代价是可能漂移，所以有三道护栏。
+>
+> **2026-09-25 形态变更**：本地开发侧，**数据库与缓存改为宿主机原生安装**
+> （PostgreSQL 17.5 / Redis 7.4.11，由 `tools/local-infra.sh` 启停），
+> **应用服务仍然全部跑在容器里**。k8s 侧不变（postgres-statefulset +
+> redis-deployment 保留 —— k8s 本就不该依赖宿主机数据库）。
+
+---
+
+## 地址口径：三处不同，且都对（这是最容易踩的点）
+
+同一批数据库/缓存，在三个地方写的地址**必然会不一样**，这不是漂移：
+
+| 位置 | DATABASE_HOST | 为什么 |
+|---|---|---|
+| `config/*.yaml` | `localhost` | 在**宿主机上直接跑**时的视角 |
+| `docker-compose.yml` | `host.docker.internal` | 容器内指**宿主机**；容器里的 `localhost` 是容器自己 |
+| `deploy/k8s/configmap.yaml` | `postgres` | k8s 里的 Service 名 |
+
+**服务之间的地址是另一回事**：`http://data-service:8081` 这类保持 compose 服务名 /
+k8s Service 名不变 —— 服务全在容器里，这一跳没有变。不要跟着数据库一起改成
+`localhost`（宿主机的 8081 上没有 data-service）。
 
 ---
 
@@ -18,8 +42,15 @@ verified-by: P1-8 收口时逐项核对 docker-compose.yml / deploy/k8s/*.yaml /
 1. `python tools/check_deploy_consistency.py` —— 比对两边的关键项
    （服务端口、`DATA_SERVICE_URL`）。CI 里跑，改配置后本地也请跑一次。
 2. 关键项 drift 时它会报错并说明差异，不是静默通过。
-3. 同一个脚本还查一条**单边**规则（AUD-13）：postgres / redis 的端口映射
-   必须绑回环。它不比对两边，而是禁止 compose 侧出现「本不该有的暴露」。
+3. 同一个脚本还查一条**单边**规则（AUD-13，2026-09-25 改写）：数据库/缓存
+   **不得由 compose 托管**，且应用侧必须显式指向 `host.docker.internal`。
+   原先这条守的是 compose 的端口映射，服务移出 compose 后**检查对象不存在了** ——
+   不改写就等于让检查 3 空转（循环体一次都不进，脚本照旧打「✓」），那是假护栏。
+   原生进程的 `listen_addresses` / `bind` 由 `tools/local-infra.sh status` 断言
+   （它读真实的 netstat 监听 socket）。
+4. **检查 5 已放宽**（2026-09-25）：`compose ↔ k8s` 只比**库名 / 用户名 / 端口**，
+   **不比 host 与 URL** —— 理由见上面的「地址口径」表：host 在三处必然不同，
+   比它只会逼出一个恒假的断言。`config/*.yaml` 的 host 同理不参与比对。
 
 ---
 
@@ -54,33 +85,53 @@ configmap 里躺了很久，2026-09-18 作为死配置清掉（同 P2-7 的 ai-s
 
 ---
 
-## 端口绑定：谁绑回环，谁绑全接口（AUD-13）
+## 端口绑定：谁绑回环，谁绑全接口（AUD-13，2026-09-25 改写）
 
 `docker-compose.yml` 的端口映射有两种写法，差别是**监听哪个网卡**：
 
 | 写法 | 监听 | 用途 |
 |---|---|---|
-| `"5432:5432"` | `0.0.0.0`（全部网卡） | 局域网内其他机器也能连 |
-| `"127.0.0.1:5432:5432"` | 只回环 | 只有本机能连 |
-| `"5432"` | 容器端口，宿主端口随机 | 用不到，别写 |
+| `"8081:8081"` | `0.0.0.0`（全部网卡） | 局域网内其他机器也能连 |
+| `"127.0.0.1:8081:8081"` | 只回环 | 只有本机能连 |
+| `"8081"` | 容器端口，宿主端口随机 | 用不到，别写 |
+
+**2026-09-25 起这条约定的承载体变了**：数据库/缓存不再是 compose 服务，端口映射
+这个载体随之消失。原先那条「postgres / redis 的映射必须回环」如果只是留着不改，
+检查会**空转**（循环体一次都不进，脚本照旧打「✓」）—— 那是假护栏。现在的分布是：
+
+| 目标 | 由谁保证 | 怎么做 |
+|---|---|---|
+| 数据库/缓存只绑回环 | **原生进程的启动参数** | `tools/local-infra.sh` 用 `-c listen_addresses=127.0.0.1` / `--bind 127.0.0.1` **显式**指定，不靠配置文件默认值 |
+| 数据库/缓存只绑回环（**验证**） | `tools/local-infra.sh status` | 读 **netstat 的真实监听 socket**，出现非回环就报 `✗` |
+| 数据库/缓存**不得回到 compose** | `check_deploy_consistency.py` 检查 3 | 正向断言（留着会与原生进程抢同一个端口） |
+| 应用容器**必须显式指向**宿主机 | `check_deploy_consistency.py` 检查 3 | `DATABASE_HOST` / `REDIS_URL` 必须出现 `host.docker.internal` |
+
+**为什么验证读 netstat 而不是配置文件**：配置文件可以被命令行参数覆盖 ——
+这个脚本自己就是靠 `-c` / `--bind` 覆盖的。只有 socket 是 ground truth。
 
 **约定**：
 
-- **postgres / redis 绑回环**。它们是内部依赖，不需要被外部访问；Redis 尤其
+- **数据库/缓存只绑回环**。它们是内部依赖，不需要被外部访问；Redis 尤其
   如此 —— 本仓库的 Redis **没有 `requirepass`**，绑 `0.0.0.0` 等于把无鉴权缓存
   交给整个局域网，绑回环是当前唯一有效的访问控制。
-- **应用服务（data-service / analysis-service / strategy-service）有意保持
-  `0.0.0.0`** —— 它们本来就是要被访问的。
+- **应用服务（data-service / analysis-service / strategy-service / web）有意保持
+  `0.0.0.0`** —— 它们本来就是要被访问的。analysis 另有 P0-4 的 fail-closed
+  兜底：**没有 `JWT_SECRET` 就拒绝启动**，所以「对外可达」与「无鉴权」不会同时
+  成立（要对外访问就配密钥；本机开发不必开鉴权，见 `local-dev.md`）。
 
-绑回环**不会**打断本机开发：容器之间走 compose 网络的服务名（`postgres:5432`），
-与本映射无关；宿主机上的 `psql` 和测试 DSN（`postgres://…@localhost:5432/…`）
-照旧通 —— `localhost` 就是 `127.0.0.1`。所以这是「收紧到本机」而不是「关掉」。
+验收方式：
 
-> 验收方式（不是看配置文件，是实测）：从**另一个容器**经宿主**局域网 IP**
-> 探测，5432/6379 应不通，而绑 `0.0.0.0` 的服务（data-service:8081）应通
-> —— 后者是对照组，证明测法本身有区分度。
-> ⚠️ 不要用 `host.docker.internal` 做这个测试：它是 Docker Desktop / Rancher 的
-> **宿主侧代理**，转发到 loopback，会**绕过网卡绑定**，必然「通」，结论无效。
+```bash
+# ① 容器必须能到宿主机（这是新形态的**必需能力**，不是漏洞）
+docker run --rm alpine:3.20 nc -z host.docker.internal 5432   # 应通
+# ② 原生进程自身只监听回环（局域网其他机器连不上）
+netstat -ano | grep LISTENING | grep 5432                      # 应只见 127.0.0.1
+```
+
+> ⚠️ **别用 `host.docker.internal` 去判断「绑定是否收紧」** —— 它是 Docker
+> Desktop 的**宿主侧代理**，转发到 loopback，会**绕过网卡绑定**、必然「通」。
+> 拿它对绑定下结论是无效的（上面 ① 问的是另一个问题：容器能否到达宿主机）。
+> 「绑定是否收紧」由 `local-infra.sh status` 读 netstat 回答。
 
 ---
 
@@ -88,8 +139,8 @@ configmap 里躺了很久，2026-09-18 作为死配置清掉（同 P2-7 的 ai-s
 
 | 服务 | compose | k8s | 说明 |
 |---|---|---|---|
-| postgres | ✅ | 用 `postgres-statefulset.yaml` | 有状态，k8s 不用 Deployment |
-| redis | ✅ | 用 `redis-deployment.yaml` | 同上 |
+| postgres | ❌ **宿主机原生** | 用 `postgres-statefulset.yaml` | 2026-09-25 移出 compose（见文件头）。k8s 侧不变 |
+| redis | ❌ **宿主机原生** | 用 `redis-deployment.yaml` | 同上 |
 | data-service | ✅ | ✅ | |
 | analysis-service | ✅ | ✅ | |
 | **web** | ✅ | ✅ | AUD-32 新增，前端（见下节） |
@@ -97,6 +148,8 @@ configmap 里躺了很久，2026-09-18 作为死配置清掉（同 P2-7 的 ai-s
 
 差异清单写在 `tools/check_deploy_consistency.py` 的 `ALLOWED_MISSING_IN_K8S` 里。
 **新增差异必须同步加进去并写明原因** —— 否则护栏会报漂移。
+`postgres` / `redis` 两条已从该清单删除（2026-09-25）：它们不再是 compose 服务，
+留在清单里就是死条目 —— 「不许回到 compose」改由检查 3a 正向断言。
 
 ---
 

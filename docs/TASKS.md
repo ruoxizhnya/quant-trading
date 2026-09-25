@@ -85,6 +85,38 @@ AUD-54 裁决走「逐条订正归档文档」，护栏一个字没动）。
 （见文末「P2-8 取证说明」六）→ 然后 **P2-1**（补宏观数据源 —— 跨境那一半已做完，
 见 `guides/data-dependencies.md`）与 **P2-2**（产业链数据底座）。
 
+### 本地部署形态定案（2026-09-25，非缺陷）
+
+**数据库与缓存改为宿主机原生安装，应用服务仍跑容器。**
+
+| 层 | 形态 | 启停 |
+|---|---|---|
+| PostgreSQL 17.5 / Redis 7.4.11 | 宿主机原生进程 | `tools/local-infra.sh {start\|stop\|status}` |
+| data / strategy / analysis / web | Docker 容器 | `docker-compose up -d` |
+
+原因是**环境事实**不是偏好：Docker Desktop 在本机受沙箱硬阻断（启动要拉起
+`wsl.exe`，而它在程序黑名单里、报错明写不可绕过），且**起来之后还会自发退出** ——
+把最该稳的数据库挂在最不稳的一层上不划算。
+
+落地要点，以及**随之改写的东西**（不写下来就会被当成「只是换了个端口」）：
+
+- `config/*.yaml` 的地址口径改为**宿主机视角**（`localhost`）；容器视角由
+  `docker-compose.yml` 的 env 注入 `host.docker.internal` —— 容器里的 `localhost`
+  是容器自己。服务之间的 `http://data-service:8081` **保持不变**（服务全在容器里，
+  这一跳没变）。三处地址不同且都对，见 `guides/deploy-config.md` 的「地址口径」表。
+- 被移除的 `depends_on: {condition: service_healthy}` 由镜像内的
+  `deploy/wait-for-deps.sh` **替换**承担（应用连不上 PG/Redis 是 `logger.Fatal()`
+  无重试，`cmd/data/setup.go:137/:146`）。
+- **`check_deploy_consistency.py` 的检查 3 与检查 5 一并改写**。检查 3 原来守的是
+  compose 里 postgres/redis 的端口映射，检查对象随服务一起从 compose 消失 ——
+  不改写不会报错，而是**循环体一次都不进、照旧打「✓」**，那是假护栏（比没护栏更糟）。
+  新断言换成「基础设施真在仓外」+「应用容器显式指向它」，两半都做了破坏验证。
+  检查 5 放宽为只比**库名 / 用户名 / 端口**（host 在三处必然不同，比它只会逼出
+  一个恒假的断言）。
+- 「数据库/缓存只监听回环」这条不变量**没有放松**，只是承载体从 compose 的端口映射
+  挪到了原生进程的启动参数（`-c listen_addresses=127.0.0.1` / `--bind 127.0.0.1`，
+  **显式**指定、不靠配置文件默认值），验证改为读真实 netstat 监听 socket。
+
 ### 已完成（2026-09-16，已从下方列表移出）
 
 - **P0-1 前视偏差**：财务读取改为按 `COALESCE(ann_date, trade_date)` 过滤

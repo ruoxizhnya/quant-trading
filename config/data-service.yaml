@@ -31,17 +31,28 @@ rate_limit:
 # pkg/storage.BuildDSN 校验（空密码 Fatal 并指向 DATABASE_PASSWORD）。
 #
 # url 留空 = 逐字段拼装；它是 DATABASE_URL 的覆盖点。
+#
+# ── 地址口径（2026-09-25 定，见 docker-compose.yml 文件头）────────────────
+# **这份 yaml 是「在宿主机上直接跑」的视角：数据库/缓存都在 localhost。**
+# 容器里的视角不同（容器内的 localhost 指容器自己），那一侧由
+# docker-compose.yml 的 environment 覆盖成 host.docker.internal。
+#
+# 这里的 host 此前写的是 "postgres"（compose 服务名）—— 那是容器视角，
+# 而 compose 又没给 data-service 注入 DATABASE_HOST，等于把容器地址当成了
+# 本机地址，只是当时 compose 里真有个叫 postgres 的容器才「碰巧能用」
+# （P1-8 同型）。容器里的 postgres 已被移除，这个值必须回到 localhost。
 database:
   url: ""
-  host: "postgres"
+  host: "localhost"
   port: 5432
   user: "postgres"
   password: ""
   database: "quant_trading"
   sslmode: "disable"
 
+# 同上：宿主机视角。容器由 compose 注入 redis://host.docker.internal:6379。
 redis:
-  url: "redis://redis:6379"
+  url: "redis://localhost:6379"
 
 # Tushare。token **只能**从 env 注入（TUSHARE_TOKEN）；空 = 未配置。
 #

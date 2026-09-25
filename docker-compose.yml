@@ -1,97 +1,95 @@
-version: '3.9'
-
-# P1-15 (Sprint 6, ODR-021): service count reduced from 7 to 5.
-# The risk and execution services have been merged into the
-# analysis service (in-process), so docker-compose no longer
-# builds/boots them as separate containers. Their HTTP endpoints
-# (under /api/risk/* and /api/execution/*) are served by
-# analysis-service:8085.
+# 本地部署形态（2026-09-25 定案）──────────────────────────────────────
 #
-# Remaining services:
-#   - postgres (5432)         — TS DB
-#   - redis (6379)            — cache / session / sync_job_cache
-#   - data-service (8081)     — multi-source data ingestion
-#   - strategy-service (8082) — strategy registry (standby per ADR-012)
-#   - analysis-service (8085) — backtest + risk + execution + auth
+# **数据库与缓存用宿主机原生安装，应用服务用容器。**
 #
-# 端口绑定约定（AUD-13）：**postgres / redis 只绑 127.0.0.1** —— 数据库与
-# 缓存不该出现在局域网上（Redis 还没有密码）。应用服务保持 0.0.0.0，它们
-# 本来就是要被访问的。这条约定由 tools/check_deploy_consistency.py 守护。
+#   宿主机原生（由 tools/local-infra.sh 启停）
+#     PostgreSQL 17.5   127.0.0.1:5432   —— 无 TimescaleDB（只是 Warn，已实测可建表）
+#     Redis 7.4.11      127.0.0.1:6379   —— 无 requirepass
+#
+#   Docker 容器（本文件）
+#     data-service     :8081   多源数据接入
+#     strategy-service :8082   策略注册表（standby per ADR-012）
+#     analysis-service :8085   回测 + 风控 + 执行 + 鉴权（ODR-021 合并后）
+#     web              :8080   Vue 3 SPA（nginx），/api 反代到 analysis
+#
+# **为什么把数据库挪出容器**：Docker Desktop 在本机受沙箱限制（启动时会拉起
+# wsl.exe 而在程序黑名单里，且起来之后还会自发退出），把最该稳的一层挂在最不稳
+# 的一层上不划算。原生 PG/Redis 出问题只看两个进程的日志。
+#
+# ⚠️ **容器内访问宿主机必须用 host.docker.internal，不是 localhost** ——
+# 容器里的 localhost 指容器自己。实测（2026-09-25）Docker Desktop 默认就把
+# 这个名字解析成 IPv4 192.168.65.254 并且能连到宿主机回环上的服务。
+#
+# ⚠️ **不要加 `extra_hosts: ["host.docker.internal:host-gateway"]`** ——
+# 实测在 Docker Desktop 上加了之后它从 IPv4 变成 IPv6（fdc4:f303:9324::254），
+# 是地址族层面的行为改变，而 Desktop 本来就不需要这行。Linux 上才需要它；
+# 换到 Linux 跑时再按需加，不要预先写死（本文件以本机能验证的形态为准）。
+#
+# ⚠️ **服务之间仍用 compose 服务名**（http://data-service:8081）—— 服务全在
+# 容器里，这一层没有变，不要改成 localhost。
+#
+# 端口绑定约定（AUD-13，2026-09-25 改写）：**数据库/缓存只绑回环** —— 它们
+# 不再是 compose 服务，这条不变量改由原生进程承担：tools/local-infra.sh 用
+# `-c listen_addresses=127.0.0.1` / `--bind 127.0.0.1` **显式**指定（不靠配置
+# 文件默认值），并由它的 status 读**真实 netstat 监听 socket** 断言。
+#
+# 为什么验证读 socket 而不是配置：配置文件可以被命令行参数覆盖（这个脚本自己
+# 就是靠 -c / --bind 覆盖的），只有 socket 是 ground truth。
+#
+# 应用服务（data / strategy / analysis / web）的端口映射**有意保持 0.0.0.0**：
+# 它们本来就是要被访问的。analysis 另有 JWT fail-closed 兜底 —— 没有
+# JWT_SECRET 就拒绝启动（见 analysis-service 的 environment），所以「暴露到
+# 局域网」与「无鉴权」不会同时成立。
+#
+# tools/check_deploy_consistency.py 的检查 3 已随之改写：原来守的是 compose 的
+# postgres/redis 端口映射，检查对象随服务一起从本文件消失 —— 不改写就变成循环体
+# 一次都不进的空转（照旧打「✓」），那是假护栏。新断言是「基础设施真在仓外」+
+# 「应用容器显式指向它」，两半都做了破坏验证。
+#
+# 启动顺序：应用连不上 PG/Redis 会直接 Fatal 退出、**没有重试**
+# （cmd/data/setup.go:137 / :146）。此前靠 `depends_on + service_healthy` 保证；
+# 那两个服务不再是 compose 成员后，保证改由镜像内的 deploy/wait-for-deps.sh
+# 承担 —— **是替换不是删除**，而且现在等的是宿主机上的真实端口。
 #
 # (ai-service 已删除：2026-09-18，TASKS P2-5。它零调用方且建在待废弃的
 # pkg/ai/agents 上；AI 能力现在走 cmd/analysis 的 MCP 工具层。)
 
 services:
-  postgres:
-    image: timescale/timescaledb:latest-pg17
-    environment:
-      POSTGRES_USER: postgres
-      # AUD-39：读的是 **DATABASE_PASSWORD**，与应用侧同一个变量。
-      # 此前这里写的是 ${DB_PASSWORD:-postgres} —— 与应用读的
-      # ${DATABASE_PASSWORD:-postgres} 是**两个独立的变量**，只是默认值
-      # 恰好相同。一旦有人把密码改成非默认（改哪个都错），postgres 与
-      # 应用就会用不同的密码，连接必然失败。ADR-017 与 SPEC.md 里写的
-      # `DB_PASSWORD` 是第三个口径，已一并订正。
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
-      POSTGRES_DB: quant_trading
-    ports:
-      # AUD-13：数据库只绑回环，不暴露到局域网。
-      # 容器之间走 compose 网络的服务名（postgres:5432），与本映射无关；
-      # 宿主机上的 psql 与测试 DSN（localhost:5432）照旧通 —— localhost 就是
-      # 127.0.0.1，所以这是「收紧到本机」而不是「关掉」。
-      # 应用服务的端口有意保持 0.0.0.0（见文件头）：它们本来就是要被访问的。
-      - "127.0.0.1:5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      # AUD-13：同上，只绑回环。⚠️ 本服务的 Redis **没有 requirepass**，
-      # 绑到 0.0.0.0 等于把无鉴权缓存交给整个局域网；绑回环是当前唯一
-      # 有效的访问控制。（给 Redis 加密码要动全部服务的 REDIS_URL，
-      # 是另一件事 —— 见 TASKS.md「AUD-13 落地说明」。）
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   data-service:
     build:
       context: .
       dockerfile: Dockerfile.service
+    # 等宿主机 PG / Redis 可达再起 —— 替换掉被移除的 depends_on 保证。
+    # 等什么由脚本从 DATABASE_HOST / REDIS_URL 推导，这里**不重复列一遍**
+    # （曾经写成传参 "postgres:5432 redis:6379"，那是已不存在的旧服务名，
+    #  实测导致容器空转 + unhealthy）。
+    entrypoint: ["/bin/sh", "/app/wait-for-deps.sh"]
     command: ["/app/data-service"]
     ports:
+      # 有意绑 0.0.0.0（见文件头「端口绑定约定」）：它本来就是要被访问的。
       - "8081:8081"
     environment:
       # AUD-39：DATABASE_HOST/PORT/USER/DATABASE 四项此前**没给** data-service
       # （只给了密码），它靠 config/data-service.yaml 里的 host/port/user/
-      # database 兜底 —— 值恰好与这里相同，所以「碰巧能用」（P1-8 同型：
-      # 一旦 yaml 或服务名改了就会静默连错库）。显式补齐，与
-      # analysis-service 的口径一致。
+      # database 兜底 —— 值恰好与这里相同，所以「碰巧能用」（P1-8 同型）。
       #
-      # DB_PASSWORD 已删除：viper 的键是 database.password，推导出的 env 名
+      # 现在那份 yaml 的口径是**宿主机视角**（localhost），容器必须显式注入
+      # 自己的视角，否则会去连容器自己的 5432 且必然失败 —— 也就是说
+      # 这四项从「碰巧能用」变成了**必需**。
+      #
+      # DB_PASSWORD 是死键：viper 的键是 database.password，推导出的 env 名
       # 是 DATABASE_PASSWORD；DB_PASSWORD 零读取者（与 k8s 侧
-      # POSTGRES_PASSWORD 是同一类死键）。
-      DATABASE_HOST: postgres
+      # POSTGRES_PASSWORD 是同一类死键，AUD-39）。
+      DATABASE_HOST: host.docker.internal
       DATABASE_PORT: 5432
       DATABASE_USER: postgres
       DATABASE_DATABASE: quant_trading
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://host.docker.internal:6379
       # AUD-35：名字必须是 LOGGING_LEVEL。viper 的 AutomaticEnv +
       # SetEnvKeyReplacer(".", "_") 把 logging.level 映射成 LOGGING_LEVEL；
-      # 此前这里写的 LOG_LEVEL 全仓无人读（死配置）—— 改了没有任何效果。
+      # 此前这里写的 LOG_LEVEL 全仓无人读（死配置）。
       LOGGING_LEVEL: info
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
@@ -99,21 +97,18 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
   strategy-service:
     build:
       context: .
       dockerfile: Dockerfile.service
+    entrypoint: ["/bin/sh", "/app/wait-for-deps.sh"]
     command: ["/app/strategy-service"]
     ports:
       - "8082:8082"
     environment:
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://host.docker.internal:6379
+      # 服务间地址保持 compose 服务名 —— 服务全在容器里。
       DATA_SERVICE_URL: http://data-service:8081
       LOGGING_LEVEL: info
     healthcheck:
@@ -123,8 +118,6 @@ services:
       retries: 5
       start_period: 10s
     depends_on:
-      redis:
-        condition: service_healthy
       data-service:
         condition: service_healthy
 
@@ -132,26 +125,25 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.service
-    entrypoint: ["/app/analysis-service"]
+    entrypoint: ["/bin/sh", "/app/wait-for-deps.sh"]
+    command: ["/app/analysis-service"]
     ports:
       - "8085:8085"
     environment:
-      # AUD-39：DB_PASSWORD 已删除（零读取者，viper 读的是
-      # database.password → DATABASE_PASSWORD，见 postgres 服务的说明）。
+      # DB_PASSWORD 已删除（零读取者，viper 读的是 database.password →
+      # DATABASE_PASSWORD，见 data-service 的说明）。
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
       # P0-4: 鉴权密钥，必须设置。容器里监听 0.0.0.0，不配密钥服务会
       # 拒绝启动（`auth: JWT secret missing`）—— 这是刻意的 fail-closed。
       # 生成：openssl rand -hex 32
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is required (generate it with: openssl rand -hex 32)}"
       # 跨源白名单，逗号分隔。留空 = 不回显任何 ACAO（默认，最安全）。
-      # 需要让独立部署的 SPA 直连时再填，例如：
-      # SERVER_CORS_ALLOWED_ORIGINS: http://localhost:5173
       SERVER_CORS_ALLOWED_ORIGINS: ${SERVER_CORS_ALLOWED_ORIGINS:-}
-      DATABASE_HOST: postgres
+      DATABASE_HOST: host.docker.internal
       DATABASE_PORT: 5432
       DATABASE_USER: postgres
       DATABASE_DATABASE: quant_trading
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://host.docker.internal:6379
       DATA_SERVICE_URL: http://data-service:8081
       STRATEGY_SERVICE_URL: http://strategy-service:8082
       # P1-15 (Sprint 6, ODR-021): risk + execution merged into
@@ -170,24 +162,20 @@ services:
       retries: 5
       start_period: 10s
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
       data-service:
         condition: service_healthy
 
   web:
     # AUD-32：官方前端（web/，Vue 3 + Vite）的构建与托管。
     # 之前它只能 `npm run dev` 跑在 :5173，compose 里连个服务都没有 ——
-    # 于是 cmd/analysis/static/ 那套 legacy HTML 成了唯一的服务端 UI
-    # （ODR-062 取证 e），想删也删不掉（AUD-33 卡在这里）。
+    # 于是 cmd/analysis/static/ 那套 legacy HTML 成了唯一的服务端 UI。
     build:
       context: .
       dockerfile: Dockerfile.web
     ports:
       # AUD-13：应用服务有意绑 0.0.0.0 —— 前端本来就是要被浏览器打开的。
-      # 只有 postgres / redis 该绑回环（那条由 check_deploy_consistency.py 守）。
+      # 只有数据库/缓存该绑回环（它们已移出 compose，那条改由
+      # tools/local-infra.sh 用 -c / --bind 指定并读 netstat 断言）。
       - "8080:8080"
     depends_on:
       # nginx 里 /api 反代到 analysis-service:8085。用 resolver + 变量
@@ -202,6 +190,11 @@ services:
       retries: 5
       start_period: 5s
 
-volumes:
-  postgres_data:
-  redis_data:
+# 注意：原先这里声明了 postgres_data / redis_data 两个卷。
+# 数据库与缓存移出容器后它们不再被任何服务挂载。**本文件不再声明**，但
+# 磁盘上的 Docker 卷 quant-trading_postgres_data（1.26GB）/
+# quant-trading_redis_data 仍然存在（compose 删声明不删卷）。
+# 里面是旧的容器版数据 —— 已知为**空库**（表结构就绪、业务表 0 行，
+# 见 docs/TEST.md）。确认不再需要时用显式删除回收：
+#   docker volume rm quant-trading_postgres_data quant-trading_redis_data
+# ⛔ 不要用 `docker volume prune` 代替 —— 它会连带删掉四个 Go 构建缓存卷。

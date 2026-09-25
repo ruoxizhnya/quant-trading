@@ -41,6 +41,16 @@ COPY --from=builder /app/analysis-service /app/analysis-service
 
 # Copy config files
 COPY config /app/config
+
+# 依赖等待脚本。
+#
+# 「数据库跑宿主机、服务跑容器」形态下，postgres / redis 不再是 compose 成员，
+# `depends_on: {condition: service_healthy}` 那层启动顺序保证随之消失 ——
+# 而应用连不上 PG/Redis 是 logger.Fatal() 直接退出、**没有重试**
+# （cmd/data/setup.go:137 / :146）。这个脚本把那层保证移到容器内部补回来。
+# 由 docker-compose.yml 的 entrypoint + command 组合调用。
+COPY deploy/wait-for-deps.sh /app/wait-for-deps.sh
+RUN chmod +x /app/wait-for-deps.sh
 #
 # ⚠️ 此处曾有一行 `COPY cmd/analysis/static /app/cmd/analysis/static`。
 # AUD-33（2026-09-22）退役 legacy HTML 时把那个目录整删了，这行没跟着删 →
