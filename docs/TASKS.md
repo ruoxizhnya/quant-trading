@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-09-24
-verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）；AUD-41/42 落地（SPEC 的 `## Configuration` 段整段订正 + doc 护栏第二项检查；`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓单实现结构护栏）+ 顺带登记 AUD-43 / AUD-44（2026-09-22）；AUD-43/44/45 落地（AUD-43 前提订正后**裁决保留** `pkg/testutil` 并归并入 AUD-45；AUD-45 = 统一盘点 13 个零导入者包 + 新增 `internal/repoguard` 结构性护栏；AUD-44 = 三份入口文档补 R1 frontmatter + doc 护栏第三项检查）+ 顺带登记 AUD-46 / AUD-47（2026-09-22）；AUD-46/47 落地（AUD-46 = 删除 `pkg/metrics`（ADR-017 §1 的竞争实现，四个核心指标由 `pkg/observability` 实现）+ `internal/repoguard` 新增 `retiredPackages` 退役负向断言，`pkg/decimal` 裁决保留并标注「待采用」；AUD-47 = `docs/TEST.md` §5–§7 内容复核 —— 沙箱限制改实测值 30s/1 GiB、覆盖率目标标注为「不是门禁」、前端与 e2e 用例数改实测），2026-09-22；P2-13 接真库取证（`pkg/validation/live_backtest_integration_test.go`，实测「验证器链在真数据上否掉策略」）+ 顺带登记 AUD-49 / AUD-50（sync 的 cancel 与重启恢复两项缺陷），2026-09-23；AUD-50 落地（`pkg/sync` 补 `Queue.CleanupStaleRunning` + 从 `WorkerPool.Start` 调用 + `cmd/analysis` 补上文档承诺却从未存在的启动期一半 + `internal/repoguard` 函数级接线护栏，其第一版对目标形态是瞎的、经破坏验证修正为 `file:function`；AUD-49 仍未修），2026-09-23；AUD-49 落地（sync 的取消两半都修 —— 无条件 `UpdateSyncJob` 退役、换成 `UpdateSyncJobIfStatus` 条件写（`WHERE id=$1 AND status = ANY(...)`）且 `from` 为空报错；`RetryLater`/`CompleteJob`/`FailJob`/`Dequeue`/`CleanupStaleRunning` 全部改为条件写；`WorkerPool` 补 `jobID → cancelFunc` 注册表 + per-job ctx（原来是 `context.Background()`），`cmd/data:NewSyncHandler` 接上 `SetRunningCanceller` 并由 repoguard 钉住调用点；新增 `pkg/sync/cancel_test.go` 13 条 + `pkg/storage/sync_jobs_conditional_test.go` 6 条**真库**测试；破坏验证 S1/S2 分别只红「行」与「执行器」各自那一层）+ 顺带登记 AUD-51（测试前置条件与断言读的不是同一个东西 —— `TestHasOHLCVData` 硬编码 `600000.SH` 而前置只检查表非空，局部同步必红；同类潜伏成员 3 个）+ AUD-52（e2e 套件的前置条件不再蕴含断言 —— :8084 指向已退役的 execution 服务，永远不可能绿；strategy API 期望 200 实测 401），2026-09-23；**AUD-55 / AUD-53 / AUD-54 一次关掉（2026-09-24）** —— AUD-55（根因）= 引擎对已持仓位重复下单（`computeEffectiveTarget` 的抵扣只在 `PendingQty > 0` 时生效 × 无状态策略每天对 top-N 发 `Long`）**已修**：抵扣改为**无条件** + 已持仓**实时读 tracker**（不再信 `tp.ActualQty` 缓存）+ 新增 `reconcileTargetPosition` 对齐三处**引擎外改持仓**（止损/止盈平仓、拆股、退市强平）；AUD-53（表现）= 资金侧 4.82pp → **0.76pp**、阶梯转**收敛**、零拒单；价格侧 10.31pp **归因到绝对金额约束**（一手 = 100 × 价格 vs 固定资金）、**非引擎缺陷**；AUD-54 = 归档层 6 条已删配置引用**逐条加时点/现状注记**（护栏一字未动，`--include-archive` 退出码 **1 → 0**）；三条回归护栏 + 破坏验证（**三条同时变红**）+ 顺带登记 **AUD-56**（`pkg/ai/pipeline` 有一条测试靠**外网可达性**才能结束 —— `go build` 会联网解析不存在的 import，墙内不通就挂到超时；**A/B/A/B 四轮交替**才排除「与本轮改动相关」这个误判）
+last-verified: 2026-09-25
+verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）；AUD-41/42 落地（SPEC 的 `## Configuration` 段整段订正 + doc 护栏第二项检查；`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓单实现结构护栏）+ 顺带登记 AUD-43 / AUD-44（2026-09-22）；AUD-43/44/45 落地（AUD-43 前提订正后**裁决保留** `pkg/testutil` 并归并入 AUD-45；AUD-45 = 统一盘点 13 个零导入者包 + 新增 `internal/repoguard` 结构性护栏；AUD-44 = 三份入口文档补 R1 frontmatter + doc 护栏第三项检查）+ 顺带登记 AUD-46 / AUD-47（2026-09-22）；AUD-46/47 落地（AUD-46 = 删除 `pkg/metrics`（ADR-017 §1 的竞争实现，四个核心指标由 `pkg/observability` 实现）+ `internal/repoguard` 新增 `retiredPackages` 退役负向断言，`pkg/decimal` 裁决保留并标注「待采用」；AUD-47 = `docs/TEST.md` §5–§7 内容复核 —— 沙箱限制改实测值 30s/1 GiB、覆盖率目标标注为「不是门禁」、前端与 e2e 用例数改实测），2026-09-22；P2-13 接真库取证（`pkg/validation/live_backtest_integration_test.go`，实测「验证器链在真数据上否掉策略」）+ 顺带登记 AUD-49 / AUD-50（sync 的 cancel 与重启恢复两项缺陷），2026-09-23；AUD-50 落地（`pkg/sync` 补 `Queue.CleanupStaleRunning` + 从 `WorkerPool.Start` 调用 + `cmd/analysis` 补上文档承诺却从未存在的启动期一半 + `internal/repoguard` 函数级接线护栏，其第一版对目标形态是瞎的、经破坏验证修正为 `file:function`；AUD-49 仍未修），2026-09-23；AUD-49 落地（sync 的取消两半都修 —— 无条件 `UpdateSyncJob` 退役、换成 `UpdateSyncJobIfStatus` 条件写（`WHERE id=$1 AND status = ANY(...)`）且 `from` 为空报错；`RetryLater`/`CompleteJob`/`FailJob`/`Dequeue`/`CleanupStaleRunning` 全部改为条件写；`WorkerPool` 补 `jobID → cancelFunc` 注册表 + per-job ctx（原来是 `context.Background()`），`cmd/data:NewSyncHandler` 接上 `SetRunningCanceller` 并由 repoguard 钉住调用点；新增 `pkg/sync/cancel_test.go` 13 条 + `pkg/storage/sync_jobs_conditional_test.go` 6 条**真库**测试；破坏验证 S1/S2 分别只红「行」与「执行器」各自那一层）+ 顺带登记 AUD-51（测试前置条件与断言读的不是同一个东西 —— `TestHasOHLCVData` 硬编码 `600000.SH` 而前置只检查表非空，局部同步必红；同类潜伏成员 3 个）+ AUD-52（e2e 套件的前置条件不再蕴含断言 —— :8084 指向已退役的 execution 服务，永远不可能绿；strategy API 期望 200 实测 401），2026-09-23；**AUD-55 / AUD-53 / AUD-54 一次关掉（2026-09-24）** —— AUD-55（根因）= 引擎对已持仓位重复下单（`computeEffectiveTarget` 的抵扣只在 `PendingQty > 0` 时生效 × 无状态策略每天对 top-N 发 `Long`）**已修**：抵扣改为**无条件** + 已持仓**实时读 tracker**（不再信 `tp.ActualQty` 缓存）+ 新增 `reconcileTargetPosition` 对齐三处**引擎外改持仓**（止损/止盈平仓、拆股、退市强平）；AUD-53（表现）= 资金侧 4.82pp → **0.76pp**、阶梯转**收敛**、零拒单；价格侧 10.31pp **归因到绝对金额约束**（一手 = 100 × 价格 vs 固定资金）、**非引擎缺陷**；AUD-54 = 归档层 6 条已删配置引用**逐条加时点/现状注记**（护栏一字未动，`--include-archive` 退出码 **1 → 0**）；三条回归护栏 + 破坏验证（**三条同时变红**）+ 顺带登记 **AUD-56**（`pkg/ai/pipeline` 有一条测试靠**外网可达性**才能结束 —— `go build` 会联网解析不存在的 import，墙内不通就挂到超时；**A/B/A/B 四轮交替**才排除「与本轮改动相关」这个误判）；**AUD-56 / AUD-51 落地（2026-09-25）** —— AUD-56 = 把那条「靠外网可达性才能结束」的测试改成**正面证据 + 反证**（`buildDir` 里放带 `replace` 的 go.mod 指向本地模块，编译成功本身即是「buildDir 被用上」的证据；换成空目录必须失败）+ `t.Setenv("GOPROXY","off")`，并给生产侧 `go build` 子进程加 `CommandContext` + 120s 上界（601s 挂死 → 6.18s 通过；破坏 `buildCmd.Dir` 后 0.93s 变红且不挂起）；AUD-51 = `pkg/storage` 四个测试改为**自灌自证**（`TestHasOHLCVData` / `TestGetTradingDays` / `TestIsTradingDay` / `TestGetTradingDates` 自己写数据自己清理，**取消前置**而非修补前置；顺带订正登记时的一处误判 —— `TestGetTradingDays` 读的是 `ohlcv_daily_qfq`、缺的是**区间**，表名对不上的只有 `TestIsTradingDay` / `TestGetTradingDates`；`skipIfNoSeedData` 收敛到 `TestGetAllStocks` 一个同源用法）；同时订正 `docs/guides/local-dev.md` 四处漂移（test 文件数 186 → 实测 **273**、`.gitignore` 的 `*_test.go` 警告失效、`cmd/ai` 已于 2026-09-18 删除却仍在教怎么跑、已知陷阱里「需要预置数据」那条随自灌自证同步）；**AUD-51 真库实测补完（2026-09-25，原生 PG 17.5，本机 Docker Desktop 不可用时的替代路径）**：四个测试在**全新空库**上全部 PASS（`pkg/storage` 整包 `ok 24.4s`），破坏验证（把自灌与断言脱钩）→ 四个测试**同时变红** —— AUD-51 由 🔶 翻 ✅
 status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有未解除的前置）" —— 见下方「状态总览」
 ---
 
@@ -22,7 +22,7 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 2. **通回路** — 让 AI 真正能操作底座跑完一次循环（P0/P1）
 3. **加数据** — 宏观/跨境、产业链（P1/P2）
 
-### 状态总览（2026-09-24 复核）
+### 状态总览（2026-09-25 复核）
 
 **状态标记**：`✅ 已完成`（附日期） / `🔶 进行中` / `⬜ 待做` / `⛔ 阻塞`（有未解除的前置）。
 
@@ -42,7 +42,7 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 
 | AUD-49~50 | 2 | 2 | 0 | 0 | 0 | ✅ **AUD-50**（重启后 `running` 的 job 永久搁浅 —— `pkg/sync` 补 `Queue.CleanupStaleRunning` 并**从 `WorkerPool.Start` 调用**（结构上不可能忘）；`cmd/analysis` 补上文档承诺却从未存在的**启动期**那一半；新增 `internal/repoguard` 的**函数级**接线护栏 —— ⚠️ **它的第一版对目标形态是瞎的**（钉文件而非函数，原 bug 下也是绿的），已修正为 `file:function` 并重做破坏验证），2026-09-23。✅ **AUD-49**（`POST /api/sync/jobs/:id/cancel` 对 `running` 任务无效 —— **两半都修**：**行**改成条件写（`UpdateSyncJobIfStatus` 是唯一入口，`WHERE id=$1 AND status = ANY(...)`，`UpdateSyncJob` 整个退役）+ **执行器**补 per-job ctx 与 `jobID → cancelFunc` 注册表，由 `cmd/data:NewSyncHandler` 接上 `workerPool.Cancel`；新增**真库**测试证明条件真的在 SQL 里，破坏验证 S1/S2 分别只红各自那一层），2026-09-23。两项都是 2026-09-23 打通数据同步时**撞出来的**，不是审查登记项。机制、取证与修法见本文件末尾「AUD-49 / AUD-50 登记说明」与「AUD-49 落地说明」 |
 
-| AUD-51 | 1 | 0 | 0 | 1 | 0 | ⬜ **AUD-51**（测试的**前置条件与断言读的不是同一个东西** —— 于是红/绿都跟被测代码无关。**会经常红的那个**：`TestHasOHLCVData`（`pkg/storage/postgres_test.go:170`）断言 `600000.SH` 在 `ohlcv_daily_qfq` 里有数据，而它的前置 `skipIfNoSeedData` 只检查**表非空**；任何一次局部同步（同步途中、或只 `RetryJob` 了一部分 symbol）都会让它红，而失败信号不指向任何代码问题。**同类的潜伏成员 3 个**：`TestGetTradingDays` / `TestGetTradingDates` / `TestIsTradingDay` 断言读的是 `trading_calendar`，前置检查的却是 `ohlcv_daily_qfq` —— 只在「两表一空一不空」时才发作，所以一直没被发现）。2026-09-23，**撞出来的**（完整跑测试时红，且**与本轮改动无关**：改的是 `sync_jobs`，实测 `600000.SH` 在库里 0 行） |
+| AUD-51 | 1 | 1 | 0 | 0 | 0 | ✅ **AUD-51**（测试的**前置条件与断言读的不是同一个东西** —— 于是红/绿都跟被测代码无关）。**已于 2026-09-25 关闭，含真库实测 + 破坏验证**。修法：四个测试一律改为**自灌自证** —— 自己写数据、自己断言、自己清理，于是**不再需要任何前置**（问题从根上消失，而不是把前置改得「更准」）。逐条：① `TestHasOHLCVData` 自己灌一只 `TEST_HASDATA_001.SH` 再问 `HasOHLCVData`（原来断言写死 `600000.SH`，前置只查「表非空」）；② `TestGetTradingDays` 在自己灌的区间上断言，并把「`len(days) <= 22`」这条弱断言换成真正的区间不变量「结果不得越界」；③ `TestIsTradingDay` / `TestGetTradingDates` 改为灌 **`trading_calendar`**（1990-01-02 真 / 1990-01-03 假 —— 落在任何现实同步区间之外，不打架也不误删真实数据），后者顺带断言 `is_trading_day = TRUE` 过滤真的生效（原来只断言 `len > 0`）。**订正登记时的一处误判**：`TestGetTradingDays` 读的其实是 `ohlcv_daily_qfq`（`pkg/storage/ohlcv.go:146`，DISTINCT trade_date），**不是**登记说明里写的 `trading_calendar`（它的问题在「区间的具体月份」，不在表名）；表名对不上的是另外两个（`pkg/storage/calendar.go:91` / `:115`）。`skipIfNoSeedData` 只剩 `TestGetAllStocks` 一个使用者 —— 那里前置（stocks 非空）与断言（`len >= 1`）**同源**，是唯一合法用法，注释已写明这个前提。**真库实测（2026-09-25，原生 PG 17.5）**：四个测试在**全新空库**上全部 PASS（`TestHasOHLCVData` 0.30s / `TestGetTradingDays` 0.67s / `TestIsTradingDay` 0.29s / `TestGetTradingDates` 0.68s），`pkg/storage` 整包 `ok 24.4s`。**修复前的对照**：同一组测试在空库上只会 `SKIP`（`skipIfNoSeedData` 见表空即跳）—— 「跳过」也是绿，却什么都没验，是「跑红」之外的**第二种不可信信号**。**破坏验证**：把自灌与断言脱钩（自灌的 symbol 加后缀、日历日期 `+1 天`）→ **四个测试全部变红**，`TestIsTradingDay` 精确报出「标为交易日的 1990-01-02 必须返回 true」失败；还原后回到绿、`grep SABOTAGE` 零残留。静态核验：`go build ./...` / `go vet ./pkg/storage/` 全绿；自灌用的 `SaveOHLCVBatch` / `SaveTradingCalendarBatch` 与同文件里早已通过的两个测试**是同一组调用**。2026-09-23，**撞出来的**（完整跑测试时红，且**与本轮改动无关**：改的是 `sync_jobs`，实测 `600000.SH` 在库里 0 行）。修法说明见文末 |
 
 | AUD-54 | 1 | 1 | 0 | 0 | 0 | ✅ **AUD-54**（**CI 的文档步骤本来就是红的，与任何一轮改动无关** —— `python tools/check_doc_links.py --include-archive` **退出码 1**，6 条「不存在的配置路径引用」全部指向 `config/ai-service.yaml`：`docs/archive/IMPLEMENTATION_PLAN.md:746`、`docs/archive/migration-phase3-to-phase4.md:171/449/479`、`docs/archive/odr/odr-009-code-doc-audit.md:156`、`docs/archive/tasks-phase-2.md:26`。成因是两件事撞在一起：**P2-5（2026-09-18）删了 `config/ai-service.yaml`**，而 **AUD-41（2026-09-22）新加的「文档引用的 config/ · deploy/ 路径必须存在」这一项被套到了归档层**。在 HEAD 的干净副本上复现过同样的 6 条、同样的退出码 1 —— **不是本轮引入的**。裁决未定，两条路选一：① 把那项检查的范围收到常青层+活跃层（归档是历史记录，引用的文件当时确实存在，与「导航坏链」不是一回事）；② 逐条订正归档文档（但那是在改写历史记录）。**动护栏前先裁决** —— 本项目对「改护栏」的规矩是「假护栏比没护栏更糟」。**✅ 已裁决（2026-09-24）：走 ② —— 逐条订正归档文档，护栏一个字没动。** 订正原则是「**不改写历史，只加时点与现状注记**」：6 处引用各自补一句「该文件已于 2026-09-18（TASKS P2-5）删除」；其中 `odr-009` 那条本是 2026-05-06 的审计快照，**保留**原来的「✅ 存在」并标明「审计快照」，旁边追加「后续：已删除」—— 过去的事实与现在的事实并存，谁都不被抹掉。用的是护栏**自带**的否定词豁免机制（其注释明说「历史行会合法地引用已删文件 —— TASKS.md 的『已完成』行几乎全是这个形状」），所以这不是绕护栏，而是把归档行改成它本来就该有的形状。**结果**：`python tools/check_doc_links.py --include-archive` 退出码 **1 → 0**，三项检查全绿。**破坏验证**：去掉其中一处注记 → 护栏**精确报出** `docs/archive/tasks-phase-2.md:26 -> config/ai-service.yaml`；恢复注记后回到绿 —— 说明那几行确实被看着、放行它们的正是注记本身。2026-09-23，做 P2-8 时**撞出来的** |
 
@@ -57,7 +57,7 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 三处调用仍在 —— 两套数字都成立，别互相校对。2026-09-24，做 AUD-53 根因定位时**查出来的** |
 
 | AUD-52 | 1 | 0 | 0 | 1 | 0 | ⬜ **AUD-52**（e2e 套件的**前置条件不再蕴含它的断言** —— `e2e/tests/integration_test.go` 的 `TestMain` 只检查「analysis 可达」，可达就整套跑；但 ① `executionURL := "http://localhost:8084"`（:248）指向**已退役的服务**（ODR-021 把 execution 并进 analysis，端点在 `:8085/api/execution/*`，容器里已无 :8084），**这个测试在当前架构下永远不可能通过**；② `TestStrategyAPI_ListStrategies` 打 `:8085/api/strategies` 期望 200，实测 **401** —— 鉴权上线后套件没有配套的取 token 步骤）。2026-09-23，**撞出来的**（完整跑测试时红，**与本轮改动无关**）。**同症状不同成因，故与 AUD-51 分开登记**：AUD-51 是前置条件**写错了对象**，AUD-52 是前置条件**不够** —— 套件级的门只保证「服务在」，不保证「服务要的东西你有」 |
-| AUD-56 | 1 | 0 | 0 | 1 | 0 | ⬜ **AUD-56**（**有一个测试要靠外网可达性才能结束** —— `TestPipeline_ValidateCompilation_UsesBuildDir`（`pkg/ai/pipeline/pipeline_test.go:325`）的立意是「证明 `buildDir` 真的被用上」：它 `WithBuildDir(tmpDir)` 指向一个**没有 go.mod** 的临时目录，再用 `import "github.com/nonexistent/fakepkg"` 逼那次 `go build` 失败。但 `go build` 解析这个 import 时**会去联网**（本机 `GOPROXY` 未设 → 默认 `proxy.golang.org`）：**网络可达**时代理立刻回「module not found」→ 编译失败 → 测试 10s 内通过；**不可达**时它一直等 → **挂到测试超时**（实测 `go test ./...` 时该包 601s 后被杀，单跑 70s `panic: test timed out`）。开关就是网络：`GOPROXY=off` 下同一条测试 **0.976s 通过**，手动复现的输出是 `go: finding module for package github.com/nonexistent/fakepkg` → `cannot find module providing package ...`。**取证（这里差点读错）**：先做**单次** A/B（`git stash` 掉本轮改动 → 通过；恢复 → 挂），看起来像「本轮改动引起的回归」；改成 **A/B/A/B 交替、各 25s 超时、四轮**（改动在 / 基线 / 改动在 / 基线）**全挂** → 证明那次「stash 后通过」是网络侥幸，**与本轮改动无关**（改动只在 `pkg/backtest/engine_daily.go` 的运行时逻辑里，既没碰 `pkg/ai/pipeline`，也没有让一个原本不联网的 `go build` 变成联网）。**未修**：修法三条路，都要先裁决 —— ① 用**语法错误**代替不可解析的 import（必然当场失败，不触网）；② 给子进程显式设 `GOPROXY=off`；③ 判「编译失败」只看**退出码非零**、不看错误文本。**同类**：AUD-51 / AUD-52 都是「测试的前置条件写错了/不够」，这条是「测试的前置条件依赖**外网**」—— 本地会红、CI 里可能绿，正是「跑红这个信号本身不可信」的第三种形态。2026-09-24，跑全仓测试时**撞出来的** |
+| AUD-56 | 1 | 1 | 0 | 0 | 0 | ✅ **AUD-56**（**有一条测试要靠外网可达性才能结束**）**已修（2026-09-25）**。原状：`TestPipeline_ValidateCompilation_UsesBuildDir` 的立意是「证明 `buildDir` 真被用上」，做法是把 `buildDir` 指向一个没有 go.mod 的临时目录、再用 `import "github.com/nonexistent/fakepkg"` 逼那次 `go build` 失败；但解析这个 import **会联网** —— 网络可达时 10s 内通过，不可达时子进程一直等（全仓 `go test ./...` 时该包 **601s 被杀**，单跑 70s `panic: test timed out`）。**而它最后只断言 `p.buildDir == tmpDir`**（构造函数刚设过的值）—— 一句同义反复，**既没证明 buildDir 被用上，又把自己的成败交给了墙**。修法（两层，都不触网）：**① 测试改成正面证据 + 反证** —— `buildDir` 里放一个 `go.mod`，用 `replace example.com/localmod => ./localmod` 指向目录内的本地模块，被测代码 import 它；只有 `go build` 真的以 `buildDir` 为工作目录才会读到那条 replace、编译通过（**腿 1**），而同一个 `buildDir` 换成空目录必须失败（**腿 2 反证** —— 没有它，腿 1 可能是「无论在哪都成功」，测试又成摆设）；断言改读**退出码 / `BuildError` 是否为空**，不读错误文本格式；并 `t.Setenv("GOPROXY","off")` 把「不触网」变成**可断言的前提**而不是对网络状况的侥幸。**② 生产侧给子进程加上界** —— `validateCompilation` 改用 `exec.CommandContext` + `buildTimeout = 120s`：没有它，一个需要联网的 import 在生产侧表现为「**实验卡住**」而不是「编译失败」，而后者才是要写进 `result.BuildError` 给人看的 artifact（ADR-024）。**实测**：修后 6.18s 通过（原 601s 挂死）；`t.Setenv` 生效后即使把 `buildCmd.Dir` 破坏成 `""` 也是 **0.93s 变红**并指名原因，不再挂起。**破坏验证**：`buildCmd.Dir = ""` → 腿 1 变红且报出 `module lookup disabled by GOPROXY=off`；还原后回到绿，`grep SABOTAGE` 零残留。**取证教训（记在案）**：先做**单次** A/B（`git stash` → 通过；恢复 → 挂）看着像「本轮改动引起的回归」，改成 **A/B/A/B 交替四轮**（改动在 / 基线 / 改动在 / 基线）**全挂**才证明那次通过是网络侥幸 —— 判 flaky 必须多轮交替，不能一次定论。2026-09-24，跑全仓测试时**撞出来的** |
 
 **原来的那处「阻塞」已解除，但换成了一个更大的问题。** P2-8 曾登记为「卡在
 `TUSHARE_TOKEN` 未设置」，2026-09-23 token 到位、`daily` + `adj_factor` 实测可用，
@@ -74,16 +74,14 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 **AUD 线**：AUD-01 ~ AUD-50 已全关；**AUD-53 / AUD-54 / AUD-55 于 2026-09-24 一次关掉**
 （AUD-55 与 AUD-53 是「一个根因、两种表现」，两处一起改 + 三条回归护栏 + 破坏验证；
 AUD-54 裁决走「逐条订正归档文档」，护栏一个字没动）。
-**待修的是 AUD-51 / AUD-52 / AUD-56** —— AUD-51 / AUD-52 是 2026-09-23「跑起来才看见」的，
-AUD-56 是 2026-09-24 跑全仓测试撞出来的，**三项都与相关那轮的改动无关**：AUD-51 是测试的
-前置条件与断言读的**不是同一个东西**（`TestHasOHLCVData` ＋ 3 个潜伏成员），AUD-52 是 e2e
-套件的前置条件**不再蕴含**它的断言（`:8084` 已退役、`/api/strategies` 实测 401），
-AUD-56 是测试的前置条件**依赖外网**（`GOPROXY` 不可达时 `go build` 子进程挂到超时）。
-三项都只影响**测试**的可信度，不影响回测数字。
+**AUD-56 于 2026-09-25 关掉**（测试改成「正面证据 + 反证」并 `GOPROXY=off`，生产侧给 `go build`
+子进程加了 120s 上界 —— 三层里那层「测试的前置条件依赖**外网**」已拆掉）。
+**AUD-51 于 2026-09-25 关掉**（四个测试改为自灌自证 + **真库实测**在全新空库上全绿 + 破坏验证）。
+**只剩 AUD-52 没动**（e2e 套件的前置条件**不再蕴含**它的断言：`:8084` 已退役、
+`/api/strategies` 实测 401）。这一族三项都只影响**测试**的可信度，不影响回测数字。
 
-**下一批建议**：**AUD-51 / AUD-52 / AUD-56**（都是测试质量问题 —— 不修的话「跑红」这个
-信号本身不可信；其中 AUD-56 有个 5 秒钟的临时解法：本机全仓测试时带上
-`GOPROXY=off`，见 `docs/TEST.md`）→ 然后 **P2-8 的 hfq 落库按新判据重新裁决**
+**下一批建议**：**AUD-52**（三项测试可信度问题里唯一没动的；不修的话「跑红」这个信号
+本身不可信）→ 然后 **P2-8 的 hfq 落库按新判据重新裁决**
 （见文末「P2-8 取证说明」六）→ 然后 **P2-1**（补宏观数据源 —— 跨境那一半已做完，
 见 `guides/data-dependencies.md`）与 **P2-2**（产业链数据底座）。
 
@@ -573,7 +571,8 @@ AUD-12（CI 补 `-race` 门禁 + frontend job）、AUD-13（compose PG/Redis 端
 
 **当时（2026-09-22）剩下的未完成项全在 P2**：P2-1 / P2-2 ⬜ 待做；P2-8 / P2-13 ⛔ 卡在数据同步
 （`TUSHARE_TOKEN` 未设置）。⚠️ **本段已过时**：`TUSHARE_TOKEN` 于 2026-09-23 到位、P2-13 已落地、
-P2-8 已复核；AUD 线随后又开出 AUD-48~55（其中 48/49/50/53/54/55 已关，**待办是 AUD-51 / AUD-52**）。
+P2-8 已复核；AUD 线随后又开出 AUD-48~56（其中 48/49/50/53/54/55/56 已关、
+AUD-51 代码已落地区，**待办是 AUD-52 与 AUD-51 的真库实测**）。
 **以本文件顶部的「状态总览」为准。**
 
 ## P2 — 数据与清理
@@ -1986,14 +1985,25 @@ P2-8 已复核；AUD 线随后又开出 AUD-48~55（其中 48/49/50/53/54/55 已
 >
 > **同类的潜伏成员 3 个**（按「去数反例密度」的规矩查的，不是只看这一个样本）：
 > `TestGetTradingDays` / `TestGetTradingDates` / `TestIsTradingDay`
-> 断言读的是 **`trading_calendar`**，前置检查的却是 `ohlcv_daily_qfq`
-> （`postgres_test.go:242/256/395`）—— 表名对不上。它们至今没发作，
-> 只在「两表一空一不空」的组合下才会露出来。
+> 与前置读的不是同一个东西（`postgres_test.go:242/256/395`）。它们至今没发作，
+> 只在「两表一空一不空」或「同步到的年份对不上」时才露出来。
 >
-> 修法方向（未落地）：前置条件改成**与断言同源** —— 要么按具体 symbol 判
-> （`HasOHLCVData("600000.SH")` 为假就 skip），要么把断言的 symbol 改成
-> **从库里查出来的**、而不是写死的。后者更好：写死常量会让测试依赖
-> 「哪只票一定在」，而这是数据同步进度决定的，不是不变量。
+> ⚠️ **登记时把这三个的病因写混了，落地时逐条对代码订正**（2026-09-25）：
+> 表名真正对不上的是 `TestGetTradingDates`（`pkg/storage/calendar.go:91` 读
+> `trading_calendar`）与 `TestIsTradingDay`（`calendar.go:115` 同样读 `trading_calendar`）
+> —— 前置却查 `ohlcv_daily_qfq`。而 `TestGetTradingDays` 的**表名是对的**
+> （`pkg/storage/ohlcv.go:146`，`SELECT DISTINCT trade_date FROM ohlcv_daily_qfq`），
+> 它的问题在**区间**：前置只保证「表非空」，断言却要 2024 年 1 月**那一个月**有数据。
+> 同一族、「前置不蕴含断言」这个**成因**相同，但**缺口位置**一个在表名、一个在区间
+> —— 登记时把三者并成一句话，就抹掉了这个区别。
+>
+> 修法（**已落地，2026-09-25**）：不是把前置改得「更准」，而是**取消前置** ——
+> 四个测试一律改为**自灌自证**（自己写数据、自己断言、自己清理），于是「前置与断言同源」
+> 这个要求变成结构上自动成立：断言读的东西就是它自己刚写进去的东西。
+> 登记时考虑的两种「打补丁」写法都被否掉了：按具体 symbol 判前置
+> （`HasOHLCVData("600000.SH")` 为假就 skip）只是把假警报换成静默跳过，
+> 而「从库里查一只票出来再断言」会让测试的读数依赖**哪只票恰好先被同步到**。
+> 自灌自证没有这个问题：数据由测试自己造，与同步进度**无关**。
 
 > **AUD-52 登记说明（2026-09-23）**：**e2e 套件的前置条件不再蕴含它的断言。**
 >

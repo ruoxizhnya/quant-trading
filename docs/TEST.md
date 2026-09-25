@@ -1,6 +1,6 @@
 ---
 status: evergreen
-last-verified: 2026-09-24
+last-verified: 2026-09-25
 verified-by: AUD-44 路径引用复核 + AUD-47 §5–§7 内容复核（2026-09-22）+ AUD-56 新增 §2.0「本机运行前置」（2026-09-24）—— ① 路径：`pkg/tracker` 已迁至 `pkg/backtest/tracker`、`docs/phase-gate-reviews.md` 已归档至 `docs/archive/research-2026-Q2/`、§4 的 CLI 示例标注为非真实接口；② 内容：§5 沙箱限制改为实测值（30s CPU + 1 GiB，ODR-020）、§6 覆盖率目标标注为「目标不是门禁」（CI 不设阈值）、§7.1 `format.test.ts` 8→28 例、§7.2 e2e 改为实测 17 spec / 160 例、`--project=chrome`→`chromium`；③ §2.0：记下本机跑全仓测试的两个环境前置（`PATH` 里要有 `go`、`GOPROXY=off`），两者都会造成「红了但不指向代码」的假信号 —— 取证见 TASKS.md 的 AUD-56
 ---
 
@@ -40,8 +40,10 @@ all_trades.have_timestamp        // Every trade is time-stamped
 
 ### 2.0 本机运行前置（Windows / 离线环境）
 
-宿主**没有原装 Go**（只有免安装版），且到 `proxy.golang.org` 的网络**不通**。这两件事
-各会制造一种「红了，但失败信号不指向任何代码问题」。跑全仓测试前先备好环境：
+宿主有两套 Go：`C:\Users\ruoxi\sdk\go1.25.0`（**原装，离线能编译全仓**，但**不在 PATH** ——
+早先「宿主没有原装 Go」的结论是错的，2026-09-25 订正）与下方这个免安装版；到
+`proxy.golang.org` 的网络**不通**。这几件事各会制造一种「红了，但失败信号不指向任何
+代码问题」。跑全仓测试前先备好环境：
 
 ```bash
 export GOROOT="C:/Users/ruoxi/.workbuddy/binaries/go/go"
@@ -55,14 +57,51 @@ go test ./...
 
 - **`PATH` 必须带上 `go` 所在的目录**：`pkg/ai/pipeline` 的 `validateCompilation` 会
   `exec.Command("go", "build", ...)`，子进程按 **PATH** 找 `go` —— 只设 `GOROOT` 不够。
-- **`GOPROXY=off` 是必需的**：同一个测试用 `import "github.com/nonexistent/fakepkg"`
-  去逼 `go build` 失败，而 `go build` 解析这个 import 时会**联网**。墙内不通时它一直等，
-  整仓测试就挂在超时上（实测 `go test ./...` **601s 被杀**、单跑 70s
-  `panic: test timed out`）。设 `GOPROXY=off` 后同一条测试 **0.976s** 通过，
-  全仓 **74 包 57s** 全绿。根因、取证与三条修法登记为 **AUD-56**（见 `TASKS.md`）。
-- **真库（PostgreSQL）测试本机跑不了**：`wsl.exe` 被安全策略列入程序黑名单 → Docker
-  Desktop 起不来。这类测试会走 skip；受影响的是 `pkg/storage` 等的集成用例，
-  纯合成 / 单元测试不受影响。
+- **`GOPROXY=off` 仍建议带上**（根因 **AUD-56** 已于 2026-09-25 修掉，见 `TASKS.md`）：
+  那条测试原来用 `import "github.com/nonexistent/fakepkg"` 逼 `go build` 失败，而
+  `go build` 解析这个 import 会**联网** —— 墙内不通时它一直等，整仓测试挂在超时上
+  （实测 `go test ./...` **601s 被杀**、单跑 70s `panic: test timed out`）。
+  现在测试改成了「**正面证据 + 反证**」并自带 `t.Setenv("GOPROXY","off")`，生产侧的
+  `go build` 子进程也有了 120s 上界。带着它只是多一层保险，读数：**74 包 57s** 全绿。
+- **真库（PostgreSQL）测试**：Docker Desktop 在本机受两条限制 —— 启动时拉起的 `wsl.exe`
+  在程序黑名单里（沙箱明写「不可批准、不可绕过」），且**起来之后还会自发退出**。
+  所以库测试不能指望它。替代路径见 §2.0.1。
+
+#### 2.0.1 原生 PostgreSQL（不依赖 Docker / WSL）
+
+代码对 TimescaleDB 是 **best-effort**（`pkg/storage/postgres.go:840` 对 `create_hypertable`
+失败只 `Warn`，注释明写「不该为此引入硬依赖」），`migrations/` 也不自动执行、建表全在
+`pkg/storage/postgres.go` 的内联 DDL 里 —— 所以**纯原生 PG 能跑通全链路**。
+
+```
+二进制   C:/Users/ruoxi/.workbuddy/binaries/postgres/pgsql/bin/
+数据目录 C:/Users/ruoxi/.workbuddy/binaries/postgres/data
+连接     postgres://postgres:postgres@localhost:5432/quant_trading?sslmode=disable
+         （与 .env 的 DATABASE_PASSWORD、pkg/storage/postgres_test.go 的硬编码 DSN 三者一致）
+```
+
+启动（**必须让进程脱离 bash 的进程组** —— 用 `pg_ctl start` 或 `nohup ... &` 起的
+进程，会随那次工具调用结束被一起清理）：
+
+```bash
+export MSYS_NO_PATHCONV=1
+ROOT="C:/Users/ruoxi/.workbuddy/binaries/postgres"
+"$ROOT/pgsql/bin/postgres.exe" -D "$ROOT/data" -c listen_addresses=127.0.0.1 -p 5432
+# ↑ 作为「后台任务」运行，不要放进一次性的前台调用里
+```
+
+初始化（只做一次）与建库：
+
+```bash
+printf 'postgres\n' > "$ROOT/pw.txt"
+"$ROOT/pgsql/bin/initdb.exe" -D "$ROOT/data" -U postgres --pwfile="$ROOT/pw.txt" \
+  -E UTF8 --locale=C && rm -f "$ROOT/pw.txt"
+"$ROOT/pgsql/bin/psql.exe" -h 127.0.0.1 -U postgres -c "CREATE DATABASE quant_trading;"
+```
+
+> **Redis 未起也能跑手动测试**：`cmd/analysis/*.go` 里零 Redis 引用（redis 只出现在
+> `pkg/storage/redis.go` / `pkg/live/redis_order_store.go` / `pkg/marketdata/cached_provider.go`）。
+> compose 里的 `depends_on: redis` 只约束容器编排，不约束本地 `go run`。
 
 ### 2.1 Unit Tests — `pkg/*`
 

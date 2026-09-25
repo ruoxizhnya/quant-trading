@@ -24,11 +24,24 @@ func testStore(t *testing.T) *PostgresStore {
 	return store
 }
 
-// skipIfNoSeedData skips tests that depend on pre-existing market data.
+// skipIfNoSeedData skips tests whose assertion is literally "this table is not
+// empty".
 //
-// 这类测试假设库里已有 stocks / ohlcv 数据（例如断言"600000.SH 应该有行情"）。
-// 在全新容器上它们会因"库是空的"而失败，但这与被测代码无关 —— 失败信号没有意义。
-// 因此这里选择跳过，让 CI 只在真正有数据时校验它们。
+// 用法只有一个前提：**前置读的东西必须就是断言读的东西**。留在这里的例子是
+// TestGetAllStocks —— 它查 stocks 表、断言 len(stocks) >= 1，与前置一致。
+//
+// AUD-51 的教训：同一族的另外四个测试此前也用它，但前置与断言读的**不是同一个
+// 东西**，于是前置给了一个它保证不了的承诺：
+//
+//   - TestHasOHLCVData：前置查「ohlcv_daily_qfq 非空」，断言却要 600000.SH 有数据；
+//   - TestGetTradingDays：前置查「表非空」，断言却要 2024 年 1 月那一个月有数据；
+//   - TestIsTradingDay / TestGetTradingDates：前置查 ohlcv_daily_qfq，而这俩函数
+//     读的是 **trading_calendar** —— 表都错了（calendar 已灌而行情未灌时它会白跳过；
+//     反过来行情有而 calendar 没灌时它会红）。
+//
+// 一个局部或中途的同步就足以让它们红，而红出来的信息不指向任何代码问题 ——
+// 「跑红」这个信号本身因此不可信。那四个已改为**自灌自证**（自己写数据、
+// 自己断言、自己清理），不再需要前置。
 func skipIfNoSeedData(t *testing.T, store *PostgresStore, table string) {
 	t.Helper()
 	var n int
@@ -167,19 +180,28 @@ func TestGetAllStocks(t *testing.T) {
 	assert.GreaterOrEqual(t, len(stocks), 1)
 }
 
+// TestHasOHLCVData 自灌自证。
+//
+// AUD-51：旧写法前置只检查 `ohlcv_daily_qfq` **非空**，断言却要 `600000.SH`
+// 有数据 —— 前置与断言读的不是同一个东西。任何局部/中途同步（表里有若干票、
+// 但没有 600000.SH）都会让它红，而红出来的信息不指向任何代码问题。
 func TestHasOHLCVData(t *testing.T) {
 	store := testStore(t)
 	defer store.Close()
 	ctx := context.Background()
 
-	skipIfNoSeedData(t, store, "ohlcv_daily_qfq")
+	symbol := "TEST_HASDATA_001.SH"
+	require.NoError(t, store.SaveOHLCVBatch(ctx, []*domain.OHLCV{
+		{Symbol: symbol, Date: parseDate("2024-02-01"), Open: 10.0, High: 10.5, Low: 9.8, Close: 10.2, Volume: 1000000},
+	}))
+	defer store.DB().Exec(ctx, "DELETE FROM ohlcv_daily_qfq WHERE symbol=$1", symbol)
 
-	// Use a real symbol that should exist
-	exists, err := store.HasOHLCVData(ctx, "600000.SH")
+	// 刚写进去的票必须被查到
+	exists, err := store.HasOHLCVData(ctx, symbol)
 	require.NoError(t, err)
-	assert.True(t, exists)
+	assert.True(t, exists, "HasOHLCVData(%s) 必须为 true", symbol)
 
-	// Non-existent symbol
+	// 不存在的票必须为 false
 	exists, err = store.HasOHLCVData(ctx, "NONEXISTENT_999.XYZ")
 	require.NoError(t, err)
 	assert.False(t, exists)
@@ -234,31 +256,88 @@ func TestSaveTradingCalendarEntry_and_GetTradingCalendar(t *testing.T) {
 	store.DB().Exec(ctx, "DELETE FROM trading_calendar WHERE exchange='TESTEX' AND trade_date='2024-12-31'")
 }
 
+// TestGetTradingDays 自灌自证：GetTradingDays 读的是 `ohlcv_daily_qfq` 的
+// DISTINCT trade_date，所以这里就灌那个表的那个区间。
+//
+// AUD-51：旧写法只用「表非空」当前置，却断言 2024 年 1 月**那一个月**有数据 ——
+// 同步到 2023 年就会红，而那不是代码问题。
 func TestGetTradingDays(t *testing.T) {
 	store := testStore(t)
 	defer store.Close()
 	ctx := context.Background()
 
-	skipIfNoSeedData(t, store, "ohlcv_daily_qfq")
+	symbol := "TEST_TRADINGDAYS.SH"
+	want := []string{"2024-01-02", "2024-01-03", "2024-01-04"}
+	records := make([]*domain.OHLCV, 0, len(want))
+	for _, d := range want {
+		records = append(records, &domain.OHLCV{
+			Symbol: symbol, Date: parseDate(d),
+			Open: 10.0, High: 10.5, Low: 9.8, Close: 10.2, Volume: 1000000,
+		})
+	}
+	require.NoError(t, store.SaveOHLCVBatch(ctx, records))
+	defer store.DB().Exec(ctx, "DELETE FROM ohlcv_daily_qfq WHERE symbol=$1", symbol)
 
 	days, err := store.GetTradingDays(ctx, parseDate("2024-01-01"), parseDate("2024-01-31"))
 	require.NoError(t, err)
-	assert.Greater(t, len(days), 0)
-	// Should be trading days only (weekends excluded for most)
-	assert.True(t, len(days) <= 22) // max ~22 trading days in Jan
+	require.NotEmpty(t, days)
+
+	got := make(map[string]bool, len(days))
+	for _, d := range days {
+		got[d.Format("2006-01-02")] = true
+	}
+	for _, w := range want {
+		assert.True(t, got[w], "刚灌进去的交易日 %s 必须出现在结果里", w)
+	}
+	// 区间边界：结果不得越界（这是 DISTINCT trade_date + WHERE 的真实不变量）
+	for _, d := range days {
+		assert.False(t, d.Before(parseDate("2024-01-01")) || d.After(parseDate("2024-01-31")),
+			"结果 %s 落在查询区间之外", d.Format("2006-01-02"))
+	}
 }
 
+// TestIsTradingDay 自灌自证：IsTradingDay 读的是 **trading_calendar**。
+//
+// AUD-51：旧写法的前置查的却是 `ohlcv_daily_qfq` —— 表都错了。calendar 已灌
+// 而行情未灌时它会白跳过（漏检），行情有而 calendar 没灌时它会红（假警报）。
 func TestIsTradingDay(t *testing.T) {
 	store := testStore(t)
 	defer store.Close()
 	ctx := context.Background()
 
-	skipIfNoSeedData(t, store, "ohlcv_daily_qfq")
+	seedIsolatedCalendar(t, store)
+	defer store.DB().Exec(ctx, "DELETE FROM trading_calendar WHERE exchange='TESTEX_IS'")
 
-	// 2024-01-02 was a Tuesday (should be trading day)
-	isTrading, err := store.IsTradingDay(ctx, parseDate("2024-01-02"))
+	isTrading, err := store.IsTradingDay(ctx, parseDate(testCalTradingDay))
 	require.NoError(t, err)
-	assert.True(t, isTrading)
+	assert.True(t, isTrading, "标为交易日的 %s 必须返回 true", testCalTradingDay)
+
+	isTrading, err = store.IsTradingDay(ctx, parseDate(testCalHoliday))
+	require.NoError(t, err)
+	assert.False(t, isTrading, "标为非交易日的 %s 必须返回 false", testCalHoliday)
+}
+
+// 自灌日历用的日期固定在 1990 年 1 月初：任何现实同步区间（默认 10 年）都不会
+// 覆盖到那里，所以自灌既不会与真实数据打架，清理时也不会误删真实数据。
+const (
+	testCalTradingDay = "1990-01-02"
+	testCalHoliday    = "1990-01-03"
+)
+
+// seedIsolatedCalendar 灌进两个交易日历条目（一真一假）：一个标为交易日、
+// 一个标为非交易日，好让调用方把 IsTradingDay / GetTradingDates 的两个分支
+// 都真的走一遍。trading_calendar 的主键是 trade_date（一格日期一行，不带
+// exchange），所以这两个日期在库里各只有一行。
+//
+// 清理由**调用方**用 defer 做（而不是这里 t.Cleanup）—— t.Cleanup 跑在测试
+// 函数的所有 defer 之后，那时 `defer store.Close()` 已经把连接池关了，
+// 清理会静默失败、把测试数据留在库里。
+func seedIsolatedCalendar(t *testing.T, store *PostgresStore) {
+	t.Helper()
+	require.NoError(t, store.SaveTradingCalendarBatch(context.Background(), []*TradingCalendarEntry{
+		{Exchange: "TESTEX_IS", TradeDate: parseDate(testCalTradingDay), IsTradingDay: true},
+		{Exchange: "TESTEX_IS", TradeDate: parseDate(testCalHoliday), IsTradingDay: false},
+	}))
 }
 
 func parseDate(s string) time.Time {
@@ -387,16 +466,20 @@ func TestSaveTradingCalendarBatch(t *testing.T) {
 	store.DB().Exec(ctx, "DELETE FROM trading_calendar WHERE exchange='TESTEX2'")
 }
 
+// TestGetTradingDates 自灌自证：GetTradingDates 读的是 **trading_calendar**
+// 且带 `is_trading_day = TRUE` 过滤（AUD-51 之前这里前置查的是 ohlcv_daily_qfq）。
 func TestGetTradingDates(t *testing.T) {
 	store := testStore(t)
 	defer store.Close()
 	ctx := context.Background()
 
-	skipIfNoSeedData(t, store, "ohlcv_daily_qfq")
+	seedIsolatedCalendar(t, store)
+	defer store.DB().Exec(ctx, "DELETE FROM trading_calendar WHERE exchange='TESTEX_IS'")
 
-	dates, err := store.GetTradingDates(ctx, parseDate("2024-01-01"), parseDate("2024-01-15"))
+	dates, err := store.GetTradingDates(ctx, parseDate("1990-01-01"), parseDate("1990-01-15"))
 	require.NoError(t, err)
-	assert.Greater(t, len(dates), 0)
+	require.Len(t, dates, 1, "区间内只灌了一个交易日，非交易日必须被 is_trading_day=TRUE 过滤掉")
+	assert.Equal(t, testCalTradingDay, dates[0].Format("2006-01-02"))
 }
 
 func floatPtr(v float64) *float64 { return &v }
