@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -307,25 +308,78 @@ func TestPipeline_BuildDirOverride(t *testing.T) {
 
 // TestPipeline_ValidateCompilation_UsesBuildDir verifies that
 // validateCompilation honours the injected buildDir rather than a
-// hardcoded path. We point buildDir at a temp directory that does NOT
-// contain go.mod and confirm the resulting build error references the
-// temp dir (proving the command ran there) rather than the developer's
-// machine path.
+// hardcoded path.
+//
+// AUD-56：旧写法用 `import "github.com/nonexistent/fakepkg"` 逼那次
+// `go build` 失败 —— 但解析这个 import**要联网**：网络可达时代理立刻回
+// 「module not found」，10s 内通过；不可达时子进程一直等，`go test ./...`
+// 里该包 601s 被杀（单跑 70s `panic: test timed out`）。而它最后只断言
+// `p.buildDir == tmpDir`（构造函数刚设过的值）—— 那是句同义反复，
+// **既没证明 buildDir 被用上，又把自己的成败交给了墙**。
+//
+// 新写法改用**正面证据**，全程离线：
+//
+//	buildDir/go.mod 用 `replace` 把 example.com/localmod 指向 buildDir 内的
+//	./localmod；被测代码 import 这个包。只有 `go build` **真的以 buildDir
+//	为工作目录**，才会读到那条 replace、解析到那个包、编译通过；换到任何
+//	别的工作目录都必然失败。
+//
+// 腿 2 是**反证**：同一个 buildDir 换成空目录必须失败 —— 没有它，腿 1 可能
+// 是「无论在哪都成功」，那这条测试又变成摆设。
+//
+// `GOPROXY=off` 显式关掉模块代理，把「不触网」变成**可断言的前提**而不是
+// 对网络状况的侥幸。断言读的是退出码 / BuildError 是否为空，不是错误文本格式。
 func TestPipeline_ValidateCompilation_UsesBuildDir(t *testing.T) {
-	tmpDir := t.TempDir()
-	p := NewPipeline(WithBuildDir(tmpDir))
-	result := p.StartJob("test")
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Fatalf("PATH 里找不到 `go`，无法验证 validateCompilation：它用 exec.Command(\"go\", ...) 按 PATH 找子进程。"+
+			"把 Go 的 bin 目录加进 PATH（见 docs/TEST.md §2.0）：%v", err)
+	}
+	t.Setenv("GOPROXY", "off")
 
-	// Code with an unresolvable import forces a build failure whose
-	// error message includes the working directory context.
-	invalidCode := `package main
-import "github.com/nonexistent/fakepkg"
-func main() {}
+	const code = `package main
+
+import "example.com/localmod"
+
+func main() { _ = localmod.V }
 `
-	_ = p.validateCompilation(invalidCode, result)
 
-	// buildDir must be the temp dir we set, proving the field is used.
-	assert.Equal(t, tmpDir, p.buildDir)
+	// 腿 1（正面）：buildDir 里备好 go.mod + replace 目标 → 编译必须成功。
+	buildDir := t.TempDir()
+	seedLocalModule(t, buildDir)
+
+	p := NewPipeline(WithBuildDir(buildDir))
+	assert.Equal(t, buildDir, p.buildDir, "WithBuildDir must override the default detected root")
+
+	result := p.StartJob("test")
+	require.NoError(t, p.validateCompilation(code, result),
+		"以注入的 buildDir 为工作目录时编译必须成功 —— 失败说明 buildDir 没被用上（或 go.mod 的 replace 没被读到）。BuildError=%q",
+		result.BuildError)
+	assert.Empty(t, result.BuildError, "编译成功时不应留下 BuildError")
+
+	// 腿 2（反证）：同一个 buildDir 换成**空**临时目录 → 必须失败。
+	bareDir := t.TempDir()
+	pBare := NewPipeline(WithBuildDir(bareDir))
+	bareResult := pBare.StartJob("test")
+
+	err := pBare.validateCompilation(code, bareResult)
+	require.Error(t, err, "空的 buildDir 里不应编译成功 —— 若成功，说明这次编译与 buildDir 无关，腿 1 就不能算证据")
+	assert.NotEmpty(t, bareResult.BuildError, "编译失败时必须把错误写进 BuildError（它是给人看的 artifact，ADR-024）")
+}
+
+// seedLocalModule 把 buildDir 布置成一个能**离线**解析 example.com/localmod
+// 的模块：一条 `replace` 指向目录内的 ./localmod，不需要任何网络与 go.sum。
+func seedLocalModule(t *testing.T, buildDir string) {
+	t.Helper()
+	sub := filepath.Join(buildDir, "localmod")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+
+	writeFile := func(name, content string) {
+		t.Helper()
+		require.NoError(t, os.WriteFile(filepath.Join(buildDir, name), []byte(content), 0o644))
+	}
+	writeFile("go.mod", "module pipelinebuildprobe\n\ngo 1.21\n\nrequire example.com/localmod v0.0.0\n\nreplace example.com/localmod => ./localmod\n")
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "go.mod"), []byte("module example.com/localmod\n\ngo 1.21\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "lib.go"), []byte("package localmod\n\n// V exists only to be imported by the probe strategy.\nconst V = 1\n"), 0o644))
 }
 
 func TestPipeline_runBacktest(t *testing.T) {

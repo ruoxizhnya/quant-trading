@@ -619,6 +619,15 @@ Output ONLY the Go source code, no explanations.`, i.StrategyType, i.StrategyNam
 	return strings.TrimSpace(resp), nil
 }
 
+// buildTimeout bounds the `go build` subprocess.
+//
+// 没有上界时，一个**需要联网解析**的 import 会让子进程一直等：测试侧挂到
+// `go test` 超时（AUD-56 实测该包 601s 被杀），生产侧则表现为「实验卡住」
+// 而不是「编译失败」—— 后者才是要写进 result.BuildError 给人看的 artifact
+// （ADR-024：代码是 artifact，失败不阻断，但必须**给出结论**）。
+// 上界取得宽，是为了不误杀「模块缓存冷、依赖树大」的首次编译。
+const buildTimeout = 120 * time.Second
+
 // validateCompilation compiles the generated code in a temp directory
 func (p *Pipeline) validateCompilation(code string, result *Result) error {
 	tmpDir, err := os.MkdirTemp("", "pipeline-*")
@@ -633,7 +642,9 @@ func (p *Pipeline) validateCompilation(code string, result *Result) error {
 	}
 
 	var stderr bytes.Buffer
-	buildCmd := exec.Command("go", "build", "-o", filepath.Join(tmpDir, "strategy"), outFile)
+	buildCtx, cancel := context.WithTimeout(context.Background(), buildTimeout)
+	defer cancel()
+	buildCmd := exec.CommandContext(buildCtx, "go", "build", "-o", filepath.Join(tmpDir, "strategy"), outFile)
 	// S7-P0-2 (ODR-043-2): use the dynamically detected (or injected)
 	// project root instead of a hardcoded developer-machine path so
 	// the pipeline is portable. p.buildDir is set by NewPipeline /
@@ -643,6 +654,9 @@ func (p *Pipeline) validateCompilation(code string, result *Result) error {
 	if err := buildCmd.Run(); err != nil {
 		buildErr := stderr.String()
 		result.BuildError = buildErr
+		if buildCtx.Err() != nil {
+			return fmt.Errorf("compilation timed out after %s (the build may have needed network access): %s", buildTimeout, buildErr)
+		}
 		return fmt.Errorf("compilation failed: %s", buildErr)
 	}
 
