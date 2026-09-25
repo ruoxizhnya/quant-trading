@@ -24,13 +24,28 @@ server:
 # 密钥只从 env 注入，不要写进这份入库的 YAML：
 #   JWT_SECRET（或 AUTH_JWT_SECRET）= openssl rand -hex 32
 #
-# 本地开发的唯一豁免：同时满足
-#   AUTH_INSECURE=true  且  server.host 是 loopback（127.0.0.1 / localhost）
-# 非 loopback 监听时豁免无效 —— 0.0.0.0 上的 open-access 等于把下单接口
-# 开给整个局域网。豁免生效时会打 WARN 横幅。
+# 本地开发有**两条**豁免路径，都必须显式声明，且都要求
+# `AUTH_INSECURE=true`：
+#
+#   a) server.host 是 loopback（127.0.0.1 / localhost）——  原生跑法
+#   b) auth.insecure_exposure = loopback-published —— **容器跑法**
+#
+# (b) 存在的理由：容器必须绑 0.0.0.0 才能被发布端口转发，所以 isLoopbackHost
+# 档不住它 —— 于是判据从「绑定地址」换成「发布层」。**基础不变量没有放松**：
+# open-access 仍不得从其他主机到达，只是保证的位置挪到了 compose 的 ports
+# 映射（四条全带 127.0.0.1: 前缀），并由两处机器校验守：
+#   tools/check_deploy_consistency.py 检查 3c（静态，双向）
+#   tools/local-stack.sh（运行时，读宿主机 netstat）
+# 取值必须逐字等于 loopback-published；拼错/空/近义词一律按没声明处理 → 拒绝启动。
+#
+# 两条都不满足时照样拒绝 —— 0.0.0.0 上的 open-access 等于把下单接口开给整个
+# 局域网。豁免生效时会打 WARN 横幅（容器形态下还会带上 exposure 与保证方）。
 auth:
   # jwt_secret: 只从 env 读，此处留空
-  allow_insecure: false        # env: AUTH_INSECURE（仅本地 + loopback）
+  jwt_secret: ""
+  allow_insecure: false        # env: AUTH_INSECURE（本地豁免的总开关）
+  # env: AUTH_INSECURE_EXPOSURE。只认 loopback-published（见上 (b)）。
+  insecure_exposure: ""
   issuer: "quant-trading"
   access_token_ttl: 15m
   refresh_token_ttl: 168h      # 7d

@@ -1532,7 +1532,7 @@ AUD-35 的两个死键（`LOG_LEVEL` / `LOG_FORMAT`）就是照抄了并不存�
 | 段 | 键 | 读到哪 |
 |---|---|---|
 | `server` | `host` / `port` / `gin_mode` / `cors.allowed_origins` | `internal/httpserver` |
-| `auth` | `jwt_secret`（env `JWT_SECRET` 或 `AUTH_JWT_SECRET`）/ `allow_insecure` / `issuer` / `access_token_ttl` / `refresh_token_ttl` | `pkg/auth` |
+| `auth` | `jwt_secret`（env `JWT_SECRET` 或 `AUTH_JWT_SECRET`）/ `allow_insecure`（env `AUTH_INSECURE`）/ `insecure_exposure`（env `AUTH_INSECURE_EXPOSURE`，只认 `loopback-published`）/ `issuer` / `access_token_ttl` / `refresh_token_ttl` | `cmd/analysis` 的 `decideAuthStartup`（P0-4 启动门）+ `pkg/auth` |
 | `rate_limit` | `per_minute`（env `RATE_LIMIT_PER_MINUTE`） | 网关限流中间件 |
 | `database` | `url`（整串 DSN 覆盖点）/ `host` / `port` / `user` / `password` / `database` / `sslmode` | `pkg/storage.BuildDSN` |
 | `redis` | `url` | `pkg/storage.NewCache` |

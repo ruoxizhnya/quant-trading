@@ -136,30 +136,33 @@ printf 'postgres\n' > "$ROOT/pw.txt"
 > **唯一稳的姿势是 `cd` 进目录再给相对路径** —— `tools/local-infra.sh` 已经这么写，
 > 别「顺手」改成绝对路径。
 
-#### 2.0.3 「起来了」的判据（2026-09-25 新增）
+#### 2.0.3 整栈启停与「起来了」的判据（2026-09-25 新增）
 
 ```bash
-tools/local-infra.sh start     # 原生 PostgreSQL 17.5 + Redis 7.4.11
-docker-compose up -d           # 应用服务（data / strategy / analysis / web）
+tools/local-stack.sh {start|stop|status}
 ```
+
+它是「原生库 + 容器服务」这两半的唯一入口，做四件事：探 Docker 引擎、
+`local-infra.sh start`、`docker-compose up -d`、**等健康 + 端口体检**。
 
 > **为什么不能只看 `docker-compose up` 的退出码**：它返回 0 只代表容器被
 > **创建**了。应用连不上 PG/Redis 是 `logger.Fatal()` **无重试**
 > （`cmd/data/setup.go:137/:146`），容器会立刻退出；健康检查还有 `start_period`，
 > up 刚返回时状态还是 `starting`；而且 **Docker Desktop 在本机还会自发退出**
-> （2026-09-25 实测：10:24 还在跑，10:27 命名管道就没了）。所以要等
-> `docker ps` 里的服务真的变成 `healthy` —— 容器内的等待由
-> `deploy/wait-for-deps.sh` 有界承担（默认 60s）。
+> （2026-09-25 实测：10:24 还在跑，10:27 命名管道就没了）。所以唯一可信的判据是
+> **HTTP 探针全通**；`status` 里显示的 `容器=healthy / HTTP=200` 两列要一起看。
 
-> **Docker 引擎探不到就停下**：那个失败的症状（
+> **Docker 引擎探不到就停下并给指引**：那个失败的症状（
 > `open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file
 > specified`）读起来像路径问题，而真因是引擎没了。启动 Docker Desktop 会拉起
 > `wsl.exe`，而它在沙箱的程序黑名单里（报错明写「不可批准、不可绕过」）——
-> **Agent 无法自救，只有你自己能解**。
+> **脚本无法自救，只有用户能解**，所以它只报错不重试。
 
-AUD-13 的运行时那一半（数据库/缓存只监听回环）读真实 `netstat` 断言，
-由 `tools/local-infra.sh status` 承担 —— 原先是 `check_deploy_consistency.py`
-守 compose 的端口映射，服务移出 compose 后挪到了机器上。
+`status` 里的**端口体检**是 AUD-13 的运行时那一半：读真实 `netstat`，断言
+8080/8081/8082/8085 只绑回环（静态那一半是 `check_deploy_consistency.py` 的
+检查 3c）。这一条不是「锦上添花的检查」—— analysis 以 open-access 运行，
+容器又必须绑 `0.0.0.0`，「不可从其他主机到达」这条不变量**只**由发布层承担，
+见 [ADR-025](adr/adr-025-auth-exposure-publish-layer.md)。
 
 ### 2.1 Unit Tests — `pkg/*`
 
@@ -464,3 +467,40 @@ npx playwright test --grep "Backtest"     # Backtest-related only
 | 视觉回归 | `visual-regression` | 12 |
 
 （`e2e/tests/integration_test.go` 是 Go 写的，不计入上表。）
+
+#### 7.2.1 Go 写的 `e2e/tests`（AUD-52 修后的形态）
+
+`e2e/tests/integration_test.go` 是一个**轻量 HTTP 冒烟套件**，跟着
+`go test ./...` 跑，不需要 Node/浏览器。它和 Playwright 那套的**共同前提**是
+**栈必须是 open-access**（Playwright 的 `apiRequest()` 不带 Authorization，
+`rbac-open-access.spec.ts` 开篇即写明 e2e environment runs with auth DISABLED）。
+
+AUD-52（2026-09-25 修）之前它不是这样工作的：`TestMain` 只探 `/health` 就放行
+整套，「服务在」被当成了「服务能用」，于是两条用例长期红得没有信息量（一条拨
+已退役的 `:8084`，一条打 `/api/strategies` 拿到 401）。现在门与断言**同源**，
+判三档：
+
+| 档 | 判据（就是各用例真正会打的路径） | 动作 |
+|---|---|---|
+| ① | `/health` 不通 | skip（S7-P0-8 原意：环境没起 → 退出 0） |
+| ② | 通了但 `/api/execution/*` 404 / 连不上 | **FAIL** —— 真回归（ODR-021 后的路由必须存在） |
+| ③ | 都在但要鉴权（401/403） | skip + 打印怎么改姿势（**形态不匹配 ≠ 缺陷**） |
+
+第 ③ 档打印出来的就是修法：打一个 `AUTH_INSECURE=true` +
+`AUTH_INSECURE_EXPOSURE=loopback-published` 的栈（默认 compose 即是，见
+[ADR-025](adr/adr-025-auth-exposure-publish-layer.md)）。
+
+**为什么第 ③ 档是 skip 而不是 FAIL**：套件**无法**自取 token —— 系统没有首个
+管理员的引导（`CreateUser` 只挂在 `RequireRole(admin)` 后面，鸡生蛋），这是
+刻意的。所以「跑了鉴权栈」这件事既不是代码缺陷、也无法自愈，报红只会变成长期
+噪声，而长期噪声会训练人忽略红色。
+
+**已知边界**：鉴权开启时**所有** `/api/*` 都回 401（中间件挂在 router 上、
+先于路由匹配），包括不存在的路径 —— 所以那种形态下「执行端点是否存在」**判不
+出来**，只能判出「要鉴权」然后整体 skip。这条检测只在 open-access 形态下有效，
+而那正是套件要跑的形态。
+
+回归护栏在 `e2e/guard/guard_test.go`（独立包，不会被上面的 skip 门带走）：
+用 AST 取标识符与字符串字面量，把门的三档判据、探针路径、以及「退役端口不许
+回来」都钉住 —— 故意扫的是 AST 而不是原文，否则文件里解释 `:8084` 的**注释**
+会被当成违规。破坏验证 5/5（4 红 + 1 绿对照）。

@@ -1,7 +1,7 @@
 ---
 status: active
 last-verified: 2026-09-25
-verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）；AUD-41/42 落地（SPEC 的 `## Configuration` 段整段订正 + doc 护栏第二项检查；`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓单实现结构护栏）+ 顺带登记 AUD-43 / AUD-44（2026-09-22）；AUD-43/44/45 落地（AUD-43 前提订正后**裁决保留** `pkg/testutil` 并归并入 AUD-45；AUD-45 = 统一盘点 13 个零导入者包 + 新增 `internal/repoguard` 结构性护栏；AUD-44 = 三份入口文档补 R1 frontmatter + doc 护栏第三项检查）+ 顺带登记 AUD-46 / AUD-47（2026-09-22）；AUD-46/47 落地（AUD-46 = 删除 `pkg/metrics`（ADR-017 §1 的竞争实现，四个核心指标由 `pkg/observability` 实现）+ `internal/repoguard` 新增 `retiredPackages` 退役负向断言，`pkg/decimal` 裁决保留并标注「待采用」；AUD-47 = `docs/TEST.md` §5–§7 内容复核 —— 沙箱限制改实测值 30s/1 GiB、覆盖率目标标注为「不是门禁」、前端与 e2e 用例数改实测），2026-09-22；P2-13 接真库取证（`pkg/validation/live_backtest_integration_test.go`，实测「验证器链在真数据上否掉策略」）+ 顺带登记 AUD-49 / AUD-50（sync 的 cancel 与重启恢复两项缺陷），2026-09-23；AUD-50 落地（`pkg/sync` 补 `Queue.CleanupStaleRunning` + 从 `WorkerPool.Start` 调用 + `cmd/analysis` 补上文档承诺却从未存在的启动期一半 + `internal/repoguard` 函数级接线护栏，其第一版对目标形态是瞎的、经破坏验证修正为 `file:function`；AUD-49 仍未修），2026-09-23；AUD-49 落地（sync 的取消两半都修 —— 无条件 `UpdateSyncJob` 退役、换成 `UpdateSyncJobIfStatus` 条件写（`WHERE id=$1 AND status = ANY(...)`）且 `from` 为空报错；`RetryLater`/`CompleteJob`/`FailJob`/`Dequeue`/`CleanupStaleRunning` 全部改为条件写；`WorkerPool` 补 `jobID → cancelFunc` 注册表 + per-job ctx（原来是 `context.Background()`），`cmd/data:NewSyncHandler` 接上 `SetRunningCanceller` 并由 repoguard 钉住调用点；新增 `pkg/sync/cancel_test.go` 13 条 + `pkg/storage/sync_jobs_conditional_test.go` 6 条**真库**测试；破坏验证 S1/S2 分别只红「行」与「执行器」各自那一层）+ 顺带登记 AUD-51（测试前置条件与断言读的不是同一个东西 —— `TestHasOHLCVData` 硬编码 `600000.SH` 而前置只检查表非空，局部同步必红；同类潜伏成员 3 个）+ AUD-52（e2e 套件的前置条件不再蕴含断言 —— :8084 指向已退役的 execution 服务，永远不可能绿；strategy API 期望 200 实测 401），2026-09-23；**AUD-55 / AUD-53 / AUD-54 一次关掉（2026-09-24）** —— AUD-55（根因）= 引擎对已持仓位重复下单（`computeEffectiveTarget` 的抵扣只在 `PendingQty > 0` 时生效 × 无状态策略每天对 top-N 发 `Long`）**已修**：抵扣改为**无条件** + 已持仓**实时读 tracker**（不再信 `tp.ActualQty` 缓存）+ 新增 `reconcileTargetPosition` 对齐三处**引擎外改持仓**（止损/止盈平仓、拆股、退市强平）；AUD-53（表现）= 资金侧 4.82pp → **0.76pp**、阶梯转**收敛**、零拒单；价格侧 10.31pp **归因到绝对金额约束**（一手 = 100 × 价格 vs 固定资金）、**非引擎缺陷**；AUD-54 = 归档层 6 条已删配置引用**逐条加时点/现状注记**（护栏一字未动，`--include-archive` 退出码 **1 → 0**）；三条回归护栏 + 破坏验证（**三条同时变红**）+ 顺带登记 **AUD-56**（`pkg/ai/pipeline` 有一条测试靠**外网可达性**才能结束 —— `go build` 会联网解析不存在的 import，墙内不通就挂到超时；**A/B/A/B 四轮交替**才排除「与本轮改动相关」这个误判）；**AUD-56 / AUD-51 落地（2026-09-25）** —— AUD-56 = 把那条「靠外网可达性才能结束」的测试改成**正面证据 + 反证**（`buildDir` 里放带 `replace` 的 go.mod 指向本地模块，编译成功本身即是「buildDir 被用上」的证据；换成空目录必须失败）+ `t.Setenv("GOPROXY","off")`，并给生产侧 `go build` 子进程加 `CommandContext` + 120s 上界（601s 挂死 → 6.18s 通过；破坏 `buildCmd.Dir` 后 0.93s 变红且不挂起）；AUD-51 = `pkg/storage` 四个测试改为**自灌自证**（`TestHasOHLCVData` / `TestGetTradingDays` / `TestIsTradingDay` / `TestGetTradingDates` 自己写数据自己清理，**取消前置**而非修补前置；顺带订正登记时的一处误判 —— `TestGetTradingDays` 读的是 `ohlcv_daily_qfq`、缺的是**区间**，表名对不上的只有 `TestIsTradingDay` / `TestGetTradingDates`；`skipIfNoSeedData` 收敛到 `TestGetAllStocks` 一个同源用法）；同时订正 `docs/guides/local-dev.md` 四处漂移（test 文件数 186 → 实测 **273**、`.gitignore` 的 `*_test.go` 警告失效、`cmd/ai` 已于 2026-09-18 删除却仍在教怎么跑、已知陷阱里「需要预置数据」那条随自灌自证同步）；**AUD-51 真库实测补完（2026-09-25，原生 PG 17.5，本机 Docker Desktop 不可用时的替代路径）**：四个测试在**全新空库**上全部 PASS（`pkg/storage` 整包 `ok 24.4s`），破坏验证（把自灌与断言脱钩）→ 四个测试**同时变红** —— AUD-51 由 🔶 翻 ✅
+verified-by: 代码审查（2026-09-16）+ 产品重构讨论；P0-4 落地复核（2026-09-17）；P2-9wire / P2-9f / P2-10 / P1-5 / P2-12 落地（2026-09-18）；ODR-065 AUD-01~18 全关（2026-09-21/22）；AUD-19~34 全部有裁决（2026-09-22，AUD-34 裁决保留、其余关闭）；AUD-20/21/22 落地 + 顺带登记 AUD-37（2026-09-22）；AUD-24/25/26 沙箱跨平台落地 + 顺带登记并落地 AUD-38（2026-09-22）；AUD-35/36/37 配置一致性落地 + 顺带登记 AUD-39 / AUD-40（2026-09-22）；AUD-39/40 落地（k8s env 口径 + 值对齐 + 消灭占位符 + 部署护栏检查 5~8；`v.Sub` 缺段防护）+ 顺带登记 AUD-41 / AUD-42（2026-09-22）；AUD-41/42 落地（SPEC 的 `## Configuration` 段整段订正 + doc 护栏第二项检查；`pkg/testutil` 的 DSN 收敛到 `storage.BuildDSN` + 全仓单实现结构护栏）+ 顺带登记 AUD-43 / AUD-44（2026-09-22）；AUD-43/44/45 落地（AUD-43 前提订正后**裁决保留** `pkg/testutil` 并归并入 AUD-45；AUD-45 = 统一盘点 13 个零导入者包 + 新增 `internal/repoguard` 结构性护栏；AUD-44 = 三份入口文档补 R1 frontmatter + doc 护栏第三项检查）+ 顺带登记 AUD-46 / AUD-47（2026-09-22）；AUD-46/47 落地（AUD-46 = 删除 `pkg/metrics`（ADR-017 §1 的竞争实现，四个核心指标由 `pkg/observability` 实现）+ `internal/repoguard` 新增 `retiredPackages` 退役负向断言，`pkg/decimal` 裁决保留并标注「待采用」；AUD-47 = `docs/TEST.md` §5–§7 内容复核 —— 沙箱限制改实测值 30s/1 GiB、覆盖率目标标注为「不是门禁」、前端与 e2e 用例数改实测），2026-09-22；P2-13 接真库取证（`pkg/validation/live_backtest_integration_test.go`，实测「验证器链在真数据上否掉策略」）+ 顺带登记 AUD-49 / AUD-50（sync 的 cancel 与重启恢复两项缺陷），2026-09-23；AUD-50 落地（`pkg/sync` 补 `Queue.CleanupStaleRunning` + 从 `WorkerPool.Start` 调用 + `cmd/analysis` 补上文档承诺却从未存在的启动期一半 + `internal/repoguard` 函数级接线护栏，其第一版对目标形态是瞎的、经破坏验证修正为 `file:function`；AUD-49 仍未修），2026-09-23；AUD-49 落地（sync 的取消两半都修 —— 无条件 `UpdateSyncJob` 退役、换成 `UpdateSyncJobIfStatus` 条件写（`WHERE id=$1 AND status = ANY(...)`）且 `from` 为空报错；`RetryLater`/`CompleteJob`/`FailJob`/`Dequeue`/`CleanupStaleRunning` 全部改为条件写；`WorkerPool` 补 `jobID → cancelFunc` 注册表 + per-job ctx（原来是 `context.Background()`），`cmd/data:NewSyncHandler` 接上 `SetRunningCanceller` 并由 repoguard 钉住调用点；新增 `pkg/sync/cancel_test.go` 13 条 + `pkg/storage/sync_jobs_conditional_test.go` 6 条**真库**测试；破坏验证 S1/S2 分别只红「行」与「执行器」各自那一层）+ 顺带登记 AUD-51（测试前置条件与断言读的不是同一个东西 —— `TestHasOHLCVData` 硬编码 `600000.SH` 而前置只检查表非空，局部同步必红；同类潜伏成员 3 个）+ AUD-52（e2e 套件的前置条件不再蕴含断言 —— :8084 指向已退役的 execution 服务，永远不可能绿；strategy API 期望 200 实测 401），2026-09-23；**AUD-55 / AUD-53 / AUD-54 一次关掉（2026-09-24）** —— AUD-55（根因）= 引擎对已持仓位重复下单（`computeEffectiveTarget` 的抵扣只在 `PendingQty > 0` 时生效 × 无状态策略每天对 top-N 发 `Long`）**已修**：抵扣改为**无条件** + 已持仓**实时读 tracker**（不再信 `tp.ActualQty` 缓存）+ 新增 `reconcileTargetPosition` 对齐三处**引擎外改持仓**（止损/止盈平仓、拆股、退市强平）；AUD-53（表现）= 资金侧 4.82pp → **0.76pp**、阶梯转**收敛**、零拒单；价格侧 10.31pp **归因到绝对金额约束**（一手 = 100 × 价格 vs 固定资金）、**非引擎缺陷**；AUD-54 = 归档层 6 条已删配置引用**逐条加时点/现状注记**（护栏一字未动，`--include-archive` 退出码 **1 → 0**）；三条回归护栏 + 破坏验证（**三条同时变红**）+ 顺带登记 **AUD-56**（`pkg/ai/pipeline` 有一条测试靠**外网可达性**才能结束 —— `go build` 会联网解析不存在的 import，墙内不通就挂到超时；**A/B/A/B 四轮交替**才排除「与本轮改动相关」这个误判）；**AUD-56 / AUD-51 落地（2026-09-25）** —— AUD-56 = 把那条「靠外网可达性才能结束」的测试改成**正面证据 + 反证**（`buildDir` 里放带 `replace` 的 go.mod 指向本地模块，编译成功本身即是「buildDir 被用上」的证据；换成空目录必须失败）+ `t.Setenv("GOPROXY","off")`，并给生产侧 `go build` 子进程加 `CommandContext` + 120s 上界（601s 挂死 → 6.18s 通过；破坏 `buildCmd.Dir` 后 0.93s 变红且不挂起）；AUD-51 = `pkg/storage` 四个测试改为**自灌自证**（`TestHasOHLCVData` / `TestGetTradingDays` / `TestIsTradingDay` / `TestGetTradingDates` 自己写数据自己清理，**取消前置**而非修补前置；顺带订正登记时的一处误判 —— `TestGetTradingDays` 读的是 `ohlcv_daily_qfq`、缺的是**区间**，表名对不上的只有 `TestIsTradingDay` / `TestGetTradingDates`；`skipIfNoSeedData` 收敛到 `TestGetAllStocks` 一个同源用法）；同时订正 `docs/guides/local-dev.md` 四处漂移（test 文件数 186 → 实测 **273**、`.gitignore` 的 `*_test.go` 警告失效、`cmd/ai` 已于 2026-09-18 删除却仍在教怎么跑、已知陷阱里「需要预置数据」那条随自灌自证同步）；**AUD-51 真库实测补完（2026-09-25，原生 PG 17.5，本机 Docker Desktop 不可用时的替代路径）**：四个测试在**全新空库**上全部 PASS（`pkg/storage` 整包 `ok 24.4s`），破坏验证（把自灌与断言脱钩）→ 四个测试**同时变红** —— AUD-51 由 🔶 翻 ✅；**AUD-52 关闭（2026-09-25，两段都修）** —— 测试侧：`e2e/tests` 的门改成与断言同源（`/health` 不通→skip；`/api/execution/*` 404→FAIL；要鉴权→skip 并打印姿势指引）+ 修掉三处指向已退役架构的断言（拨 `:8084`、把 risk 当独立服务、`/api/strategies` 按裸数组解）；栈侧：P0-4 的判据从「绑定地址」换成「**发布层**」，新增逐字匹配的显式声明 `AUTH_INSECURE_EXPOSURE=loopback-published` + compose 四条映射改回环 + `JWT_SECRET` 不再必填，**基础不变量未放松**（改由静态检查 3c + 运行时 netstat 断言守），决策见 ADR-025；**复核时发现比登记时严重**（实测前端经 nginx 的全部接口都 401 → 当时整个 SPA 与 160 条 Playwright 不可用，AUD-52 只是最显眼的症状）；读数：全仓 `go test ./...` **85 包 0 FAIL**、`e2e/tests` 两条**真跑真绿**（原「永远不可能通过」）、容器日志横幅带 `exposure` + `guaranteed_by`、四个宿主端口全 `127.0.0.1`；破坏验证三组（检查 3c **5/5** 含 1 绿对照 / `e2e/guard` **5/5** / P0-4 新判据 **2/2**）—— **AUD-01 ~ AUD-56 至此全部关闭**
 status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有未解除的前置）" —— 见下方「状态总览」
 ---
 
@@ -56,7 +56,7 @@ status-legend: "✅ 已完成 / 🔶 进行中 / ⬜ 待做 / ⛔ 阻塞（有�
 777~1005 略有差别，因为破坏只还原了**抵扣条件**这一处，`reconcileTargetPosition` 的
 三处调用仍在 —— 两套数字都成立，别互相校对。2026-09-24，做 AUD-53 根因定位时**查出来的** |
 
-| AUD-52 | 1 | 0 | 0 | 1 | 0 | ⬜ **AUD-52**（e2e 套件的**前置条件不再蕴含它的断言** —— `e2e/tests/integration_test.go` 的 `TestMain` 只检查「analysis 可达」，可达就整套跑；但 ① `executionURL := "http://localhost:8084"`（:248）指向**已退役的服务**（ODR-021 把 execution 并进 analysis，端点在 `:8085/api/execution/*`，容器里已无 :8084），**这个测试在当前架构下永远不可能通过**；② `TestStrategyAPI_ListStrategies` 打 `:8085/api/strategies` 期望 200，实测 **401** —— 鉴权上线后套件没有配套的取 token 步骤）。2026-09-23，**撞出来的**（完整跑测试时红，**与本轮改动无关**）。**同症状不同成因，故与 AUD-51 分开登记**：AUD-51 是前置条件**写错了对象**，AUD-52 是前置条件**不够** —— 套件级的门只保证「服务在」，不保证「服务要的东西你有」 |
+| AUD-52 | 1 | 1 | 0 | 0 | 0 | ✅ **AUD-52**（e2e 套件的**前置条件不再蕴含它的断言** —— `TestMain` 只检查「analysis 可达」，可达就整套跑；而 ① `executionURL := "http://localhost:8084"` 指向**已退役的服务**（ODR-021 把 execution 并进 analysis，端点在 `:8085/api/execution/*`），**这个测试在当前架构下永远不可能通过**；② `TestStrategyAPI_ListStrategies` 打 `:8085/api/strategies` 期望 200，实测 **401**）。**已于 2026-09-25 关闭，两段都修 + 全仓测试 85 包 0 FAIL + 破坏验证**。**⚠️ 复核时发现实际比登记时严重得多**：401 不止影响那两条测试 —— 实测**经 nginx 打前端真正的接口全部 401**（`:8080/api/strategies` / `/api/stocks/count` / `/api/market/index`），而前端无登录页、无 token、无首个管理员引导，也就是说**整个 SPA + 160 条 Playwright 当时全站不可用**；AUD-52 只是这个矛盾最显眼的一处症状。根因是两条硬约束互斥：容器**必须**绑 `0.0.0.0` 才能被发布端口转发，而 P0-4 的 `decideAuthStartup` 只在 `server.host` 是 loopback 时才允许 `AUTH_INSECURE`。**修法**：① **测试侧** —— 门改**与断言同源**（三档：`/health` 不通→skip；通了但 `/api/execution/*` 404→**FAIL**（真回归）；都在但要鉴权→**skip 并打印姿势指引**，因为形态不匹配 ≠ 缺陷，且套件**无法**自取 token——无首个管理员引导是刻意的），并修掉**三处**指向已退役架构的断言：拨 `:8084`、把 risk 当独立服务（且 `/api/risk/health` 这个路径**从来没有存在过**）、以及把 `/api/strategies` 的 `{"strategies":[...]}` 响应按裸数组解（**断言恒空、看着在跑其实什么都没检查**）。② **栈侧** —— 判据从「绑定地址」换成「**发布层**」：新增显式声明 `AUTH_INSECURE_EXPOSURE=loopback-published`（逐字匹配，拼错即拒绝启动），compose 四条端口映射全部改 `127.0.0.1:` 前缀，`JWT_SECRET` 不再必填；**基础不变量没有放松**（open-access 仍不可从其他主机到达），只是保证的位置从「进程绑定」挪到「端口发布」—— 由**两处机器校验**守住：静态 `check_deploy_consistency.py` **检查 3c**（四条双向规则）+ 运行时 `tools/local-stack.sh status`（读真实 netstat）。决策与 5 个备选方案见 **[ADR-025](adr/adr-025-auth-exposure-publish-layer.md)**。**取证**：容器日志横幅带 `exposure=loopback-published` + `guaranteed_by`（正面证据，新路径真在跑）；`:8085/api/*` 与 `:8080/api/*` 全 200；`e2e/tests` 两条从「永远红」变成**真跑真绿**。**破坏验证 3 组**：检查 3c **5/5**（4 红 + 1 绿对照：非回环+真开鉴权仍应绿）；`e2e/guard` **5/5**（其中 D1 拨回 `:8084`、D2 删门里的探针、D3/D4 让门判出来却不用，各自变红）；P0-4 新判据 **2/2**（把逐字匹配放宽成 `strings.Contains` → 精确匹配腿变红；撤掉豁免分支 → 放行腿变红）。**期间抓到的真实缺陷**：`e2e/guard` 的负向钉命中了我自己写在报错消息字符串里的 `:8084` 字面量（护栏工作正常，改的是消息措辞）；`local-stack.sh status` 抓到只重建了 analysis、其余三个容器仍是旧的 `0.0.0.0` 发布（`--no-deps` 的后果）。**顺带**：运行时断言在这一轮里**先红后绿**，是同一个机制的 A/B 取证。2026-09-23，**撞出来的**（完整跑测试时红）；2026-09-25 修。**同症状不同成因，故与 AUD-51 分开登记**：AUD-51 是前置条件**写错了对象**，AUD-52 是前置条件**不够** |
 | AUD-56 | 1 | 1 | 0 | 0 | 0 | ✅ **AUD-56**（**有一条测试要靠外网可达性才能结束**）**已修（2026-09-25）**。原状：`TestPipeline_ValidateCompilation_UsesBuildDir` 的立意是「证明 `buildDir` 真被用上」，做法是把 `buildDir` 指向一个没有 go.mod 的临时目录、再用 `import "github.com/nonexistent/fakepkg"` 逼那次 `go build` 失败；但解析这个 import **会联网** —— 网络可达时 10s 内通过，不可达时子进程一直等（全仓 `go test ./...` 时该包 **601s 被杀**，单跑 70s `panic: test timed out`）。**而它最后只断言 `p.buildDir == tmpDir`**（构造函数刚设过的值）—— 一句同义反复，**既没证明 buildDir 被用上，又把自己的成败交给了墙**。修法（两层，都不触网）：**① 测试改成正面证据 + 反证** —— `buildDir` 里放一个 `go.mod`，用 `replace example.com/localmod => ./localmod` 指向目录内的本地模块，被测代码 import 它；只有 `go build` 真的以 `buildDir` 为工作目录才会读到那条 replace、编译通过（**腿 1**），而同一个 `buildDir` 换成空目录必须失败（**腿 2 反证** —— 没有它，腿 1 可能是「无论在哪都成功」，测试又成摆设）；断言改读**退出码 / `BuildError` 是否为空**，不读错误文本格式；并 `t.Setenv("GOPROXY","off")` 把「不触网」变成**可断言的前提**而不是对网络状况的侥幸。**② 生产侧给子进程加上界** —— `validateCompilation` 改用 `exec.CommandContext` + `buildTimeout = 120s`：没有它，一个需要联网的 import 在生产侧表现为「**实验卡住**」而不是「编译失败」，而后者才是要写进 `result.BuildError` 给人看的 artifact（ADR-024）。**实测**：修后 6.18s 通过（原 601s 挂死）；`t.Setenv` 生效后即使把 `buildCmd.Dir` 破坏成 `""` 也是 **0.93s 变红**并指名原因，不再挂起。**破坏验证**：`buildCmd.Dir = ""` → 腿 1 变红且报出 `module lookup disabled by GOPROXY=off`；还原后回到绿，`grep SABOTAGE` 零残留。**取证教训（记在案）**：先做**单次** A/B（`git stash` → 通过；恢复 → 挂）看着像「本轮改动引起的回归」，改成 **A/B/A/B 交替四轮**（改动在 / 基线 / 改动在 / 基线）**全挂**才证明那次通过是网络侥幸 —— 判 flaky 必须多轮交替，不能一次定论。2026-09-24，跑全仓测试时**撞出来的** |
 
 **原来的那处「阻塞」已解除，但换成了一个更大的问题。** P2-8 曾登记为「卡在
@@ -77,13 +77,19 @@ AUD-54 裁决走「逐条订正归档文档」，护栏一个字没动）。
 **AUD-56 于 2026-09-25 关掉**（测试改成「正面证据 + 反证」并 `GOPROXY=off`，生产侧给 `go build`
 子进程加了 120s 上界 —— 三层里那层「测试的前置条件依赖**外网**」已拆掉）。
 **AUD-51 于 2026-09-25 关掉**（四个测试改为自灌自证 + **真库实测**在全新空库上全绿 + 破坏验证）。
-**只剩 AUD-52 没动**（e2e 套件的前置条件**不再蕴含**它的断言：`:8084` 已退役、
-`/api/strategies` 实测 401）。这一族三项都只影响**测试**的可信度，不影响回测数字。
+**AUD-52 于 2026-09-25 关掉**（三项测试可信度问题的最后一项 —— 两段都修：测试侧的门改成
+与断言同源 + 修掉三处指向已退役架构的断言；栈侧把 P0-4 的判据从「绑定地址」换成「发布层」，
+配静态检查 3c + 运行时 netstat 断言，见 [ADR-025](adr/adr-025-auth-exposure-publish-layer.md)）。
+**AUD 线至此 AUD-01 ~ AUD-56 全部有裁决且已落地，无待办项。**
 
-**下一批建议**：**AUD-52**（三项测试可信度问题里唯一没动的；不修的话「跑红」这个信号
-本身不可信）→ 然后 **P2-8 的 hfq 落库按新判据重新裁决**
-（见文末「P2-8 取证说明」六）→ 然后 **P2-1**（补宏观数据源 —— 跨境那一半已做完，
-见 `guides/data-dependencies.md`）与 **P2-2**（产业链数据底座）。
+**下一批建议**：**P2-8 的 hfq 落库按新判据重新裁决**（见文末「P2-8 取证说明」六）
+→ **P2-1**（补宏观数据源 —— 跨境那一半已做完，见 `guides/data-dependencies.md`）
+与 **P2-2**（产业链数据底座）。
+⚠️ **另一个已浮出水面、尚未登记的产品缺口**：本地默认已恢复 open-access，但
+「要让局域网/手机访问」这条路现在**必须**配 `JWT_SECRET`，而**前端没有登录页、
+系统没有首个管理员引导** —— 也就是说「对外访问」目前等于「UI 不可用」。这不是
+本轮引入的（本轮只是把它从「全站 401」改回「本机可用」），要真正支持对外，需要
+单独立项做「首个管理员引导 + 前端登录」。
 
 ### 本地部署形态定案（2026-09-25，非缺陷）
 
@@ -110,7 +116,9 @@ AUD-54 裁决走「逐条订正归档文档」，护栏一个字没动）。
 - **`check_deploy_consistency.py` 的检查 3 与检查 5 一并改写**。检查 3 原来守的是
   compose 里 postgres/redis 的端口映射，检查对象随服务一起从 compose 消失 ——
   不改写不会报错，而是**循环体一次都不进、照旧打「✓」**，那是假护栏（比没护栏更糟）。
-  新断言换成「基础设施真在仓外」+「应用容器显式指向它」，两半都做了破坏验证。
+  新断言换成「基础设施真在仓外」+「应用容器显式指向它」，两半都做了破坏验证
+  （postgres 带 ports 放回 → 红；redis 只带 environment 放回 → 红；把 data-service
+  的 `DATABASE_HOST` 改成 `localhost` → 红；干净树 → 8 项全绿 exit 0）。
   检查 5 放宽为只比**库名 / 用户名 / 端口**（host 在三处必然不同，比它只会逼出
   一个恒假的断言）。
 - 「数据库/缓存只监听回环」这条不变量**没有放松**，只是承载体从 compose 的端口映射
@@ -2066,6 +2074,96 @@ AUD-51 代码已落地区，**待办是 AUD-52 与 AUD-51 的真库实测**）�
 > `E2E_FORCE_SKIP=1` 并在文档里写明它需要什么）；③ 更好的是把「这道门」也做成
 > **与断言同源** —— 门应该检查它真正需要的东西（执行端点存在、鉴权可用），
 > 而不只是「某个端口有响应」。
+
+> **AUD-52 落地说明（2026-09-25）**：
+>
+> **一、复核改写了问题的大小。** 登记时看的是「两条用例红」。实际去核验环境时
+> 发现 401 的范围是**整个 `/api/*`**（`pkg/auth/middleware.go:221` 的公开路径
+> 白名单只有 `/health`、`/api/health`、`/metrics`、`/api/auth/login`、
+> `/api/auth/refresh`），实测**经 nginx 打前端真正会打的接口全部 401**：
+>
+> ```
+> GET :8080/api/strategies   → 401      GET :8085/api/strategies   → 401
+> GET :8080/api/stocks/count → 401      GET :8085/api/execution/account → 401
+> GET :8080/api/market/index → 401      GET :8085/api/risk/health  → 401
+> ```
+>
+> 而前端无登录页、`web/src/api/client.ts` 是裸 `fetch` 不带 token、也没有首个
+> 管理员引导。⇒ 当时**整个 SPA 与 160 条 Playwright 都不可用**，AUD-52 那两条
+> 只是最显眼的症状。同一个根因还解释了 `e2e/tests/rbac-open-access.spec.ts` 开篇
+> 那句「The e2e environment runs with auth DISABLED」为什么是硬前提。
+>
+> **二、根因是两条硬约束互斥，不是谁写错了。**
+>
+> | 约束 | 来源 |
+> |---|---|
+> | 容器必须绑 `0.0.0.0` 才能被发布端口转发 | Docker 语义（转发目标是容器 eth0，不是它的 loopback） |
+> | `AUTH_INSECURE` 只在 `server.host` 是 loopback 时生效 | P0-4 的 `decideAuthStartup` |
+>
+> 于是「服务进容器」与「dev/e2e 免鉴权」**结构上互斥**。这不是配置笔误，改配置
+> 解决不了。
+>
+> **三、修法的取舍（为什么不选那两条看起来更省事的）。**
+>
+> - *只把门改成 skip 401*：dev compose 仍是鉴权栈 → 前端与 Playwright 仍全站
+>   401，UI 实际不可用。等于把「测试红」挪成「产品不能用」。**否**。
+> - *让 e2e 自取 token*：被设计封死 —— `CreateUser` 只在 `RequireRole(admin)`
+>   后面，要打开就得先加一个「无认证时可创建首个 admin」的引导接口，那是给
+>   生产开一个洞。**否**。
+> - *容器改 `network_mode: host`*：那样 loopback 就是宿主的 loopback，原判据
+>   直接成立。但 host 网络在 Docker Desktop 上语义特殊，且会连带推翻
+>   `wait-for-deps.sh` 与「服务间用 compose 服务名」两条设计。**否**。
+> - **选的是**：判据从「绑定地址」换成「**发布层**」，配一个**逐字匹配**的显式
+>   声明 `AUTH_INSECURE_EXPOSURE=loopback-published`。要点是**声明本身不提供
+>   保证** —— 保证由静态检查 3c（读 compose）+ 运行时 netstat 断言两处给出。
+>   不选「自动推断我在容器里且只发布了回环」，因为进程看不到自己的 ports 映射，
+>   而「在容器里」**不等于**「只发布到回环」（`-p 8085:8085` 也是容器）——
+>   自动推断只会给出虚假的安全感。
+>
+> **四、测试侧的关键点：为什么第 ③ 档是 skip 而不是 FAIL。**
+>
+> 门的三档里，第 ② 档（执行端点 404）**必须** FAIL —— 那是真回归。第 ③ 档
+> （要鉴权）必须 skip，因为「跑了鉴权栈」既不是代码缺陷、也无法自愈（见上），
+> 报红只会变成长期噪声，而长期噪声会训练人忽略红色 —— 这正是 AUD-52 登记时
+> 点出的病。
+>
+> **已知边界（写出来，免得被当成全覆盖）**：鉴权开启时**所有** `/api/*` 都回
+> 401（中间件挂在 router 上、先于路由匹配），包括根本不存在的路径 —— 所以那种
+> 形态下「执行端点是否存在」**判不出来**，只能判出「要鉴权」然后整体 skip。
+> 这条检测只在 open-access 形态下有效，而那正是套件要跑的形态。
+>
+> **五、顺带修掉的一处「看着在跑、其实没检查」。** `TestStrategyAPI_ListStrategies`
+> 把响应 `Decode` 到 `[]map[string]interface{}`，而 handler 返回的是对象
+> `gin.H{"strategies": configs}`（`cmd/analysis/handlers_strategy.go:26`）——
+> 解码必然失败 → `strategies` 恒为空 → 每次都走「没有策略注册」那条 `t.Log`
+> 分支。**断言一直在跑，却一条都没检查**。这和 AUD-52 的主症状是同一族
+> （「前置/形状不蕴含断言」），但位置不同，一并订正为
+> `{Strategies []...}` + `require.NotEmpty`（与 `api-strategy.spec.ts` 的断言对齐）。
+>
+> **六、取证与破坏验证。** 读数见状态总览表该行；三组破坏验证的用例与预期：
+>
+> | 组 | 用例 | 期望 |
+> |---|---|---|
+> | 检查 3c | 8085 映射去掉回环前缀（open-access 下） | 红 |
+> |  | 非回环映射 **+ 真开鉴权**（对照） | **绿** |
+> |  | 非回环映射 + 无密钥 + 关 open-access | 红 |
+> |  | 开了 open-access 但撤掉 exposure 声明 | 红 |
+> |  | 同时给 `JWT_SECRET` 与 open-access | 红 |
+> | `e2e/guard` | 拨回退役端口 / 删门里的 `/api/strategies` 探针 / 删 `executionMissing` / `TestMain` 不再用 `authRequired` / 把 risk 写成独立服务 | 全红 |
+> | P0-4 新判据 | 逐字匹配放宽成 `strings.Contains` | 精确匹配腿红 |
+> |  | 撤掉发布层豁免分支 | 放行腿红 |
+>
+> 期间抓到的两处**真实**缺陷（都不是测试脚本的锅）：① `e2e/guard` 的负向钉
+> 命中了写在**报错消息字符串**里的退役端口字面量 —— 护栏工作正常，改的是消息
+> 措辞；② `tools/local-stack.sh status` 抓到「只重建了 analysis、其余三个容器
+> 仍是旧的 `0.0.0.0` 发布」（`--no-deps` 的后果，端口映射只在容器重建时生效）。
+> 后者让运行时断言**先红后绿**，等于这条断言自带一次 A/B 取证。
+>
+> **七、未做 / 已知缺口。** 「局域网或手机访问 UI」现在是**不可能**的：那条路
+> 必须配 `JWT_SECRET`，而前端没有登录页、系统没有首个管理员引导 ⇒ 等于 UI
+> 不可用。这不是本轮引入的（本轮只是把它从「全站 401」改回「本机可用」），
+> 要真正支持需单独立项（首个管理员引导 + 前端登录）。决策记录见
+> [ADR-025](adr/adr-025-auth-exposure-publish-layer.md)。
 
 ## P2-8 取证说明（2026-09-23）
 

@@ -1,14 +1,14 @@
 ---
 status: evergreen
-last-verified: 2026-09-22
-verified-by: AUD-30 索引表与「已取代」尾注校准（2026-09-22）—— 顶层定位改 ADR-023/024；新增或取代 ADR 时要同时更新索引表与尾注，两处是两套真相来源
+last-verified: 2026-09-25
+verified-by: AUD-30 索引表与「已取代」尾注校准（2026-09-22）—— 顶层定位改 ADR-023/024；新增 ADR-025（2026-09-25，AUD-52 的栈侧一半：P0-4 判据从绑定地址换到发布层），索引表与本尾注两处同步。新增或取代 ADR 时要同时更新索引表与尾注，两处是两套真相来源
 ---
 
 # Architecture Decision Records (ADR) & Operational Decision Records (ODR)
 
 > **Location:** `docs/adr/` — architectural ADR files | `docs/archive/odr/` — operational ODR files
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Version:** 3.21.0
+> **Version:** 3.22.0
 > **Created:** 2026-03-24
 
 ---
@@ -41,6 +41,7 @@ verified-by: AUD-30 索引表与「已取代」尾注校准（2026-09-22）—�
 | [ADR-022](archive/superseded-adr/adr-022-unified-research-platform.md) | 统一研究平台 — 单一数据面 + 双对等工作面 + 内容坐标证据 + 飞轮闭环 | **Superseded by ADR-023**（Proposed 期间即被取代，从未实施） | 2026-09-15 |
 | [ADR-023](adr/adr-023-ai-experimenter-lab.md) | **AI 实验员 + 人类监督者实验室** — 三层模型（AI 编排 / 能力 / 数据）+ EquityDeep 降为数据底座 + 挖掘/红队双 agent + 校准优于准确率 | **Accepted** | 2026-09-16 |
 | [ADR-024](adr/adr-024-expression-as-execution-target.md) | **策略执行载体是表达式，LLM 生成的代码只是 artifact** — 意图类型 → 确定性默认表达式映射；不做 `plugin.Open`（Windows 不支持 / 依赖版本须一致 / 违背 ADR-023）；value·quality 缺基本面数据时明确失败而非给假数字 | **Accepted** | 2026-09-17 |
+| [ADR-025](adr/adr-025-auth-exposure-publish-layer.md) | **P0-4 鉴权豁免的判据从「绑定地址」换成「发布层」** — 容器必须绑 `0.0.0.0` 才能被发布端口转发，于是新增逐字匹配的显式声明 `AUTH_INSECURE_EXPOSURE=loopback-published`；**基础不变量未放松**（改由静态检查 3c + 运行时 netstat 断言守）；本地默认 open-access，对外发布必须配 `JWT_SECRET` | **Accepted** | 2026-09-25 |
 
 ---
 
@@ -159,9 +160,11 @@ When to create an ODR:
 ODR template: see `docs/archive/odr/odr-001-document-cleanup.md` for the canonical example.
 
 ---
-_Last updated by: AI Assistant — 2026-09-22 (AUD-30：docs/SPEC.md 顶层定位从 ADR-022 校准到 ADR-023/024；顺带复核下方 ADR/ODR 累计数)
-_ADR 累计 24 条: 架构 19 (ADR-001~016 + ADR-022~024) + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020) + 研究层 1 (ADR-021); 其中 ADR-014 由 ADR-020 §6 取代、ADR-021 与 ADR-022 均由 ADR-023 取代（ADR-022 从未实施，仅存于 archive/superseded-adr/）
+_Last updated by: AI Assistant — 2026-09-25 (AUD-52 关闭：新增 ADR-025 —— P0-4 鉴权豁免的判据从「绑定地址」换成「发布层」；顺带更新下方累计数)
+_ADR 累计 25 条: 架构 20 (ADR-001~016 + ADR-022~025) + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020) + 研究层 1 (ADR-021); 其中 ADR-014 由 ADR-020 §6 取代、ADR-021 与 ADR-022 均由 ADR-023 取代（ADR-022 从未实施，仅存于 archive/superseded-adr/）
 _ODR 累计 65 条: Cleanup 4 (ODR-001/006/008/045) | Audit 14 (ODR-002/009/010/012/013/015/043/047/049/054/061/062/063/065) | Migration 7 (ODR-003/005/007/011/014/044/046) | Process 1 (ODR-004) | Implementation 37 (ODR-016~021 + ODR-023~042 + ODR-050~053 + ODR-055~060 + ODR-064) | Refactor 2 (ODR-022/048)
+_2026-09-25 状态变更 (本次): ADR-025 新建 Accepted (P0-4 鉴权豁免的判据从「绑定地址」换成「**发布层**」 — 起因是 AUD-52：容器**必须**绑 `0.0.0.0` 才能被发布端口转发，而 `decideAuthStartup` 只在 `server.host` 是 loopback 时允许 `AUTH_INSECURE` ⇒「服务进容器」与「dev/e2e 免鉴权」**结构上互斥**；配 `JWT_SECRET` 则因前端无登录页/无首个管理员引导而**全站 401**（实测经 nginx 的前端接口全 401 = 整个 SPA 与 160 条 Playwright 不可用）。决策：新增**逐字匹配**的显式声明 `AUTH_INSECURE_EXPOSURE=loopback-published`（拼错即拒绝启动），`server.host` 为 loopback 的原路径不变；**基础不变量未放松**，改由**两处机器校验**守 —— 静态 `check_deploy_consistency.py` 检查 3c（四条双向规则：open-access ⟹ 每条 ports 映射回环 / 非回环映射 ⟹ 必须有 `JWT_SECRET` / open-access ⟹ 必须有 exposure 声明 / 两者并存 ⟹ 报错）+ 运行时 `tools/local-stack.sh status`（读真实 netstat）。配套：compose 四条映射改 `127.0.0.1:` 前缀、`JWT_SECRET` 不再必填、`e2e/tests` 的门改与断言同源（404→FAIL / 要鉴权→skip 并打印姿势指引）；5 个备选方案（只改测试侧 / 自取 token / host 网络 / 自动推断 / 放宽公开路径）逐条给出否决理由；ADR.md index 3.21.0 → 3.22.0 (ADR 24 → 25) — AUD-52_
+
 _2026-09-16 状态变更 (本次): ODR-064 新建 Completed (P5-3 **对接 L0 单一数据面 + Evidence API** — SPA 消费 citation 坐标: 范围与验收方式经 AskUserQuestion 裁决 (① SPA 消费 citation 坐标 / ② 起运行时端到端取证; TASKS.md 阶段 P5 原仅 P5-1, **P5-3 无既有条目** ⇒ 未擅自选范围) + **路由命名陷阱侦察** (L0 真实契约 `GET /factors/:factor_name` **无 `/api` 前缀 + 复数** / analysis 既有 `/api/factor/*` **单数** 形状不互通 / SPA 约定 `/api` ⇒ 三方不通, 故须**补 facade 而非复用**) + **后端 1 文件 +24 行** (`cmd/analysis/handlers_proxy.go` 新增 `GET /api/factors/:factor_name` facade: `url.Values` 空值省略 + `url.PathEscape` + `proxyRequest` **状态码原样透传** — 404「无 factor_cache 行」与 hash-only citation 穿透不失真) + **前端 6 文件** (`types/factor.ts` `CitationTuple`/`FactorCacheEntry` + `api/factor.ts::getFactorCitation` + `components/factor/FactorCitation.vue` 五元组表格 + 「四字段任一存在」判归档态**不补造** + `pages/FactorCitation.vue` + 路由 `/factors` + 侧栏「因子证据」+ `EvidenceLookup.vue` `initialHash` prop + `onMounted`/`watch` 立即解析 + `pages/Evidence.vue` 读 `route.query.content_hash`) 实现**一键回溯**; **运行时端到端取证 10 项全过** (一次性 pg16 :15432 + Redis :16379 + data 8081/analysis 8085/vite 5175: 播种 `POST /api/ingest/raw` → hash `8e8d829b…c69c` → `POST /api/ingest/equitydeep` 3 snapshots/6 rows → `POST /sync/factors/roe_dupont_leverage`; `GET /api/factors/roe_dupont_leverage?symbol=600519.SH&date=20250630` **200** 携五元组 → `GET /api/evidence/8e8d829b…c69c` **200** + 原始归档 payload; 未归档 hash **404** / 行未命中 **404**; 3 标的同哈希 = 请求批次坐标; 直连 L0 形状一致; vite 代理 200/404/200; `ingest.raw` 仅 1 行); 门禁 `go build` EXIT=0 / `TestFactorCitationProxy` 4/4 / vitest 16/16 / `vue-tsc` 0 错; **ODR-061 遗留「主验收点待运行时取证」闭合**; 未做项如实记录 (覆盖面仍 5/11 因子 / `cmd/analysis/handlers_proxy_test.go` 命中 `.gitignore:*_test.go` **未入库** / facade 前缀依赖待收敛 / `/factors` 无 Playwright spec); 顺带**修复索引漂移**: ODR-063 此前仅见于尾注、**未录入 ODR Index 表** (v3.20.0 尾注已宣称更新但实际缺失) → 本次补录 ODR-063 + ODR-064 两行; ADR.md index 3.20.0 → 3.21.0 (ODR 63 → 64, Implementation 36 → 37) — ODR-064_
 _2026-09-16 状态变更 (本次): ODR-063 新建 Completed (Sprint 8 **e2e 运行时全套件取证** — Playwright 167 用例 ×3 轮: 86/167 → 129/167 (77.2%); 承 ODR-062 交棒, 用户供 tushare token 仅进程环境注入; 现场取证 = 限流硬编码 429 自伤风暴 + **worker 饥饿**(`JobService.CreateJob/RetryJob` 直写 DB 不 notify → worker 永久阻塞 `WaitForJob` select; 时间线取证法: worker 启动 14:34:13 本地 vs DB 最老 pending 13:01:23 UTC = 15:01:23 本地, 推翻「启动时已有 pending」误判) + `/api/strategies` 500 (params 列双消费者形状冲突: 写 object / 读 `[]Parameter` 描述符数组); 修复 = `Queue.NotifyJobAvailable()` + `JobService.SetPendingNotifier` + `NewSyncHandler` 接线 (覆盖 14 调用点) + 2 回归测试 + object→descriptor 投影 (`jsonTypeName`) + 限流配置驱动 ×4 文件 + **P1-18 关闭** (`newMockJobStore` + Clone + created_at DESC 镜像; pkg/sync 11/11, `go test ./...` 门禁解锁); 数据面就绪 (calendar 969 日 / stocks 5564 行 / ohlcv 权限墙 40203 SQL 兜底 / momentum 回测 200·92ms); 余 38 条根因分类 → 登记 **P1-25~31** (backtest 入口 400 校验 / `BacktestResponse` omitempty 零值指标消失 / sortino MaxFloat64 哨兵 / stk_factor_pro 权限墙回退 / 限流窗口重置算法 / SetWatchDir Windows / e2e 期望侧对齐); `.gitignore` 补 visual 快照 + `/build/`); ADR.md index 3.19.0 → 3.20.0 (ODR 62 → 63, Audit 12 → 13) — ODR-063_
 _2026-09-16 状态变更 (本次): ODR-062 新建 Completed (阶段 P5 切片 B+D **旁路取数残留全量收口** — P5-1 收官刀: 评估 8 条现场取证 + ADR-022 §3 单向依赖判定表 (L3→L0 直连 = 旁路 / Go 内部 L1·L2→L0 = 合法 / 裸路径 rewrite = 形状问题) → 用户裁决**方案甲全量收口** = S-A 前端 5 文件重写对齐 jobs 契约 (types/api/stores/SyncStatusPanel.vue/DataImportForm.vue, EventSource 按 job 订阅 SSE) + S-B analysis `/api/sync/*` 网关代理 (ReverseProxy + FlushInterval=-1 SSE 流式透传, 顺带修复 viper 局部实例接线 — 全局 viper 恒空被 docker 硬编码 hostname 静默掩盖) + S-C analysis 死代理路由 ×3 退役 + S-E vite 死代理 ×3 清理 (含最后一处 L3→L0 直连形态 `/market`→8081) + S-D 裸镜像路由保留现状 (与 legacy 静态页共存亡, 退役另立议题) + 实施补齐 data `POST /api/sync/jobs` 类型化创建门 (7 type switch + 400 fail-fast, SPEC/e2e 三方期望但原不存在) + 哨兵 `sync.ErrInvalidCron` (无效 cron 500→400); go build EXIT=0 / 相关包测试 ok (pkg/sync 存量 mock 缺文件除外 → 登记 TASKS.md P1-18) / 前端 vue-tsc·vitest(158)·build 全绿 / 运行时取证网关面 12 项全过; **P5-1 全维度关闭**, 阶段 P5 1/1); ADR.md index 3.18.0 → 3.19.0 (ODR 61 → 62, Audit 11 → 12) — ODR-062_

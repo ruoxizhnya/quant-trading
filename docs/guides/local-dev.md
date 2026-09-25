@@ -39,32 +39,37 @@ verified-by: 实际命令逐条复核（`find -name '*_test.go'` 实测 273、`.
 ## 起基础设施
 
 ```bash
-cp .env.example .env         # 一次性：至少把 JWT_SECRET 换成 openssl rand -hex 32
-tools/local-infra.sh start   # 原生 PostgreSQL 17.5 + Redis 7.4.11（不再由 compose 托管）
-docker-compose up -d         # 应用服务（data / strategy / analysis / web）
+cp .env.example .env          # 一次性；默认已是本地 open-access，见下方
+tools/local-stack.sh start    # ★ 一键：原生 PG/Redis → 容器服务 → 等健康 → 端口体检
 ```
+
+`tools/local-stack.sh {start|stop|status}` 是**整栈**的统一入口，负责顺序、
+就绪等待与体检。它做的事，以及为什么不能只看 `docker-compose up` 的退出码：
+
+1. 探 Docker 引擎**是否真的活着**（Docker Desktop 在本机**会自发退出**，
+   此后所有 docker 命令都报 `open //./pipe/dockerDesktopLinuxEngine: ...`，
+   读起来像路径问题而不是「引擎没了」）；
+2. `tools/local-infra.sh start`（原生 PostgreSQL 17.5 + Redis 7.4.11）；
+3. `docker-compose up -d`；
+4. **等健康** —— 判据是 **HTTP 探针全通**，不是 `up` 返回 0。`up` 只代表容器被
+   创建了：应用连不上 PG/Redis 是 `logger.Fatal()` 无重试（容器立刻退出），
+   健康检查还有 `start_period`；
+5. **宿主机端口体检** —— 读真实 `netstat`，断言 8080/8081/8082/8085 只绑回环
+   （AUD-13 运行时那一半，见 ADR-025）。
 
 `tools/local-infra.sh {start|stop|status}` 只管**原生**那半（PG + Redis），
 `status` 会断言 AUD-13（数据库/缓存只监听回环）—— 这条断言原先在
 `tools/check_deploy_consistency.py` 里守 compose 的端口映射，服务移出 compose 后
-挪到了这里，改为断言真实的 netstat 监听 socket（`listen_addresses` 由脚本用
-`-c` 显式指定，不靠配置文件默认值）。
-
-> ⚠️ **`up` 返回 0 只代表容器被创建了**。应用连不上 PG/Redis 是 `logger.Fatal()`
-> **没有重试**（`cmd/data/setup.go:137` / `:146`），容器会立刻退出；健康检查还有
-> `start_period`，`up` 刚返回时状态还是 `starting`。所以起完要看
-> `docker ps` 里的服务是否已成 `healthy` —— 容器内的等待由
-> `deploy/wait-for-deps.sh` 有界承担（默认 60s），它替换掉了被移除的
-> `depends_on: {condition: service_healthy}`。
+挪到了这里，改为断言真实的 netstat 监听 socket。
 
 > ⚠️ **`local-infra.sh start` 在 Agent 沙箱里跑会被回收**：沙箱按进程组清理整棵
 > 进程树，`nohup ... &` 起的进程随那次工具调用一起消失（实测 `pg_ctl start` /
 > `nohup &` / `Start-Process` 三者在这个环境下都无效）。那种情况下要改用
 > 「后台任务」姿势直接 exec 两个二进制。**在你自己开的终端里正常。**
 
-> ⚠️ **必须先有 `.env`**。P0-4 之后 `docker-compose.yml` 对 `JWT_SECRET` 用了
-> `${JWT_SECRET:?...}` 必填插值 —— 没配的话连 `docker-compose up -d` 都会在解析
-> 阶段报错（这是刻意的：analysis 监听 0.0.0.0，无鉴权不能起）。
+> ⚠️ **必须先有 `.env`**。2026-09-25 起 `JWT_SECRET` **不再必填**（本地默认
+> open-access），但 `AUTH_INSECURE` / `AUTH_INSECURE_EXPOSURE` / `DATABASE_PASSWORD`
+> 仍从它读。`cp .env.example .env` 得到的默认值就是可直接跑的本机配置。
 
 > ⚠️ **必须用带连字符的 `docker-compose`**。本机 Docker CLI 没装 `compose`
 > 插件，空格写法会报 `'compose' is not a docker command`；`docker-compose` v2.32.1 可用。
@@ -99,20 +104,28 @@ PIT 回归测试就跑不到了）。
 
 ## 跑服务（本地）
 
+推荐直接用 `tools/local-stack.sh start`（原生库 + 容器服务 + 健康校验一条龙）。
+
+要用 `go run` 直接跑（改代码时热迭代更快）则是**原生跑法**，走豁免 (a)：
+
 ```bash
-# analysis 必须带密钥，否则拒绝启动（P0-4）
-JWT_SECRET=$(openssl rand -hex 32) go run ./cmd/analysis   # :8085 主服务（含 risk/execution，已合并）
+# analysis：open-access 本地模式 —— AUTH_INSECURE=true + server.host=127.0.0.1
+# （config/analysis-service.yaml 的 server.host 是 0.0.0.0，所以必须覆盖它）
+AUTH_INSECURE=true SERVER_HOST=127.0.0.1 go run ./cmd/analysis   # :8085 主服务（含 risk/execution，已合并）
 
 go run ./cmd/data        # :8081
 go run ./cmd/strategy    # :8082
 ```
+
+> 若一定要带鉴权跑：`JWT_SECRET=$(openssl rand -hex 32) go run ./cmd/analysis`
+> —— 但本地前端与 e2e 都拿不到 token，见上文「两种启动姿势」的说明。
 
 > `cmd/ai`（:8086）已于 2026-09-18 **删除**（TASKS P2-5）：零调用方，且建在废弃交互层的
 > 定位上。AI 能力走 `cmd/analysis` 的 MCP 工具层，不再是独立服务。
 
 ### analysis 服务的两种启动姿势
 
-**① 带鉴权（默认，任何非 loopback 部署都必须）**
+**① 带鉴权（任何非本机部署都必须）**
 
 ```bash
 export JWT_SECRET=$(openssl rand -hex 32)
@@ -121,20 +134,45 @@ export JWT_SECRET=$(openssl rand -hex 32)
 生效后 `/api/*` 需要 `Authorization: Bearer <access_token>`，
 token 从 `POST /api/auth/login` 拿。不设就直接 `auth: JWT secret missing` 退出。
 
-**② 无鉴权的本地模式（仅开发）**
+> ⚠️ **本地全栈不要用这个姿势**：前端没有登录页、`web/src/api/client.ts` 是裸
+> `fetch` 不带 token，系统也没有首个管理员的引导（`CreateUser` 在
+> `RequireRole(admin)` 后面 —— 鸡生蛋）。所以开了鉴权 = 整个 SPA 与 e2e
+> 全站 401，服务"起得来但用不了"。要对外访问才用它，见 ② 的说明。
 
-必须**同时**满足两个条件，缺一不可：
+**② 无鉴权的本地模式（仅开发，也是本地默认）**
+
+必须 `AUTH_INSECURE=true`，**外加**下面二者之一：
 
 ```bash
+# (a) 原生跑法：进程直接绑 loopback
 AUTH_INSECURE=true CONFIG_PATH=config/analysis-service.yaml go run ./cmd/analysis
-# 且配置里 server.host 必须是 127.0.0.1 / localhost
+#     且配置里 server.host 必须是 127.0.0.1 / localhost
+
+# (b) 容器跑法：容器**必须**绑 0.0.0.0（否则发布端口转发不进来），
+#     于是判据换成「发布层」—— 需要逐字声明：
+AUTH_INSECURE=true AUTH_INSECURE_EXPOSURE=loopback-published
 ```
 
-监听 `0.0.0.0` 时豁免**无效**（照样拒绝启动）—— 否则等于把回测和下单接口
-开给整个局域网。豁免生效时日志会打 WARN 横幅。
+两条都不满足时豁免**无效**（照样拒绝启动）—— 否则等于把回测和下单接口开给
+整个局域网。豁免生效时日志会打 WARN 横幅（容器形态下还会带上 `exposure` 与
+`guaranteed_by`，指明是谁在保证暴露面）。
 
-> e2e 走的是这种姿势：`e2e/playwright.config.ts` 的 `BACKEND_URL` 默认
-> `http://localhost:8085`，后端需要 `AUTH_INSECURE=true` + loopback 才能起来。
+> **`AUTH_INSECURE_EXPOSURE` 的取值必须逐字等于 `loopback-published`**：
+> 拼错、大小写不符、写 `loopback-only` / `true`，一律按「没声明」处理 →
+> 拒绝启动（fail closed）。这一条掉了等于这个开关可以靠一个笔误打开。
+>
+> 声明本身**不提供保证** —— 保证是两处机器校验给的：
+> `tools/check_deploy_consistency.py` 检查 3c（静态，双向：开了 open-access
+> 就不许有非回环映射；有非回环映射就必须配 `JWT_SECRET`）+ `tools/local-stack.sh`
+> 的 `status`（运行时读真实 netstat，断言 8080/8081/8082/8085 只绑回环）。
+> 决策见 [ADR-025](../adr/adr-025-auth-exposure-publish-layer.md)。
+
+> e2e 走的就是这种姿势：`e2e/playwright.config.ts` 的 `BACKEND_URL` 默认
+> `http://localhost:8085`，而 Playwright 与 `e2e/tests/integration_test.go`
+> **都不带 token**（`e2e/tests/rbac-open-access.spec.ts` 开篇即写明「e2e
+> environment runs with auth DISABLED」）。所以 e2e 必须打一个 open-access 的栈。
+> `e2e/tests` 的 Go 套件还会在门里判这一条：拿到 401 时**明确 skip 并打印
+> 姿势指引**，而不是报一条读不出信息的红（AUD-52）。
 
 ### CORS
 

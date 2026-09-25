@@ -22,6 +22,13 @@
   4. 部署配置里不得出现 GIN_MODE（AUD-29）。gin mode 的唯一来源是
      config/*.yaml 的 server.gin_mode；GIN_MODE 会被 gin 自己读走，是同一个
      决定的第二个入口，而且 grep 不到读取点。
+  3c. open-access 的声明与端口发布范围必须**互相蕴含**（AUD-52 / P0-4）。
+     容器必须绑 0.0.0.0 才能被发布端口转发，于是「open-access 只许在 loopback
+     上」这条不变量判不了绑定地址，只能判**发布层**。cmd/analysis 因此承认一个
+     显式声明 AUTH_INSECURE_EXPOSURE=loopback-published —— 而声明本身不做任何
+     保证，保证是这一项给的。双向四条：开了 open-access 就不许有非回环映射；
+     有非回环映射就必须有 JWT_SECRET；开了 open-access 必须有那个声明；
+     同时给密钥与声明 → 报错（密钥优先，声明会误导读者）。
   5. compose ↔ k8s 的数据库/缓存 env **口径**必须一致，且库名/用户名
      不能与 config/*.yaml 漂移（AUD-39）。
      2026-09-25 **放宽**：地址（DATABASE_HOST / REDIS_URL 的 host）不再比对 ——
@@ -592,6 +599,112 @@ def check_infra_is_external(
                     f"{CONTAINER_HOST_ALIAS}（容器里的 localhost 是容器自己）（AUD-13）")
 
 
+# ── 3c) open-access ⟹ 所有端口映射必须回环（2026-09-25，AUD-52 的栈侧一半）──
+#
+# 背景：容器**必须**绑 0.0.0.0 才能被发布端口转发，所以 P0-4 那道「open-access
+# 只允许在 loopback 上」的门在容器形态下判不了 —— 判据只能从「绑定地址」换成
+# 「发布层」。于是 cmd/analysis/setup.go 承认一个显式声明
+# （AUTH_INSECURE_EXPOSURE=loopback-published），而**声明本身不提供任何保证**：
+# 保证是这里（静态）+ tools/local-stack.sh（运行时 netstat）给的。
+#
+# 这是典型「两个机制各自对、接起来才成立」的地方 —— 少了这一项，声明就变成
+# 一句没人核对的口头承诺（真护栏 vs 假护栏的分界）。
+#
+# **双向**是有意的（只写一个方向会漏掉一半）：
+#   正向：声明了 open-access → 每条映射都必须回环（否则下单接口开给局域网）
+#   反向：有非回环映射 → 必须有 JWT_SECRET 且不许开 open-access
+# 破坏验证（2026-09-25）：把任意一条映射的 127.0.0.1: 前缀删掉 → 正向报错；
+# 把 AUTH_INSECURE 改成 false 而映射仍回环 → 仍然合法（auth 开 + 回环没事）。
+
+_AUTH_TRUE_VALUES = {"true", "1", "yes", "on"}
+
+
+def _resolve_default(value: str | None) -> str:
+    """把 compose 的 `${NAME:-default}` 解析成「实际会生效的默认值」。
+
+    只看字符串形态，不读 .env（静态脚本读不到运行时环境）。语义：
+      ${NAME:-DEF}  → DEF（.env 没设时的值）
+      ${NAME}       → ""（值取决于 .env，静态不可知 → 按空处理，fail closed）
+      ${NAME:?msg}  → ""（同上；缺值时 compose 自己会报错，不由本脚本负责）
+      其他          → 原样
+    """
+    if value is None:
+        return ""
+    s = value.strip()
+    if s.startswith("${") and s.endswith("}"):
+        inner = s[2:-1]
+        if ":-" in inner:
+            return inner.split(":-", 1)[1]
+        return ""
+    return s
+
+
+def _is_loopback_bind(bind: str | None) -> bool:
+    """bind=None 表示映射没写宿主地址 → 等价绑 0.0.0.0。"""
+    if bind is None:
+        return False
+    b = bind.strip().strip("[]")
+    if b in {"localhost"}:
+        return True
+    if b == "::1":
+        return True
+    return b.startswith("127.")
+
+
+def check_open_access_exposure(
+    errors: list[str],
+    compose_env: dict[str, dict[str, str]],
+    compose_bindings: dict[str, list[tuple[str | None, int]]],
+) -> None:
+    """检查 3c：open-access 的声明与端口发布范围必须互相蕴含。"""
+    open_access_services = [
+        svc for svc, env in compose_env.items()
+        if _resolve_default(env.get("AUTH_INSECURE")).lower() in _AUTH_TRUE_VALUES
+    ]
+    analysis_env = compose_env.get("analysis-service", {})
+    secret = _resolve_default(analysis_env.get("JWT_SECRET"))
+    exposure = _resolve_default(analysis_env.get("AUTH_INSECURE_EXPOSURE"))
+    has_secret = bool(secret)
+
+    # 收集所有非回环映射（含 bind=None 即 0.0.0.0）
+    exposed: list[str] = []
+    for svc, binds in sorted(compose_bindings.items()):
+        for bind, host_port in binds:
+            if not _is_loopback_bind(bind):
+                exposed.append(f"{svc}:{host_port}（绑定 {bind or '0.0.0.0'}）")
+
+    # 正向：声明了 open-access，就不许有任何非回环映射
+    if open_access_services and exposed:
+        errors.append(
+            f"docker-compose.yml 开了 open-access（{', '.join(sorted(open_access_services))} "
+            f"的 AUTH_INSECURE 为真）却存在非回环端口映射：{'; '.join(exposed)} —— "
+            f"这等于把下单接口开给整个局域网。要么把映射改成 127.0.0.1: 前缀，"
+            f"要么改回鉴权模式（AUD-52 / P0-4）")
+
+    # 反向：有非回环映射就必须真的开了鉴权
+    if exposed and not has_secret:
+        errors.append(
+            f"docker-compose.yml 存在非回环端口映射（{'; '.join(exposed)}）但没有 "
+            f"JWT_SECRET —— 对外发布必须配鉴权（AUD-52 / P0-4）")
+
+    # 反向-2：开了 open-access 就必须给容器形态的显式声明，否则 analysis
+    # 会被 decideAuthStartup 拒绝启动（server.host=0.0.0.0）。这里提前拦，
+    # 免得症状表现为「容器起来又立刻退出」。
+    if open_access_services and exposure != "loopback-published":
+        errors.append(
+            f"docker-compose.yml 开了 open-access 但 analysis-service 的 "
+            f"AUTH_INSECURE_EXPOSURE 是 {exposure or '(缺失)'} —— 必须是 "
+            f"loopback-published，否则 analysis 启动即被 decideAuthStartup 拒绝"
+            f"（server.host 是 0.0.0.0，容器必须绑它才能被转发）（AUD-52 / P0-4）")
+
+    # 反向-3：同时给了密钥和 open-access 声明 → 密钥优先，声明变成误导。
+    if open_access_services and has_secret:
+        errors.append(
+            "docker-compose.yml 同时给了 JWT_SECRET 与 AUTH_INSECURE=true —— "
+            "setup.go 的 decideAuthStartup 里**密钥优先**，于是 AUTH_INSECURE 与 "
+            "AUTH_INSECURE_EXPOSURE 都不生效，读配置的人会被误导成「这是 open-access」"
+            "（AUD-52 / P0-4）")
+
 
 def main() -> int:
     if not COMPOSE.exists():
@@ -659,6 +772,9 @@ def main() -> int:
     compose_env = parse_compose_environment(COMPOSE)
     check_infra_is_external(errors, compose_env, compose_bindings)
 
+    # 3c) open-access 的声明与端口发布范围必须互相蕴含（AUD-52 / P0-4）
+    check_open_access_exposure(errors, compose_env, compose_bindings)
+
     # 4) gin 的运行模式只能有一个来源：config/*.yaml 的 server.gin_mode（AUD-29）
     #
     # gin 自己在 init() 里读 GIN_MODE 环境变量（gin/mode.go:52），所以在部署配置里
@@ -690,6 +806,8 @@ def main() -> int:
 
     print("✓ 部署配置一致（compose ↔ k8s：服务端口 + DATA_SERVICE_URL）")
     print("✓ 数据库/缓存已移出 compose，应用容器显式指向 host.docker.internal（AUD-13 改写）")
+    print("✓ open-access 与端口发布范围互相蕴含（AUTH_INSECURE ⟺ 所有映射回环；"
+          "对外发布 ⟹ 有 JWT_SECRET）（AUD-52 / P0-4）")
     print("✓ gin mode 无 GIN_MODE 旁路（唯一来源 server.gin_mode）")
     print("✓ env 口径一致（compose ↔ k8s 的库名/用户名/端口相同 —— 地址按环境各写"
           "一份，刻意不比；且与 config/*.yaml 的库名/用户名一致）")

@@ -31,21 +31,120 @@ const (
 // Compose not started), the entire suite is skipped so `go test ./...`
 // exits 0 instead of FAIL. Set E2E_FORCE_SKIP=1 to skip unconditionally
 // (useful in CI without Docker).
+//
+// ── AUD-52（2026-09-25 修）：这道门过去只探 /health，「服务在」于是被
+// 当成了「服务能用」。但下面的用例要的是后者，两者是两件事 —— 结果两条
+// 用例长期红，而且红得没有信息量（一条拨已退役的 :8084、一条打
+// /api/strategies 拿到 401）。一条永远不可能绿的测试比没有测试更糟：
+// 它会训练人忽略红色。
+//
+// 现在门与断言**同源** —— 判的三档正好是各用例真正会打的东西：
+//
+//	① /health 不通            → skip（环境没起，S7-P0-8 的原意）
+//	② 通了，但 /api/execution/* 不存在 → **FAIL**。这是真回归：
+//	  ODR-021 把 execution 并进 analysis，路由没了就是路由坏了。
+//	③ 都在，但 /api/strategies 要鉴权 → **skip 并打印怎么改姿势**。
+//	  这是环境**形态**不匹配，不是代码缺陷 —— 套件不带 token，而系统
+//	  也没有首个管理员的引导可以拿 token（CreateUser 在 RequireRole(admin)
+//	  后面，鸡生蛋）。报红只会变成长期噪声。
 func TestMain(m *testing.M) {
 	if os.Getenv("E2E_FORCE_SKIP") == "1" {
 		fmt.Println("e2e: E2E_FORCE_SKIP=1, skipping integration tests")
 		os.Exit(0)
 	}
-	if !servicesReachable() {
-		fmt.Println("e2e: analysis service not reachable, skipping integration tests (start Docker Compose to enable)")
+
+	st := probeIntegrationEnv()
+	if !st.analysisUp {
+		fmt.Println("e2e: analysis service not reachable, skipping integration tests " +
+			"(start the stack with: tools/local-stack.sh start)")
+		os.Exit(0)
+	}
+	if st.executionMissing {
+		fmt.Fprintln(os.Stderr,
+			"e2e: FAIL — analysis is up but the execution endpoints under "+
+				baseURL+"/api/execution/* are missing (404 / unreachable).\n"+
+				"     This is a real regression, not an environment problem: ODR-021\n"+
+				"     merged risk+execution into analysis, so those routes must exist\n"+
+				"     (cmd/analysis/handlers_execution.go RegisterRoutes).\n"+
+				"     Note: the retired execution-service port used to be dialed here, which\n"+
+				"     could never pass on this architecture (AUD-52).")
+		os.Exit(1)
+	}
+	if st.authRequired {
+		fmt.Fprintln(os.Stderr,
+			"e2e: SKIP — analysis is up but REQUIRES AUTH, and this suite sends no token.\n"+
+				"     The suite (like the whole e2e/ Playwright suite and the SPA) assumes an\n"+
+				"     OPEN-ACCESS stack: AUTH_INSECURE=true + AUTH_INSECURE_EXPOSURE=loopback-published\n"+
+				"     (see docker-compose.yml). There is deliberately no way to mint a token here:\n"+
+				"     the first admin cannot be created through the API (chicken-and-egg).\n"+
+				"     Running an auth-enabled stack is a POSITION MISMATCH, not a defect — skipped.")
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
 
+// integrationEnv 是门判出来的环境形态（AUD-52）。
+type integrationEnv struct {
+	analysisUp       bool // /health 通了
+	executionMissing bool // /api/execution/* 不存在（真回归）
+	authRequired     bool // /api/strategies 或执行端点返回 401/403（形态不匹配）
+}
+
+// probeIntegrationEnv 用**下面用例真正会打的路径**判断环境，而不是只看 /health。
+// 每条判据都能在对应用例里找到同源的断言（AUD-52 的要点）。
+//
+// 已知边界（写出来，免得被当成全覆盖）：鉴权开启时**所有** /api/* 都回 401，
+// 包括根本不存在的路径（中间件挂在 router 上，先于路由匹配）—— 所以那种形态下
+// 「执行端点是否存在」**判不出来**，只能判出「要鉴权」然后整体 skip。
+// 也就是说这条检测只在 open-access 形态下有效 —— 那正是套件要跑的形态。
+func probeIntegrationEnv() integrationEnv {
+	var st integrationEnv
+	if !servicesReachable() {
+		return st
+	}
+	st.analysisUp = true
+
+	client := &http.Client{Timeout: 3 * time.Second}
+
+	// 执行端点：存在性判据是「不是 404 / 不是连不上」。开了鉴权时它会回 401，
+	// 那同样证明**路由在**（只是进不去）—— 所以两种情形要分开记。
+	code, err := probeStatus(client, http.MethodGet, baseURL+"/api/execution/account")
+	switch {
+	case err != nil || code == http.StatusNotFound:
+		st.executionMissing = true
+	case code == http.StatusUnauthorized || code == http.StatusForbidden:
+		st.authRequired = true
+	}
+
+	// /api/strategies：用例断言 200，所以拿到 401/403 就是形态不匹配。
+	if code, err := probeStatus(client, http.MethodGet, baseURL+"/api/strategies"); err == nil {
+		if code == http.StatusUnauthorized || code == http.StatusForbidden {
+			st.authRequired = true
+		}
+	}
+	return st
+}
+
+// probeStatus 发一个只读请求，返回状态码。连不上时返回 (0, err)。
+func probeStatus(client *http.Client, method, url string) (int, error) {
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
 // servicesReachable probes the analysis service health endpoint with a
 // short timeout. Returns true if the service responds, false otherwise.
 // S7-P0-8 (ODR-043-6).
+//
+// 注意它现在**只是门的第一步**（「环境起没起」），不再被当成「环境可用」——
+// 后者由 probeIntegrationEnv 判（AUD-52）。
 func servicesReachable() bool {
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(baseURL + "/health")
@@ -125,18 +224,30 @@ func TestStrategyAPI_ListStrategies(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var strategies []map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&strategies)
-
-	if len(strategies) > 0 {
-		for _, s := range strategies {
-			assert.Contains(t, s, "name")
-			assert.Contains(t, s, "description")
-			t.Logf("Strategy: %s - %s", s["name"], s["description"])
-		}
-	} else {
-		t.Log("⚠️ No strategies registered (this is normal if strategy service has no plugins)")
+	// ⚠️ 响应是**对象**不是裸数组：handlers_strategy.go 里是
+	// `c.JSON(200, gin.H{"strategies": configs})`。此前这里 `Decode` 到
+	// `[]map[string]interface{}`，解码必然失败 → strategies 恒为空 →
+	// 每次都走「没有策略」那条分支 —— 断言看着在跑，其实一条都没检查（AUD-52）。
+	var body struct {
+		Strategies []map[string]interface{} `json:"strategies"`
 	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+
+	// 这条是**正面证据**：内建策略至少要有 momentum（与
+	// e2e/tests/api-strategy.spec.ts 断言一致），空列表不是「正常情况」。
+	require.NotEmpty(t, body.Strategies, "内建策略列表不该为空（momentum 至少一个）")
+
+	var names []string
+	for _, s := range body.Strategies {
+		for _, k := range []string{"name", "id", "strategy_id"} {
+			if v, ok := s[k].(string); ok && v != "" {
+				names = append(names, v)
+				break
+			}
+		}
+	}
+	assert.NotEmpty(t, names, "策略条目必须带 name / id / strategy_id 之一")
+	t.Logf("✅ %d strategies: %v", len(body.Strategies), names)
 }
 
 func TestOHLCVAPI_DataRetrieval(t *testing.T) {
@@ -244,47 +355,66 @@ func pollForCompletion(t *testing.T, jobID string) {
 }
 
 // TestExecutionService_OrderPersistence tests the new order persistence feature
+//
+// ⚠️ ODR-021 (P1-15)：execution 已**并入 analysis**，端点在
+// :8085/api/execution/*（cmd/analysis/handlers_execution.go）。此前这里写死
+// "http://localhost:8084" —— 那是**已退役的服务**，容器里根本没有 :8084，
+// 所以这条测试在当前架构下永远不可能通过（AUD-52）。
+//
+// 请求体沿用 handler 的真实形状（createOrderRequest）：side / type，
+// **不是** direction / order_type。
 func TestExecutionService_OrderPersistence(t *testing.T) {
-	executionURL := "http://localhost:8084"
-
 	orderPayload := map[string]interface{}{
-		"symbol":     "600000.SH",
-		"direction":  "long",
-		"order_type": "market",
-		"quantity":   1000,
-		"price":      0,
+		"symbol":   "600000.SH",
+		"side":     "long",
+		"type":     "market",
+		"quantity": 1000,
+		"price":    0,
 	}
 
 	body, _ := json.Marshal(orderPayload)
 
 	client := &http.Client{Timeout: timeout}
-	resp, err := client.Post(executionURL+"/api/orders", "application/json", bytes.NewReader(body))
+	resp, err := client.Post(baseURL+"/api/execution/orders", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
+	// 201 = 受理；400 = 领域层拒绝（休市 / 资金不足）—— 两者都证明请求抵达了
+	// handler 并走完了绑定。401/403 到不了这里：TestMain 已经把鉴权形态拦下了。
+	assert.Contains(t, []int{http.StatusCreated, http.StatusBadRequest}, resp.StatusCode,
+		"订单端点必须可达且不被角色中间件拒绝（实测 %d）", resp.StatusCode)
+
+	if resp.StatusCode == http.StatusCreated {
 		var orderResult map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&orderResult)
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&orderResult))
 
 		assert.Contains(t, orderResult, "order_id")
 		assert.Contains(t, orderResult, "symbol")
 		assert.Equal(t, "600000.SH", orderResult["symbol"])
-
-		t.Logf("✅ Order persisted: id=%s status=%v", orderResult["order_id"], orderResult["status"])
+		t.Logf("✅ Order persisted: id=%v status=%v", orderResult["order_id"], orderResult["status"])
 	} else {
 		respBody, _ := io.ReadAll(resp.Body)
-		t.Logf("⚠️ Order creation returned status %d: %s", resp.StatusCode, string(respBody))
+		t.Logf("订单被领域层拒绝（400，端点本身正常）: %s", string(respBody))
 	}
 }
 
 // TestDockerComposeServicesConnectivity verifies all services are reachable
+//
+// ⚠️ AUD-52：这张表此前写着 `:8083/risk/health` 与 `:8084/api/orders` ——
+// 两个**已退役**的服务（ODR-021 把 risk + execution 并进 analysis，容器里
+// 已无这两个端口）。而且 `/api/risk/health` 这个路径**从来没有存在过**
+// （handlers_risk.go 只注册 calculate_position / detect_regime /
+// check_stoploss / metrics）。于是每条都只打一行"⚠️ not reachable"，
+// 既不是失败也不是信息 —— 正是 AUD-52 说的那种「看着在跑、其实没检查」。
 func TestDockerComposeServicesConnectivity(t *testing.T) {
+	// 左侧是**当前架构**：risk 与 execution 是 analysis 的 in-process 组件，
+	// 不是独立服务（ODR-021 / P1-15）。
 	services := map[string]string{
-		"analysis-service":  baseURL + "/api/health",
-		"data-service":      dataServiceURL + "/health",
-		"strategy-service":  "http://localhost:8082/strategies",
-		"risk-service":      "http://localhost:8083/risk/health",
-		"execution-service": "http://localhost:8084/api/orders",
+		"analysis-service":                baseURL + "/api/health",
+		"data-service":                    dataServiceURL + "/health",
+		"strategy-service":                "http://localhost:8082/health",
+		"risk (in-process, ODR-021)":      baseURL + "/api/risk/metrics",
+		"execution (in-process, ODR-021)": baseURL + "/api/execution/account",
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -292,17 +422,14 @@ func TestDockerComposeServicesConnectivity(t *testing.T) {
 	for name, url := range services {
 		t.Run(name, func(t *testing.T) {
 			resp, err := client.Get(url)
-			if err != nil {
-				t.Logf("⚠️ Service %s not reachable: %v", name, err)
-				return
-			}
+			require.NoError(t, err, "%s 不可达（%s）", name, url)
 			defer resp.Body.Close()
 
-			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound {
-				t.Logf("✅ %s is responding (status %d)", name, resp.StatusCode)
-			} else {
-				t.Logf("⚠️ %s responded with status %d", name, resp.StatusCode)
-			}
+			// 200 = 通。403 = 端点存在但当前身份不够 —— 也算「服务在」
+			// （这一段测的是连通性，不是授权）。404 = 表里写的路径是错的。
+			assert.NotEqual(t, http.StatusNotFound, resp.StatusCode,
+				"%s 返回 404 —— 上表里的路径与真实路由不一致", name)
+			t.Logf("✅ %s is responding (status %d)", name, resp.StatusCode)
 		})
 	}
 }

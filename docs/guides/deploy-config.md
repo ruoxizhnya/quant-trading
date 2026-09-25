@@ -48,7 +48,25 @@ k8s Service 名不变 —— 服务全在容器里，这一跳没有变。不要
    不改写就等于让检查 3 空转（循环体一次都不进，脚本照旧打「✓」），那是假护栏。
    原生进程的 `listen_addresses` / `bind` 由 `tools/local-infra.sh status` 断言
    （它读真实的 netstat 监听 socket）。
-4. **检查 5 已放宽**（2026-09-25）：`compose ↔ k8s` 只比**库名 / 用户名 / 端口**，
+4. **检查 3c（2026-09-25 新增，AUD-52）**：open-access 的声明与端口发布范围
+   **互相蕴含**。容器必须绑 `0.0.0.0` 才能被发布端口转发，于是 P0-4 那道
+   「open-access 只许在 loopback 上」的门判不了绑定地址，只能判**发布层** ——
+   `cmd/analysis` 因此承认一个显式声明 `AUTH_INSECURE_EXPOSURE=loopback-published`。
+   声明本身不做保证，保证是这一项给的，四条双向规则：
+
+   | # | 条件 | 要求 |
+   |---|---|---|
+   | 3c-1 | `AUTH_INSECURE` 为真 | **每一条** ports 映射都必须带 `127.0.0.1:` 前缀 |
+   | 3c-2 | 存在非回环映射 | 必须有非空 `JWT_SECRET`（对外发布必须配鉴权） |
+   | 3c-3 | `AUTH_INSECURE` 为真 | `AUTH_INSECURE_EXPOSURE` 必须是 `loopback-published` |
+   | 3c-4 | 同时给 `JWT_SECRET` 与 `AUTH_INSECURE=true` | 报错（密钥优先，声明会误导读者） |
+
+   运行时那一半在 `tools/local-stack.sh status`（读真实 netstat）。两者缺一
+   不可：静态管不到运行时改动与 override 文件，运行时管不到未来还没起的那次
+   提交。决策与备选方案见 [ADR-025](../adr/adr-025-auth-exposure-publish-layer.md)。
+   **只写一个方向会漏掉一半** —— 3c 的破坏验证是 5 个用例（4 红 + 1 绿对照）。
+
+5. **检查 5 已放宽**（2026-09-25）：`compose ↔ k8s` 只比**库名 / 用户名 / 端口**，
    **不比 host 与 URL** —— 理由见上面的「地址口径」表：host 在三处必然不同，
    比它只会逼出一个恒假的断言。`config/*.yaml` 的 host 同理不参与比对。
 
@@ -61,7 +79,7 @@ k8s Service 名不变 —— 服务全在容器里，这一跳没有变。不要
 | # | 文件 | 改什么 |
 |---|---|---|
 | 1 | `config/data-service.yaml` | `server.port: 8082`（**代码实际读的是这个**） |
-| 2 | `docker-compose.yml` | 端口映射 `"8082:8082"` + healthcheck 里的端口 |
+| 2 | `docker-compose.yml` | 端口映射 `"127.0.0.1:8082:8082"`（回环前缀不能丢，见检查 3c）+ healthcheck 里的端口 |
 | 3 | `deploy/k8s/data-deployment.yaml` | `containerPort`（Deployment）与 `port`（Service） |
 | 4 | 任何 `DATA_SERVICE_URL` | compose 的 environment + `deploy/k8s/configmap.yaml` |
 
@@ -85,26 +103,19 @@ configmap 里躺了很久，2026-09-18 作为死配置清掉（同 P2-7 的 ai-s
 
 ---
 
-## 端口绑定：谁绑回环，谁绑全接口（AUD-13，2026-09-25 改写）
+## 端口绑定：全都只绑回环（AUD-13 的推广）
 
-`docker-compose.yml` 的端口映射有两种写法，差别是**监听哪个网卡**：
-
-| 写法 | 监听 | 用途 |
-|---|---|---|
-| `"8081:8081"` | `0.0.0.0`（全部网卡） | 局域网内其他机器也能连 |
-| `"127.0.0.1:8081:8081"` | 只回环 | 只有本机能连 |
-| `"8081"` | 容器端口，宿主端口随机 | 用不到，别写 |
-
-**2026-09-25 起这条约定的承载体变了**：数据库/缓存不再是 compose 服务，端口映射
-这个载体随之消失。原先那条「postgres / redis 的映射必须回环」如果只是留着不改，
-检查会**空转**（循环体一次都不进，脚本照旧打「✓」）—— 那是假护栏。现在的分布是：
+**2026-09-25 起这条约定的落点变了**，而且覆盖面**扩大了**：数据库/缓存不再是
+compose 服务（端口映射这个载体不存在了），同时**应用服务也从「有意绑 0.0.0.0」
+改成了「只发布到回环」**。现在的分布是：
 
 | 目标 | 由谁保证 | 怎么做 |
 |---|---|---|
 | 数据库/缓存只绑回环 | **原生进程的启动参数** | `tools/local-infra.sh` 用 `-c listen_addresses=127.0.0.1` / `--bind 127.0.0.1` **显式**指定，不靠配置文件默认值 |
 | 数据库/缓存只绑回环（**验证**） | `tools/local-infra.sh status` | 读 **netstat 的真实监听 socket**，出现非回环就报 `✗` |
-| 数据库/缓存**不得回到 compose** | `check_deploy_consistency.py` 检查 3 | 正向断言（留着会与原生进程抢同一个端口） |
-| 应用容器**必须显式指向**宿主机 | `check_deploy_consistency.py` 检查 3 | `DATABASE_HOST` / `REDIS_URL` 必须出现 `host.docker.internal` |
+| 应用服务只发布到回环 | `docker-compose.yml` 的四条 `ports` | **全部**带 `127.0.0.1:` 前缀 |
+| 应用服务只发布到回环（静态检查） | `check_deploy_consistency.py` 检查 3c | `AUTH_INSECURE` 为真 ⟹ 每条映射都必须回环 |
+| 应用服务只发布到回环（**验证**） | `tools/local-stack.sh status` | 读 netstat 断言 8080/8081/8082/8085 只绑回环 |
 
 **为什么验证读 netstat 而不是配置文件**：配置文件可以被命令行参数覆盖 ——
 这个脚本自己就是靠 `-c` / `--bind` 覆盖的。只有 socket 是 ground truth。
@@ -114,24 +125,32 @@ configmap 里躺了很久，2026-09-18 作为死配置清掉（同 P2-7 的 ai-s
 - **数据库/缓存只绑回环**。它们是内部依赖，不需要被外部访问；Redis 尤其
   如此 —— 本仓库的 Redis **没有 `requirepass`**，绑 `0.0.0.0` 等于把无鉴权缓存
   交给整个局域网，绑回环是当前唯一有效的访问控制。
-- **应用服务（data-service / analysis-service / strategy-service / web）有意保持
-  `0.0.0.0`** —— 它们本来就是要被访问的。analysis 另有 P0-4 的 fail-closed
-  兜底：**没有 `JWT_SECRET` 就拒绝启动**，所以「对外可达」与「无鉴权」不会同时
-  成立（要对外访问就配密钥；本机开发不必开鉴权，见 `local-dev.md`）。
+- **应用服务（data-service / analysis-service / strategy-service / web）也只
+  发布到回环**，因为 analysis 以 **open-access** 运行（无鉴权，见
+  [ADR-025](../adr/adr-025-auth-exposure-publish-layer.md)）：容器**必须**绑
+  `0.0.0.0` 才能被转发，于是「不可从其他主机到达」这条不变量只剩下发布层这一个
+  着力点。写成 `"8085:8085"` 等于把下单接口开给整个局域网。
+- 要给局域网设备访问时，**两件事一起做**：去掉 `127.0.0.1:` 前缀 + 设
+  `JWT_SECRET`。只改一半会被检查 3c 拦下。
+- 检查 3c 认的回环写法是 `127.*` 前缀、`::1` / `[::1]`、`localhost`；**不写宿主
+  地址**（裸 `"8085:8085"`）一律当成绑 `0.0.0.0`，与运行时 netstat 读到的
+  `0.0.0.0:8085` 一致 —— 两边对「非回环」的定义刻意对齐。
 
-验收方式：
+验收方式（实测，三条一起看才完整）：
 
 ```bash
 # ① 容器必须能到宿主机（这是新形态的**必需能力**，不是漏洞）
 docker run --rm alpine:3.20 nc -z host.docker.internal 5432   # 应通
 # ② 原生进程自身只监听回环（局域网其他机器连不上）
 netstat -ano | grep LISTENING | grep 5432                      # 应只见 127.0.0.1
+# ③ 容器服务的宿主侧映射也只绑回环（一条命令顶上面整张表）
+tools/local-stack.sh status                                    # 四个端口都应 ✓
 ```
 
 > ⚠️ **别用 `host.docker.internal` 去判断「绑定是否收紧」** —— 它是 Docker
 > Desktop 的**宿主侧代理**，转发到 loopback，会**绕过网卡绑定**、必然「通」。
-> 拿它对绑定下结论是无效的（上面 ① 问的是另一个问题：容器能否到达宿主机）。
-> 「绑定是否收紧」由 `local-infra.sh status` 读 netstat 回答。
+> 拿它对绑定下结论是无效的。那个问题由 `local-infra.sh status` / `local-stack.sh
+> status` 读 netstat 回答。
 
 ---
 

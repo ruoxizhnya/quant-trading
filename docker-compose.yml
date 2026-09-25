@@ -28,23 +28,26 @@
 # ⚠️ **服务之间仍用 compose 服务名**（http://data-service:8081）—— 服务全在
 # 容器里，这一层没有变，不要改成 localhost。
 #
-# 端口绑定约定（AUD-13，2026-09-25 改写）：**数据库/缓存只绑回环** —— 它们
-# 不再是 compose 服务，这条不变量改由原生进程承担：tools/local-infra.sh 用
-# `-c listen_addresses=127.0.0.1` / `--bind 127.0.0.1` **显式**指定（不靠配置
-# 文件默认值），并由它的 status 读**真实 netstat 监听 socket** 断言。
+# 端口绑定约定（AUD-13 的推广，2026-09-25）：**本栈里没有任何东西绑 0.0.0.0
+# 在宿主机上**。数据库/缓存那半由原生进程的配置承担（postgresql.conf 的
+# listen_addresses、redis.conf 的 bind，真身由 tools/local-infra.sh 的 netstat
+# 断言守着）；应用服务这半由本文件的 ports 映射承担 —— 四条映射**全部**带
+# 127.0.0.1: 前缀。
 #
-# 为什么验证读 socket 而不是配置：配置文件可以被命令行参数覆盖（这个脚本自己
-# 就是靠 -c / --bind 覆盖的），只有 socket 是 ground truth。
+# 为什么应用端口也必须回环：analysis-service 以 **open-access** 运行
+# （无鉴权，见下面 AUTH_INSECURE 那段），而容器**必须**绑 0.0.0.0 才能被发布
+# 端口转发 —— 于是「对外可达性」这件事从绑定地址转移到了发布层。若映射写成
+# "8085:8085"，等于把下单接口开给整个局域网。
 #
-# 应用服务（data / strategy / analysis / web）的端口映射**有意保持 0.0.0.0**：
-# 它们本来就是要被访问的。analysis 另有 JWT fail-closed 兜底 —— 没有
-# JWT_SECRET 就拒绝启动（见 analysis-service 的 environment），所以「暴露到
-# 局域网」与「无鉴权」不会同时成立。
+# 这条配对关系（AUTH_INSECURE 为真 ⟺ 所有映射都回环）由两处机器校验守住，
+# 不靠记得：
+#   静态 —— tools/check_deploy_consistency.py 的检查 3c（双向：非回环映射
+#           必须配 JWT_SECRET；AUTH_INSECURE 为真则每条映射都必须回环）
+#   运行时 —— tools/local-stack.sh 读宿主机 netstat，断言 8080/8081/8082/8085
+#           只监听回环
 #
-# tools/check_deploy_consistency.py 的检查 3 已随之改写：原来守的是 compose 的
-# postgres/redis 端口映射，检查对象随服务一起从本文件消失 —— 不改写就变成循环体
-# 一次都不进的空转（照旧打「✓」），那是假护栏。新断言是「基础设施真在仓外」+
-# 「应用容器显式指向它」，两半都做了破坏验证。
+# tools/check_deploy_consistency.py 的检查 3 已随之改写为「宿主机监听地址」的
+# 等价断言 + 破坏验证。
 #
 # 启动顺序：应用连不上 PG/Redis 会直接 Fatal 退出、**没有重试**
 # （cmd/data/setup.go:137 / :146）。此前靠 `depends_on + service_healthy` 保证；
@@ -66,8 +69,10 @@ services:
     entrypoint: ["/bin/sh", "/app/wait-for-deps.sh"]
     command: ["/app/data-service"]
     ports:
-      # 有意绑 0.0.0.0（见文件头「端口绑定约定」）：它本来就是要被访问的。
-      - "8081:8081"
+      # 只发布到宿主机回环（见文件头「端口绑定约定」）—— 本机开发/测试够用，
+      # 且是 analysis 能以 open-access 运行的前提。要给局域网设备访问时，
+      # 必须同时给 analysis 配 JWT_SECRET（检查 3c 会拦住只改这一半的做法）。
+      - "127.0.0.1:8081:8081"
     environment:
       # AUD-39：DATABASE_HOST/PORT/USER/DATABASE 四项此前**没给** data-service
       # （只给了密码），它靠 config/data-service.yaml 里的 host/port/user/
@@ -105,7 +110,7 @@ services:
     entrypoint: ["/bin/sh", "/app/wait-for-deps.sh"]
     command: ["/app/strategy-service"]
     ports:
-      - "8082:8082"
+      - "127.0.0.1:8082:8082"
     environment:
       REDIS_URL: redis://host.docker.internal:6379
       # 服务间地址保持 compose 服务名 —— 服务全在容器里。
@@ -128,15 +133,35 @@ services:
     entrypoint: ["/bin/sh", "/app/wait-for-deps.sh"]
     command: ["/app/analysis-service"]
     ports:
-      - "8085:8085"
+      - "127.0.0.1:8085:8085"
     environment:
       # DB_PASSWORD 已删除（零读取者，viper 读的是 database.password →
       # DATABASE_PASSWORD，见 data-service 的说明）。
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
-      # P0-4: 鉴权密钥，必须设置。容器里监听 0.0.0.0，不配密钥服务会
-      # 拒绝启动（`auth: JWT secret missing`）—— 这是刻意的 fail-closed。
-      # 生成：openssl rand -hex 32
-      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is required (generate it with: openssl rand -hex 32)}"
+      # ── P0-4 鉴权：两种模式**二选一**，默认是本地 open-access ──────────
+      #
+      # 本地默认走 open-access，理由不是图方便：**前端没有登录页、没有 auth
+      # store，api client 是裸 fetch 不带 token**（web/src/api/client.ts），
+      # 且**没有首个管理员的引导**（CreateUser 只在 RequireRole(admin) 后面 ——
+      # 鸡生蛋）。所以鉴权一开，整个 SPA 与 e2e 套件（160 条 Playwright）全站
+      # 401，服务"起得来但用不了"。
+      #
+      # 基础不变量仍然保留（这是 P0-4 的要点，没有被削弱）：**open-access
+      # 绝不能从其他主机到达**。改动只是把判据从「绑定地址」换成「发布层」——
+      # 容器必须绑 0.0.0.0 才能被转发，所以对外可达性由上面的 ports 映射决定，
+      # 而四条映射全都带 127.0.0.1: 前缀。
+      #
+      #   AUTH_INSECURE=true 且 AUTH_INSECURE_EXPOSURE=loopback-published
+      #     → cmd/analysis/setup.go 的 decideAuthStartup 才放行（取值必须逐字
+      #       匹配，拼错等于没声明 → 拒绝启动，fail closed）
+      #
+      # 要给局域网设备访问时，把两件事**一起**做：ports 映射去掉 127.0.0.1:
+      # 前缀 + 设 JWT_SECRET（openssl rand -hex 32）。只改一半会被检查 3c 拦下。
+      AUTH_INSECURE: ${AUTH_INSECURE:-true}
+      AUTH_INSECURE_EXPOSURE: ${AUTH_INSECURE_EXPOSURE:-loopback-published}
+      # 留空 = 不开鉴权。设了它则**密钥优先于 AUTH_INSECURE**（setup.go 的
+      # decideAuthStartup 先看密钥）—— 所以 .env 里别同时留着一个值。
+      JWT_SECRET: ${JWT_SECRET:-}
       # 跨源白名单，逗号分隔。留空 = 不回显任何 ACAO（默认，最安全）。
       SERVER_CORS_ALLOWED_ORIGINS: ${SERVER_CORS_ALLOWED_ORIGINS:-}
       DATABASE_HOST: host.docker.internal
@@ -173,10 +198,8 @@ services:
       context: .
       dockerfile: Dockerfile.web
     ports:
-      # AUD-13：应用服务有意绑 0.0.0.0 —— 前端本来就是要被浏览器打开的。
-      # 只有数据库/缓存该绑回环（它们已移出 compose，那条改由
-      # tools/local-infra.sh 用 -c / --bind 指定并读 netstat 断言）。
-      - "8080:8080"
+      # 前端也只发布到回环 —— 与后端保持同一条不变量，别让它成为那个缺口。
+      - "127.0.0.1:8080:8080"
     depends_on:
       # nginx 里 /api 反代到 analysis-service:8085。用 resolver + 变量
       # 写法（见 deploy/nginx-spa.conf），后端晚起来也不会让 nginx 启动失败，
