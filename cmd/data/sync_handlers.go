@@ -1030,6 +1030,103 @@ func (e *fundamentalsExecutor) Execute(ctx context.Context, job *sync.Job, progr
 	}, nil
 }
 
+// calendarCoverageTolerance 是「Tushare 返回的区间」与「请求的区间」之间允许的偏差。
+//
+// 为什么允许偏差而不是要求边界逐日对齐：`trade_cal` 返回的是**自然日**（含休市日），
+// 实测正常时边界与请求完全一致；容差只用来兜住「请求边界落在已发布日历之外」
+// （例如请求了尚未公布的年尾）这种正当情形。所以容差取小 —— 它要能抓住
+// AUD-59 那种「整整少 269 天」的错区间，而不是给它留活路。
+const calendarCoverageTolerance = 7 * 24 * time.Hour
+
+// parseSyncDate 解析同步作业的日期参数，**两种格式都认**。
+//
+// 两种都必须认，因为 `validDateRange` 与它给出的报错文案
+// `params.start_date/end_date must be YYYYMMDD or YYYY-MM-DD` 就是这么承诺的。
+// 「承诺的格式集合」大于「实际支持的格式集合」正是 AUD-59：原日历执行器按 8 位
+// 定长硬切 `[:4]`/`[4:6]`/`[6:8]`，于是 `2022-01-01` 被切成 `2022--01-`，
+// Tushare 视作非法日期、回落到它自己的默认区间 —— **作业报 completed，
+// 落库的却是错的日历**，全程零错误零告警。
+func parseSyncDate(raw string) (time.Time, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return time.Time{}, errors.New("date is required (YYYYMMDD or YYYY-MM-DD)")
+	}
+	for _, layout := range []string{"20060102", "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("cannot parse date %q: expected YYYYMMDD or YYYY-MM-DD", raw)
+}
+
+// calendarFetchWindow 把作业参数解析成**唯一**的取数窗口。
+//
+// 「唯一」是承重的：取数用它，覆盖校验也用它。只要两处读的是同一组 time.Time，
+// 就不可能再出现「请求 A 区间、校验 B 区间」这种脱钩 —— 而那正是复查 AUD-59 时
+// 最容易再犯的形态（把硬切换个写法塞回来，校验却照着原始参数做，于是永远绿）。
+func calendarFetchWindow(params sync.CalendarSyncParams) (start, end time.Time, err error) {
+	start, err = parseSyncDate(params.StartDate)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("start_date: %w", err)
+	}
+	end, err = parseSyncDate(params.EndDate)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("end_date: %w", err)
+	}
+	if end.Before(start) {
+		return time.Time{}, time.Time{}, fmt.Errorf("end_date %s is before start_date %s",
+			end.Format("2006-01-02"), start.Format("2006-01-02"))
+	}
+	return start, end, nil
+}
+
+// calendarFetchArgs 返回**恰好**要传给 FetchTradingCalendar 的两个参数。
+//
+// 两个参数由**解析后的时间**派生，绝不在原始字符串上切片 —— 见 AUD-59。
+// 单测用「带首尾空格的合法日期」把这条性质钉死：原始串不是 `20230101`，
+// 但只要参数是从解析结果格式化的，取数参数就必然规范化为 `20230101`。
+func calendarFetchArgs(params sync.CalendarSyncParams) (start, end time.Time, startArg, endArg string, err error) {
+	start, end, err = calendarFetchWindow(params)
+	if err != nil {
+		return time.Time{}, time.Time{}, "", "", err
+	}
+	return start, end, start.Format("20060102"), end.Format("20060102"), nil
+}
+
+// validateCalendarCoverage 断言「取回来的日历真的覆盖了请求的区间」。
+//
+// 为什么需要它：AUD-59 里作业报 `completed`、`count: 2922`，**零错误零告警**，
+// 而库里只有请求区间的约五分之四 —— 一个「成功」的同步写进了错的数据。
+// 回测只检查「区间内有没有交易日」（pkg/backtest/engine.go），**不检查区间覆盖
+// 是否完整**，所以这种错日历会一路喂到回测里，而且从任何读数上都看不出来。
+func validateCalendarCoverage(exchange string, reqStart, reqEnd time.Time, entries []storage.TradingCalendarEntry) error {
+	if len(entries) == 0 {
+		return fmt.Errorf("%s: tushare returned no calendar entries for %s..%s — "+
+			"a sync that writes nothing must not report success",
+			exchange, reqStart.Format("2006-01-02"), reqEnd.Format("2006-01-02"))
+	}
+
+	lo, hi := entries[0].TradeDate, entries[0].TradeDate
+	for i := range entries {
+		d := entries[i].TradeDate
+		if d.Before(lo) {
+			lo = d
+		}
+		if d.After(hi) {
+			hi = d
+		}
+	}
+
+	if lo.After(reqStart.Add(calendarCoverageTolerance)) || hi.Before(reqEnd.Add(-calendarCoverageTolerance)) {
+		return fmt.Errorf("%s: returned calendar %s..%s does not cover the requested %s..%s — "+
+			"refusing to persist a partial range; check the date format (YYYYMMDD vs YYYY-MM-DD)",
+			exchange,
+			lo.Format("2006-01-02"), hi.Format("2006-01-02"),
+			reqStart.Format("2006-01-02"), reqEnd.Format("2006-01-02"))
+	}
+	return nil
+}
+
 // calendarExecutor executes calendar sync jobs.
 type calendarExecutor struct {
 	tc    *data.TushareClient
@@ -1046,8 +1143,11 @@ func (e *calendarExecutor) Execute(ctx context.Context, job *sync.Job, progress 
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 
-	startFormatted := fmt.Sprintf("%s-%s-%s", params.StartDate[:4], params.StartDate[4:6], params.StartDate[6:8])
-	endFormatted := fmt.Sprintf("%s-%s-%s", params.EndDate[:4], params.EndDate[4:6], params.EndDate[6:8])
+	// 取数窗口解析一次、两处共用（取数 + 覆盖校验）—— 见 calendarFetchArgs 的注释。
+	start, end, startArg, endArg, err := calendarFetchArgs(params)
+	if err != nil {
+		return nil, err
+	}
 
 	exchanges := []string{params.Exchange}
 	if params.Exchange == "both" {
@@ -1056,21 +1156,23 @@ func (e *calendarExecutor) Execute(ctx context.Context, job *sync.Job, progress 
 
 	var allEntries []storage.TradingCalendarEntry
 	for _, exchange := range exchanges {
-		entries, err := e.tc.FetchTradingCalendar(ctx, exchange, startFormatted, endFormatted)
+		entries, err := e.tc.FetchTradingCalendar(ctx, exchange, startArg, endArg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch %s calendar: %w", exchange, err)
+		}
+		// 先校验、后落库：区间不对宁可让作业失败，也不能写进去（AUD-59）。
+		if err := validateCalendarCoverage(exchange, start, end, entries); err != nil {
+			return nil, err
 		}
 		allEntries = append(allEntries, entries...)
 	}
 
-	if len(allEntries) > 0 {
-		domainEntries := make([]*storage.TradingCalendarEntry, len(allEntries))
-		for i := range allEntries {
-			domainEntries[i] = &allEntries[i]
-		}
-		if err := e.store.SaveTradingCalendarBatch(ctx, domainEntries); err != nil {
-			return nil, fmt.Errorf("failed to save calendar: %w", err)
-		}
+	domainEntries := make([]*storage.TradingCalendarEntry, len(allEntries))
+	for i := range allEntries {
+		domainEntries[i] = &allEntries[i]
+	}
+	if err := e.store.SaveTradingCalendarBatch(ctx, domainEntries); err != nil {
+		return nil, fmt.Errorf("failed to save calendar: %w", err)
 	}
 
 	return map[string]any{"count": len(allEntries)}, nil
