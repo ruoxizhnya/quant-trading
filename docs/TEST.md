@@ -292,6 +292,7 @@ Using `testing/quick` or `golang/mock`:
 | `docs/openapi_test.go`（AUD-60 新增） | `docs/openapi.yaml` 能被 YAML 解析；**每条本地 `$ref` 都解析得到**（实测 **142** 条）；**每个操作都有 `responses`**（实测 **85** 个） | 收不到 `$ref`、或一个操作都遍历不到 → `t.Fatal`（原文「这个测试是瞎的」） |
 | `internal/repoguard/package_wiring_test.go` | 每个包都有非测试消费者；退役包（`pkg/metrics`）负向断言 | 见该文件 |
 | `internal/repoguard/recovery_wiring_test.go` | 恢复函数按 `file:function` 钉住调用点 | `TestProductionCallSiteWalkerSeesTheTree` 是**走查器自己的**腿 |
+| `internal/repoguard/calendar_seed_isolation_test.go`（AUD-62 新增） | 任何 `*_test.go` 都不许拿「真实感」日期去灌 `trading_calendar` —— 该表主键**只有 `trade_date`**，`exchange` 隔离不了测试数据（写 TESTEX 的行就是真实那一行，按 exchange 清理就是删真实数据）。规则覆盖两处：`TradingCalendarEntry` 复合字面量的 `TradeDate` 字段（含 `[]*TradingCalendarEntry{{…}}` 这种**省略元素类型**、内层 `Type` 为 nil 的写法）、以及含 `trading_calendar` 的 SQL 文本里的日期；**无法静态求值一律 fail closed** | 三条：`TestCalendarSeedGuardSeesTheTree`（遍历真走到了 `pkg/storage/postgres_test.go`、识别出的自灌点 > 0、白名单条目无 stale、阈值 `< 2000`）；`TestCalendarSeedGuardRejectsRealisticDates`（**9 条子例**，含「套上运行时闸门也不能绕过静态检查」「常量藏真日期」「别的结构体也有 `TradeDate` → 不误报」两条对照腿） |
 | `e2e/guard/guard_test.go` | e2e 的前置条件与断言**同源**（走 **AST** —— 扫原文会被注释误报） | 见该文件 |
 
 同族还有两个脚本护栏：`tools/check_deploy_consistency.py`（compose / k8s env / 文档
@@ -306,6 +307,14 @@ Using `testing/quick` or `golang/mock`:
 > `$ref: '#/components/responses/ConflictPrecondition'` —— 组件名打错一个字母，
 > 原有测试**一条都不会红**。用 `gopkg.in/yaml.v3` 而不是文本扫描：`$ref` 的解析是
 > **结构化**的事，文本扫描既会漏（缩进/引号变体）又会误报（注释里写了 `$ref`）。
+
+> **为什么日历自灌护栏必须是结构检查、而不是把那两个测试改对就完事**：同一份文件里
+> `seedIsolatedCalendar` 的注释**早就写明了这条陷阱**（「主键是 trade_date，所以日期固定
+> 1990，清理不会误删真实数据」）—— 知识在一个函数里存在、在两个函数外被违反。只改那两处，
+> 下一个作者还得重新踩一次。更要紧的是它**在 CI 上永远看不见**：CI 的 postgres 是空库，
+> 删一行不存在的数据不报错 —— 一套恒绿的测试，只在「它破坏的数据真的存在」的机器上造成损失
+> （实测代价：本机真库被删 4 行，其中 3 天是真实交易日）。所以判据设成**结构性**的：
+> 「测试不许往这张表写真实感日期」，并把**无法静态求值**的表达式一律 fail closed。
 
 ---
 

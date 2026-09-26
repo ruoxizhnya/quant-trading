@@ -239,21 +239,37 @@ func TestSaveTradingCalendarEntry_and_GetTradingCalendar(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 
+	// 日期在隔离纪元（见 isolatedCalendarMaxYear，AUD-62）。包装内联而不是先
+	// 存进变量：静态护栏要能穿透看见里面的日期字面量。
+	// 清理按 trade_date（这张表的隔离维度）—— 不是 exchange。
+	defer store.DB().Exec(ctx, "DELETE FROM trading_calendar WHERE trade_date = '1990-03-10'")
+
 	entry := &TradingCalendarEntry{
 		Exchange:     "TESTEX",
-		TradeDate:    parseDate("2024-12-31"),
+		TradeDate:    assertIsolatedCalendarDate(t, parseDate(testCalSingleDay)),
 		IsTradingDay: false, // holiday
 	}
 
 	err := store.SaveTradingCalendarEntry(ctx, entry)
 	require.NoError(t, err)
 
-	entries, err := store.GetTradingCalendar(ctx, parseDate("2024-12-01"), parseDate("2024-12-31"))
+	// 断言必须只在自灌的那一条上。旧写法是 `len(entries) >= 1` 查 2024-12，
+	// 被真实数据兜着 —— 写失败也照样绿（AUD-62 的手法之一）。
+	entries, err := store.GetTradingCalendar(ctx, parseDate("1990-03-01"), parseDate("1990-03-15"))
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(entries), 1)
+	require.Len(t, entries, 1, "区间内只该有自灌的这一条")
+	assert.Equal(t, testCalSingleDay, entries[0].TradeDate.Format("2006-01-02"))
+	assert.Equal(t, "TESTEX", entries[0].Exchange)
+	assert.False(t, entries[0].IsTradingDay)
 
-	// Cleanup
-	store.DB().Exec(ctx, "DELETE FROM trading_calendar WHERE exchange='TESTEX' AND trade_date='2024-12-31'")
+	// UPSERT 语义：同一天再写一次必须**改**那一条，而不是又**加**一条。
+	require.NoError(t, store.SaveTradingCalendarEntry(ctx, &TradingCalendarEntry{
+		Exchange: "TESTEX", TradeDate: assertIsolatedCalendarDate(t, parseDate(testCalSingleDay)), IsTradingDay: true,
+	}))
+	entries, err = store.GetTradingCalendar(ctx, parseDate("1990-03-01"), parseDate("1990-03-15"))
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "主键是 trade_date —— 同一天写两次仍只有一行")
+	assert.True(t, entries[0].IsTradingDay, "UPSERT 必须更新 is_trading_day")
 }
 
 // TestGetTradingDays 自灌自证：GetTradingDays 读的是 `ohlcv_daily_qfq` 的
@@ -306,7 +322,8 @@ func TestIsTradingDay(t *testing.T) {
 	ctx := context.Background()
 
 	seedIsolatedCalendar(t, store)
-	defer store.DB().Exec(ctx, "DELETE FROM trading_calendar WHERE exchange='TESTEX_IS'")
+	// 按 trade_date 清理（这张表的隔离维度），不是按 exchange（AUD-62）。
+	defer store.DB().Exec(ctx, "DELETE FROM trading_calendar WHERE trade_date IN ('1990-01-02','1990-01-03')")
 
 	isTrading, err := store.IsTradingDay(ctx, parseDate(testCalTradingDay))
 	require.NoError(t, err)
@@ -317,17 +334,64 @@ func TestIsTradingDay(t *testing.T) {
 	assert.False(t, isTrading, "标为非交易日的 %s 必须返回 false", testCalHoliday)
 }
 
-// 自灌日历用的日期固定在 1990 年 1 月初：任何现实同步区间（默认 10 年）都不会
-// 覆盖到那里，所以自灌既不会与真实数据打架，清理时也不会误删真实数据。
+// 隔离纪元 —— **所有**自灌进 trading_calendar 的日期都必须落在这里。
+//
+// 为什么 exchange 不能隔离（AUD-62，2026-09-26 实测）
+// --------------------------------------------------
+// trading_calendar 的主键只有 trade_date（一格日期一行，不带 exchange），
+// exchange 只是普通一列。所以
+//
+//	SaveTradingCalendarEntry(&TradingCalendarEntry{Exchange: "TESTEX", TradeDate: <真实日期>})
+//
+// 写的**就是真实那一行**（UPSERT 把它的 exchange / is_trading_day 改掉），
+// 紧接着的 `DELETE ... WHERE exchange='TESTEX'` 删掉的也是那一行 —— 真实数据
+// 永久消失，而测试全绿。这张表上唯一可用的隔离维度是**日期本身**。
+//
+// 实测代价：默认构型 `go test ./...` 跑完，库里少了 4 行真实数据
+// （2024-12-31 / 2025-01-01 / 2025-01-02 / 2025-01-03），其中 3 天是真实交易日
+// （行情表各有 ~5370 票），跨年回测会静默跳过那几天。CI 看不见这件事：CI 的
+// postgres 是空库，删一行不存在的数据不报错。
+//
+// 两道防线：
+//  1. 静态：internal/repoguard/calendar_seed_isolation_test.go 扫全仓 *_test.go，
+//     日期不在隔离纪元就红；无法静态求值的表达式 fail closed。
+//  2. 运行时：下面的 assertIsolatedCalendarDate —— 静态护栏看不见的表达式形态
+//     （变量、拼接、从别处算出来的日期）在建数据的那一刻就会被判。
+const isolatedCalendarMaxYear = 1991
+
+// 自灌日历用的日期固定在 1990 年：任何现实同步区间都不会覆盖到那里，所以自灌
+// 既不会与真实数据打架，清理时也不会误删真实数据。三组日期互不重叠，免得一个
+// 测试断言区间时把另一个测试的残留算进去。
 const (
-	testCalTradingDay = "1990-01-02"
-	testCalHoliday    = "1990-01-03"
+	testCalTradingDay = "1990-01-02" // seedIsolatedCalendar
+	testCalHoliday    = "1990-01-03" // seedIsolatedCalendar
+	testCalBatchDay0  = "1990-02-01" // TestSaveTradingCalendarBatch
+	testCalBatchDay1  = "1990-02-02"
+	testCalBatchDay2  = "1990-02-03"
+	testCalSingleDay  = "1990-03-10" // TestSaveTradingCalendarEntry_and_GetTradingCalendar
 )
+
+// assertIsolatedCalendarDate 是隔离纪元的运行时闸门。
+//
+// 它 fail closed 而不是「记个日志继续」：把真实日期灌进 calendar 表会**删掉**
+// 真实数据，这种失败必须在建数据的那一刻就停住。
+func assertIsolatedCalendarDate(t *testing.T, d time.Time) time.Time {
+	t.Helper()
+	if d.Year() > isolatedCalendarMaxYear {
+		t.Fatalf("自灌日历的日期 %s 落在真实数据区间内（AUD-62）："+
+			"trading_calendar 的主键只有 trade_date，exchange 隔离不了测试数据 —— "+
+			"写进来就是覆盖真实那一行，清理就是把它删掉。"+
+			"请改用 %d 年及以前的日期。",
+			d.Format("2006-01-02"), isolatedCalendarMaxYear)
+	}
+	return d
+}
 
 // seedIsolatedCalendar 灌进两个交易日历条目（一真一假）：一个标为交易日、
 // 一个标为非交易日，好让调用方把 IsTradingDay / GetTradingDates 的两个分支
-// 都真的走一遍。trading_calendar 的主键是 trade_date（一格日期一行，不带
-// exchange），所以这两个日期在库里各只有一行。
+// 都真的走一遍。日期取自隔离纪元（见 isolatedCalendarMaxYear）；trading_calendar
+// 的主键是 trade_date（一格日期一行，不带 exchange），所以这两个日期在库里各
+// 只有一行，清理也**必须按 trade_date** 做 —— 按 exchange 清是删真实数据的写法。
 //
 // 清理由**调用方**用 defer 做（而不是这里 t.Cleanup）—— t.Cleanup 跑在测试
 // 函数的所有 defer 之后，那时 `defer store.Close()` 已经把连接池关了，
@@ -335,8 +399,8 @@ const (
 func seedIsolatedCalendar(t *testing.T, store *PostgresStore) {
 	t.Helper()
 	require.NoError(t, store.SaveTradingCalendarBatch(context.Background(), []*TradingCalendarEntry{
-		{Exchange: "TESTEX_IS", TradeDate: parseDate(testCalTradingDay), IsTradingDay: true},
-		{Exchange: "TESTEX_IS", TradeDate: parseDate(testCalHoliday), IsTradingDay: false},
+		{Exchange: "TESTEX_IS", TradeDate: assertIsolatedCalendarDate(t, parseDate(testCalTradingDay)), IsTradingDay: true},
+		{Exchange: "TESTEX_IS", TradeDate: assertIsolatedCalendarDate(t, parseDate(testCalHoliday)), IsTradingDay: false},
 	}))
 }
 
@@ -453,17 +517,31 @@ func TestSaveTradingCalendarBatch(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 
+	// 日期在隔离纪元（见 isolatedCalendarMaxYear，AUD-62）。旧写法灌的是
+	// 2025-01-01..03 —— 那是三个真实日期，写完再按 exchange='TESTEX2' 删掉，
+	// 等于把库里真实的那三天删了。
 	entries := []*TradingCalendarEntry{
-		{Exchange: "TESTEX2", TradeDate: parseDate("2025-01-01"), IsTradingDay: false},
-		{Exchange: "TESTEX2", TradeDate: parseDate("2025-01-02"), IsTradingDay: true},
-		{Exchange: "TESTEX2", TradeDate: parseDate("2025-01-03"), IsTradingDay: true},
+		{Exchange: "TESTEX2", TradeDate: assertIsolatedCalendarDate(t, parseDate(testCalBatchDay0)), IsTradingDay: false},
+		{Exchange: "TESTEX2", TradeDate: assertIsolatedCalendarDate(t, parseDate(testCalBatchDay1)), IsTradingDay: true},
+		{Exchange: "TESTEX2", TradeDate: assertIsolatedCalendarDate(t, parseDate(testCalBatchDay2)), IsTradingDay: true},
 	}
+	defer store.DB().Exec(ctx, "DELETE FROM trading_calendar WHERE trade_date IN ('1990-02-01','1990-02-02','1990-02-03')")
 
 	err := store.SaveTradingCalendarBatch(ctx, entries)
 	require.NoError(t, err)
 
-	// Cleanup
-	store.DB().Exec(ctx, "DELETE FROM trading_calendar WHERE exchange='TESTEX2'")
+	// 旧写法到这就结束了（只断言 NoError）—— 批量一条都没落库也会绿。这里把
+	// 「真的写进去了」「顺序」「区间边界」「只认交易日的那条读法」都钉住。
+	got, err := store.GetTradingCalendar(ctx, parseDate(testCalBatchDay0), parseDate(testCalBatchDay2))
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	for i, want := range []string{testCalBatchDay0, testCalBatchDay1, testCalBatchDay2} {
+		assert.Equal(t, want, got[i].TradeDate.Format("2006-01-02"), "结果必须按 trade_date 升序")
+	}
+
+	trading, err := store.GetTradingDates(ctx, parseDate(testCalBatchDay0), parseDate(testCalBatchDay2))
+	require.NoError(t, err)
+	assert.Len(t, trading, 2, "3 条里只有 2 条标了 is_trading_day，非交易日必须被过滤掉")
 }
 
 // TestGetTradingDates 自灌自证：GetTradingDates 读的是 **trading_calendar**
@@ -474,7 +552,8 @@ func TestGetTradingDates(t *testing.T) {
 	ctx := context.Background()
 
 	seedIsolatedCalendar(t, store)
-	defer store.DB().Exec(ctx, "DELETE FROM trading_calendar WHERE exchange='TESTEX_IS'")
+	// 按 trade_date 清理（这张表的隔离维度），不是按 exchange（AUD-62）。
+	defer store.DB().Exec(ctx, "DELETE FROM trading_calendar WHERE trade_date IN ('1990-01-02','1990-01-03')")
 
 	dates, err := store.GetTradingDates(ctx, parseDate("1990-01-01"), parseDate("1990-01-15"))
 	require.NoError(t, err)

@@ -8,7 +8,7 @@ verified-by: 实际命令逐条复核（`*_test.go` 实测 272、口径即 §测
   `ls cmd/` 只有 analysis/data/strategy、`docker compose` 实测报 `'compose' is not a docker command`
   而 `docker-compose` v2.32.1 可用、`C:\Users\ruoxi\sdk\go1.25.0\bin\go.exe` 实测存在且能离线编译全仓）＋
   AUD-51 自灌自证改造后同步「已知陷阱」＋ ADR-026 / AUD-57 落地后同步鉴权与限流两节
-  （`*_test.go` 实测 **272**（本轮 AUD-59/60/58 新增 5 个 test 文件之后）、前端 `vitest` 实测 **208 条 / 18 文件**、探针连打 130 次实测 `200×130 / 429×0`）
+  （`*_test.go` 实测 **273**（AUD-59/60/58 新增 5 个 test 文件、AUD-62 新增 1 个结构性护栏之后）、前端 `vitest` 实测 **208 条 / 18 文件**、探针连打 130 次实测 `200×130 / 429×0`）
 ---
 
 # 本地开发指南（How-to）
@@ -209,7 +209,7 @@ go test ./...                                  # 全量
 go test ./pkg/... -coverprofile=coverage.out   # 带覆盖率
 ```
 
-现有 **272** 个 `*_test.go`：
+现有 **273** 个 `*_test.go`：
 
 ```bash
 # 注意要排除 .workbuddy-ai —— 那下面是本机的备份/临时副本
