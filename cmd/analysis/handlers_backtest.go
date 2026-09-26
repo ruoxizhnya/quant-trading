@@ -65,7 +65,16 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 				defer cancel()
 				result, err := engine.RunBacktest(ctx, req)
 				if err != nil {
-					httpserver.FailCause(c, http.StatusInternalServerError, "backtest failed", err)
+					// 引擎返回的是**带类别**的错误（pkg/errors），别把它拍平成 500 ——
+					// 见 httpserver.StatusForAppError 的注释（AUD-60）。
+					// 4xx 走 Error：把原因原样给用户（那本来就是给他看的）；
+					// 5xx 走 FailCause：只回静态文案，真实原因只进日志
+					// （P1-5 的信息泄露收口 —— DB 报错、连接串、内部路径不能出去）。
+					if status := httpserver.StatusForAppError(err); status < http.StatusInternalServerError {
+						httpserver.Error(c, status, err)
+					} else {
+						httpserver.FailCause(c, status, "backtest failed", err)
+					}
 					return
 				}
 				if saveErr := jobService.SaveSyncResult(c.Request.Context(), result); saveErr != nil {

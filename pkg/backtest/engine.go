@@ -494,9 +494,26 @@ func (e *Engine) parseBacktestDateRange(ctx context.Context, req BacktestRequest
 	if err != nil {
 		e.logger.Warn().Err(err).Msg("Calendar check error, proceeding anyway")
 	} else if !hasCalendar {
-		return time.Time{}, time.Time{}, apperrors.New(apperrors.ErrCodeInvalidInput, "trading calendar not synced, please run POST /sync/calendar first (with exchange 'SSE' or 'both')").WithOperation("RunBacktest")
+		return time.Time{}, time.Time{}, errTradingCalendarNotSynced()
 	}
 	return startDate, endDate, nil
+}
+
+// errTradingCalendarNotSynced 是「库里没有交易日历」这个前置失败的**唯一构造点**。
+//
+// 分类是 DATA_QUALITY 而不是 INVALID_INPUT：请求本身没有任何问题，缺的是
+// **库里的数据**。定成 INVALID_INPUT 等于对调用方说「你传错了」，而它该收到的是
+// 「当前数据状态不满足前置」—— 两者的 HTTP 状态也不同（409 vs 400），
+// 映射见 internal/httpserver.StatusForAppError（AUD-60：这条原先被拍平成 500）。
+//
+// 收敛成函数是为了让它**可被单测钉住**：Engine 的 store 是具体类型
+// （`*storage.PostgresStore`）不是接口，所以「走到这个分支」需要真库；
+// 但「这个分支给出的分类是什么」不需要 —— 见 errTradingCalendarNotSynced_test.go
+// 与真环境 A/B（请求一个库里没有日历的区间应得 409）。
+func errTradingCalendarNotSynced() error {
+	return apperrors.New(apperrors.ErrCodeDataQuality,
+		"trading calendar not synced, please run POST /sync/calendar first (with exchange 'SSE' or 'both')").
+		WithOperation("RunBacktest")
 }
 
 // resolveStockPool returns the stock pool from the request, expanding index

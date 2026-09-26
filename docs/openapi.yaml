@@ -182,6 +182,8 @@ paths:
                     type: string
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/ConflictPrecondition'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -2471,6 +2473,22 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    ConflictPrecondition:
+      description: |
+        The request is well-formed, but a **data precondition** is not met right now
+        (e.g. the trading calendar has not been synced for the requested range).
+
+        Distinct from `400`: nothing about the request itself is wrong, so the caller
+        should not "fix the request" — it should make the data available first
+        (`POST /api/sync/jobs` with `type: "calendar"`).
+
+        This used to be reported as `500 internal` (AUD-60) because every engine error
+        was flattened to 500, which told the client "server broke" and logged a
+        self-solvable precondition as a server-side error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     InternalError:
       description: Internal server error
       content:
@@ -2487,10 +2505,20 @@ components:
       properties:
         error:
           type: string
+          description: Human-readable message. Stable enough to display, not to parse.
+        code:
+          type: string
+          description: |
+            Machine-readable category, so clients branch on this instead of matching the
+            prose. Emitted by the single error sink (`internal/httpserver`), derived from
+            the HTTP status: `bad_request` / `unauthorized` / `forbidden` / `not_found` /
+            `conflict` / `rate_limited` / `unavailable` / `internal`.
         details:
           type: string
+          description: Legacy field; not emitted by the current error sink.
         status:
           type: string
+          description: Legacy field; not emitted by the current error sink.
 
     RawIngestWrite:
       type: object

@@ -22,6 +22,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
+
+	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 )
 
 // 错误码。前端可以按 code 分支，不必去匹配中文文案。
@@ -183,5 +185,59 @@ func genericMessage(status int) string {
 		return "上游服务超时"
 	default:
 		return "服务器内部错误"
+	}
+}
+
+// StatusForAppError 把 pkg/errors 的**错误类别**映射成 HTTP 状态。
+//
+// 为什么需要它：本文件的 codeForStatus 是「状态码 → 错误码」**单向**派生，
+// 所以「回哪个状态」这件事完全落在**调用点**手上。回测 handler 原先对引擎返回的
+// 任何错误一律回 500，而 codeForStatus(500) = "internal" —— 于是一个「库里还没
+// 同步交易日历」这种**调用方自己能解**的前置问题，被同时说成两件错事：
+// 对客户端说「服务器内部错误」，对服务端自己走 log.Error 记成服务端故障
+// （会污染告警）。见 AUD-60。
+//
+// 分类判据只有一条：**这件事该谁去修**。
+//
+//	INVALID_INPUT → 400  请求本身不合法，调用方改请求
+//	NOT_FOUND     → 404  点名的资源不存在
+//	DATA_QUALITY  → 409  请求没错，但当前**数据状态**不满足前置（如日历未同步）
+//	CONFLICT      → 409  与当前资源状态冲突（如重复创建）
+//	PERMISSION    → 403
+//	RATE_LIMIT    → 429
+//	TIMEOUT       → 504
+//	UNAVAILABLE   → 503
+//
+// 其余（INTERNAL、以及**根本不是** AppError 的错误）→ 500：保留
+// 「未知即服务端问题」这个保守默认 —— 宁可把未知错误当服务端故障，也不要
+// 把一个内部 bug 说成「你请求错了」。
+//
+// ⚠️ 一处**已知不对称**（本轮刻意不修）：`codeForStatus` 没有 504 分支，
+// 所以 TIMEOUT → 504 的响应体里 `code` 会落到默认的 `"internal"` ——
+// 状态码说的是「网关超时」，`code` 却说的是「内部错误」。要修得新增一个
+// 错误码常量（例如 `"timeout"`），而那会改动 `code` 这个**对外契约的取值集合**，
+// 应当单独裁决，不该混在 AUD-60 里顺手做（本文件开头的 P1-5 就是讲这类事的）。
+func StatusForAppError(err error) int {
+	var appErr *apperrors.AppError
+	if !errors.As(err, &appErr) {
+		return http.StatusInternalServerError
+	}
+	switch appErr.Code {
+	case apperrors.ErrCodeInvalidInput:
+		return http.StatusBadRequest
+	case apperrors.ErrCodeNotFound:
+		return http.StatusNotFound
+	case apperrors.ErrCodeDataQuality, apperrors.ErrCodeConflict:
+		return http.StatusConflict
+	case apperrors.ErrCodePermission:
+		return http.StatusForbidden
+	case apperrors.ErrCodeRateLimit:
+		return http.StatusTooManyRequests
+	case apperrors.ErrCodeTimeout:
+		return http.StatusGatewayTimeout
+	case apperrors.ErrCodeUnavailable:
+		return http.StatusServiceUnavailable
+	default:
+		return http.StatusInternalServerError
 	}
 }

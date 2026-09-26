@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 )
 
 func newRecorder(t *testing.T, h gin.HandlerFunc) *httptest.ResponseRecorder {
@@ -156,5 +158,58 @@ func TestErrorMiddleware_AppErrorKeepsStatus(t *testing.T) {
 	}
 	if bodyOf(t, w)["error"] != "already running" {
 		t.Fatalf("文案应保留：%s", w.Body.String())
+	}
+}
+
+// AUD-60：把 pkg/errors 的**类别**映射成 HTTP 状态。
+//
+// 为什么值得单测：本包的 codeForStatus 是「状态码 → 错误码」单向派生，
+// 所以「回哪个状态」完全由调用点决定。回测 handler 原先一律回 500，于是
+// 「库里还没同步交易日历」这种调用方自己能解的前置问题，对客户端说成
+// 「服务器内部错误」、对服务端自己记成 log.Error（污染告警）。
+func TestStatusForAppError_MapsCategoryToStatus(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		code apperrors.ErrorCode
+		want int
+		why  string
+	}{
+		{"请求不合法该调用方改", apperrors.ErrCodeInvalidInput, http.StatusBadRequest, "400"},
+		{"点名资源不存在", apperrors.ErrCodeNotFound, http.StatusNotFound, "404"},
+		{"请求没错但数据前置没满足", apperrors.ErrCodeDataQuality, http.StatusConflict, "409"},
+		{"与当前资源状态冲突", apperrors.ErrCodeConflict, http.StatusConflict, "409"},
+		{"权限不足", apperrors.ErrCodePermission, http.StatusForbidden, "403"},
+		{"限流", apperrors.ErrCodeRateLimit, http.StatusTooManyRequests, "429"},
+		{"超时", apperrors.ErrCodeTimeout, http.StatusGatewayTimeout, "504"},
+		{"上游不可用", apperrors.ErrCodeUnavailable, http.StatusServiceUnavailable, "503"},
+		{"未分类的内部错误", apperrors.ErrCodeInternal, http.StatusInternalServerError, "500"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := apperrors.New(tc.code, "boom")
+			if got := StatusForAppError(err); got != tc.want {
+				t.Fatalf("StatusForAppError(%s) = %d, want %d（%s）", tc.code, got, tc.want, tc.why)
+			}
+		})
+	}
+}
+
+// 对照腿：**未知即服务端问题**。没有这条，「映射表把 400 给了一个内部 bug」
+// 这种反向错误永远不会被发现 —— 而它比原来的「一律 500」更糟：它会把
+// 服务端的 bug 说成「你请求错了」，调用方于是去改一个本来就对的请求。
+func TestStatusForAppError_UnknownStaysServerSide(t *testing.T) {
+	t.Parallel()
+
+	if got := StatusForAppError(errors.New("connection reset by peer")); got != http.StatusInternalServerError {
+		t.Fatalf("非 AppError 的错误必须留 500，实际 %d", got)
+	}
+	if got := StatusForAppError(nil); got != http.StatusInternalServerError {
+		t.Fatalf("nil 必须留 500，实际 %d", got)
+	}
+	// 引擎常见的形状是「AppError 包着底层 cause」，errors.As 必须能穿过去。
+	wrapped := apperrors.Wrap(errors.New("pgx: no rows"), apperrors.ErrCodeDataQuality, "calendar missing", "RunBacktest")
+	if got := StatusForAppError(wrapped); got != http.StatusConflict {
+		t.Fatalf("带 cause 的 AppError 应仍是 409，实际 %d", got)
 	}
 }
