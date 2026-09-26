@@ -313,3 +313,40 @@ func TestLoadConfig_RetiredLogEnvNamesStayDead(t *testing.T) {
 	assert.Equal(t, "json", viper.GetString("logging.format"),
 		"LOG_FORMAT 是已退役的名字（AUD-35）")
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// AUD-58 guard: RATE_LIMIT_PER_MINUTE 是本包（全局 viper）真正读得到的名字
+// ──────────────────────────────────────────────────────────────────────
+
+// 与上面 logging.* 那对同源：本包驱动的是**全局** viper，所以
+// `cmd/analysis/rate_limit_budget_test.go` 覆盖不到这里 —— 那个包用的是
+// 注入的 `viper.New()` 实例（见本文件开头那段注释）。而 AUD-58 的 e2e 覆盖层
+// 给**两个**服务都设了 `RATE_LIMIT_PER_MINUTE`：只证明 analysis 认它是不够的，
+// 另一半若读不到，就是**安慰剂** —— 而安慰剂比没有更糟，因为它看起来在做事。
+//
+// 取 42 而不是 100：`rateLimitPerMinute()` 的兜底是 `return 100`，而 shipped
+// 配置**也是** 100 —— 取 100 的话「读到了覆盖」与「用了兜底」在断言里长得一模一样。
+func TestLoadConfig_RateLimitEnvNameIsTheOneThatWorks(t *testing.T) {
+	viper.Reset()
+	t.Setenv("RATE_LIMIT_PER_MINUTE", "42")
+
+	require.NoError(t, loadConfig())
+
+	got := rateLimitPerMinute()
+	require.NotEqual(t, 100, got, "100 是兜底值 —— 落在这里说明覆盖根本没生效")
+	assert.Equal(t, 42, got,
+		"RATE_LIMIT_PER_MINUTE 必须真的被 rateLimitPerMinute() 读到")
+}
+
+// 反证腿：名字不对（少了 _PER_MINUTE）时不许生效 —— 否则上面那个 42 可能
+// 来自「任何环境变量都能改限流」这种错误接线。
+func TestLoadConfig_RetiredRateLimitEnvNameStaysDead(t *testing.T) {
+	viper.Reset()
+	t.Setenv("RATE_LIMIT", "42")
+
+	require.NoError(t, loadConfig())
+
+	assert.Equal(t, 100, rateLimitPerMinute(),
+		"RATE_LIMIT 不是正确名字（正确名是 RATE_LIMIT_PER_MINUTE）—— "+
+			"它生效就说明限流的读法比预期宽松")
+}
