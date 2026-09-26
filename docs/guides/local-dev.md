@@ -2,11 +2,13 @@
 status: evergreen
 type: how-to
 last-verified: 2026-09-25
-verified-by: 实际命令逐条复核（`find -name '*_test.go'` 实测 273、`.gitignore` 已无 `*_test.go` 规则、
+verified-by: 实际命令逐条复核（`*_test.go` 实测 272、口径即 §测试 里那条命令 —— 全仓曾同时挂着
+  273 / 275 / 271 三个互相矛盾的数字、`web/` 下没有、`e2e/` 下 2 个（`guard_test.go` 与
+  `integration_test.go`）、`.workbuddy-ai/tmp` 下 9 个不入库副本，现统一为同一条命令的 272、`.gitignore` 已无 `*_test.go` 规则、
   `ls cmd/` 只有 analysis/data/strategy、`docker compose` 实测报 `'compose' is not a docker command`
   而 `docker-compose` v2.32.1 可用、`C:\Users\ruoxi\sdk\go1.25.0\bin\go.exe` 实测存在且能离线编译全仓）＋
   AUD-51 自灌自证改造后同步「已知陷阱」＋ ADR-026 / AUD-57 落地后同步鉴权与限流两节
-  （`*_test.go` 实测 **275**、前端 `vitest` 实测 **208 条 / 18 文件**、探针连打 130 次实测 `200×130 / 429×0`）
+  （`*_test.go` 实测 **272**（本轮 AUD-59/60/58 新增 5 个 test 文件之后）、前端 `vitest` 实测 **208 条 / 18 文件**、探针连打 130 次实测 `200×130 / 429×0`）
 ---
 
 # 本地开发指南（How-to）
@@ -207,7 +209,15 @@ go test ./...                                  # 全量
 go test ./pkg/... -coverprofile=coverage.out   # 带覆盖率
 ```
 
-现有 **275** 个 `*_test.go`（`find . -name '*_test.go' -not -path './web/*' -not -path './e2e/*' | wc -l`）。
+现有 **272** 个 `*_test.go`：
+
+```bash
+# 注意要排除 .workbuddy-ai —— 那下面是本机的备份/临时副本
+# （`.workbuddy-ai/tmp/aud42bak`、`.../git-repair-20260923/delta-files` 里各躺着一批
+# `*_test.go`），它们既不入库也不参与构建。此前这条命令没排除它，于是计数里混进了
+# 9 个永远不会被编译的副本（曾经的「275」就是这么来的）。
+find . -name '*_test.go' -not -path './web/*' -not -path './e2e/*' -not -path './.workbuddy-ai/*' | wc -l
+```
 
 > 跑全仓测试前把 Go 的 bin 目录放进 `PATH`，并设 `GOPROXY=off` —— 见 `docs/TEST.md` §2.0
 > 「本机运行前置」。缺前者会让 `pkg/ai/pipeline` 的子进程找不到 `go`，缺后者会让它联网

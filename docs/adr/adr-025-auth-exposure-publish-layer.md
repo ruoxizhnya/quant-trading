@@ -45,7 +45,8 @@ token**；系统也**没有首个管理员的引导**（`CreateUser` 只挂在
 `RequireRole(admin)` 后面 —— 鸡生蛋）。所以「配了 JWT_SECRET」这个选项在
 当前产品形态下等于**把 UI 关掉**：服务"起得来但用不了"。
 
-同时 e2e 套件（160 条 Playwright + `e2e/tests/integration_test.go`）明确假定
+同时 e2e 套件（当时 160 条 Playwright + `e2e/tests/integration_test.go`；现行条数
+见 `TEST.md` §7.2）明确假定
 open-access（`e2e/tests/rbac-open-access.spec.ts` 开篇即写 "The e2e environment
 runs with auth DISABLED"），所以这个矛盾不是「AUD-52 那两条测试」的局部问题 ——
 **AUD-52 只是它最显眼的一处症状**。
@@ -141,7 +142,7 @@ ports: - "127.0.0.1:8085:8085"       # 四条映射全部回环
 ## Alternatives Considered
 
 1. **只改测试侧（门里 skip 401），不动安全门。** 最省事，但 dev compose 仍是
-   鉴权开启 → 前端与 160 条 Playwright 仍全站 401，UI 实际不可用。等于把
+   鉴权开启 → 前端与整套 Playwright（当时 160 条）仍全站 401，UI 实际不可用。等于把
    问题从「测试红」挪成「产品不可用」。**否**。
 
 2. **让 e2e 自己去取 token。** 被设计封死：无首个管理员引导，`CreateUser`

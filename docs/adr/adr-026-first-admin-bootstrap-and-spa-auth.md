@@ -35,7 +35,7 @@ GET :8080/api/strategies   → 401      ← 前端自己
 GET :8080/api/stocks/count → 401
 ```
 
-同时 160 条 Playwright 用例全部假定 open-access（`rbac-open-access.spec.ts`
+同时既有的 160 条 Playwright 用例全部假定 open-access（`rbac-open-access.spec.ts`
 开篇即写 "The e2e environment runs with auth DISABLED"）。**"让前端 UI 可用"
 不是给登录页化妆，而是要把这条链路真正打通。**
 

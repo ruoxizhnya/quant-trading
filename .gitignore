@@ -66,6 +66,9 @@ e2e/node_modules/
 e2e/test-results/
 e2e/e2e-report/
 e2e/playwright-report/
+# Ad-hoc `--output` dirs (e.g. when the sandbox blocks playwright's startup
+# cleanup of the default output dir). Never meant to be tracked.
+e2e/.pw-out-*/
 # Visual baselines are environment-dependent (fonts/rendering) and were never
 # tracked; each machine regenerates them on first run (ODR-063).
 e2e/tests/visual-regression.spec.ts-snapshots/

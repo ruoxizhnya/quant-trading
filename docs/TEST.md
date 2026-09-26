@@ -1,7 +1,7 @@
 ---
 status: evergreen
 last-verified: 2026-09-25
-verified-by: AUD-44 路径引用复核 + AUD-47 §5–§7 内容复核（2026-09-22）+ AUD-56 新增 §2.0「本机运行前置」（2026-09-24）—— ① 路径：`pkg/tracker` 已迁至 `pkg/backtest/tracker`、`docs/phase-gate-reviews.md` 已归档至 `docs/archive/research-2026-Q2/`、§4 的 CLI 示例标注为非真实接口；② 内容：§5 沙箱限制改为实测值（30s CPU + 1 GiB，ODR-020）、§6 覆盖率目标标注为「目标不是门禁」（CI 不设阈值）、§7.1 `format.test.ts` 8→28 例、§7.2 e2e 改为实测 17 spec / 160 例、`--project=chrome`→`chromium`；③ §2.0：记下本机跑全仓测试的两个环境前置（`PATH` 里要有 `go`、`GOPROXY=off`），两者都会造成「红了但不指向代码」的假信号 —— 取证见 TASKS.md 的 AUD-56
+verified-by: AUD-44 路径引用复核 + AUD-47 §5–§7 内容复核（2026-09-22）+ AUD-56 新增 §2.0「本机运行前置」（2026-09-24）—— ① 路径：`pkg/tracker` 已迁至 `pkg/backtest/tracker`、`docs/phase-gate-reviews.md` 已归档至 `docs/archive/research-2026-Q2/`、§4 的 CLI 示例标注为非真实接口；② 内容：§5 沙箱限制改为实测值（30s CPU + 1 GiB，ODR-020）、§6 覆盖率目标标注为「目标不是门禁」（CI 不设阈值）、§7.1 `format.test.ts` 8→28 例、§7.2 e2e 改为实测 17 spec / 160 例、`--project=chrome`→`chromium`；③ §2.0：记下本机跑全仓测试的两个环境前置（`PATH` 里要有 `go`、`GOPROXY=off`），两者都会造成「红了但不指向代码」的假信号 —— 取证见 TASKS.md 的 AUD-56；④ §7.2 补「实测读数与已知红」（2026-09-26）—— 干净环境整套 playwright 实测 **127 passed / 34 failed / 2 skipped**，34 条逐条归因（全部为既有用例漂移、与本轮改动零交集）并登记 **AUD-61**，另补 UI 用例的「前端宿主」前置（`BASE_URL` 默认 `:5173`）
 ---
 
 # Test Plan & Quality Assurance (TEST.md)
@@ -281,6 +281,34 @@ Using `testing/quick` or `golang/mock`:
 
 ---
 
+### 2.6 契约 / 结构性护栏
+
+不测「行为对不对」，测「**结构本身有没有被改坏**」。这一类护栏的价值全在**破坏验证**上 ——
+一条**永远绿**的结构检查比没有检查更糟，因为它让人以为结构有人守。所以能加的都带一条
+自己的「防空转腿」（跑不出目标就失败，而不是静默通过）。
+
+| 护栏 | 钉住什么 | 防空转腿 |
+|---|---|---|
+| `docs/openapi_test.go`（AUD-60 新增） | `docs/openapi.yaml` 能被 YAML 解析；**每条本地 `$ref` 都解析得到**（实测 **142** 条）；**每个操作都有 `responses`**（实测 **85** 个） | 收不到 `$ref`、或一个操作都遍历不到 → `t.Fatal`（原文「这个测试是瞎的」） |
+| `internal/repoguard/package_wiring_test.go` | 每个包都有非测试消费者；退役包（`pkg/metrics`）负向断言 | 见该文件 |
+| `internal/repoguard/recovery_wiring_test.go` | 恢复函数按 `file:function` 钉住调用点 | `TestProductionCallSiteWalkerSeesTheTree` 是**走查器自己的**腿 |
+| `e2e/guard/guard_test.go` | e2e 的前置条件与断言**同源**（走 **AST** —— 扫原文会被注释误报） | 见该文件 |
+
+同族还有两个脚本护栏：`tools/check_deploy_consistency.py`（compose / k8s env / 文档
+三处同名配置项取值一致，AUD-39~44 一线）与 `tools/check_doc_links.py`（文档相对链接
+可落地）。
+
+> **为什么 `docs/openapi_test.go` 是「新的一类」**：这份 spec 是 `go:embed` 直出的
+> （`serveOpenAPISpec` 只做 `c.Data(..., OpenAPISpec)`），全仓此前**没有任何地方真的
+> 解析它** —— 三条 `TestServeOpenAPISpec_*` 只检查顶层键在不在。于是**一条指向不存在
+> component 的 `$ref` 可以一路合进主干**：CI 全绿，Swagger UI 要等人真的在浏览器里打开
+> 才报错。触发补齐的具体情形，就是给 `POST /api/backtest` 加 `409` 时新增的那条
+> `$ref: '#/components/responses/ConflictPrecondition'` —— 组件名打错一个字母，
+> 原有测试**一条都不会红**。用 `gopkg.in/yaml.v3` 而不是文本扫描：`$ref` 的解析是
+> **结构化**的事，文本扫描既会漏（缩进/引号变体）又会误报（注释里写了 `$ref`）。
+
+---
+
 ## 3. Phase Gate Tests
 
 These are the **acceptance tests** that must pass before advancing phases. Recorded in `archive/research-2026-Q2/phase-gate-reviews.md`（已归档，只读）。
@@ -488,13 +516,40 @@ npm run test:coverage # With coverage report
 
 **Running:**
 ```bash
+# 前置（AUD-58）：整套 playwright 从 127.0.0.1 **一个 IP** 出量，
+# API 密集的几段会越过网关的 100 req/min per ClientIP，于是一批与被测代码
+# 无关的用例拿到 429。所以先切到 **e2e 专用姿势**（把额度抬高）：
+docker compose -f docker-compose.yml -f docker-compose.e2e.yml \
+  up -d --force-recreate --no-deps analysis-service data-service
+
 cd e2e
 npx playwright test                       # Full suite
 npx playwright test --project=chromium    # Chromium only（唯一配置的 project）
 npx playwright test --grep "Backtest"     # Backtest-related only
+
+# 跑完恢复默认姿势（限流回到 100）：
+docker compose up -d --force-recreate --no-deps analysis-service data-service
 ```
 
-**Test Suites:** 17 个 spec 文件、**160** 条用例（AUD-47 复核后的实测数）：
+> ⚠️ **为什么要单独一层覆盖文件，而不是把默认值调高**：缺省 100 是本地开发该有的
+> 姿势，把它调高等于**把限流从本地开发里静默删掉** —— 比拿到 429 更糟（429 至少看得见）。
+> 代价也写清楚：在 e2e 姿势下**不再覆盖**「限流生效」。限流本身由
+> `cmd/analysis/rate_limit_exempt_test.go`（含对照组腿 + 窄度腿）与
+> `cmd/analysis/rate_limit_budget_test.go`（证明 `RATE_LIMIT_PER_MINUTE`
+> 这个旋钮真的接上了，且默认值不许被调高）守。见 AUD-58。
+
+> ⚠️ **别和 `go test ./...` 同时跑**：两者共用同一个 per-IP 限流预算，
+> `e2e/tests` 的 `TestStrategyAPI_ListStrategies` / `TestExecutionService_OrderPersistence`
+> 会因此变红 —— 那是并发 artifact，不是回归。单独重跑 `go test ./e2e/...` 立刻全绿。
+
+> ⚠️ **全新 clone 首轮必红 12 条视觉回归**：基线快照是**刻意不入库**的
+> （`.gitignore` 忽略 `e2e/tests/visual-regression.spec.ts-snapshots/`），
+> 报的是 `A snapshot doesn't exist … writing actual`，**不是** mismatch。
+> 注意区分：**本机已有快照时仍有 9 条红**（见 §7.2.0），那部分是**真的 mismatch**
+> —— 页面结构在快照生成之后已变（与 AUD-61 同源）。
+
+**Test Suites:** **18** 个 spec 文件、**163** 条用例（`npx playwright test --list` 实测，
+2026-09-25 AUD-58 这轮复核 —— 此前的「17 / 160」少算了 ADR-026 新增的 `auth-login-flow`）：
 
 | 类别 | spec 文件 | 用例数 |
 |---|---|---|
@@ -503,9 +558,37 @@ npx playwright test --grep "Backtest"     # Backtest-related only
 | 数据同步 | `data-sync` / `data-sync-schedule` / `data-sync-error` | 22 |
 | Copilot | `copilot` / `copilot-e2e` | 20 |
 | 页面 / 导航 | `dashboard` / `screener` / `strategy-selector` / `cross-navigation` / `rbac-open-access` | 35 |
+| 认证 | `auth-login-flow` | 3 |
 | 视觉回归 | `visual-regression` | 12 |
 
 （`e2e/tests/integration_test.go` 是 Go 写的，不计入上表。）
+
+#### 7.2.0 实测读数与已知红（2026-09-26）
+
+干净环境（原生 PG 17.5 + `docker-compose.e2e.yml` 覆盖层 + 容器化 SPA 作 `BASE_URL`）
+整套实测 **127 passed / 34 failed / 2 skipped（共 163）**。
+
+**这 34 条是既有的用例漂移，不是回归** —— 已逐条归因，**无一条**来自 2026-09-26 那轮
+AUD-58 / AUD-59 / AUD-60 的改动（那轮改动与 `web/`、`e2e/tests/` **零交集**）：
+
+| 归因 | 条数 | 证据 |
+|---|---|---|
+| 前端 DOM / 选择器漂移 | 24 | `dashboard.spec.ts:36` 期望 5 个 `.nav-item` 实际 **12**；`cross-navigation.spec.ts:37` 期望 4 个 `.nav-tile` 实际 **5**；`backtest-engine.spec.ts:49` 的 `.n-button--primary-type` 命中 **22** 个；`.metric-card` / `.quick-bt-card` / `.bt-form-card` 等期望的类名**在 `web/src` 里命中 0 处**（即已不存在）。`dashboard.spec.ts` 自 2026-05-03 再未改过，而 `web/` 此后改过 5+ 次 |
+| API 期望过时（5 月的 spec） | 4 | `api-backtest.spec.ts` / `api-negative.spec.ts` 最后改动 `b1991cb` 2026-05-03；`/api/screen` 空 body 现回 200、`/api/copilot/generate` 空 prompt 现回 503（本轮这两个端点一行未碰） |
+| 数据已全量 → `total_items=0` | 1 | `stocks` 增量 job 无新增项可处理（作业 `completed`、`progress_percent=100`） |
+| 创建期校验 400 vs 期望 202 | 1 | `handlers_sync.go` 的参数校验是**既有**的；`data-sync:125` 传 `start_date:'invalid'` 被正确拒绝 |
+| 用例自身 bug | 1 | `data-sync.spec.ts:223` 在 Node 环境里 `new EventSource(...)` → `ReferenceError: EventSource is not defined` |
+| 测试隔离缺陷 | 1 | `sync_schedules.name` 唯一约束残留（用例固定名 + 失败不走 cleanup ⇒ **第二次跑必红**；日志 `duplicate key value violates unique constraint "sync_schedules_name_key"`） |
+| 超时（无断言失败） | 2 | — |
+
+⇒ 登记为 **AUD-61**（见 `TASKS.md`）。**不要**把「34 条红」写进任何「已验证通过」的结论
+（那是把假信号洗白），也**不要**用「放宽断言」消红。
+
+> ⚠️ **UI 用例另有一个「前端宿主」前置**：`e2e/playwright.config.ts` 的 `BASE_URL`
+> 默认是 `http://localhost:5173`（vite dev server）。只起 docker 栈（SPA 在 `:8080`）
+> 而不起 vite 时，UI 用例会全部 `page.goto: net::ERR_CONNECTION_REFUSED`
+> —— 两条路任选：`cd web && npm run dev`（默认姿势），或
+> `BASE_URL=http://localhost:8080 npx playwright test`（用容器化 SPA，无需 Node dev server）。
 
 #### 7.2.1 Go 写的 `e2e/tests`（AUD-52 修后的形态）
 
