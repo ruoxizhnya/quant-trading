@@ -79,7 +79,7 @@ func TestClient_Chat_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(t, srv)
+	c := newTestClient(t, srv, WithModel(DefaultModel))
 	resp, err := c.Chat(context.Background(), []ChatMessage{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "hello"},
@@ -386,7 +386,8 @@ func TestClient_Chat_RecordsSpanAttributes(t *testing.T) {
 	defer srv.Close()
 
 	tracer := &recordingTracer{}
-	c := newTestClient(t, srv, WithTracer(tracer))
+	// 显式钉住模型：否则本机 shell 里导出的 AI_MODEL 会让这条断言随机变红。
+	c := newTestClient(t, srv, WithTracer(tracer), WithModel(DefaultModel))
 
 	_, err := c.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}})
 	require.NoError(t, err)

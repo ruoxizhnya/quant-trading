@@ -196,6 +196,12 @@ services:
       # registry doesn't have the requested strategy.
       AI_API_KEY: ${AI_API_KEY:-}
       AI_API_URL: ${AI_API_URL:-https://api.openai.com/v1/chat/completions}
+      # 模型名。留空 = 回落 pkg/ai.DefaultModel（gpt-4o-mini）。
+      # 换供应商（MiniMax / DeepSeek / 通义 / OpenRouter / 本地 vLLM）必须
+      # **同时**改 URL 和这里：只改 URL 会把 "gpt-4o-mini" 发给对方，对方
+      # 回 model-not-found —— 协议兼容不等于模型名兼容。
+      # 注意 AI_API_URL 要填完整的 chat-completions 端点，不是 base URL。
+      AI_MODEL: ${AI_MODEL:-}
       LOGGING_LEVEL: info
       # AUD-58：见 data-service 里同一行的注释。缺省 100 与
       # config/analysis-service.yaml 的 rate_limit.per_minute 一致。

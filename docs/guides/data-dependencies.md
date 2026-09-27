@@ -172,8 +172,16 @@ qfq 已落 `ohlcv_daily_qfq`，hfq 未落库（表结构只有一套价格列）
 | **`TUSHARE_TOKEN`** | **阻塞项** | A 股行情 / 财务 / 复权因子 | `tushare.token`（只能从 env 注入） | **空** |
 | `JWT_SECRET` | 必填，否则拒绝启动 | 鉴权 | `auth.jwt_secret` | 需 `openssl rand -hex 32` |
 | `DATABASE_PASSWORD` | 必填 | 数据库（**唯一**一个密码变量） | `database.password` | 默认 `postgres` |
-| `AI_API_KEY` + `AI_API_URL` | 可选 | 因果维 / AI 实验员 | `pkg/ai/client.go` 直读 env | 空 |
+| `AI_API_KEY` + `AI_API_URL` + `AI_MODEL` | 可选 | 因果维 / AI 实验员 / Copilot / 探索观察台 | `pkg/ai/client.go` 直读 env | **key 已配（MiniMax CN）；URL/模型见下** |
 | `ALPHA_VANTAGE_KEY` | 可选 | 跨境行情 fallback | `alpha_vantage.api_key` | 空 |
+
+三个 AI 变量必须**成对**改：`AI_API_URL` 填完整 chat-completions 端点（以
+`/chat/completions` 结尾，不是 base URL），`AI_MODEL` 填该供应商的模型 id。
+协议是 OpenAI 兼容的（`POST <URL>` + `Authorization: Bearer <KEY>` +
+body `{"model":...,"messages":[...]}`），但**协议兼容 ≠ 模型名兼容** —— 只改
+URL 会把默认的 `gpt-4o-mini` 发给对方，对方回 `model not found`。
+`AI_MODEL` 留空回落到 `pkg/ai.DefaultModel`。改完必须**重建**容器
+（`docker compose up -d --build analysis-service`），环境变量不热加载。
 
 读取路径的两条坑（都已修，别踩回去）：
 

@@ -62,6 +62,29 @@ type Client struct {
 	mu sync.Mutex
 }
 
+// DefaultModel is the chat model used when AI_MODEL is unset or blank.
+//
+// Exported (rather than an inline literal) so callers and tests can assert
+// the fallback without duplicating the string — a hardcoded literal in two
+// places drifts the moment someone changes the default.
+const DefaultModel = "gpt-4o-mini"
+
+// resolveModel picks the chat model from the environment, falling back to
+// DefaultModel when AI_MODEL is unset or whitespace-only.
+//
+// WHY AI_MODEL EXISTS: AI_API_URL already lets you point the client at any
+// OpenAI-compatible gateway, but the *model* was hardcoded. A provider that
+// speaks /v1/chat/completions still rejects a foreign model id (MiniMax
+// answers "model not found" for "gpt-4o-mini"), so URL-only configuration is
+// half a feature. Any OpenAI-compatible backend — OpenAI, MiniMax CN,
+// DeepSeek, Qwen, OpenRouter, a local Ollama/vLLM shim — needs both knobs.
+func resolveModel() string {
+	if m := strings.TrimSpace(os.Getenv("AI_MODEL")); m != "" {
+		return m
+	}
+	return DefaultModel
+}
+
 // NewClient creates a new AI client reading config from environment.
 // A 30s default HTTP timeout is applied to prevent indefinite hangs.
 func NewClient() *Client {
@@ -72,11 +95,15 @@ func NewClient() *Client {
 // NewClientWithOptions builds a Client with functional options. Useful for
 // tests that need to inject a custom model, custom HTTP client, or fixed
 // API key/URL without touching environment variables.
+//
+// Precedence for each setting is: explicit option > environment variable >
+// built-in default. WithModel therefore beats AI_MODEL, which beats
+// DefaultModel.
 func NewClientWithOptions(opts ...ClientOption) (*Client, error) {
 	c := &Client{
 		apiKey:     os.Getenv("AI_API_KEY"),
 		apiURL:     os.Getenv("AI_API_URL"),
-		model:      "gpt-4o-mini",
+		model:      resolveModel(),
 		httpClient: &http.Client{Timeout: defaultHTTPTimeout},
 		limiter:    NewLimiter(),
 		retry:      DefaultRetryPolicy,
@@ -109,7 +136,7 @@ func WithAPIURL(url string) ClientOption {
 	return func(c *Client) error { c.apiURL = url; return nil }
 }
 
-// WithModel overrides the default "gpt-4o-mini" model.
+// WithModel overrides the model — it beats both AI_MODEL and DefaultModel.
 func WithModel(model string) ClientOption {
 	return func(c *Client) error { c.model = model; return nil }
 }
