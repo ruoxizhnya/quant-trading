@@ -432,6 +432,36 @@ type Strategy interface {
 
 ---
 
+## Streaming Strategy Interface — BarHandler（2026-10-08，目标形态）
+
+> **Canonical definition（目标形态）** — 模块化内核新增，服务 L2/L3 有状态策略。与批式 `SignalGenerator`（§Strategy Interface）**并存**，引擎按策略实现的接口自动选执行模式。详细设计见 [design/kernel/target-architecture-modular-kernel.md](design/kernel/target-architecture-modular-kernel.md) §6。
+
+```go
+// 流式策略接口（新增）—— 服务 L2/L3 有状态策略
+type BarHandler interface {
+    // OnBar 逐 bar 回调，&mut self 语义（持有内部状态）
+    OnBar(ctx context.Context, bar domain.Bar) error
+    // Warmup 声明需要多少根历史 bar 才能产出首个有效信号（静态推导）
+    Warmup() int
+    // SaveState / LoadState 状态持久化（断点续跑 / 回测-实盘迁移）
+    SaveState() ([]byte, error)
+    LoadState([]byte) error
+}
+```
+
+**双模式与回测-实盘同构**：
+
+| | 批式 `SignalGenerator` | 流式 `BarHandler` |
+|---|---|---|
+| 服务层 | L0 / L1（横截面） | L2 / L3（有状态） |
+| 回测驱动 | VirtualClock 攒窗口 → `GenerateSignals` | VirtualClock 逐 bar → `OnBar` |
+| 实盘驱动 | feed 攒窗口 → `GenerateSignals` | feed bar 到达 → `OnBar` |
+| 状态 | 无（窗口纯函数 DAG） | 有，`SaveState`/`LoadState` 落 `quant.strategy_state` |
+
+**同一份策略代码，回测与实盘只换三个实现**：Clock（Virtual/Live）、DataSource（PG 快照/推送 feed）、Broker（模拟撮合/真实券商）——策略本身一行不动。
+
+---
+
 ## ExpressionStrategy (S7-P3-1)
 
 > **Package**: `pkg/strategy/expression/`
@@ -794,6 +824,21 @@ CREATE TABLE factor_cache (
 
 SELECT create_hypertable('factor_cache', 'date');
 ```
+
+### 模块化内核新表（2026-10-08，目标形态）
+
+> 以下 8 张表为模块化内核的目标 schema（**尚未实施**，见 [design/kernel/target-architecture-modular-kernel.md](design/kernel/target-architecture-modular-kernel.md) §5 模块矩阵）。归属 `quant.*`（派生）与 `audit.*`（审计），遵循单一事实源、禁止双写。
+
+| 表 | 归属模块 | 用途 |
+|---|---|---|
+| `quant.portfolio_snapshot` | portfolio | 组合净值 / 持仓快照 |
+| `quant.positions` | portfolio | 当前持仓 |
+| `quant.risk_events` | risk-engine | 风控裁决记录 |
+| `quant.orders` | exec-engine | 订单生命周期 |
+| `quant.fills` | exec-engine | 成交回报 |
+| `quant.recon_report` | exec-engine | 对账差异报告 |
+| `quant.strategy_state` | strategy-runtime | L2/L3 流式策略状态（`SaveState`） |
+| `audit.message_log` | eventstore | 模块间消息（先记录后分发，BusTap 语义） |
 
 ### tushare.pro API Adapter
 - REST API with token authentication

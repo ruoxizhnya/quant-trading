@@ -22,14 +22,15 @@ verified-by: 人工整理（文档体系重组）
 |---|---|---|
 | 了解这个产品是什么、为谁做 | [PRODUCT.md](PRODUCT.md) | 待按新定位重写 |
 | 了解设计原则 | [VISION.md](VISION.md) | 待重写（74KB 原文见 `archive/VISION-full.md`） |
-| 了解系统怎么搭 | [ARCHITECTURE.md](ARCHITECTURE.md) | 待重写（精简至 ≤5 页） |
+| 了解系统怎么搭 | [ARCHITECTURE.md](ARCHITECTURE.md) | 现行（Reference 类；含「目标架构：模块化内核」节，2026-10-08 融入） |
+| 后端架构设计蓝图（模块化内核） | [design/kernel/](design/kernel/) | Draft（D1–D5 已拍板，未实施） |
 | 查 API / 数据模型 / 契约 | [SPEC.md](SPEC.md) | 现行（Reference 类，可长） |
 | 查某个架构决策的来龙去脉 | [ADR.md](ADR.md) → [adr/](adr/) | 现行（18 条） |
 | 了解测试策略 | [TEST.md](TEST.md) | 现行 |
 | 看阶段规划 | [ROADMAP.md](ROADMAP.md) | 现行 |
 | 本地起步（环境 / 命令 / 已知坑） | [guides/local-dev.md](guides/local-dev.md) | 现行 |
 | 加数据源 / 加因子 / 跑一轮实验 | — | 待补（S1 / S3 开工前再写） |
-| 实盘接口（**未实现**，仅接口参考） | [live-trading.md](live-trading.md) | 已标注 |
+| 实盘接口（核心抽象实盘-ready，仅 paper 实现） | [live-trading.md](live-trading.md) | 已标注 |
 | **当前在做什么** | [TASKS.md](TASKS.md) | 现行（只放未完成项） |
 | 找历史记录 / 旧决策 / 取证报告 | [archive/](archive/) | **只读，不维护** |
 

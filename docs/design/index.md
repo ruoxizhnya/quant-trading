@@ -5,11 +5,15 @@
 > **状态**: Active
 > **适用范围**: Quant Lab 前端 (Vue 3 + Naive UI)
 >
-> ⚠️ **目录语义边界 (2026-09-15, ODR-047 DR-8)**: 本目录（`docs/design/`）**专指前端设计系统**。其他子项目的设计规格**不得**直接平铺在本目录根下 —— 请放入独立子目录（如 `design/equitydeep/`）。已迁出：`EquityDeep_Product_Specification.md` / `EquityDeep_Technical_Specification.md` → [`design/equitydeep/`](equitydeep/)（工作面 1 纵向深研，上位定义见 [PRODUCT.md](../PRODUCT.md)；架构决策见 [ADR-022](../archive/superseded-adr/adr-022-unified-research-platform.md)，取代 [ADR-021](../archive/superseded-adr/adr-021-equitydeep-research-layer.md)）。
+> ⚠️ **目录语义边界 (2026-09-15, ODR-047 DR-8；2026-10-08 微调)**: 本目录（`docs/design/`）根下**专指前端设计系统**。其他设计规格**不得**直接平铺在根下 —— 放入独立子目录：
+> - [`design/equitydeep/`](equitydeep/) — EquityDeep 纵向深研规格（工作面 1，上位定义见 [PRODUCT.md](../PRODUCT.md)）
+> - [`design/kernel/`](kernel/) — **后端架构设计**（模块化内核目标架构等，2026-10-08 起）
 
 ---
 
 ## 目录
+
+**前端设计系统（根下）**
 
 1. [设计原则](principles.md) — 核心设计理念与决策准则
 2. [视觉规范](visual.md) — 色彩、字体、间距、布局
@@ -21,6 +25,11 @@
    - [选股器 Screener](pages/screener.md)
    - [策略实验室 StrategyLab](pages/strategy-lab.md)
    - [策略 Copilot](pages/copilot.md)
+   - [数据同步 DataSync](pages/data-sync.md)
+
+**后端架构设计（子目录）**
+
+6. [模块化内核目标架构](kernel/target-architecture-modular-kernel.md) — 回测/实盘同构 + 双模式策略接口 + 四层表达力（2026-10-08，Draft 已拍板 D1–D5）
 
 ---
 

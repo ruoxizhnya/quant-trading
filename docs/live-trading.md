@@ -1,7 +1,7 @@
 ---
 status: active
-last-verified: 2026-09-16
-verified-by: 代码审查（2026-09-16）
+last-verified: 2026-10-08
+verified-by: 代码审查（2026-09-16）；实盘-ready 定位更新（2026-10-08，D1）
 ---
 
 # Live Trading Interface Specification
@@ -16,8 +16,7 @@ verified-by: 代码审查（2026-09-16）
 > | `OrderStore` | ✅ 已实现（PostgreSQL） |
 > | **XTP 券商适配** | ❌ **桩** — `pkg/live/broker/xtp/xtp.go:315,378,410,479` 四处 `TODO: When SDK is linked`，真实下单为空操作 |
 >
-> **实盘不在当前路线图内**（见 [ROADMAP.md](ROADMAP.md)「明确不做」）。本文档保留作接口参考，**不代表已实现**。
-> 后续若启用：代码侧只预留扩展接口，不实现 XTP 适配。
+> **实盘定位（2026-10-08 D1 更新）**：核心抽象（`Broker` / `DataFeed` / `LiveTrader`）**按实盘-ready 设计、保留冗余**——接口形状按真实券商设计（部分成交 / 撤单 / 订单状态机 / 断线重连），见 [ADR-023 §6](adr/adr-023-ai-experimenter-lab.md) 与 [design/kernel/target-architecture-modular-kernel.md](design/kernel/target-architecture-modular-kernel.md)。当前只实现 paper / 模拟撮合，**paper trading 作为回测-实盘同构验证手段**（同一份策略代码两跑）。**真实券商对接（XTP）与合规报送仍不在当前路线图内**，留作将来。本文档保留作接口参考，**不代表已实现**。
 
 > **版本**: v1.0
 > **原文更新**: 2026-05-05 | **状态标注**: 2026-09-16

@@ -98,6 +98,14 @@ L1  数据层       行情 | 财务 | 产业链图谱 | 研究洞察 | 实验日
 系统输出"未来有效的概率 X%"，考核指标为**校准误差**（声称 60% 的应实际命中 50–70%），而非推荐准确率。
 理由：校准良好的信心才能用于配仓位；不准却表现得有把握会导致重仓受伤。
 
+### 6. 核心部件按实盘-ready 设计（2026-10-08 补充，D1）
+
+本 ADR 的「不上实盘、只验证逻辑」前提**不推翻**。但模块化内核改造（见 [design/kernel/target-architecture-modular-kernel.md](../design/kernel/target-architecture-modular-kernel.md)）引入一条补充原则：
+
+**核心部件的抽象（`Broker` / `DataFeed` / `Clock` / `ExecEngine` / `Reconciliation`）本着将来做实盘去设计、留足冗余**——接口形状按真实券商设计（支持部分成交、撤单、订单状态机、断线重连语义），但当前只实现 paper / 模拟撮合。**实盘专属部件（真实券商 SDK 对接、FIX 协议、合规报送）不做，留作将来。**
+
+理由：回测-实盘同构（同一份策略代码，回测换 VirtualClock + PG 快照、实盘换 LiveClock + 推送 feed）只有核心抽象实盘-ready 才成立；paper trading 是同构验证手段，不是真实下单。这条把「实盘能力」从「被排除」改为「预留冗余但不启用」，防止未来接实盘时要推翻核心抽象重写。
+
 ---
 
 ## Consequences

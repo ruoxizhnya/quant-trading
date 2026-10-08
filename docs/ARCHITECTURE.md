@@ -1,8 +1,8 @@
 ---
 status: evergreen
 type: reference
-last-verified: 2026-09-21
-verified-by: 代码审查（2026-09-16）；AUD-14 校准（2026-09-21）—— 顶层定位/执行载体改 ADR-023/024、表数口径改「内联 DDL 37 张（唯一执行路径）」、删掉已删除/已取消的服务行、标注非表项
+last-verified: 2026-10-08
+verified-by: 模块化内核融入 + 文档治理（2026-10-08）—— 新增「目标架构：模块化内核」节（D1–D5 已拍板，蓝图 design/kernel/）；删 :8086 死图（cmd/ai 已删）/ ADR-022 废弃正文 / 前端 AI 组件 DEPRECATED 清单；策略接口与 ExpressionStrategy 双写归 SPEC（单一事实源）。（前次：代码审查 2026-09-16 + AUD-14 校准 2026-09-21）
 ---
 
 # 架构参考（Reference）
@@ -84,6 +84,18 @@ L1  数据层       行情 | 财务 | 产业链图谱 | 研究洞察 | 实验日
 | **L2** | 19 个 MCP 工具已暴露于 `/api/tools`，但**无 agent driver 循环调用**；产业链查询、证据查询未接通 | 被 AI 循环调用；产业链 / 证据能力补全 |
 | **L1** | `ingest.raw`（content_hash 主键）与 `research` schema 已建，但 DDL 硬编码在 `pkg/storage/postgres.go`，`migrations/` 无版本管理；`market` / `quant` schema 未建 | schema 收口 + 版本管理 + PIT 修正 + 宏观/跨境与产业链接入 |
 
+### 目标架构：模块化内核（2026-10-08，已拍板 D1–D5）
+
+三层模型不动。**变化发生在 L2 能力层内部**：回测与实盘将改造为 **nautilus-like 的模块化内核**——一个 Kernel 装配 11 个模块，回测与实盘**共享同一内核**，只在三处替换边界换实现（Clock / DataSource / Broker），**策略代码一行不动**。
+
+- **详细蓝图**：[design/kernel/target-architecture-modular-kernel.md](design/kernel/target-architecture-modular-kernel.md)（11 模块四件套矩阵、数据流图、4 个 user case、分期路线 P0–P7）
+- **双模式策略接口**：现有批式 `SignalGenerator`（L0/L1 横截面）保留；新增流式 `BarHandler`（`OnBar` + `SaveState`/`LoadState`）服务 L2/L3 有状态策略（Kalman/EWMA/累积量）。同一份策略代码，回测换 VirtualClock + PG 快照，实盘换 LiveClock + 推送 feed。
+- **四层表达力**：L0 模板 / L1 表达式 DSL / L2 确定性有状态算子 / L3 WASM 沙箱 + 外部模型信号注入；**能用 L2 表达的不允许上 L3**（D2，维持 ADR-024「自由度是负债」）。
+- **实盘-ready（D1）**：核心抽象（`Broker`/`DataFeed`/`Clock`/`ExecEngine`）按真实券商设计留冗余，当前只实现 paper/模拟撮合；真实券商对接与合规报送留作将来。见 [ADR-023](adr/adr-023-ai-experimenter-lab.md) 补条款。
+- **模块化目的（D3）**：每模块有独立接口 / DB / 数据流 / 功能定义，使**独立 coding agent 能不被打扰地完成模块**；硬前提是**契约先行冻结**（接口 / 消息 / DB schema / 测试四类，见蓝图 §5.1）。
+
+> 本节是**目标形态，尚未实施**（分期路线 P0 契约冻结 → P1 内核骨架 → …，见蓝图 §10）。当前实现见下文各章节。
+
 > ⚠️ **下文各章节是"当前实现的 Reference 细节"**，可能领先或落后于目标形态。**以代码为准**；若发现本文与代码不符，改代码或改本文，不要两边都留着。
 
 ---
@@ -131,8 +143,8 @@ L1  数据层       行情 | 财务 | 产业链图谱 | 研究洞察 | 实验日
 ┌─────────────────────────────────────────────────────────────┐
 │                      PostgreSQL (:5432)                      │
 │                                                             │
-│  stocks              — 5491 只股票列表                       │
-│  ohlcv_daily_qfq     — 1527 万条 K 线（前复权）             │
+│  stocks              — 5908 只股票列表                       │
+│  ohlcv_daily_qfq     — 392 万条 K 线（前复权）              │
 │  stock_fundamentals  — 财务数据（PE/PB/ROE 等）              │
 │  trading_calendar     — 沪深交易日历                          │
 │  backtest_jobs        — 异步回测任务队列                      │
@@ -569,37 +581,10 @@ TTL 自动选择：
 ## 策略架构
 
 ### 策略接口 (pkg/strategy/interfaces.go)
-> **Canonical definition** — matches [SPEC.md](SPEC.md#strategy-interface) §Strategy Interface
-> 与 [VISION.md](VISION.md#b-strategy-layer) §B Strategy Layer, P1-24 (ADR-020 §6)
 
-```go
-// 4 个 single-responsibility 子接口 (P1-24 ISP 拆分)
-type StrategyCore interface {
-    Name() string
-    Description() string
-}
-type Configurable interface {
-    Parameters() []Parameter
-    Configure(params map[string]interface{}) error
-}
-type SignalGenerator interface {
-    GenerateSignals(ctx context.Context,
-        bars map[string][]domain.OHLCV,
-        portfolio *domain.Portfolio) ([]domain.Signal, error)
-    Weight(signal domain.Signal, portfolioValue float64) float64
-}
-type ResourceManaged interface {
-    Cleanup()
-}
-
-// 复合接口 (向后兼容, 7 方法 surface 不变)
-type Strategy interface {
-    StrategyCore
-    Configurable
-    SignalGenerator
-    ResourceManaged
-}
-```
+> **Canonical 定义（单一事实源）见 [SPEC.md §Strategy Interface](SPEC.md)** —— 本文不再重复接口签名（消除双写）。
+>
+> **双模式（2026-10-08 起，目标形态）**：现有批式 `SignalGenerator` 服务 L0/L1 横截面；模块化内核将新增流式 `BarHandler`（`OnBar` + `SaveState`/`LoadState`）服务 L2/L3 有状态策略（Kalman/EWMA/累积量）。详见 [design/kernel/target-architecture-modular-kernel.md](design/kernel/target-architecture-modular-kernel.md) §6。
 
 ### 策略列表
 
@@ -622,26 +607,7 @@ type Strategy interface {
 
 ### ExpressionStrategy 架构 (pkg/strategy/expression/, S7-P3-1)
 
-DSL 表达式 → 策略的端到端流水线，让 AI 输出的 YAML 表达式可直接作为策略运行：
-
-```
-GenerateSignals(ctx, bars, portfolio)
-  │
-  ├─ NewOHLCVDataProvider(bars)      → aiexpr.DataProvider 适配
-  ├─ aiexpr.NewEvaluator(provider)   → 表达式求值器
-  ├─ SignalGenerator.Generate()      → DSL 表达式 → []Signal (truthy 过滤)
-  ├─ PositionSizer.Size()            → equal/strength_prop/fixed 权重
-  ├─ RiskController.Check()          → 单仓上限 + 持仓数 + 现金缓冲
-  └─ 返回 signals (Strength = 最终权重, Metadata.raw_strength = 原始 DSL 值)
-```
-
-**组件层级**:
-- `pkg/ai/expression/` — DSL 解析器 + AST + 求值器 (cs_rank/cs_zscore/cs_neutralize/ts_*)
-- `pkg/strategy/expression/signal.go` — SignalGenerator: DSL → Signal
-- `pkg/strategy/expression/sizing.go` — PositionSizer: Signal → 权重
-- `pkg/strategy/expression/risk.go` — RiskController: 权重 → 风控过滤
-- `pkg/strategy/expression/data_provider.go` — OHLCVDataProvider: bars → DataProvider
-- `pkg/strategy/expression/strategy.go` — ExpressionStrategy: 组合以上为 strategy.Strategy
+> DSL 表达式 → 策略的端到端流水线。**单一事实源见 [SPEC.md §ExpressionStrategy](SPEC.md)**（GenerateSignals Pipeline + 组件职责表），本文不再重复（消除双写）。
 
 ---
 
@@ -912,89 +878,7 @@ SPA 的部署在 AUD-32 补上（宿主 8080）后才执行的删除，所以没
 >
 > 保留本节仅供溯源。**现行决策以 [adr/](adr/) 中未废弃的条目为准。**
 
-### 顶层定位：一个产品，两个对等工作面，一个共享底座
-
-原 Quant Lab 的 Go 后端 + PG + 微服务**降维为共享底座**（数据面 + 计算面 + 编排面），其上承载两个**对等工作面**：
-
-```
-        ┌──────────────────────┐   ┌──────────────────────
-        │  工作面 1：纵向深研    │   │  工作面 2：横截面选股  │
-        │  1 股 × N 季度        │   │  N 股 × 1 因子        │
-        │  产出：研究档案        │   │  产出：交易信号        │
-        └──────────┬───────────┘   └──────────┬───────────┘
-                   │      飞轮闭环 ①②↔③④      │
-                   └───────────┬───────────────
-                               ▼
-        ┌──────────────────────────────────────────────────┐
-        │  共享底座 = 原 Quant Lab 全部能力（降维为 L0-L2）   │
-        └──────────────────────────────────────────────────┘
-```
-
-- **工作面 1（纵向深研）**：EquityDeep —— 1 股 × N 季度，季度频，产出研究档案，是本产品的**首要高层工作面**。
-- **工作面 2（横截面选股）**：原横截面能力 —— N 股 × 1 因子，日频，产出交易信号，与工作面 1 **对等**，本期纳入规划。
-
-### 按数据性质分区（"不重复存储"的机制）
-
-**不重复存储不靠约定，靠物理归属**——每类数据只有一个权威位置：
-
-| 类别 | 内容 | 可重建？ | 唯一权威位置 | 其他侧副本 |
-|---|---|---|---|---|
-| A | 原始源响应（含中文原始字段名） | 可（重抓） | PG `ingest.raw`（`content_hash` 唯一键） | ❌ 仅持 `content_hash` |
-| B | 规范化数据（OHLCV / 财报字段 / 日历 / 公司行为） | 可（从 A 重算） | PG `market.*` | ❌ 只读证据 API |
-| C | 派生计算结果（因子 / 回测 / IC） | 可（从 B 重算） | PG `quant.*` + Redis `factor_cache` |  只读计算 API |
-| D | 研究叙事（结论 / 疑点的自然语言正文） | **不可**（人的判断） | **Vault markdown**（事实源） | — 本身即事实源 |
-| E | 研究结构化状态（结论/疑点字段 + citations） | 可（从 D 确定性投影） | PG `research.*`（**投影，非权威**） | 权威在 D；可 DROP 重建 |
-
-**判据**："重复存储" = 同一份数据有两个都可写的位置并导致口径漂移。本方案中：A/B/C 物理唯一于 PG，工作面 1 运行期按需读 API、**零本地副本**；D 物理唯一于 vault markdown；E 是 D 的**确定性投影**（`equitydeep sync`，非 LLM 生成），单一写者、可丢弃、冲突时以 markdown 为准 —— 性质等同索引 / 物化视图，存在理由仅是可做跨层 SQL join。
-
-### 四层架构与单向依赖
-
-```
-L3 体验面   Obsidian Vault（工作面1） | Vue SPA（工作面2） | Hermes Agent（编排）
-L2 编排面   Research Pipeline（纵向） | Research Engine（横截面） | MCP Tool Bridge
-L1 计算面   因子引擎 | 回测引擎 | 验证门禁 L1-L5 | 风控·执行
-L0 数据面   ingest.raw | market.* | quant.* | research.* | Evidence API   ← 唯一事实源
-```
-
-原则：**L0 唯一数据面 + 单一写者 + 单向依赖（L3→L2→L1→L0）+ 可重建性标注 + 契约优先**。
-
-### EquityDeep 形态变更（允许有 DB / Docker，但零数据副本）
-
-| 项 | ADR-021（原） | ADR-022（本决策） |
-|---|---|---|
-| DB | 无（"文件系统即数据库"） | **接入共享 PostgreSQL 的 `research` schema**（不新建实例） |
-| Docker | 无 | **`equitydeep-research` worker 容器**加入 docker-compose |
-| 取数 | 自行调用 akshare | **严格单一入口**：经 L0 只读证据 API；akshare adapter 归入 L0 |
-| 原始快照 | vault 内 `snapshots/*.json` | 迁至 PG `ingest.raw`；vault 只留 `{content_hash, pointer}` |
-| 叙事 | `_profile.md` | **不变** —— 仍是事实源，Obsidian 仍是工作面 |
-| 结构化状态 | `_profile.json` 镜像文件 | 升级为 PG `research.*` 投影（JSON 保留为导出格式） |
-| **不变** | Python 3.11 / 7-stage 固定流程 / 逐数溯源 / 三硬承诺 / 非目标红线 | **全部保留**（产品价值本体） |
-
-### 证据服务升级为平台能力
-
-Citation 从"文件路径 + 模糊字符串"升级为**不可变内容坐标**：
-
-```
-citation = { source, dataset, key, as_of, content_hash }
-GET /api/evidence/{content_hash}  →  ingest.raw 中的唯一原始记录（不可变）
-```
-
-这条同时**在架构层面消除** ODR-047 发现的 P0 缺陷：回查脚本的校验对象从"文本子串"变为"声明（citation 元组）+ JSON Pointer 精确解析"，假阳性在机制上不可能发生。
-
-### 飞轮闭环是"一个产品"的判据
-
-```
-① 纵向深挖 → 产出可检验假设
-② 横截面验证 → 假设变因子 → 全市场回测 → IC/Sharpe
-③ 结果回流 → 修正/限制原结论（证伪也是收益）
-④ 异常触发 → 横截面命中异常板块 → 触发纵向深挖 → 回到 ①
-```
-
-没有这个闭环，产品退化为两个独立工具；有了它，**护城河是积累起来的研究资产（档案 + 因子 + 对应关系）**，而非任何单点技术。
-
-**边界**：EquityDeep 不产出信号或目标价；档案是**审查材料与因子假设来源**，不是信号源。
-
-**执行路线（P0-P5）**：P0 顶层定义 → P1 底座契约 → P2 工作面 1 跑通 → P3 计算面补齐 → P4 飞轮打通 → P5 横截面工作面对齐。详见 [TASKS.md](TASKS.md) Sprint 8。
+> 本节正文已删（数据归属 A-E 分区表与 [SPEC.md §数据归属](SPEC.md) 双写、定位已被 ADR-023 取代）。完整原文见 [archive/superseded-adr/adr-022](archive/superseded-adr/adr-022-unified-research-platform.md)。
 
 ---
 
@@ -1030,7 +914,7 @@ pkg/tools/
 - **共存适配器**: BacktestTool 委托给现有 `contracts.BacktestRunner`，不破坏现有 agent
 - **factory 注入**: Registry 通过 `ServerDeps.ToolsRegistry` 注入，无全局实例
 - **builtin/ 子包隔离**: `pkg/tools/` 保持纯净（只有接口），具体实现依赖在 `builtin/`
-- **19 个 builtin tool**（ODR-046 扩展后 + ODR-057 新增 `research.profile`）: backtest.run | factor.compute | factor.evaluate | validate_factor | compute_factor_ic | list_factors | list_strategies | save_factor | save_strategy | get_strategy_lineage | walk_forward_validate | get_market_regime | summarize_backtest | data.ohlcv | data.stocks | data.fundamentals | strategy.list | strategy.get | research.profile
+- **builtin tool 清单以运行时 `GET /api/tools` 为准**（ODR-046 扩展 + ODR-057 新增 `research.profile`；本文不硬编码数量与枚举，避免漂移 —— 各文档曾出现 18/19/20/21 不一致）
 
 > **DR-1 修复 (ODR-047)**: 本节原称「8 个 builtin tool」，与 `pkg/tools/builtin/` 实际注册的 18 个不符（已逐一核对 `Name()` 实现）。数量以本文为准，新增工具需同步更新此列表。
 
@@ -1122,38 +1006,7 @@ var bar market.OHLCV
 
 ### 服务架构
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         AI Research Service (:8086)                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐│
-│  │  Research   │  │  Generate   │  │  Validate   │  │      Evolve         ││
-│  │   Agent     │  │   Agent     │  │   Agent     │  │      Agent          ││
-│  │             │  │             │  │             │  │                     ││
-│  │ • 因子假设   │  │ • 表达式生成 │  │ • 批量回测   │  │ • 遗传算法          ││
-│  │ • 文献理解   │  │ • 代码生成   │  │ • IC 分析   │  │ • 漂移检测          ││
-│  │ • 制度学习   │  │ • 模板填充   │  │ • 过拟合检测 │  │ • 自动重训          ││
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘│
-│         │                │                │                    │          │
-│         └────────────────┴────────────────┘                    │          │
-│                                   │                            │          │
-│                    ┌──────────────┴──────────────┐    ┌────────┴─────────┐│
-│                    │      Expression Engine      │    │     Gene Pool    ││
-│                    │      (DSL + AST)            │    │   (PG + JSONB)   ││
-│                    └──────────────┬──────────────┘    └──────────────────┘│
-│                                   │                                        │
-└───────────────────────────────────┼────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      Analysis Service (:8085) — Existing                     │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐│
-│  │   Backtest  │  │   Batch     │  │   Factor    │  │    Strategy         ││
-│  │   Engine    │  │   Engine    │  │  Analyzer   │  │    Registry         ││
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘│
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+AI 能力不由独立服务承载——`cmd/ai` (:8086) 已于 2026-09-18 删除（TASKS P2-5，零调用方）。现状链路：**外部 Hermes Agent → MCP 工具层（`/api/tools`，`cmd/analysis` :8085）→ 能力实现**（回测 / 因子 / 验证器链）。`pkg/ai/` 内的 Go-native agent（Generate/Validate/Evolve）已在 [ODR-046](archive/odr/odr-046-hermes-agent-integration-decision.md) 标记 deprecated，保留向后兼容。
 
 ### 核心组件
 
@@ -1258,26 +1111,4 @@ type FactorExpression struct {
 | L4 Walk-Forward | 过拟合检测 | 5年/全市场 | < 10min | 4% |
 | L5 人类审核 | 最终决策 | — | — | 1% |
 
-### 前端 AI 模块 — ❌ DEPRECATED (ODR-045, 2026-07-02)
-
-> 以下组件 P1-13 创建 (ODR-017) 后 S7-P2-7 作为死代码删除 (ODR-043, commit `d7c2a38`)。
-> `web/src/components/ai/` 目录已不存在。Hermes Agent 自然语言交互替代 (ODR-046)。
-> 不要重建这些组件 — 研究主路径现为 Hermes → MCP bridge (`pkg/tools/builtin/`, 19 工具) → Go 后端。
-
-```
-web/src/components/ai/     # ❌ 目录已删除 (S7-P2-7)
-├── FactorLab.vue           # ❌ 已删除 (was 362 lines)
-├── StrategyWorkshop.vue    # ❌ 已删除 (was 297 lines)
-├── EvolutionObs.vue        # ❌ 已删除 (was 304 lines)
-├── FactorCard.vue          # ❌ 已删除 (was 233 lines)
-├── StrategyCard.vue        # ❌ 已删除 (was 225 lines)
-├── GenealogyTree.vue       # ❌ 已删除 (was 182 lines)
-└── FitnessChart.vue        # ❌ 已删除 (was 254 lines)
-```
-
-### 新增页面 — ❌ DEPRECATED
-
-```
-web/src/pages/
-└── AIResearch.vue          # ❌ 已删除 (was 36 lines, never registered in router)
-```
+> 前端 AI 组件（`web/src/components/ai/` 9 个 Vue 组件 + `AIResearch.vue`）已于 S7-P2-7 作为死代码删除（ODR-045，commit `d7c2a38`）；研究主路径现为 Hermes → MCP bridge（`pkg/tools/builtin/`）→ Go 后端。**不要重建。**
