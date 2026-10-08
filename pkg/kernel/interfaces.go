@@ -94,45 +94,17 @@ var BootOrder = []string{
 	"msgbus",
 }
 
-// ─── Contract stubs（K1 实现替换，勿在此写实现逻辑） ────────────────
-
-// StandardKernel 是 K1 内核实现的契约 stub。
-type StandardKernel struct{}
-
-// Boot 按 BootOrder 顺序启动全部模块。
-func (k *StandardKernel) Boot(ctx context.Context) error { panic("contract stub: not implemented") }
-
-// Shutdown 按 BootOrder 逆序关停全部模块。
-func (k *StandardKernel) Shutdown(ctx context.Context) error { panic("contract stub: not implemented") }
-
-// Module 按名检索已装配的模块。
-func (k *StandardKernel) Module(name string) (Module, error) {
-	panic("contract stub: not implemented")
-}
-
-// Clock 返回内核时钟。
-func (k *StandardKernel) Clock() clock.Clock { panic("contract stub: not implemented") }
-
-// Bus 返回消息总线。
-func (k *StandardKernel) Bus() msgbus.MsgBus { panic("contract stub: not implemented") }
-
-// Store 返回事件存储。
-func (k *StandardKernel) Store() eventstore.EventStore { panic("contract stub: not implemented") }
-
-// BaseModule 是模块实现的契约 stub。
-type BaseModule struct{}
-
-// Name 返回模块名。
-func (m *BaseModule) Name() string { panic("contract stub: not implemented") }
-
-// Init 本地构造与配置校验。
-func (m *BaseModule) Init(ctx context.Context) error { panic("contract stub: not implemented") }
-
-// Start 连接外部资源并启动。
-func (m *BaseModule) Start(ctx context.Context) error { panic("contract stub: not implemented") }
-
-// Stop 幂等关停。
-func (m *BaseModule) Stop(ctx context.Context) error { panic("contract stub: not implemented") }
+// ─── K1 实现落点 ─────────────────────────────────────────────────
+//
+// K0 切片 1 在此处冻结的 StandardKernel / BaseModule 的 panic stub 已由
+// K1 切片 2 替换为真实实现，**本文件从此只保留接口契约与守卫**，实现
+// 全部搬到 kernel.go（StandardKernel / NewKernel / BaseModule / NoopModule）
+// 与 adapters.go（clock/msgbus/eventstore 的薄包装 Module）。
+//
+// 这样切分是为了让「契约文件」与「实现文件」的改动面互不污染：改实现不必
+// 动契约文件，契约评审只看 interfaces.go / topics.go 与下面的守卫。
+//
+// 下面的编译期守卫原样保留（含方法表达式守卫——删接口方法即编译失败）。
 
 // ─── 编译期合规检查 + 方法存在性守卫 ────────────────────────────────
 //

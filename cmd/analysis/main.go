@@ -258,6 +258,15 @@ func main() {
 	// exactly once, here, before the router exists.
 	applyGinMode(v, logger)
 
+	// ─── 内核影子启动（K1 切片 2，渐进接管第一步）─────────────────────
+	// 位置理由（裁决）：放在现有装配块（ServerDeps 构造）之后、HTTP 服务
+	// 起来之前 —— ① 此刻 store 及其连接池已就绪（影子内核复用 store.DB()）；
+	// ② 现有装配块（initStore…deps）保持视觉与语义连续、**一行不改**；
+	// ③ 仍在 startHTTPServer 之前，kernel.boot 属启动期事件。
+	// 影子期失败不阻断服务（见 kernel_shadow.go 的失败策略）；现有装配的
+	// 每一行都不受这段新增代码影响。K2+ 才把原装配搬进内核 Boot 序列。
+	shadowKernel := startShadowKernel(store, logger)
+
 	router := buildRouter(authSvc, v, logger)
 	registerRoutes(router, deps)
 	registerAlertRoutes(router, alertLoop)
@@ -267,6 +276,15 @@ func main() {
 
 	sig := waitForShutdown()
 	logger.Info().Str("signal", sig.String()).Msg("Shutdown signal received; beginning graceful drain")
+
+	// ─── 内核影子关停（K1 切片 2，渐进接管第一步）─────────────────────
+	// 必须早于 gracefulShutdown：后者 phase 4 会 store.Close() 关掉连接池，
+	// 而 kernel.shutdown 要落 audit.message_log —— 落库时 pool 必须还活着。
+	// 内核内部顺序：先发 kernel.shutdown（msgbus/eventstore 仍运行），再按
+	// BootOrder 逆序停（msgbus 最先停、eventstore 最后停）。见 kernel.go 的
+	// 「时序裁决」注释与其单测 TestShutdownPublishesBeforeStoppingMsgBus。
+	stopShadowKernel(shadowKernel, logger)
+
 	gracefulShutdown(srv, ds.JobService, alertManager, store, logger)
 }
 

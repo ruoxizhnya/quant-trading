@@ -34,7 +34,12 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：`go build ./...` 通过；每模块合规测试通过；**独立可运行判据自证**（任取一模块，其四类契约能让不了解其他模块的 agent 说清「实现什么接口 / 写哪张表 / 发收什么消息 / 过什么测试」）；破坏验证——删某模块一个接口方法 → 其合规测试变红。
 - **⑥ 边界**：只做 11 个模块 × 四类契约定义，不做任何实现。
 
-### K1 · 内核骨架（P1）⬜（前置：K0）
+### K1 · 内核骨架（P1）🔶 切片 1+2 完成，接管 setup.go 待做（前置：K0）
+
+> **切片 1 ✅（`b33afd7`）**：clock / msgbus / eventstore 三模块实现（63 测试含签名变更）。
+> **切片 2 ✅（2026-10-08）**：`StandardKernel` 真实现（Boot 按 BootOrder / 失败逆序回滚 / Shutdown 逆序幂等 + 关停消息先发再停 / Module 检索）+ 适配包装 `pkg/kernel/adapters.go`（Clock/MsgBus/EventStore 三真模块）+ **`main.go` 影子启动**（3 真模块 + 7 占位，**现有装配一行未改**）+ 真环境验证（服务起 + `/health` 200 + `audit.message_log` 实测 kernel.boot/shutdown 落库）。
+> **待做（高风险，单独切片）**：把现有组件（backtest.Engine / risk / live / alert / store …）包装成 Module，让 Kernel 真正接管 `setup.go` 的装配顺序；接管后影子启动的「失败不阻断」改为 fail-fast。
+> 关键裁决（已写入代码注释）：适配包装放 `pkg/kernel` 而非 cmd 层；**Shutdown 先发 kernel.shutdown 再逆序停**（否则关停事件落不了库）；影子关停放 `gracefulShutdown` **之前**（pool 要先活着才能落库）；服务级内核用 LiveClock（VirtualClock 是 per-回测-run 的）。
 
 - **① 目标**：kernel + clock + msgbus（命名注册表 + 同步分发）+ eventstore 落地，`cmd/analysis/setup.go` 的 831 行硬编码装配被 `Kernel.Boot/Shutdown` 取代，`audit.message_log` 落库（D4）。
 - **② 上下文**：蓝图 §4.1 形态 + §4.2 生命周期（Boot/Shutdown 顺序契约）+ §5 矩阵；`cmd/analysis/setup.go`（当前硬编码）；K0 冻结的契约。
