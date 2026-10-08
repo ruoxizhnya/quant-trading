@@ -164,6 +164,16 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ---
 
+### K0-P2-3 · 两项签名级契约变更待裁决 ⬜（K1 实现时撞出，建议 K2 前定）
+
+> K0 审查（依赖/文档层）未发现、实现时才暴露的两个签名级缺陷。K1 已用 workaround 绕开，但**越晚改调用方越多**，建议不晚于 K2 完成前裁决。
+
+- **① `Handler` 是否改为返回 error**：现契约 `type Handler func(ctx, msg)` **无 error 返回**（`pkg/msgbus/interfaces.go`），K1 按「panic 原样传播、不吞不重试不并发」实现（符合 fail-loud 哲学）。若要「一个订阅者失败不拖累其他 + 聚合上报」，须改签名为 `func(ctx, msg) error` —— 届时需同步改 `Publish` 的分发循环与全部订阅方。
+- **② `Publish` 是否显式接收 ts**：现签名 `Publish(topic, payload)` 无 ts 参数；回测里若自取 `time.Now()`，落库 ts 是墙钟 ⇒ 审计无法与虚拟时间比对（毒化 BusTap）。K1 用 Clock 注入绕开（`NewSyncBusWithClock(tap, clk)` 专供回测注入 VirtualClock），但**理想契约是 Publish 由内核注入 ts**。
+- **已解决的架构模式（记录复用）**：`msgbus` ↔ `eventstore` 的 import 环（eventstore 必须 import msgbus 的 `Message`）用**消费方定义窄接口**绕开 —— `msgbus.Tap { Append(Message) error }`，`eventstore.EventStore` 结构化满足，并由 `var _ msgbus.Tap = (*eventstore.PGEventStore)(nil)` 钉住。这是 Go 惯用法，值得在其他跨模块依赖处复用（与 topics.go 落位修正是同一类问题）。
+
+---
+
 ## 维护本文件
 
 - 新增 task 必须按 [AGENTS.md §8.5](../AGENTS.md) 写全六字段（目标/上下文/要求/约束与非目标/验收/边界）。
