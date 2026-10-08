@@ -20,7 +20,10 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 > **依赖主线：K0 → K1 → K2 → {K3, K5, K6, K7}；K4 独立（只依赖 K1 的 exec-engine 挂点）。**
 > K0 是所有并行开发的**硬前提**（契约先行冻结，见蓝图 §5.1）。K0 完成后，K3/K4/K5/K6/K7 可各自交一个独立 agent 并行开发。
 
-### K0 · 契约冻结（P0）⬜ —— 当前最优先
+### K0 · 契约冻结（P0）🔶 —— 切片 1 已完成（2026-10-08，试金石派工）
+
+> **切片 1 ✅（2026-10-08）**：kernel / clock / msgbus / eventstore 四包契约 + topics 命名注册表 + `audit.message_log` DDL + 合规测试已落地（10 文件 905 行，独立 agent 派工 + 验收方独立复核 + 双方各做破坏验证）。**切片 2 ⬜**：其余 7 模块（data-engine / portfolio / risk-engine / exec-engine / strategy-runtime / indicators / exec-algo）四类契约 + `quant.*` 7 张表 DDL。
+> 落地时的三个裁决（已写入代码注释）：BootOrder 为 **10 元素**（kernel 是装配者不进序列）；topics.go 落位 `pkg/msgbus`（蓝图笔误修正——Go 包级依赖全量，放 kernel 侧成环）；DDL 补 `CREATE SCHEMA IF NOT EXISTS audit`。
 
 - **① 目标**：把 11 个内核模块的四类契约写死并冻结，作为后续所有并行开发的「宪法」。
 - **② 上下文**：蓝图 §5 模块矩阵 + §5.1 模块边界契约（`docs/design/kernel/`）；现有接口样板 `pkg/strategy/interfaces.go`（4 子接口 + 编译期合规检查 + `interfaces_compliance_test.go`）、`pkg/marketdata/provider.go`、`pkg/live/engine.go`（Broker/DataFeed）、`pkg/domain/types.go`（RiskManager）；契约落点 `contracts/`（已存在）。
