@@ -84,6 +84,14 @@ var topicRegistry = []struct {
 	{msgbus.TopicRunDone, "TopicRunDone"},
 	{msgbus.TopicKernelBoot, "TopicKernelBoot"},
 	{msgbus.TopicKernelShutdown, "TopicKernelShutdown"},
+	// ─── K0 切片 2 追加的 7 个 topic ───────────────────────────────
+	{msgbus.TopicRiskOrderVerdict, "TopicRiskOrderVerdict"},
+	{msgbus.TopicExecOrderRejected, "TopicExecOrderRejected"},
+	{msgbus.TopicPortfolioFilled, "TopicPortfolioFilled"},
+	{msgbus.TopicReconDiff, "TopicReconDiff"},
+	{msgbus.TopicStrategyStateSaved, "TopicStrategyStateSaved"},
+	{msgbus.TopicIndicatorWarmupDone, "TopicIndicatorWarmupDone"},
+	{msgbus.TopicExecAlgoChildOrder, "TopicExecAlgoChildOrder"},
 }
 
 // frozenTopicValues 是 K0 切片 1 冻结的「常量名 → 值」映射。
@@ -97,6 +105,25 @@ var frozenTopicValues = map[string]string{
 	"TopicRunDone":          "run.done",
 	"TopicKernelBoot":       "kernel.boot",
 	"TopicKernelShutdown":   "kernel.shutdown",
+	// ─── K0 切片 2 追加的 7 个 topic ───────────────────────────────
+	"TopicRiskOrderVerdict":    "risk.order_verdict",
+	"TopicExecOrderRejected":   "exec.order_rejected",
+	"TopicPortfolioFilled":     "portfolio.filled",
+	"TopicReconDiff":           "recon.diff",
+	"TopicStrategyStateSaved":  "strategy.state_saved",
+	"TopicIndicatorWarmupDone": "indicator.warmup_done",
+	"TopicExecAlgoChildOrder":  "execalgo.child_order",
+}
+
+// TestTopicRegistryCount 冻结注册表规模：切片 1 的 9 个 + 切片 2 追加的
+// 7 个 = 16。新增 topic 必须同步登记到 topicRegistry 与
+// frozenTopicValues，否则本测试红（防「加了常量忘了登记」）。
+func TestTopicRegistryCount(t *testing.T) {
+	const want = 16
+	if len(topicRegistry) != want {
+		t.Errorf("topicRegistry 有 %d 项, want %d（切片 1 的 9 个 + 切片 2 的 7 个）",
+			len(topicRegistry), want)
+	}
 }
 
 // TestTopicNamingConvention 强制全部 topic 常量匹配
