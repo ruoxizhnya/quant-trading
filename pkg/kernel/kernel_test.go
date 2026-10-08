@@ -239,6 +239,30 @@ func TestBootRollsBackOnInitFailure(t *testing.T) {
 	}
 }
 
+// ─── 2b. Boot 防重复闸门（与 Shutdown 幂等对称）───────────────────
+
+func TestBootRejectsSecondCall(t *testing.T) {
+	rec := &recorder{}
+	bus := &fakeBus{rec: rec}
+	k := newKernelWithFakes(rec, bus, nil)
+
+	if err := k.Boot(context.Background()); err != nil {
+		t.Fatalf("首次 Boot 应成功: %v", err)
+	}
+	before := rec.snapshot()
+
+	err := k.Boot(context.Background())
+	if !errors.Is(err, kernel.ErrAlreadyBooted) {
+		t.Fatalf("第二次 Boot 应返回 ErrAlreadyBooted，实际: %v", err)
+	}
+
+	after := rec.snapshot()
+	if len(after) != len(before) {
+		t.Fatalf("第二次 Boot 不得触发任何模块调用/发布：前 %d 条事件，后 %d 条\n前: %v\n后: %v",
+			len(before), len(after), before, after)
+	}
+}
+
 // ─── 3. Shutdown 逆序 ─────────────────────────────────────────────
 
 func TestShutdownStopsInReverseBootOrder(t *testing.T) {

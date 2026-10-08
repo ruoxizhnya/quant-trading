@@ -210,6 +210,17 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：删除 `registry.go` 后 `go build ./...` 与 `pkg/msgbus` 全部测试仍绿，且「新增常量未登记」会编译失败（不再只是测试红）。
 - **⑥ 边界**：只做这份双真相收敛，不动 topic 取值与 `Publish/Subscribe` 的校验语义。
 
+### K1/K2 实现审查发现（2026-10-08，设计层审查）
+
+> 审查通过与亮点记录：`kernel.go` 全生命周期逻辑正确（回滚只装成功的、回滚 error 丢弃理由已论证、Shutdown 先发后停时序）、`adapters.go` 包装设计论证完整、`kernel_shadow.go` 失败策略与关停时序清楚、`runtime.go` 失败立即停 + universe 过滤 + 横截面就绪门正确。**P1-1 已当场修复**（Boot 防重复闸门 + `ErrAlreadyBooted` + 测试 + 破坏验证，随审查提交）。
+
+| # | 问题 | 处理时机 |
+|---|---|---|
+| K1-P2-1 | **Boot 的 ctx 在 Boot 后立即 cancel**（kernel_shadow 的 20s timeout + defer cancel）：当前模块不保存 ctx 无影响，但未来模块若在 Start 里起 goroutine 依赖该 ctx 存活，会被抢先 Cancel | 接管时（内核应传长生命周期 ctx，或契约明示 ctx 仅限于 Boot 期间） |
+| K1-P2-2 | **回滚 error 被静默丢弃**：`rollbackLocked` 的 Stop error 直接丢弃（注释论证「避免掩盖根因」），但 Stop 失败=资源泄漏，无人知晓 | 接管时（至少 log 或包进返回 error 的 message） |
+| K1-P2-3 | **eventstore 模块的资源归属未定**：`EventStoreModule.Stop` 不关 pool（归 pkg/storage 统一 Close）——影子期正确，但接管后必须裁决「pool 是内核资源（模块 Stop 关）还是应用层资源（保持现状）」 | 接管时（与 setup.go 的 gracefulShutdown 归属一起裁决） |
+| K1-P2-4 | **模块回调内核会死锁**：`Boot/Shutdown` 全程持 `k.mu`；`Clock()/Bus()/Store()` 不加锁安全，但模块若在 Init/Start/Stop 里调 `Module()`（加锁）会死锁。注释已声明「模块拿不到内核引用」 | 作为**未来模块约束**登记：模块不得在生命周期方法内回调 `Module()` |
+
 ---
 
 ## 维护本文件

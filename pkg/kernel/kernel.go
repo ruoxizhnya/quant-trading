@@ -44,6 +44,12 @@ var (
 
 	// ErrBootFailed：某个模块 Init 或 Start 失败；Boot 已逆序回滚。
 	ErrBootFailed = errors.New("kernel: 模块启动失败")
+
+	// ErrAlreadyBooted：Boot 已调用过（无论成败）。生命周期只走一遍——
+	// 第二次 Boot 会二次 Init/Start 所有模块（模块未必可重入）并让 booted
+	// 翻倍（Shutdown 便会对同一模块 Stop 两次）。需要重试时构造新内核实例
+	// （构造极轻），而不是重放同一个实例的状态机。
+	ErrAlreadyBooted = errors.New("kernel: Boot 已调用过（生命周期只走一遍；重试请构造新实例）")
 )
 
 // StandardKernel 是装配后的内核实体（取代 setup.go 的手工编排）。
@@ -73,6 +79,10 @@ type StandardKernel struct {
 	booted []string
 	// shutdown 标记本内核是否已执行过 Shutdown（幂等闸门）。
 	shutdown bool
+	// bootAttempted 标记 Boot 是否被调用过（防重复闸门，与 shutdown 对称）。
+	// 注意语义是「调用过」而非「成功过」：失败后状态已被回滚到干净态，但
+	// 重放同一实例仍被拒绝——重试的正确姿势是构造新实例（见 ErrAlreadyBooted）。
+	bootAttempted bool
 }
 
 // NewKernel 注入三个核心部件构造内核。
@@ -134,6 +144,13 @@ func (k *StandardKernel) Register(m Module) error {
 func (k *StandardKernel) Boot(ctx context.Context) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+
+	// 防重复闸门（与 Shutdown 的幂等对称）：第二次 Boot 不做任何事、不碰
+	// 任何模块，直接拒绝——细节与理由见 ErrAlreadyBooted。
+	if k.bootAttempted {
+		return ErrAlreadyBooted
+	}
+	k.bootAttempted = true
 
 	for _, name := range BootOrder {
 		m, ok := k.modules[name]
