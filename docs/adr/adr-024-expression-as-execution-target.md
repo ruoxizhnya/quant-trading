@@ -1,10 +1,48 @@
 # ADR-024: 策略执行载体是表达式，LLM 生成的代码只是 artifact
 
-> **Status**: Accepted
+> **Status**: Accepted —— **Superseded (部分) by [ADR-029](adr-029-ai-layer-2026-agent-practice-alignment.md)**（2026-10-06）
 > **Date**: 2026-09-17
 > **Category**: Architecture
-> **Related**: [ADR-023](adr-023-ai-experimenter-lab.md) · [ADR-001](adr-001-plugin-loading.md) · [ADR-015](adr-015-ai-agent-architecture.md) · [TASKS.md](../TASKS.md) P0-5
+> **Related**: [ADR-023](adr-023-ai-experimenter-lab.md) · [ADR-001](adr-001-plugin-loading.md) · [ADR-015](adr-015-ai-agent-architecture.md) · **[ADR-029](adr-029-ai-layer-2026-agent-practice-alignment.md)** · [TASKS.md](../TASKS.md) P0-5
 > **Upstream**: 用户（若曦）2026-09-17 决策（P0-5 修法三选一）
+
+> ### ⚠️ 2026-10-06 部分被取代（ADR-029 §2）
+>
+> **被取代的一条**：「表达式是**唯一**执行载体」→ 改为**双轨**。
+> 轨道 A 仍是表达式；轨道 B 是 **WASM（wazero）策略插件**，用于 ADR-028 附录 B
+> 量化的 5 类硬缺口（EWMA/RMA/IIR 递推、OBV 等累积量、最大回撤、任意长度 streak、
+> 线性离散状态方程）—— 这些在表达式 DAG 里**无法表达**（DAG 不能引用自身历史输出）。
+>
+> **完整保留的三条**：
+> - **「起点确定 / 可审阅 / 可复现」三条理由** —— 轨道 B 用 **host API 能力隔离**满足
+>   （WASM 实例只能调宿主显式导入的函数，`get_bar(t_offset > 0)` 直接 trap，
+>   前视在**物理上不可能**）。这比本 ADR 依赖的静态审阅**更强**。见 ADR-029 §3
+> - **「不做 `plugin.Open`」** —— 完整保留。wazero 是纯 Go、无 CGO、**支持 Windows**，
+>   恰好绕开本 ADR 拒绝 plugin 的核心理由（Windows 不支持 `-buildmode=plugin`）。
+>   本 ADR 对 plugin 的三条批评（平台限制 / 依赖版本逐字节一致 / 符号冲突难排查）
+>   **对 WASM 全部不成立**
+> - **「LLM 生成代码是 artifact」在轨道 A 下不变** —— 轨道 A 跑的仍是表达式，
+>   代码只真编译校验不执行
+>
+> **判定规则**：默认走轨道 A；仅当意图属于轨道 B 适用域**且**轨道 A 已证明无法表达
+> （parse 失败或需要附录 B 的硬缺口能力）才走 B。见 ADR-029 §2。
+>
+> **同时收口**：本 ADR 与 [ADR-007](adr-007-ai-sandbox.md) Phase 3（「Optional: WASM
+> sandbox via `wazero`」）悬置半年的矛盾 —— ADR-007 状态 Accepted 且其 Context 针对
+> 「compiles+**runs** it」，与本 ADR「不加载不执行」冲突，但两者都活着。
+> ADR-029 把 Phase 3 转为轨道 B 主路径，矛盾收口。
+>
+> **下列正文保持原样，作为 2026-09-17 时点的判断记录。**
+
+> ### 🔗 2026-10-08 对齐：与「四层表达力」模型的关系（D2 裁决）
+>
+> 上文（2026-10-06 注记）的「双轨」需与 2026-10-08 拍板的**四层表达力模型**对齐（见 [design/kernel/target-architecture-modular-kernel.md](../design/kernel/target-architecture-modular-kernel.md) §6）：
+>
+> - **轨道 A 不是只有 L1 表达式** —— 它内部含三层：L0 固定模板 / L1 表达式 DSL / **L2 确定性有状态算子**（EWMA / RMA / IIR / Kalman，作为 DSL 扩展算子，可枚举、warmup 可静态推导、可白盒校验）。
+> - **轨道 B = L3（WASM）**，仅在 **L2 确定性算子也无法表达**时（自定义状态机、非标准滤波）才启用。
+> - **对上文「附录 B 的 5 类硬缺口全部划给轨道 B」的修正**：其中 EWMA / RMA / IIR / Kalman（线性离散状态方程）**能用 L2 确定性算子表达**，按 D2「能用 L2 表达的不允许上 L3」应**优先做 L2 算子**，不直接上 WASM；只有 L2 也表达不了的才落到轨道 B。
+>
+> 即：判定规则细化为 **L0 → L1 → L2 → L3（轨道 B）逐层升级**，每层都先问「上一层能不能做」。这维持本 ADR「自由度是负债」的原始精神——表达力逐层放大，但每层都有前置闸口。
 
 ---
 

@@ -8,7 +8,7 @@ verified-by: AUD-30 索引表与「已取代」尾注校准（2026-09-22）—�
 
 > **Location:** `docs/adr/` — architectural ADR files | `docs/archive/odr/` — operational ODR files
 > **Owner:** 龙少 (Longshao) — AI Assistant
-> **Version:** 3.22.0
+> **Version:** 3.23.0
 > **Created:** 2026-03-24
 
 ---
@@ -43,6 +43,10 @@ verified-by: AUD-30 索引表与「已取代」尾注校准（2026-09-22）—�
 | [ADR-024](adr/adr-024-expression-as-execution-target.md) | **策略执行载体是表达式，LLM 生成的代码只是 artifact** — 意图类型 → 确定性默认表达式映射；不做 `plugin.Open`（Windows 不支持 / 依赖版本须一致 / 违背 ADR-023）；value·quality 缺基本面数据时明确失败而非给假数字 | **Accepted** | 2026-09-17 |
 | [ADR-025](adr/adr-025-auth-exposure-publish-layer.md) | **P0-4 鉴权豁免的判据从「绑定地址」换成「发布层」** — 容器必须绑 `0.0.0.0` 才能被发布端口转发，于是新增逐字匹配的显式声明 `AUTH_INSECURE_EXPOSURE=loopback-published`；**基础不变量未放松**（改由静态检查 3c + 运行时 netstat 断言守）；本地默认 open-access，对外发布必须配 `JWT_SECRET` | **Accepted** | 2026-09-25 |
 | [ADR-026](adr/adr-026-first-admin-bootstrap-and-spa-auth.md) | **首个管理员自助引导 + SPA 鉴权** — 公开的 `POST /api/auth/bootstrap`（空表即门，事务级咨询锁，窗口一次性永久关闭）+ 公开的 `GET /api/auth/status`（SPA 无凭据时定分支）；前端补 token 注入 / 三态 401 刷新 / 路由守卫 / 登录页，**open-access 形态逐字节不变**；白名单与路由表由 AST 护栏机器对齐 | **Accepted** | 2026-09-25 |
+| [ADR-027](adr/adr-027-modular-decomposition-to-independent-services.md) | 模块化拆解为独立服务 — 簇①回测核心判定不拆 / 簇②AI 链路拆 ai-service / 簇③只读薄壳归位；数据 A/B 二分；8 步落地顺序；服务数 5→7 | **Proposed** | 2026-10-06 |
+| [ADR-028](adr/adr-028-tiered-extension-of-strategy-expression-capability.md) | 策略表达能力分层扩展 — DSL 分层 + 算子声明契约（含 `state` 字段预留）；定位由 ADR-029 调整为「轨道 A 的能力扩展」 | **Proposed** | 2026-10-06 |
+| [ADR-029](adr/adr-029-ai-layer-2026-agent-practice-alignment.md) | AI 层 2026 agent 实践对齐 — 双轨执行载体（轨道 A 表达式 / 轨道 B WASM）；确定性状态图；上下文经济；可观测性 | **Proposed** | 2026-10-06 |
+| [ADR-030](adr/adr-030-draft-observed-improvements.md) | 观察到的改进点清单（vnpy/nautilus/本项目三框架对比源码取证，OBS-01~15）—— 不取代任何 ADR，仅登记 | **Draft（未裁决）** | 2026-10-07 |
 
 ---
 
@@ -161,8 +165,9 @@ When to create an ODR:
 ODR template: see `docs/archive/odr/odr-001-document-cleanup.md` for the canonical example.
 
 ---
-_Last updated by: AI Assistant — 2026-09-25 (AUD-52 收尾：新增 ADR-026 —— 首个管理员自助引导 + SPA 鉴权；顺带更新下方累计数与索引版本)
-_ADR 累计 26 条: 架构 21 (ADR-001~016 + ADR-022~026) + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020) + 研究层 1 (ADR-021); 其中 ADR-014 由 ADR-020 §6 取代、ADR-021 与 ADR-022 均由 ADR-023 取代（ADR-022 从未实施，仅存于 archive/superseded-adr/）
+_2026-10-08 状态变更 (本次): ADR-027/028/029/030 补录入索引（此前已在 `adr/` 但未入索引，属索引漂移修复）—— 027 模块化拆解为独立服务（Proposed）/ 028 表达能力分层扩展（Proposed）/ 029 AI 层 2026 对齐（Proposed）/ 030 观察改进点清单（Draft，未裁决）；四者均未提交（git untracked），ADR-031（模块化内核目标架构）待设计文档 `design/kernel/target-architecture-modular-kernel.md` 拍板后再立；ADR.md index 3.22.0 → 3.23.0 (ADR 26 → 30)_
+_Last updated by: AI Assistant — 2026-10-08 (补录 ADR-027~030 索引)_
+_ADR 累计 30 条: 架构 25 (ADR-001~016 + ADR-022~030) + 业务 1 (ADR-017) + 测试 1 (ADR-018) + 服务合并 1 (ADR-019) + 重构 1 (ADR-020) + 研究层 1 (ADR-021); 其中 ADR-014 由 ADR-020 §6 取代、ADR-021 与 ADR-022 均由 ADR-023 取代（ADR-022 从未实施，仅存于 archive/superseded-adr/）；ADR-027/028/029 为 Proposed、ADR-030 为 Draft，均尚未裁决
 _ODR 累计 65 条: Cleanup 4 (ODR-001/006/008/045) | Audit 14 (ODR-002/009/010/012/013/015/043/047/049/054/061/062/063/065) | Migration 7 (ODR-003/005/007/011/014/044/046) | Process 1 (ODR-004) | Implementation 37 (ODR-016~021 + ODR-023~042 + ODR-050~053 + ODR-055~060 + ODR-064) | Refactor 2 (ODR-022/048)
 _2026-09-25 状态变更 (本次): ADR-025 新建 Accepted (P0-4 鉴权豁免的判据从「绑定地址」换成「**发布层**」 — 起因是 AUD-52：容器**必须**绑 `0.0.0.0` 才能被发布端口转发，而 `decideAuthStartup` 只在 `server.host` 是 loopback 时允许 `AUTH_INSECURE` ⇒「服务进容器」与「dev/e2e 免鉴权」**结构上互斥**；配 `JWT_SECRET` 则因前端无登录页/无首个管理员引导而**全站 401**（实测经 nginx 的前端接口全 401 = 整个 SPA 与 160 条 Playwright 不可用）。决策：新增**逐字匹配**的显式声明 `AUTH_INSECURE_EXPOSURE=loopback-published`（拼错即拒绝启动），`server.host` 为 loopback 的原路径不变；**基础不变量未放松**，改由**两处机器校验**守 —— 静态 `check_deploy_consistency.py` 检查 3c（四条双向规则：open-access ⟹ 每条 ports 映射回环 / 非回环映射 ⟹ 必须有 `JWT_SECRET` / open-access ⟹ 必须有 exposure 声明 / 两者并存 ⟹ 报错）+ 运行时 `tools/local-stack.sh status`（读真实 netstat）。配套：compose 四条映射改 `127.0.0.1:` 前缀、`JWT_SECRET` 不再必填、`e2e/tests` 的门改与断言同源（404→FAIL / 要鉴权→skip 并打印姿势指引）；5 个备选方案（只改测试侧 / 自取 token / host 网络 / 自动推断 / 放宽公开路径）逐条给出否决理由；ADR.md index 3.21.0 → 3.22.0 (ADR 24 → 25) — AUD-52_
 
