@@ -5,6 +5,13 @@
 // BarHandler 的合规测试落在本文件（streaming_compliance_test.go），
 // 不并入也不改动既有文件。
 //
+// 契约变更记录（K2 切片 2，2026-10-08）：BarHandler 新增信号出口
+// Signals()（取走即清空）。这是**改冻结契约**，按 K0-P2-3 的先例同流程
+// 办理——改签名 + 同步守卫 + 同步文档 + 破坏验证。故本文件的冻结方法集
+// 与数量断言由 {OnBar,Warmup,SaveState,LoadState}=4 更新为
+// {…,Signals}=5，并补 Signals 的签名断言。这是契约变更的正常同步，
+// 不是「改测试迁就实现」。
+//
 // 护栏目标：
 //  1. BarHandler 的方法集合（名字+数量）被反射精确断言，并与
 //     docs/SPEC.md「Streaming Strategy Interface — BarHandler」节逐字对齐；
@@ -23,13 +30,16 @@ import (
 )
 
 // TestBarHandlerInterfaceMethods 断言 BarHandler 的方法集合精确等于
-// {OnBar, Warmup, SaveState, LoadState}。
+// {OnBar, Warmup, SaveState, LoadState, Signals}。
 func TestBarHandlerInterfaceMethods(t *testing.T) {
 	iface := reflect.TypeOf((*strategy.BarHandler)(nil)).Elem()
 	if iface.Kind() != reflect.Interface {
 		t.Fatalf("BarHandler 的类型是 %v, want interface", iface.Kind())
 	}
-	want := map[string]bool{"OnBar": true, "Warmup": true, "SaveState": true, "LoadState": true}
+	want := map[string]bool{
+		"OnBar": true, "Warmup": true, "SaveState": true, "LoadState": true,
+		"Signals": true,
+	}
 	if got := iface.NumMethod(); got != len(want) {
 		t.Errorf("BarHandler.NumMethod() = %d, want %d（方法集: %v）", got, len(want), streamingMethodNames(iface))
 	}
@@ -81,6 +91,16 @@ func TestBarHandlerMethodSignatures(t *testing.T) {
 	if loadState.Type != wantLoad {
 		t.Errorf("BarHandler.LoadState 签名 = %v, want %v", loadState.Type, wantLoad)
 	}
+
+	// Signals 是 K2 切片 2 新增的信号出口（取走即清空）。
+	signals, ok := iface.MethodByName("Signals")
+	if !ok {
+		t.Fatal("BarHandler 缺 Signals")
+	}
+	wantSignals := reflect.TypeOf(func() []strategy.Signal { return nil })
+	if signals.Type != wantSignals {
+		t.Errorf("BarHandler.Signals 签名 = %v, want %v", signals.Type, wantSignals)
+	}
 }
 
 // TestDualModeInterfacesCoexist 冻结「双模式并存」——批式 SignalGenerator
@@ -98,8 +118,8 @@ func TestDualModeInterfacesCoexist(t *testing.T) {
 			t.Errorf("批式 SignalGenerator 缺失方法 %q", name)
 		}
 	}
-	if stream.NumMethod() != 4 {
-		t.Errorf("流式 BarHandler.NumMethod() = %d, want 4", stream.NumMethod())
+	if stream.NumMethod() != 5 {
+		t.Errorf("流式 BarHandler.NumMethod() = %d, want 5", stream.NumMethod())
 	}
 	// 两模式正交：流式接口不得含批式的 GenerateSignals/Weight。
 	for _, name := range []string{"GenerateSignals", "Weight"} {

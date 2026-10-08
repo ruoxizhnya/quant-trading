@@ -255,6 +255,7 @@ type BarHandler interface {
     Warmup() int                        // 声明需要多少根历史 bar（静态推导）
     SaveState() ([]byte, error)         // 状态持久化（对应 nautilus save/load）
     LoadState([]byte) error
+    Signals() []Signal                  // 取走自上次调用以来的信号（取走即清空，防重复消费）
 }
 ```
 

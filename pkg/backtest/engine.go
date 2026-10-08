@@ -1125,6 +1125,22 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 }
 
 // getSignalsFromLocalStrategy generates signals via a locally-loaded strategy plugin.
+//
+// K2 切片 2：本函数是**双模式**接入点。检测顺序是「优先流式 BarHandler，
+// 否则现有批式 SignalGenerator」：
+//
+//   - 流式策略（同时实现 Strategy 与 BarHandler）：引擎把「当日」的新 bar
+//     按 symbol 字典序逐根喂 OnBar，喂完当日全部 bar 后经 Signals() 取走
+//     当日信号（取走即清空，防重复消费）。有状态递推活在策略对象里——
+//     它是注册表的**单例**，跨交易日持久。
+//   - 批式策略：走到下面的 else 分支，**逐行未改**。
+//
+// 向后兼容的机制保证（为什么批式零影响）：注册表存的是 strategy.Strategy
+// 复合接口（StrategyCore+Configurable+SignalGenerator+ResourceManaged），
+// 它**不嵌入** BarHandler。现有批式策略没有 Signals() 方法，因此对它们
+// 而言 `strat.(strategy.BarHandler)` **恒为 false**，必然落到批式分支——
+// 这不是靠运行时标志或配置，而是类型系统的结构保证。只有**同时**实现
+// Strategy 与 BarHandler 的双模式策略才会进入流式分支。
 func (e *Engine) getSignalsFromLocalStrategy(ctx context.Context, strat strategy.Strategy, strategyName string, marketData map[string][]domain.OHLCV, date time.Time, tracker *Tracker) ([]domain.Signal, error) {
 	if fa, ok := strat.(strategy.FactorAware); ok {
 		fa.SetFactorCache(e.GetFactorZScore)
@@ -1134,12 +1150,57 @@ func (e *Engine) getSignalsFromLocalStrategy(ctx context.Context, strat strategy
 		fu.SetFundamentals(e.fundamentalsSnapshot())
 	}
 
-	prices := extractLatestPrices(marketData)
-	portfolio := tracker.GetPortfolio(prices)
+	var signals []strategy.Signal
 
-	signals, err := strat.GenerateSignals(ctx, marketData, portfolio)
-	if err != nil {
-		return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, fmt.Sprintf("local strategy %s failed", strategyName), "getSignals")
+	if bh, ok := strat.(strategy.BarHandler); ok {
+		// ── 流式路径（K2 切片 2）─────────────────────────────────────
+		//
+		// 喂序确定性（裁决：按 symbol 字典序）：marketData 是 map，Go 的
+		// range 遍历顺序是随机的——同一份输入两次跑会喂出不同的 bar 序列，
+		// 任何 per-symbol 递推状态的方向因此不确定，回测不可复现。定序是
+		// 可复现性的前提（与 engine.go:sortedKeys 同一理由，见 P1-14）。
+		for _, symbol := range sortedKeys(marketData) {
+			bars := marketData[symbol]
+			if len(bars) == 0 {
+				continue
+			}
+			bar := bars[len(bars)-1]
+			// 只喂「当日」的 bar。marketData 是「截至当日」的累积历史，
+			// 本函数每个交易日被调用一次。若当日该 symbol 无新 bar（停牌），
+			// 其最后一根是更早的日期——重复喂会让递推状态吞下一根陈旧 bar。
+			// 故按 UTC 自然日比对，非当日则跳过（不喂 = 这天没有新信息）。
+			by, bm, bd := bar.Date.UTC().Date()
+			dy, dm, dd := date.UTC().Date()
+			if by != dy || bm != dm || bd != dd {
+				continue
+			}
+			if err := bh.OnBar(ctx, bar); err != nil {
+				return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal,
+					fmt.Sprintf("local streaming strategy %s OnBar failed at %s", strategyName, bar.Date.Format("2006-01-02")),
+					"getSignals")
+			}
+		}
+
+		// 喂完当日全部 bar 后取走信号（取走即清空，防重复消费）。
+		//
+		// Warmup 处理（裁决：引擎不设 warmup 门，依赖策略自守）：Warmup()
+		// 的契约语义是「静态声明需求」而非「引擎维护的计数器」。批式策略
+		// 经 BatchAdapter 桥接时已由其就绪门自守（窗口不满绝不产出），原生
+		// 流式策略的状态递推天然在历史不足时产不出有效信号。引擎侧再加一道
+		// 与策略内部口径并行的计数器门只会制造二义（谁说了算？），故引擎
+		// 只负责喂 bar + 取走，warmup 由策略保证——契约把 Warmup() 定义为
+		// 声明，实现方负责据此自守。
+		signals = bh.Signals()
+	} else {
+		// ── 现有批式路径：一行未改 ───────────────────────────────────
+		prices := extractLatestPrices(marketData)
+		portfolio := tracker.GetPortfolio(prices)
+
+		var err error
+		signals, err = strat.GenerateSignals(ctx, marketData, portfolio)
+		if err != nil {
+			return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal, fmt.Sprintf("local strategy %s failed", strategyName), "getSignals")
+		}
 	}
 
 	domainSignals := convertStrategySignals(signals, date)

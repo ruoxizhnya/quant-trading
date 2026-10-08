@@ -63,6 +63,19 @@ type BarHandler interface {
 	// 初始态——静默重置会让「断点续跑」变成「悄悄从头跑」，结果错了
 	// 还查不出来）。
 	LoadState([]byte) error
+
+	// Signals 取走自上次调用以来 OnBar 产生的全部信号（**取走即清空**）。
+	//
+	// ─── 裁决：为什么是「取走」而不是「只读快照」 ──────────────────
+	// 引擎在每根 bar 喂完后调用并消费返回值。若只提供只读快照，同一批
+	// 信号会被重复取到（调用方忘了去重、或引擎与另一处调用点各取一次），
+	// 后果是同一根 bar 的信号被重复下单——而且重复发生在撮合侧，离信号
+	// 产生点很远，极难查。取走语义把「谁消费了这批信号」钉进契约本身：
+	// 取走即清空，重复调用拿到空切片。防重复消费是**接口属性**，不靠
+	// 调用方纪律（纪律会忘，接口不会）。
+	//
+	// 返回切片的所有权移交给调用方：实现方在取走后不得再引用它。
+	Signals() []Signal
 }
 
 // ─── Contract stubs（K2 实现替换，勿在此写实现逻辑） ────────────────
@@ -84,6 +97,9 @@ func (s *StreamingStrategy) SaveState() ([]byte, error) { panic("contract stub: 
 // LoadState 反序列化状态；不合法输入返回 error。
 func (s *StreamingStrategy) LoadState(b []byte) error { panic("contract stub: not implemented") }
 
+// Signals 取走自上次调用以来积累的信号（取走即清空）。
+func (s *StreamingStrategy) Signals() []Signal { panic("contract stub: not implemented") }
+
 // ─── 编译期合规检查 + 方法存在性守卫 ────────────────────────────────
 //
 // 第一行：stub 漂移出接口时 go build 失败（切片 1 既有样板）。
@@ -98,4 +114,5 @@ var (
 	_ func(BarHandler) int                                  = BarHandler.Warmup
 	_ func(BarHandler) ([]byte, error)                      = BarHandler.SaveState
 	_ func(BarHandler, []byte) error                        = BarHandler.LoadState
+	_ func(BarHandler) []Signal                             = BarHandler.Signals
 )

@@ -104,6 +104,9 @@ func (h *rtTraceHandler) LoadState(b []byte) error {
 	return nil
 }
 
+// Signals 实现契约出口；本 fake 不产信号（只验证驱动与递推）。
+func (h *rtTraceHandler) Signals() []Signal { return nil }
+
 // TestStreamRunnerDrivesBarHandlerAndIsReproducible 验证：
 //   - 逐 bar 驱动后内部递推状态正确；
 //   - 时钟被推进到最后一根 bar 的时间；
@@ -271,6 +274,72 @@ func TestStreamRunnerDrivesBatchAdapter(t *testing.T) {
 
 	require.NoError(t, NewStreamRunner().Run(ctx, ad, bars, clk))
 	require.Equal(t, len(bars)-3+1, gen.calls)
+}
+
+// TestBatchAdapterSignalsIsTakeAway 验证 BarHandler 契约出口 Signals 的
+// **取走即清空**语义（防重复消费）：
+//   - 未就绪时为空；
+//   - 就绪后取到信号；
+//   - 连续调用第二次、第三次为空（取走即清空）；
+//   - 取走后共享缓冲已空，LastSignals()（非破坏 peek）读到 nil；
+//     重新填充后 LastSignals peek 与 Signals 取走的内容一致。
+func TestBatchAdapterSignalsIsTakeAway(t *testing.T) {
+	ctx := context.Background()
+	bars := rtMakeBars("AAA", []float64{10, 11, 12, 13})
+	gen := &rtCountGen{}
+	ad := NewBatchAdapter(gen, []string{"AAA"}, 2)
+
+	// 未就绪：取走为空。
+	require.NoError(t, ad.OnBar(ctx, bars[0]))
+	require.Nil(t, ad.Signals(), "未就绪时 Signals 应为空")
+
+	// 就绪：取到信号。
+	require.NoError(t, ad.OnBar(ctx, bars[1]))
+	first := ad.Signals()
+	require.NotEmpty(t, first, "就绪后 Signals 应取到信号")
+
+	// 取走即清空：第二次为空（防重复消费）。
+	require.Nil(t, ad.Signals(), "取走后第二次调用必须为空（取走即清空）")
+	require.Nil(t, ad.Signals(), "第三次仍为空")
+
+	// 下一根就绪 bar 重新填充。
+	require.NoError(t, ad.OnBar(ctx, bars[2]))
+	require.NotEmpty(t, ad.Signals(), "下一根就绪 bar 应重新产出信号")
+
+	// LastSignals 与 Signals 共享同一个 lastSignals 缓冲：Signals 取走后
+	// 缓冲已空，LastSignals 读到 nil（信号已被消费，无残留可 peek）。
+	require.Nil(t, ad.LastSignals(), "取走后缓冲已空，LastSignals 同为 nil")
+
+	// 再喂一根：缓冲重新填充后，LastSignals（非破坏 peek）与新 Signals 一致。
+	require.NoError(t, ad.OnBar(ctx, bars[3]))
+	peek := ad.LastSignals()
+	require.NotNil(t, peek, "重新填充后 LastSignals 可 peek")
+	require.Equal(t, peek, ad.Signals(), "Signals 取走的内容应与 LastSignals peek 一致")
+}
+
+// TestBatchAdapterSignalsReturnsLatestCrossSectionOnce 验证多 symbol 同日
+// 就绪时，Signals() 取走的是「最近一次完整横截面集合」而不是把多次触发
+// 累积拼接（否则同一批横截面信号会被重复计多次）。
+func TestBatchAdapterSignalsReturnsLatestCrossSectionOnce(t *testing.T) {
+	ctx := context.Background()
+	a := rtMakeBars("AAA", []float64{1, 2, 3})
+	b := rtMakeBars("BBB", []float64{4, 5, 6})
+
+	gen := &rtCountGen{} // 每次产出 [{Symbol:"x"}]
+	ad := NewBatchAdapter(gen, []string{"AAA", "BBB"}, 2)
+
+	require.NoError(t, ad.OnBar(ctx, a[0]))
+	require.NoError(t, ad.OnBar(ctx, a[1])) // AAA 满，BBB 未满 → 不就绪
+	require.NoError(t, ad.OnBar(ctx, b[0])) // BBB 仍差一根 → 不就绪
+	require.NoError(t, ad.OnBar(ctx, b[1])) // 都满 → 第 1 次触发
+	require.NoError(t, ad.OnBar(ctx, a[2])) // 第 2 次触发
+	require.NoError(t, ad.OnBar(ctx, b[2])) // 第 3 次触发
+	require.Equal(t, 3, gen.calls, "就绪后每根触发一次（共 3 次）")
+
+	got := ad.Signals()
+	require.Len(t, got, 1,
+		"取走的应是最近一次完整集合（3 次触发同属一批横截面，不得累积成 3 条）")
+	require.Nil(t, ad.Signals(), "取走后为空")
 }
 
 // ─── 测试 4：三路一致性 Batch ≡ Step ≡ Step-from-persisted ───────────

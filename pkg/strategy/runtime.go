@@ -108,12 +108,13 @@ const batchAdapterStateVersion = 1
 //     这正是 BarHandler.Warmup() 的语义：引擎据此预取历史，窗口不满时
 //     策略无从判断，宁可不出信号也不出假信号。
 //
-//  3. 信号怎么处理（裁决：本切片不消费）—— GenerateSignals 的返回被存进
-//     lastSignals，调用方经 LastSignals() 读取。**本适配器不把信号路由到
-//     Broker / 引擎**：那是切片 2（接 backtest engine）与切片 5（实盘）
-//     的事。把消费逻辑提前塞进来会让适配器同时承担「窗口维护」与
-//     「下单路由」两件事，而后者依赖尚未定型的执行上下文——所以这里
-//     只产出、不消费，边界清晰。
+//  3. 信号怎么处理（裁决：只产出、不路由）—— GenerateSignals 的返回被存进
+//     lastSignals。调用方经 Signals()（取走即清空，K2 切片 2 契约出口）或
+//     LastSignals()（非破坏性 peek，切片 1 遗留）读取。**本适配器不把信号
+//     路由到 Broker / 引擎**：是否消费、如何下单由调用方（backtest engine
+//     的 getSignalsFromLocalStrategy / 实盘运行时）决定。把消费逻辑提前
+//     塞进适配器会让它同时承担「窗口维护」与「下单路由」两件事，而后者
+//     依赖尚未定型的执行上下文——所以这里只产出、不消费，边界清晰。
 //
 //  4. portfolio 注入（裁决：SetPortfolio 运行时注入）—— 批式
 //     GenerateSignals 需要 *domain.Portfolio，但组合在回测/实盘里是
@@ -170,6 +171,12 @@ func (a *BatchAdapter) SetPortfolio(p *domain.Portfolio) { a.portfolio = p }
 
 // LastSignals 返回最近一次 GenerateSignals 的产出（可能为 nil = 尚未
 // 产生首个信号）。返回**副本**，调用方改它不会污染适配器内部状态。
+//
+// 这是**非破坏性**读数（peek）：不清空内部状态，可反复读。它是切到
+// K2 切片 1 时引入的测试/诊断入口，三路一致性测试依赖它逐步构造信号
+// 序列（(c) 路还依赖「LoadState 后不立刻读」的行为）。它与契约方法
+// Signals() 共享同一个 lastSignals 字段，但语义相反：LastSignals 只读，
+// Signals 取走后清空。
 func (a *BatchAdapter) LastSignals() []Signal {
 	if a.lastSignals == nil {
 		return nil
@@ -177,6 +184,25 @@ func (a *BatchAdapter) LastSignals() []Signal {
 	cp := make([]Signal, len(a.lastSignals))
 	copy(cp, a.lastSignals)
 	return cp
+}
+
+// Signals 实现 BarHandler 契约的信号出口：取走最近一次 GenerateSignals
+// 的产出并清空（**取走即清空**，见 BarHandler.Signals 的裁决）。
+// 取走后再调返回 nil；下一根就绪 bar 的 GenerateSignals 会重新填充。
+//
+// ─── 裁决：为什么取「最近一次」而不是「累积拼接」 ──────────────────
+// 批式策略的 GenerateSignals 每次返回的是**当前横截面的完整信号集**，
+// 不是增量。BatchAdapter 在每根就绪 bar 上调一次 GenerateSignals：若按
+// 「自上次取走后累积」把多次调用结果拼接，同一天喂多个 symbol 时会把
+// 同一批横截面信号重复计入（每个 symbol 的 bar 都触发一次全量重算）。
+// 故 Signals() 的取走语义 = 返回最近一次的完整集合并清空，既满足
+// 「取走即清空」的防重复消费属性，又不产生横截面重复。
+//
+// 返回切片所有权移交调用方（取走后适配器不再引用它）。
+func (a *BatchAdapter) Signals() []Signal {
+	out := a.lastSignals
+	a.lastSignals = nil
+	return out
 }
 
 // OnBar 收一根 bar：并入对应 symbol 的滚动窗口，窗口就绪则调一次

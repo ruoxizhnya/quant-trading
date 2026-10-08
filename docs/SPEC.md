@@ -452,6 +452,10 @@ type BarHandler interface {
     // SaveState / LoadState 状态持久化（断点续跑 / 回测-实盘迁移）
     SaveState() ([]byte, error)
     LoadState([]byte) error
+    // Signals 取走自上次调用以来 OnBar 产生的全部信号（**取走即清空**）。
+    // 引擎在每根 bar 喂完后调用并消费；重复调用不应拿到重复信号——
+    // 防重复消费是接口属性（2026-10-08 K2 切片 2 新增的信号出口）。
+    Signals() []Signal
 }
 ```
 
