@@ -48,10 +48,11 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：`Kernel.Boot` 装配顺序符合契约（EventStore 第一个、MsgBus 最后）；关停逆序；`audit.message_log` 有启动期消息；破坏验证——打乱 Boot 顺序 → 对应测试变红。
 - **⑥ 边界**：只做 4 个模块的骨架 + 装配替换，不动策略/回测逻辑。
 
-### K2 · 流式接口（P2）🔶 切片 1 完成，接入 engine 待做（前置：K1）
+### K2 · 流式接口（P2）🔶 切片 1+2 完成，state 落库待做（前置：K1）
 
-> **切片 1 ✅（`532af55`）**：流式运行时基座落地 `pkg/strategy/runtime.go` —— `StreamRunner`（Clock 逐 bar 驱动 BarHandler，时间倒退立即停）+ `BatchAdapter`（批式→流式攒窗口桥：每 symbol 滚动窗口 + **横截面对齐就绪门**「每个 symbol 都满才算就绪」）+ 状态序列化**三路一致性**落测（Batch ≡ Step ≡ Step-from-persisted，ADR-028 §7）+ `LoadState` 原子提交 fail-loud。91 测试全绿，契约零改动。
-> **待做**：切片 2 —— 接入 `pkg/backtest` engine（引擎按策略实现接口自动选执行模式；流式策略用 VirtualClock 逐 bar 喂 OnBar）；`quant.strategy_state` 落库接线。
+> **切片 1 ✅（`532af55`）**：流式运行时基座落地 `pkg/strategy/runtime.go` —— `StreamRunner`（Clock 逐 bar 驱动 BarHandler，时间倒退立即停）+ `BatchAdapter`（批式→流式攒窗口桥：每 symbol 滚动窗口 + **横截面对齐就绪门**）+ 三路一致性落测（Batch ≡ Step ≡ Step-from-persisted）+ `LoadState` 原子提交 fail-loud。
+> **切片 2 ✅（`a43c011`）**：`BarHandler` 加 **`Signals() []Signal`**（取走即清空——OnBar 无返回、信号无处可出是切片 1 暴露的契约缺口，走 K0-P2-3 同款变更流程）；引擎 `getSignalsFromLocalStrategy` **双模式接入**（检测 BarHandler → 流式分支：喂序按 symbol 字典序 + 只喂当日 bar（停牌不喂陈旧 bar）+ 取 Signals；批式路径零改动，**机制是类型系统保证**——`strategy.Strategy` 不嵌入 BarHandler，断言恒 false）；**双模式等价性正证据**：同一回测请求批式 vs 流式各产 127 条信号逐条一致。
+> **待做**：`quant.strategy_state` 落库接线（SaveState → PG）；paper 侧接线归 K5。
 
 - **① 目标**：strategy-runtime 加流式 `BarHandler` + VirtualClock 驱动 + 同构桥，使批式策略（L0/L1）无改动可上 paper、流式策略（L2/L3）可回测。
 - **② 上下文**：蓝图 §6.2 双模式接口；SPEC §Streaming Strategy Interface（`docs/SPEC.md`）；`pkg/strategy/interfaces.go`（现有批式 SignalGenerator）；`pkg/backtest/engine.go:669`（date-loop）。
