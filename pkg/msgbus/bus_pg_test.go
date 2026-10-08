@@ -81,11 +81,12 @@ func TestBusTapEndToEndAgainstPostgres(t *testing.T) {
 	ctx := context.Background()
 
 	clk := clock.NewVirtualClock(time.Date(2200, 2, 1, 0, 0, 0, 0, time.UTC))
-	bus := msgbus.NewSyncBusWithClock(store, clk)
+	bus := msgbus.NewSyncBus(store, clk)
 
 	var received []msgbus.Message
-	if err := bus.Subscribe(msgbus.TopicDataBar, func(_ context.Context, m msgbus.Message) {
+	if err := bus.Subscribe(msgbus.TopicDataBar, func(_ context.Context, m msgbus.Message) error {
 		received = append(received, m)
+		return nil
 	}); err != nil {
 		t.Fatalf("Subscribe 失败: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestBusTapEndToEndAgainstPostgres(t *testing.T) {
 		if err := clk.Advance(ts); err != nil {
 			t.Fatalf("推进虚拟时钟失败: %v", err)
 		}
-		if err := bus.Publish(msgbus.TopicDataBar, dto); err != nil {
+		if err := bus.Publish(ctx, msgbus.TopicDataBar, dto); err != nil {
 			t.Fatalf("Publish 第 %d 条失败: %v", i, err)
 		}
 	}
@@ -154,16 +155,18 @@ func TestBusTapEndToEndAgainstPostgres(t *testing.T) {
 // 是真实实现路径，而不是替身。
 func TestBusAgainstBrokenPostgresStore(t *testing.T) {
 	store := newBusTestStore(t)
-	bus := msgbus.NewSyncBus(store)
+	ctx := context.Background()
+	bus := msgbus.NewSyncBus(store, clock.NewVirtualClock(time.Date(2200, 5, 1, 0, 0, 0, 0, time.UTC)))
 
 	handlerCalls := 0
-	if err := bus.Subscribe(msgbus.TopicExecOrderIntent, func(context.Context, msgbus.Message) {
+	if err := bus.Subscribe(msgbus.TopicExecOrderIntent, func(context.Context, msgbus.Message) error {
 		handlerCalls++
+		return nil
 	}); err != nil {
 		t.Fatalf("Subscribe 失败: %v", err)
 	}
 
-	err := bus.Publish(msgbus.TopicExecOrderIntent, map[string]any{"ch": make(chan int)})
+	err := bus.Publish(ctx, msgbus.TopicExecOrderIntent, map[string]any{"ch": make(chan int)})
 	if err == nil {
 		t.Fatal("payload 不可序列化时 Publish 返回 nil——未记录的消息被放行")
 	}
@@ -185,17 +188,17 @@ func TestBusTopicIsolationAgainstPostgres(t *testing.T) {
 	ctx := context.Background()
 
 	clk := clock.NewVirtualClock(time.Date(2200, 4, 1, 0, 0, 0, 0, time.UTC))
-	bus := msgbus.NewSyncBusWithClock(store, clk)
+	bus := msgbus.NewSyncBus(store, clk)
 
 	var barCount, fillCount int
-	if err := bus.Subscribe(msgbus.TopicDataBar, func(context.Context, msgbus.Message) { barCount++ }); err != nil {
+	if err := bus.Subscribe(msgbus.TopicDataBar, func(context.Context, msgbus.Message) error { barCount++; return nil }); err != nil {
 		t.Fatalf("Subscribe(bar) 失败: %v", err)
 	}
-	if err := bus.Subscribe(msgbus.TopicExecFill, func(context.Context, msgbus.Message) { fillCount++ }); err != nil {
+	if err := bus.Subscribe(msgbus.TopicExecFill, func(context.Context, msgbus.Message) error { fillCount++; return nil }); err != nil {
 		t.Fatalf("Subscribe(fill) 失败: %v", err)
 	}
 
-	if err := bus.Publish(msgbus.TopicDataBar, barDTO{Symbol: "600000.SH", Close: 7.1, Volume: 100}); err != nil {
+	if err := bus.Publish(ctx, msgbus.TopicDataBar, barDTO{Symbol: "600000.SH", Close: 7.1, Volume: 100}); err != nil {
 		t.Fatalf("Publish(bar) 失败: %v", err)
 	}
 	if barCount != 1 || fillCount != 0 {

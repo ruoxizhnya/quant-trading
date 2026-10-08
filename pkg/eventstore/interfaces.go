@@ -19,12 +19,16 @@
 // panic("contract stub: not implemented")）。K1 切片 1 已把 stub 替换为
 // 真实实现（PGEventStore），契约半个字未改。
 //
+// K0-P2-3（审查裁决后的契约变更）：`Append` 加上 ctx 参数 ——
+// `Append(ctx, msg)`。旧签名没有 ctx，实现只能 `context.Background()`
+// 自建，取消权被彻底关在门外。超时兜底保留（mergeTimeout）。
+//
 // ─── 导入方向（写 SyncBus 之前先看这条） ────────────────────────────
 // 本包 import pkg/msgbus（Message 接口与 Envelope 在那儿）。因此 pkg/msgbus
 // **不得** import 本包——那会是导入环。后果：SyncBus 的构造参数类型不能写成
 // eventstore.EventStore，而由消费方 msgbus 自己定义一个窄接口（msgbus.Tap，
-// 只有一个 Append(Message) error）。eventstore.EventStore 天然满足它（Go
-// 结构化类型），由 pkg/msgbus 测试里的静态断言钉住。
+// 只有一个 Append(ctx, Message) error）。eventstore.EventStore 天然满足它
+//（Go 结构化类型），由 pkg/msgbus 测试里的静态断言钉住。
 package eventstore
 
 import (
@@ -45,7 +49,13 @@ type EventStore interface {
 	// Append 落库一条消息。先记录后分发：本调用成功后，msgbus 才会
 	// 把该消息派发给订阅者；本调用失败则消息不得派发（也不得静默
 	// 丢弃——由调用方决定终止）。
-	Append(msg msgbus.Message) error
+	//
+	// K0-P2-3 契约变更：ctx 由调用方（msgbus.Publish）传入，落库因此
+	// 可被**单条消息**取消/限时——旧签名没有 ctx，实现只能自建
+	// context.Background()，一条卡住的 SQL 与一次「本次发布要不要继续」
+	// 的取消完全脱钩。注意本方法仍套 appendTimeout 作为兜底上限：调用方
+	// 传 context.Background() 时不能让它无限期挂着。
+	Append(ctx context.Context, msg msgbus.Message) error
 
 	// Replay 回放 [from, to] 闭区间（含两端）内落库的消息，按落库
 	// 顺序（id 升序）返回。用于审计、调试与断点续跑。
@@ -77,10 +87,11 @@ var (
 	ErrIntegrity = errors.New("eventstore: 落库与本次写入账不一致")
 )
 
-// 单次 DB 操作的上限。Append/Replay/Verify 三个方法 **契约里都没有 ctx 参数**，
-// 因此内部一律自建带超时的 context：既不让调用方拿到取消权（契约没给），
-// 也不让一次卡住的 SQL 把整个内核挂死（挂死 = 消息停止派发 = 静默停摆，
-// 比报错糟得多）。
+// 单次 DB 操作的上限。Replay/Verify 契约里没有 ctx 参数，内部自建带超时的
+// context；Append 自 K0-P2-3 起接收调用方 ctx，但仍用
+// mergeTimeout(ctx, appendTimeout) 套一个上限——契约把取消权给了调用方，
+// 不代表调用方一定会设截止，一次卡住的 SQL 会让消息停止派发 = 静默停摆，
+// 比报错糟得多。
 const (
 	appendTimeout = 10 * time.Second
 	replayTimeout = 30 * time.Second
@@ -173,7 +184,7 @@ func NewPGEventStore(pool *pgxpool.Pool, publisher, runID string) (*PGEventStore
 //   - json.RawMessage 原样透传（Marshal 不做二次加工）；
 //   - 序列化失败（chan / func / 循环引用）→ 包 ErrPayloadNotMarshalable 返回
 //     error，**绝不**降级为「跳过记录」或「记个大括号」。
-func (s *PGEventStore) Append(msg msgbus.Message) error {
+func (s *PGEventStore) Append(ctx context.Context, msg msgbus.Message) error {
 	if msg == nil {
 		return ErrNilMessage
 	}
@@ -186,8 +197,15 @@ func (s *PGEventStore) Append(msg msgbus.Message) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), appendTimeout)
+	// 沿用 Replay 的 mergeTimeout 模式：以调用方 ctx 为父，再套 appendTimeout
+	// 兜底。调用方已取消/已超时时立即返回，不做任何 I/O——「这次发布要不要
+	// 落库」是调用方的决定，取消语义必须真的传到这里（旧实现自建
+	// Background()，取消信号根本进不来）。
+	ctx, cancel := mergeTimeout(ctx, appendTimeout)
 	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("eventstore: Append(%s) 未落库（ctx 已取消/超时，调用方不得派发该消息）: %w", topic, err)
+	}
 
 	// ts 归一到 UTC：回测时间来自 VirtualClock（已是 UTC），实盘是墙钟（带
 	// 时区）。TIMESTAMPTZ 本身存瞬时、与时区无关，归一只是为了让传参确定性。
@@ -329,7 +347,7 @@ func mergeTimeout(ctx context.Context, d time.Duration) (context.Context, contex
 var (
 	_ EventStore = (*PGEventStore)(nil)
 
-	_ func(EventStore, msgbus.Message) error                                            = EventStore.Append
+	_ func(EventStore, context.Context, msgbus.Message) error                           = EventStore.Append
 	_ func(EventStore, context.Context, time.Time, time.Time) ([]msgbus.Message, error) = EventStore.Replay
 	_ func(EventStore) error                                                            = EventStore.Verify
 )

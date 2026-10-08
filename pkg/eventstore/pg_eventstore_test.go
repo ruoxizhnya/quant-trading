@@ -183,7 +183,7 @@ func TestAppendThenReplayRoundTrip(t *testing.T) {
 		{msgbus.TopicRiskVerdict, map[string]any{"verdict": "pass", "reason": nil}},
 	}
 	for i, p := range published {
-		if err := store.Append(msg(p.topic, testTS(i), p.payload)); err != nil {
+		if err := store.Append(ctx, msg(p.topic, testTS(i), p.payload)); err != nil {
 			t.Fatalf("Append 第 %d 条(%s) 失败: %v", i, p.topic, err)
 		}
 	}
@@ -228,7 +228,7 @@ func TestReplayIsTsAscending(t *testing.T) {
 
 	// 乱序 Append：3, 1, 2 分钟。
 	for _, i := range []int{3, 1, 2} {
-		if err := store.Append(msg(msgbus.TopicDataBar, testTS(i), map[string]int{"i": i})); err != nil {
+		if err := store.Append(ctx, msg(msgbus.TopicDataBar, testTS(i), map[string]int{"i": i})); err != nil {
 			t.Fatalf("Append(%d) 失败: %v", i, err)
 		}
 	}
@@ -260,7 +260,7 @@ func TestReplayBoundaryIsClosed(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i <= 4; i++ {
-		if err := store.Append(msg(msgbus.TopicDataBar, testTS(i), map[string]int{"i": i})); err != nil {
+		if err := store.Append(ctx, msg(msgbus.TopicDataBar, testTS(i), map[string]int{"i": i})); err != nil {
 			t.Fatalf("Append(%d) 失败: %v", i, err)
 		}
 	}
@@ -306,16 +306,17 @@ func TestReplayRejectsInvertedRange(t *testing.T) {
 // 而不是退化成一行 topic 未知 / payload 未知的记录。
 func TestAppendRejectsIllFormedMessage(t *testing.T) {
 	store, _, _ := newTestStore(t)
+	ctx := context.Background()
 
-	if err := store.Append(nil); !errors.Is(err, eventstore.ErrNilMessage) {
+	if err := store.Append(ctx, nil); !errors.Is(err, eventstore.ErrNilMessage) {
 		t.Errorf("Append(nil) = %v, want errors.Is(err, ErrNilMessage)", err)
 	}
 	// 空 topic：未走注册表，落库后回放检索不到。
-	if err := store.Append(msg("", testTS(0), "x")); !errors.Is(err, eventstore.ErrEmptyTopic) {
+	if err := store.Append(ctx, msg("", testTS(0), "x")); !errors.Is(err, eventstore.ErrEmptyTopic) {
 		t.Errorf("Append(topic=\"\") = %v, want errors.Is(err, ErrEmptyTopic)", err)
 	}
 	// 不可序列化的 payload：chan 没法 json.Marshal。
-	if err := store.Append(msg(msgbus.TopicDataBar, testTS(0), map[string]any{"ch": make(chan int)})); !errors.Is(err, eventstore.ErrPayloadNotMarshalable) {
+	if err := store.Append(ctx, msg(msgbus.TopicDataBar, testTS(0), map[string]any{"ch": make(chan int)})); !errors.Is(err, eventstore.ErrPayloadNotMarshalable) {
 		t.Errorf("Append(payload=chan) = %v, want errors.Is(err, ErrPayloadNotMarshalable)", err)
 	}
 
@@ -332,7 +333,7 @@ func TestAppendNilPayloadBecomesJSONNull(t *testing.T) {
 	store, pool, runID := newTestStore(t)
 	ctx := context.Background()
 
-	if err := store.Append(msg(msgbus.TopicRunStart, testTS(0), nil)); err != nil {
+	if err := store.Append(ctx, msg(msgbus.TopicRunStart, testTS(0), nil)); err != nil {
 		t.Fatalf("Append(nil payload) 失败: %v", err)
 	}
 
@@ -353,7 +354,7 @@ func TestAppendWritesPublisherAndRunID(t *testing.T) {
 	store, pool, runID := newTestStore(t)
 	ctx := context.Background()
 
-	if err := store.Append(msg(msgbus.TopicKernelBoot, testTS(0), map[string]string{"phase": "boot"})); err != nil {
+	if err := store.Append(ctx, msg(msgbus.TopicKernelBoot, testTS(0), map[string]string{"phase": "boot"})); err != nil {
 		t.Fatalf("Append 失败: %v", err)
 	}
 
@@ -402,11 +403,11 @@ func TestAppendWithEmptyRunIDWritesNULL(t *testing.T) {
 		}
 	})
 
-	if err := runless.Append(msg(msgbus.TopicKernelBoot, ts, "boot")); err != nil {
+	ctx := context.Background()
+	if err := runless.Append(ctx, msg(msgbus.TopicKernelBoot, ts, "boot")); err != nil {
 		t.Fatalf("Append 失败: %v", err)
 	}
 
-	ctx := context.Background()
 	var storedRunID pgtype.Text
 	if err := pool.QueryRow(ctx,
 		`SELECT run_id FROM audit.message_log WHERE publisher = $1 AND ts = $2`,
@@ -418,18 +419,78 @@ func TestAppendWithEmptyRunIDWritesNULL(t *testing.T) {
 	}
 }
 
+// ─── Append 的 ctx 语义（K0-P2-3）─────────────────────────────────
+
+// TestAppendHonorsCallerContext —— Append 的 ctx 由调用方（msgbus.Publish）
+// 逐消息传入，取消/超时必须真的传到落库这一步。
+//
+// 旧实现是 `context.WithTimeout(context.Background(), appendTimeout)`：调用方
+// 完全没有取消权，「这一次发布要不要落库」无从表达。改完后：
+//   - 已取消 / 已超时的 ctx ⇒ 不做任何 I/O，直接返回 error；
+//   - 错误链上保留 ctx 的原始原因（errors.Is 到 context.Canceled /
+//     DeadlineExceeded），总线一侧才能据此判定「零分发」；
+//   - 一条都没写（写入账仍为 0，由 Verify 钉住）。
+//
+// 「调用方给的截止比 appendTimeout 更近时按更近的算」这一点由 deadline 子用例
+// 覆盖：mergeTimeout 取父子中更早的截止，而不是拿 appendTimeout 覆盖调用方。
+func TestAppendHonorsCallerContext(t *testing.T) {
+	cases := []struct {
+		name    string
+		ctx     func() (context.Context, context.CancelFunc)
+		wantErr error
+	}{
+		{
+			name: "已取消",
+			ctx: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx, cancel
+			},
+			wantErr: context.Canceled,
+		},
+		{
+			name: "截止已过",
+			ctx: func() (context.Context, context.CancelFunc) {
+				return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			},
+			wantErr: context.DeadlineExceeded,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store, _, _ := newTestStore(t)
+			ctx, cancel := tc.ctx()
+			defer cancel()
+
+			err := store.Append(ctx, msg(msgbus.TopicDataBar, testTS(0), map[string]int{"i": 0}))
+			if err == nil {
+				t.Fatal("取消/超时的 ctx 上 Append 返回 nil——取消权没传到落库这一步")
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("Append = %v, want errors.Is(err, %v)", err, tc.wantErr)
+			}
+			// 一条都没写：写入账（本实例成功 Append 次数）必须仍为 0。
+			if err := store.Verify(); err != nil {
+				t.Errorf("Verify 失败——被取消的 Append 竟然留下了痕迹: %v", err)
+			}
+		})
+	}
+}
+
 // ─── Verify ───────────────────────────────────────────────────────
 
 // TestVerifyMatchesAppendCount Verify 的最小语义：本实例写入范围内可计数，
 // 且与本实例成功 Append 的次数一致。
 func TestVerifyMatchesAppendCount(t *testing.T) {
 	store, _, _ := newTestStore(t)
+	ctx := context.Background()
 
 	if err := store.Verify(); err != nil {
 		t.Errorf("空账 Verify 失败: %v", err)
 	}
 	for i := 0; i < 5; i++ {
-		if err := store.Append(msg(msgbus.TopicDataBar, testTS(i), map[string]int{"i": i})); err != nil {
+		if err := store.Append(ctx, msg(msgbus.TopicDataBar, testTS(i), map[string]int{"i": i})); err != nil {
 			t.Fatalf("Append(%d) 失败: %v", i, err)
 		}
 	}
@@ -442,9 +503,10 @@ func TestVerifyMatchesAppendCount(t *testing.T) {
 // 有人绕过本模块清理），Verify 必须红。一条永远绿的 Verify 等于没有 Verify。
 func TestVerifyDetectsMissingRow(t *testing.T) {
 	store, pool, runID := newTestStore(t)
+	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
-		if err := store.Append(msg(msgbus.TopicDataBar, testTS(i), map[string]int{"i": i})); err != nil {
+		if err := store.Append(ctx, msg(msgbus.TopicDataBar, testTS(i), map[string]int{"i": i})); err != nil {
 			t.Fatalf("Append(%d) 失败: %v", i, err)
 		}
 	}

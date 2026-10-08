@@ -164,13 +164,43 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ---
 
-### K0-P2-3 · 两项签名级契约变更待裁决 ⬜（K1 实现时撞出，建议 K2 前定）
+### K0-P2-3 · 三项签名级契约变更 ✅（2026-10-08 已裁决并完成）
 
-> K0 审查（依赖/文档层）未发现、实现时才暴露的两个签名级缺陷。K1 已用 workaround 绕开，但**越晚改调用方越多**，建议不晚于 K2 完成前裁决。
+> K0 审查（依赖/文档层）未发现、K1 实现时才暴露的签名级缺陷（外加审查时新发现的时钟静默陷阱）。K1 曾用 workaround 绕开，已在 K2 前裁决落地。
 
-- **① `Handler` 是否改为返回 error**：现契约 `type Handler func(ctx, msg)` **无 error 返回**（`pkg/msgbus/interfaces.go`），K1 按「panic 原样传播、不吞不重试不并发」实现（符合 fail-loud 哲学）。若要「一个订阅者失败不拖累其他 + 聚合上报」，须改签名为 `func(ctx, msg) error` —— 届时需同步改 `Publish` 的分发循环与全部订阅方。
-- **② `Publish` 是否显式接收 ts**：现签名 `Publish(topic, payload)` 无 ts 参数；回测里若自取 `time.Now()`，落库 ts 是墙钟 ⇒ 审计无法与虚拟时间比对（毒化 BusTap）。K1 用 Clock 注入绕开（`NewSyncBusWithClock(tap, clk)` 专供回测注入 VirtualClock），但**理想契约是 Publish 由内核注入 ts**。
-- **已解决的架构模式（记录复用）**：`msgbus` ↔ `eventstore` 的 import 环（eventstore 必须 import msgbus 的 `Message`）用**消费方定义窄接口**绕开 —— `msgbus.Tap { Append(Message) error }`，`eventstore.EventStore` 结构化满足，并由 `var _ msgbus.Tap = (*eventstore.PGEventStore)(nil)` 钉住。这是 Go 惯用法，值得在其他跨模块依赖处复用（与 topics.go 落位修正是同一类问题）。
+**最终形态（已落地，`go build ./...` + 三包测试全绿，破坏验证 a/b 各红一次后逐字节还原）**：
+
+| 项 | 变更前 | 变更后（当前） |
+|---|---|---|
+| `Handler` | `func(ctx, msg)`（无 error，失败只能 panic 传播） | `func(ctx, msg) error`；**逐 handler 调用、遇 error 继续**（一个订阅者失败不拖累其他），全部 error 由 `errors.Join` 聚合上报；**panic 仍不 recover** |
+| `Publish` | `Publish(topic, payload)`（总线构造时自持一个 ctx，全消息共享） | `Publish(ctx, topic, payload) error`；ctx **逐消息**透传给落库与 handler；`SyncBus.ctx` 字段**已删除**；ctx 已取消/超时 ⇒ 返回 `ErrContextCanceled` 且**零分发**（连落库都不试） |
+| `Append` | `Append(msg)`（`context.Background()` + 固定 `appendTimeout`） | `Append(ctx, msg)`；沿用 `mergeTimeout(ctx, appendTimeout)` 保留超时兜底 |
+| 时钟 | `NewSyncBus(tap)`，clk 为 nil 时**兜底墙钟** | `NewSyncBus(tap, clk)` —— **构造期强制**，nil 直接 panic；实盘便捷入口 `NewLiveBus(tap)`；`NewSyncBusWithClock` **已删除** |
+
+- **① `Handler` 改返回 error**：裁决为「**继续分发 + 聚合上报**」。反向（遇错即中断）会把单个订阅者的故障扩散成全总线静默丢消息——那正是 BusTap 要防的缺口。聚合选 `errors.Join`（`errors.Is/As` 天然穿透到每个原始 error，不必自定聚合类型多维护一份真相）。
+- **② `Publish` 显式接收 ts（原提案）**：**不采纳**，改为 K1 已有的 Clock 注入 + **构造期强制注入**。理由：ts 由内核/装配决定、每条消息都一样，塞进 `Publish` 参数会让每个调用点都能改写业务时间（ts 是回测锚点）；强制注入 clk 既堵住「回测忘了注入虚拟时钟」的静默陷阱，又不给调用方改 ts 的权力。
+- **③ 审查新发现并已修的静默陷阱**：旧 `NewSyncBus(tap)` 在 clk 为 nil 时兜底墙钟——回测装配漏注入 VirtualClock 时编译照过、运行照跑，但 `audit.message_log` 落的是真实世界时刻，两次回放无从比对，**BusTap 审计价值归零且全程不报错**。现改为构造期 panic（故障钉在离错误最近处），墙钟只能由 `NewLiveBus` 显式声明。
+- **已解决的架构模式（记录复用）**：`msgbus` ↔ `eventstore` 的 import 环（eventstore 必须 import msgbus 的 `Message`）用**消费方定义窄接口**绕开 —— `msgbus.Tap { Append(ctx, Message) error }`，`eventstore.EventStore` 结构化满足，并由 `var _ msgbus.Tap = (*eventstore.PGEventStore)(nil)` 钉住。这是 Go 惯用法，值得在其他跨模块依赖处复用（与 topics.go 落位修正是同一类问题）。
+
+**本条新登记的两条待办（本次不做，仅记录）**：
+
+#### K0-P2-3a · `Verify` 依赖内存计数器，实例重建即归零 ⬜
+
+- **① 目标**：把 `Verify` 的「写入账」基准从进程内 `atomic.Int64` 换成库内计数。
+- **② 现状**：`PGEventStore.Verify` 用本实例成功 Append 的次数（`appended`）与库里 `count(*)` 对账。**实例重建（进程重启、断点续跑）后计数器归零**，而库里的行还在 ⇒ Verify 误报「落库 N 行 vs Append 0 次」，红灯是假的；假红灯会训练人忽略 Verify。
+- **③ 要求**：改为基于 `run_id` 的库内计数（例如按 run_id 聚合条数并与期望值对账），使「重开一个 store 实例」不再影响结论。
+- **④ 约束与非目标**：不改 `audit.message_log` 的 DDL 与列名；不改 `Verify` 的方法签名。
+- **⑤ 验收**：构造 store → Append 5 条 → 丢弃实例 → 用同一 (publisher, run_id) 新建实例 → `Verify` 仍绿。
+- **⑥ 边界**：只改 Verify 的计数口径，不做哈希链/checksum、不做 id 连续性检查。
+
+#### K0-P2-3b · `pkg/msgbus/registry.go` 的 topicSet 与 `topics.go` 常量是两份真相 ⬜
+
+- **① 目标**：把注册表收敛为一处真相后删除 `registry.go`。
+- **② 现状**：`topics.go` 的 16 个常量是编译期符号，运行期拿不到「全体已注册 topic」集合，于是 `registry.go` 里又手工镜像了一份 `topicSet` map——**加常量忘了登记**是静默失效（新 topic 会被 Publish 拒掉，错误信息清楚但没人提前知道）。现状靠 `registry_internal_test.go` 与 `interfaces_compliance_test.go` 各引用一次全部常量来钉，属于测试兜底而非结构消除。
+- **③ 要求**：把 `All`（或等价集合）迁进 `topics.go`，`IsRegisteredTopic` / `RegisteredTopics` 基于它实现，然后删除 `registry.go` 并同步测试引用。
+- **④ 约束与非目标**：topic 数量与取值不得变更（仍是 16 个、值同 K0 冻结）；`IsRegisteredTopic` / `RegisteredTopics` 的对外语义不变。
+- **⑤ 验收**：删除 `registry.go` 后 `go build ./...` 与 `pkg/msgbus` 全部测试仍绿，且「新增常量未登记」会编译失败（不再只是测试红）。
+- **⑥ 边界**：只做这份双真相收敛，不动 topic 取值与 `Publish/Subscribe` 的校验语义。
 
 ---
 

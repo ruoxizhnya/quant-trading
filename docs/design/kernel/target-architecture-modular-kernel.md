@@ -198,8 +198,8 @@ Kernel.Shutdown()  // 逆序，先停分发再落库
 |---|---|---|---|---|
 | **kernel** | 装配 11 模块、管生命周期（Boot/Shutdown 顺序）、持有消息注册表 | `Kernel.Boot/Shutdown/Module(name)` | 无（内存装配） | 启动时单向装配，运行时不收消息 |
 | **clock** | 提供「现在」；回测=数据驱动，实盘=墙钟 | `Clock.Now()/Advance(ts)/Mode()` | 无 | VirtualClock 被数据迭代器推进；LiveClock 自走 |
-| **msgbus** | 模块间消息的**命名注册表 + 同步分发**；不并发 | `Publish(topic,msg)/Subscribe(topic,handler)`（同步） | 无（内存）；消息经 eventstore 落 `audit.message_log` | 单线程语义：handler 同步执行，按注册优先级 |
-| **eventstore** | 所有模块间消息**先落库后分发**（BusTap 语义）；回放与审计 | `Append(msg)/Replay(range)/Verify()` | `audit.message_log`（新） | 写：msgbus 派发前钩子；读：审计/回放/调试 |
+| **msgbus** | 模块间消息的**命名注册表 + 同步分发**；不并发 | `Publish(ctx,topic,msg)/Subscribe(topic,handler)`（同步；handler 返回 error，分发不中断、错误聚合上报） | 无（内存）；消息经 eventstore 落 `audit.message_log` | 单线程语义：handler 同步执行，按注册优先级；时钟构造期强制注入（`NewSyncBus(tap,clk)` / `NewLiveBus(tap)`），无墙钟兜底 |
+| **eventstore** | 所有模块间消息**先落库后分发**（BusTap 语义）；回放与审计 | `Append(ctx,msg)/Replay(ctx,range)/Verify()` | `audit.message_log`（新） | 写：msgbus 派发前钩子；读：审计/回放/调试 |
 | **data-engine** | 数据入口唯一闸口；回测建快照，实盘管订阅 | `Provider`（沿用）+ `Snapshot(range)/Subscribe(symbols)` | 读 `market.*`；写 `ingest.raw`（同步）；`factor_cache`（Redis） | 回测：`BulkLoadOHLCV` 一次性物化；实盘：feed→bar 聚合→发布 |
 | **portfolio** | 持仓/现金/净值；成交后更新；快照持久化 | `ApplyFill(f)/Value()/Snapshot()` | `quant.portfolio_snapshot` / `quant.positions`（新） | 收 `exec.fill` 消息 → 更新 → 发 `portfolio.updated` |
 | **risk-engine** | 订单前置风控（仓位/止损/制度）+ 盘后 regime | `RiskManager`（扩）+ `CheckOrder(order)→verdict` | `quant.risk_events`（新） | 收 `exec.order_intent` → 裁决 → 放行/拒绝 |
@@ -285,7 +285,7 @@ type BarHandler interface {
 AI/Hermes ──MCP──► Kernel.RunBacktest(req)
                         │
                         ▼
-              EventStore.Append(run.start)          ─ ─ ─ 先记录
+              EventStore.Append(ctx, run.start)          ─ ─ ─ 先记录
                         │
                         ▼
               DataEngine.Snapshot(range)            ─ ─ ─ 物化边界
@@ -314,7 +314,7 @@ AI/Hermes ──MCP──► Kernel.RunBacktest(req)
               Portfolio.ApplyFill → snapshot
                    │
                    ▼
-              EventStore.Append(run.done)  ─ ─ ─ 落 audit.message_log
+              EventStore.Append(ctx, run.done)  ─ ─ ─ 落 audit.message_log
                    │
                    ▼
               validation 六维证伪（被调用，不循环）
@@ -326,7 +326,7 @@ AI/Hermes ──MCP──► Kernel.RunBacktest(req)
 RealtimeFeed ──推送──► DataEngine(bar聚合)
                             │ Bar 到达
                             ▼
-                      EventStore.Append(bar)   ─ ─ ─ 先记录
+                      EventStore.Append(ctx, bar)   ─ ─ ─ 先记录
                             │
                             ▼
                       StrategyRuntime.OnBar(bar)   （流式；批式由引擎攒窗口）
