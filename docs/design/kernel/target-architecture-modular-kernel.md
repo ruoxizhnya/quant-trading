@@ -170,17 +170,21 @@ D1 的本意是「**留能力，不留包袱**」。执行时最容易犯的错�
 
 ```
 Kernel.Boot()
-  ├─ 1. EventStore.Init   (先开记录，否则后续消息无审计)
-  ├─ 2. Clock.Init        (决定时间观)
-  ├─ 3. DataEngine.Init   (建快照 / 连 feed)
-  ├─ 4. Portfolio.Init    (恢复持仓)
-  ├─ 5. RiskEngine.Init
-  ├─ 6. ExecEngine.Init   (连 broker)
-  ├─ 7. StrategyRuntime.Init (加载策略，恢复 L2/L3 状态)
-  └─ 8. MsgBus.Start      (最后开分发，此前消息只记录不派发)
+  ├─ 1.  EventStore.Init       (先开记录，否则后续消息无审计)
+  ├─ 2.  Clock.Init            (决定时间观)
+  ├─ 3.  DataEngine.Init       (建快照 / 连 feed)
+  ├─ 4.  Portfolio.Init        (恢复持仓)
+  ├─ 5.  RiskEngine.Init       (风控就位后 exec 才敢收单)
+  ├─ 6.  ExecEngine.Init       (连 broker)
+  ├─ 7.  StrategyRuntime.Init  (加载策略，恢复 L2/L3 状态)
+  ├─ 8.  Indicators.Init       (L2 有状态算子就位)
+  ├─ 9.  ExecAlgo.Init         (执行算法挂点)
+  └─ 10. MsgBus.Start          (最后开分发，此前消息只记录不派发)
 
 Kernel.Shutdown()  // 逆序，先停分发再落库
 ```
+
+> **已冻结为代码契约**：本顺序即 `pkg/kernel.BootOrder`（K0 切片 1，10 项）。**11 模块中 kernel 自身是装配者、不被自己装配**，故被装配的是其余 10 个——这与本文 §5 矩阵的 11 模块不矛盾，是同一集合的两种视角。改顺序 = 改契约，须走变更评审；断言见 `TestBootOrderContract`。
 
 **为什么这个顺序是契约**：EventStore 必须第一个起（否则启动期消息丢失），MsgBus 必须最后开（否则策略在状态未恢复完就收到 bar）。nautilus 的 Kernel 就是这么排的我们直接对齐。
 

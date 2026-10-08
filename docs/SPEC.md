@@ -440,7 +440,13 @@ type Strategy interface {
 // 流式策略接口（新增）—— 服务 L2/L3 有状态策略
 type BarHandler interface {
     // OnBar 逐 bar 回调，&mut self 语义（持有内部状态）
-    OnBar(ctx context.Context, bar domain.Bar) error
+    // ⚠️ 2026-10-08 订正：此处原写 domain.Bar，但该类型并不存在
+    //（pkg/domain 与 pkg/domain/market 均无；全仓零引用）——它是目标形态
+    // 里的未建类型。K0 冻结实现用 domain.OHLCV（pkg/domain/market/types.go:6，
+    // 本项目唯一的 bar 载体）。将来若真引入 domain.Bar（如给 bar 加复权
+    // 标记）属**改冻结契约**，须走变更评审并同步 pkg/strategy/streaming.go
+    // 及全部调用方。
+    OnBar(ctx context.Context, bar domain.OHLCV) error
     // Warmup 声明需要多少根历史 bar 才能产出首个有效信号（静态推导）
     Warmup() int
     // SaveState / LoadState 状态持久化（断点续跑 / 回测-实盘迁移）

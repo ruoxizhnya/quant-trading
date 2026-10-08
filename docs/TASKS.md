@@ -139,6 +139,31 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ---
 
+## 五、K0 契约审查发现（2026-10-08）
+
+> 审查通过项（记录以免重复审）：依赖方向无环且层次干净（clock/msgbus 零依赖 → eventstore → kernel；`live→risk`、`execalgo→portfolio` 别名方向均与 BootOrder 同向）；11 模块全覆盖；8 张表齐全且归属清楚；编译期守卫经双方独立破坏验证有效；零现有实现改动。
+
+### K0-P2-1 · 核心语义约束需 AST 护栏 ⬜（建议 K1/K2 同步做）
+
+- **① 目标**：把三条**只在注释里**的核心不变量变成机器可验证的护栏。
+- **② 上下文**：K0 契约的三条关键语义约束目前只有注释，K1/K2 实现后无从自动验证——
+  - `ExecEngine.Submit` 必须先过 `risk.RiskEngine.CheckOrder`（`pkg/live/interfaces.go:87`）
+  - `msgbus.Publish` 必须先经 EventStore 记录、再分发（BusTap 语义，D4）
+  - `BarHandler.OnBar` 不得回看未来 bar（`pkg/strategy/streaming.go:52`）
+- **③ 要求**：用 AST 护栏钉住（项目先例：`internal/repoguard/calendar_seed_isolation_test.go` 的 AST 扫、`cmd/analysis/auth_public_paths_test.go` 的 AST 双向对齐）。
+- **④ 约束与非目标**：只加护栏、不改契约签名；护栏本身必须破坏验证（改坏→红→还原）；**防「扫原文被注释误报」**——用 `scanInside(FuncName)` 限定函数体，别扫全文。
+- **⑤ 验收**：三条不变量各有一条破坏腿（如 Submit 去掉 CheckOrder 调用 → 该护栏红），且反证腿证明护栏不是永真。
+- **⑥ 边界**：只做这三条护栏，不扩到其他语义约束。
+
+### K0-P2-2 · `strategy → ai/contracts` 循环未破 ⬜（技术债登记，防遗忘）
+
+- **现状**：`go list` 实测 `pkg/strategy` 仍依赖 `pkg/ai/contracts`。ADR-027 §5 第 3 步指出「唯一非法边是 strategy → ai 方向的全部 4 处」，移出 `ai/expression` 与 `ai/contracts` 即**零逻辑改动破环**。
+- **为何 K0 不动**：D3 裁决先做进程内核模块化，ADR-027 的服务拆分推后。
+- **何时做**：随 ADR-027 落地；或至少先做其 §5 第 3 步的「expression 移出 `pkg/ai`」——这步不依赖拆服务，可独立先做。
+- **风险**：**越晚迁移成本越高**——K1/K2 会在 `pkg/strategy` 内继续加代码，依赖边会越缠越多。建议不晚于 K2 完成后处理。
+
+---
+
 ## 维护本文件
 
 - 新增 task 必须按 [AGENTS.md §8.5](../AGENTS.md) 写全六字段（目标/上下文/要求/约束与非目标/验收/边界）。
