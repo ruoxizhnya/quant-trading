@@ -16,35 +16,52 @@
 // 见 ADR-028 §4 存量算子表），没有 ts_ewma / ts_rma / ts_kalman 等
 // L2 有状态算子。本包是它们的家，与 expression 分层而不混层。
 //
-// K0 切片 2：本文件只冻结接口契约，stub 方法体固定
-// panic("contract stub: not implemented")，K1+ 实现直接替换 stub。
+// ─── 2026-10-08 · K3 切片 1 契约变更（Update 标量化 + Save/Load 状态序列化） ───
+//
+// 变更一：Indicator.Update 由 Update(bar domain.OHLCV) 改为 **Update(x float64)**。
+//   - 裁决理由：ADR-028 §7 的算子契约是 `Step(x float64, state *S)` ——
+//     RMA / EWMA / Kalman 是**标量序列**上的递推核；bar 级抽取（Close /
+//     TrueRange / Volume）是调用方（或薄适配）的职责。原 Update(bar) 让
+//     「RMA over TrueRange」这类**复合输入在类型上无法表达**（TrueRange
+//     本身依赖上一根 bar 的 Close，是一个 bar 级抽取，不属于标量递推核）。
+//     标量化后，递推核只认 float64，复合输入的组装权回到调用方。
+//
+// 变更二：新增 SaveState() ([]byte, error) / LoadState([]byte) error。
+//   - 裁决理由：ADR-028 §7 原文「这个不对称必须在算子接口设计时就承认：
+//     **如果接口不预留状态序列化，后面补不进去**」—— Step-from-persisted
+//     是三路一致性（Batch ≡ Step ≡ Step-from-persisted）的一路，契约必须
+//     承载，否则实盘进程重启后 EWMA/ATR 从头算，与回测静默漂移。
+//   - 语义照 strategy.BarHandler 先例（checkpoint.go / streaming.go）：
+//     LoadState 对不合法输入返回 error、**原子提交**（失败不改动接收者）、
+//     不静默重置为初始态。
 package indicator
-
-import (
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
-)
 
 // Indicator 是有状态算子的统一抽象（蓝图 §5 indicators 行：
 // Update / Value / Reset / Warmup，fail-loud）。
 //
 // 方法语义（冻结）：
-//   - Update：喂一根 bar 推进内部状态。**&mut self 语义**（有状态：
+//   - Update：喂一个标量 x 推进内部状态。**&mut self 语义**（有状态：
 //     同一算子对象连续 Update 才得到正确序列）。Update 失败必须返回
-//     error（fail-loud），不吞异常、不回退到上一值。
-//   - Value：取当前值。**warmup 未完成（已喂 bar 数 < Warmup()）时
+//     error（fail-loud），不吞异常、不回退到上一值，且**原子**——任何
+//     error 路径不得部分改动内部状态。
+//   - Value：取当前值。**warmup 未完成（已喂标量数 < Warmup()）时
 //     必须返回 error**，绝不返回未预热的部分值——返回半成品等于让策略
 //     拿噪声下单。
 //   - Warmup：需要多少根 bar 才能产出首个有效值——**可静态推导**
 //     （ADR-028 §4：可以是参数的函数，如 ts_ewma 的
-//     ln(1e-6)/ln(1-α)，α=0.3 约 20 根，α=0.05 约 60 根；
-//     **不能硬编码成一个常数**）。
+//     ln(1e-6)/ln(1-α)；**不能硬编码成一个常数**）。
 //   - Reset：清空状态回到初始态（换 run / 换 symbol 时调用）。
+//   - SaveState / LoadState：状态的序列化 / 反序列化（断点续跑、
+//     回测-实盘迁移、三路一致性的第三路）。LoadState 不合法输入返回
+//     error 且原子提交（失败不改动接收者）。
 type Indicator interface {
 	Name() string
-	Update(bar domain.OHLCV) error
+	Update(x float64) error
 	Value() (float64, error)
 	Warmup() int
 	Reset()
+	SaveState() ([]byte, error)
+	LoadState([]byte) error
 }
 
 // OperatorSpec 是算子声明契约——对齐 ADR-028 §4 的 7 项，缺一不可注册。
@@ -84,8 +101,8 @@ type BaseIndicator struct{}
 // Name 返回算子名（与 OperatorSpec.Name 一致）。
 func (i *BaseIndicator) Name() string { panic("contract stub: not implemented") }
 
-// Update 喂一根 bar 推进内部状态（&mut self）。
-func (i *BaseIndicator) Update(bar domain.OHLCV) error { panic("contract stub: not implemented") }
+// Update 喂一个标量 x 推进内部状态（&mut self）。
+func (i *BaseIndicator) Update(x float64) error { panic("contract stub: not implemented") }
 
 // Value 取当前值；warmup 未完成返回 error（fail-loud）。
 func (i *BaseIndicator) Value() (float64, error) { panic("contract stub: not implemented") }
@@ -96,6 +113,12 @@ func (i *BaseIndicator) Warmup() int { panic("contract stub: not implemented") }
 // Reset 清空状态回到初始态。
 func (i *BaseIndicator) Reset() { panic("contract stub: not implemented") }
 
+// SaveState 序列化内部状态（版本化；断点续跑 / 三路一致性第三路）。
+func (i *BaseIndicator) SaveState() ([]byte, error) { panic("contract stub: not implemented") }
+
+// LoadState 反序列化状态；不合法输入返回 error 且原子提交（失败不改动接收者）。
+func (i *BaseIndicator) LoadState(b []byte) error { panic("contract stub: not implemented") }
+
 // ─── 编译期合规检查 + 方法存在性守卫 ────────────────────────────────
 //
 // 第一行：stub 漂移出接口时 go build 失败（切片 1 既有样板）。
@@ -105,9 +128,11 @@ func (i *BaseIndicator) Reset() { panic("contract stub: not implemented") }
 var (
 	_ Indicator = (*BaseIndicator)(nil)
 
-	_ func(Indicator) string              = Indicator.Name
-	_ func(Indicator, domain.OHLCV) error = Indicator.Update
-	_ func(Indicator) (float64, error)    = Indicator.Value
-	_ func(Indicator) int                 = Indicator.Warmup
-	_ func(Indicator)                     = Indicator.Reset
+	_ func(Indicator) string           = Indicator.Name
+	_ func(Indicator, float64) error   = Indicator.Update
+	_ func(Indicator) (float64, error) = Indicator.Value
+	_ func(Indicator) int              = Indicator.Warmup
+	_ func(Indicator)                  = Indicator.Reset
+	_ func(Indicator) ([]byte, error)  = Indicator.SaveState
+	_ func(Indicator, []byte) error    = Indicator.LoadState
 )
