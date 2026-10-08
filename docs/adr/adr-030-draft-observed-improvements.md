@@ -3,6 +3,8 @@
 > **Status**: **Draft** —— 观察与建议登记，**尚未裁决**。本文件不取代任何 ADR，只把散落在对话里的、
 > 现有 ADR 尚未覆盖的改进项集中成可引用、可派工的条目（编号 `OBS-xx`）。
 > **Date**: 2026-10-07
+>
+> **吸收状态（2026-10-08）**：本清单是 [design/kernel/target-architecture-modular-kernel.md](../design/kernel/target-architecture-modular-kernel.md)（模块化内核目标架构，D1–D5 已拍板）的直接输入。**已被吸收 / 裁决**：OBS-02 / 03 / 04 → 数据契约与 msgbus（同步分发）；OBS-05 → D2（能用 L2 不上 L3）；OBS-13 → D1（实盘-ready）；OBS-15 → eventstore（先记录后分发）。**未吸收、留作独立工单**：OBS-01（空票池假成功，最高优先级）/ OBS-06 / 07 / 08 / 09 / 10 / 11 / 12；OBS-14 为外部先例参考（非工单）。
 > **Category**: Architecture / Governance
 > **Related**: [ADR-023](adr-023-ai-experimenter-lab.md) · [ADR-024](adr-024-expression-as-execution-target.md) ·
 > [ADR-027](adr-027-modular-decomposition-to-independent-services.md) ·

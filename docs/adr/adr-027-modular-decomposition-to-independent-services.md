@@ -1,6 +1,6 @@
 # ADR-027: 模块化拆分 — 独立仓库 / 独立服务的边界、契约与数据归属
 
-> **Status**: Proposed
+> **Status**: Proposed —— **落地顺序调整（2026-10-08）**：先做**进程内核模块化**（[design/kernel/target-architecture-modular-kernel.md](../design/kernel/target-architecture-modular-kernel.md) 分期 P0–P2，把 11 个模块的边界 / 契约在**进程内**划清并冻结），本 ADR 的**服务拆分（5→7）在其后**。两者同一方向（划清模块边界、明确数据归属）；进程内核的模块边界契约是服务拆分的直接输入。
 > **Date**: 2026-10-06（§2.6 与 §Context⑫⑬⑭ 为同日三轮头脑风暴追加）
 > **Category**: Architecture
 > **Related**: [ADR-023](adr-023-ai-experimenter-lab.md) · [ADR-024](adr-024-expression-as-execution-target.md) · **[ADR-028](adr-028-tiered-extension-of-strategy-expression-capability.md)（配套：028 定表达能力，本 ADR 定资产住哪个进程）** · **[ADR-029](adr-029-ai-layer-2026-agent-practice-alignment.md)（配套：029 定 tools 门面协议、实验生命周期状态图、可观测性；本 ADR 定服务边界）** · [ADR-020](adr-020-engine-decomposition.md) · [ADR-008](adr-008-inter-service-comm.md) · [PRODUCT.md](../PRODUCT.md)
