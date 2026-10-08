@@ -63,27 +63,15 @@ func NewStreamRunner() *StreamRunner { return &StreamRunner{} }
 //     难查：若把倒退那根照喂，OnBar 会看到一根「比上一根旧」的 bar，
 //     任何有状态算子都被污染，且污染现场离根因很远。
 //   - 同理 OnBar 自身返回 error 时立即停（不吞掉策略的失败）。
+//
+// ─── 裁决：Run 委托 RunCheckpointed + 零值 Checkpoint（K2 切片 3） ──
+// Run 与 RunCheckpointed 的逐 bar 驱动逻辑必须**完全一致**（否则回测/
+// 实盘的确定性会因「走哪条路」而分叉）。做法是只保留一份实现：
+// RunCheckpointed 是唯一驱动体，Run 用零值 Checkpoint{}（Store==nil）委托。
+// Store==nil 在 RunCheckpointed 里走「无保存、无恢复」路径，因此 Run 的
+// 对外行为（推进非递减、失败立即停、无任何 DB 依赖）与切片 1 一字不差。
 func (r *StreamRunner) Run(ctx context.Context, h BarHandler, bars []domain.OHLCV, clk clock.Clock) error {
-	if h == nil {
-		return errors.New("strategy: StreamRunner.Run 收到 nil BarHandler")
-	}
-	if clk == nil {
-		return errors.New("strategy: StreamRunner.Run 收到 nil Clock")
-	}
-	for i := range bars {
-		bar := bars[i]
-		if err := clk.Advance(bar.Date); err != nil {
-			return fmt.Errorf(
-				"strategy: StreamRunner 在第 %d 根 bar (symbol=%s date=%s) 推进时钟失败，已停止喂后续 bar: %w",
-				i, bar.Symbol, bar.Date.UTC().Format(time.RFC3339Nano), err)
-		}
-		if err := h.OnBar(ctx, bar); err != nil {
-			return fmt.Errorf(
-				"strategy: StreamRunner 第 %d 根 bar (symbol=%s date=%s) OnBar 失败: %w",
-				i, bar.Symbol, bar.Date.UTC().Format(time.RFC3339Nano), err)
-		}
-	}
-	return nil
+	return r.RunCheckpointed(ctx, h, bars, clk, Checkpoint{})
 }
 
 // ─── BatchAdapter：批式 → 流式 的同构桥 ──────────────────────────────
