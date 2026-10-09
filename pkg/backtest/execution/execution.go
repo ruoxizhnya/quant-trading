@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/backtest/marketimpact"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
-	"github.com/ruoxizhnya/quant-trading/pkg/fees"
+	costexec "github.com/ruoxizhnya/quant-trading/pkg/execution"
 )
 
 // ExecutionService handles order execution in backtests.
@@ -113,69 +112,26 @@ func (s *BacktestExecutionService) SetSlippageModel(model string) {
 // orderQty was added by K4 so the "impact" branch can size impact against
 // the order's participation in volume. The existing "fixed" / "variable" /
 // "none" branches ignore it and are byte-for-byte unchanged.
+//
+// K5 切片 1：函数体改为委托 pkg/execution 的**共享成本核**——paper 侧
+// （pkg/live）走的是同一段代码，回测与 paper 的滑点公式从此不可能漂移。
+// 这里把可变的 s.slippageModel 覆盖进 config 再构造 core，以保留
+// SetSlippageModel 的既有语义（s.slippageModel 可能已不同于
+// config.SlippageModel）。数值行为逐位不变。
 func (s *BacktestExecutionService) applySlippage(price float64, direction domain.Direction, quote Quote, orderQty float64) float64 {
-	switch s.slippageModel {
-	case "fixed":
-		// Sprint 6 P1-22 (ODR-013): pulled the literal 0.001
-		// out of this branch into fees.FixedSlippageRate so a
-		// "what-if" sensitivity sweep can change the fixed
-		// model rate in one place.
-		slippage := fees.FixedSlippageRate
-		if direction == domain.DirectionLong {
-			return price * (1 + slippage)
-		}
-		return price * (1 - slippage)
-	case "variable":
-		// Variable slippage based on volatility (high-low range)
-		volatility := (quote.High - quote.Low) / quote.Close
-		slippage := volatility * 0.1
-		if direction == domain.DirectionLong {
-			return price * (1 + slippage)
-		}
-		return price * (1 - slippage)
-	case "impact":
-		// K4（D5）：平方根市场冲击模型——滑点随 orderQty/ADV 增大，
-		// 使「大单滑点 > 小单滑点」成为可测事实。
-		//
-		// ADV 代理口径（裁决）：用当根 quote.Volume 近似 ADV。真实 ADV 是
-		// 过去 N 日平均成交量，本切片不引入历史窗口状态（撮合服务无该
-		// 状态），Volume 是 Q5 现状能拿到的最接近的量纲——局限见报告：
-		// 单日量尖峰/地量都会让冲击被高估/低估。
-		//
-		// quote.Volume <= 0 → 无法估 ADV，**退化为 fixed 滑点**而非
-		// 零冲击：静默返回零会让「无成交量数据」被误读成「无冲击、成本
-		// 为零」，是危险的乐观偏差。退化到 fixed 至少保持与旧模型一致
-		// 的保守 haircut。
-		if quote.Volume <= 0 {
-			slippage := fees.FixedSlippageRate
-			if direction == domain.DirectionLong {
-				return price * (1 + slippage)
-			}
-			return price * (1 - slippage)
-		}
-		model := marketimpact.MarketImpactModel{
-			Sigma:           s.config.ImpactSigma,
-			LiquidityFactor: s.config.ImpactLiquidityFactor,
-		}
-		impact := model.CalculateImpact(orderQty, quote.Volume)
-		if direction == domain.DirectionLong {
-			return price * (1 + impact)
-		}
-		return price * (1 - impact)
-	case "none":
-		return price
-	default:
-		return price
-	}
+	cfg := s.config
+	cfg.SlippageModel = s.slippageModel
+	core := costexec.NewCostModel(cfg)
+	// quote.Volume 作 ADV 代理（K4 裁决，见 pkg/execution 的 SlippagePrice）。
+	return core.SlippagePrice(price, direction, orderQty, quote.Volume, quote.High, quote.Low)
 }
 
-// calculateCommission calculates trading commission
+// calculateCommission calculates trading commission.
+//
+// K5 切片 1：委托 pkg/execution 的共享成本核——回测与 paper 用同一条
+// max(notional*CommissionRate, MinCommission) 公式。
 func (s *BacktestExecutionService) calculateCommission(amount float64) float64 {
-	commission := amount * s.config.CommissionRate
-	if commission < s.config.MinCommission {
-		commission = s.config.MinCommission
-	}
-	return commission
+	return costexec.NewCostModel(s.config).Commission(amount)
 }
 
 func generateTradeID() string {

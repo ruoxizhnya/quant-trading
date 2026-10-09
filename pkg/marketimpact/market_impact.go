@@ -1,3 +1,18 @@
+// Package marketimpact — 平方根市场冲击模型。
+//
+// K5 切片 1：本包从 pkg/backtest/marketimpact **上提到顶层**（与 pkg/fees
+// 平级）。归位理由：冲击是「执行/成本」子域的共享概念，不是回测的内部细节。
+//
+//   - K4 之前它只被 pkg/backtest/execution 的 "impact" 滑点分支消费，住在
+//     backtest 下尚可自圆其说；
+//   - K5 起 paper 侧（pkg/live 的 MockTrader）也要用它，与回测**同构**地
+//     给大单算冲击成本。若仍留在 pkg/backtest 下，paper 就要反向依赖回测，
+//     依赖方向错乱（成本模型是两者的**共同前置**，不是回测的下游）。
+//
+// 先例是 pkg/fees：同为「被多个平级域共用的成本模型」，被
+// backtest / live / portfolio / domain / ai 共用，故独立成顶层包。本包同理。
+// 包名不变（marketimpact），仅 import path 从
+// `.../pkg/backtest/marketimpact` 变为 `.../pkg/marketimpact`。
 package marketimpact
 
 import "math"

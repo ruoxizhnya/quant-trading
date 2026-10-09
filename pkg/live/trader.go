@@ -149,6 +149,19 @@ type OrderResult struct {
 	Status      string           `json:"status"` // "pending" / "filled" / "partial" / "cancelled" / "rejected" / "expired"
 	SubmittedAt time.Time        `json:"submitted_at"`
 	Message     string           `json:"message,omitempty"` // error or informational message
+
+	// ─── K5 切片 1：成交明细（可选，omitempty 保证旧 JSON 不变） ───────
+	//
+	// 改动前 Price 装的是**下单参考价**（MockTrader 里是 execPrice），真实
+	// 成交价只进了日志。paper 回放要产出的成交流需要「实际成交价 + 费用」，
+	// 因此把这两个量显式带上：
+	//   - FillPrice：施加滑点/冲击后的实际成交价；
+	//   - Fee      ：该笔总费用（A 股口径 = 佣金 + 过户费 + 卖出印花税）。
+	//
+	// 为什么加字段而不是把 Price 改成成交价：Price 被 LiveBridge 日志等
+	// 多处当参考价消费，改语义会静默污染既有读数。加法是向后兼容的。
+	FillPrice float64 `json:"fill_price,omitempty"`
+	Fee       float64 `json:"fee,omitempty"`
 }
 
 // AccountInfo represents a snapshot of the trading account.

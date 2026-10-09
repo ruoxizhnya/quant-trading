@@ -8,6 +8,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/execution"
 	"github.com/ruoxizhnya/quant-trading/pkg/fees"
 	"github.com/ruoxizhnya/quant-trading/pkg/id"
 	"github.com/ruoxizhnya/quant-trading/pkg/portfolio"
@@ -33,6 +34,28 @@ type MockTraderConfig struct {
 	MinCommission   float64
 	PriceProvider   func(symbol string) float64
 	OrderStore      OrderStore // optional; nil = no persistence
+
+	// ─── K5 切片 1：可选的真实执行成本模型 ───────────────────────────
+	//
+	// 这三个字段**默认零值不改变任何既有行为**：
+	//
+	//   - SlippageModel 空字符串 ⇒ 沿用旧的固定 SlippageRate 滑点
+	//     （execPrice*(1±SlippageRate)），与改动前逐位一致。这是默认路径，
+	//     所有既有 MockTrader 测试依赖它。
+	//   - SlippageModel 非空（"fixed"/"variable"/"impact"/"none"）⇒ 走
+	//     **与回测同一段代码**的 pkg/execution 成本核。此时 filled 价与
+	//     回测撮合服务对同一 (order, refPrice, adv, config) 给出的价逐位
+	//     相等 —— 这就是「paper 与回测成本同构」的落点。
+	//
+	// 用可选字段而非改默认值的理由：回测/实盘的默认成本行为必须零变化
+	// （硬约束），新能力只在显式配置时启用。
+	SlippageModel string
+
+	// ImpactSigma / ImpactLiquidityFactor 仅当 SlippageModel=="impact" 时
+	// 生效，语义与 domain.ExecutionConfig 的同名字段一致（Sigma 零值 →
+	// 无冲击；LiquidityFactor 零值 → 1.0）。
+	ImpactSigma           float64
+	ImpactLiquidityFactor float64
 }
 
 // MockTrader implements LiveTrader with in-memory simulation.
@@ -45,6 +68,65 @@ type MockTrader struct {
 	orders    map[string]*OrderResult
 	cash      float64
 	logger    zerolog.Logger
+
+	// barProvider 在 SlippageModel 非空时，为共享成本核提供当根 bar 的
+	// 高/低/量（"impact" 用 volume 作 ADV 代理，"variable" 用高低价）。
+	// 由回放编排（PaperSession）经 SetCurrentBarProvider 注入。nil ⇒
+	// adv=0、high=low=参考价 ⇒ impact 退化为 fixed（见 pkg/execution）。
+	barProvider func(symbol string) (Quote, bool)
+}
+
+// SetCurrentBarProvider 注入「当根 bar」的来源（K5 切片 1）。
+//
+// MockTrader.SubmitOrder 的签名里没有 bar 参数（它是 LiveTrader 冻结契约，
+// 不能改），而 "impact"/"variable" 成本模型需要当根 bar 的量/高低价。故用
+// 这个可选钩子把 bar 从回放编排喂进来：PaperSession 每天把它设成能读到
+// 「(日, symbol) → Quote」的闭包。
+//
+// 不实现本钩子的调用方（例如真实券商、或只用旧固定滑点的路径）无需理会
+// ——nil 时成本核按文档的零值语义退化，行为可预期。
+func (m *MockTrader) SetCurrentBarProvider(f func(symbol string) (Quote, bool)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.barProvider = f
+}
+
+// applyExecutionCost 算一笔单腿的成交价（K5 切片 1 的成本落点）。
+//
+// SlippageModel 为空 ⇒ 旧的固定 SlippageRate 滑点路径，逐位不变（默认，
+// 既有测试全部依赖它）。
+// SlippageModel 非空 ⇒ 委托 pkg/execution 的**共享成本核**——与回测
+// pkg/backtest/execution 走同一段代码，因此 paper 与回测的成本公式不可能
+// 各自漂移。这是「读法 A」在成本侧的落点：差异只可能来自执行机制，不来自
+// 两份公式。
+func (m *MockTrader) applyExecutionCost(symbol string, direction domain.Direction, quantity, execPrice float64) float64 {
+	if m.config.SlippageModel == "" {
+		slippage := execPrice * m.config.SlippageRate
+		if direction == domain.DirectionLong {
+			return execPrice + slippage
+		}
+		return execPrice - slippage
+	}
+
+	var high, low, adv float64
+	if m.barProvider != nil {
+		if q, ok := m.barProvider(symbol); ok {
+			high, low, adv = q.High, q.Low, float64(q.Volume)
+		}
+	}
+	if high == 0 && low == 0 {
+		// 无 bar：variable 波动率=0、impact 的 adv=0 退化为 fixed。
+		high, low = execPrice, execPrice
+	}
+
+	cfg := domain.ExecutionConfig{
+		SlippageModel:         m.config.SlippageModel,
+		CommissionRate:        m.config.CommissionRate,
+		MinCommission:         m.config.MinCommission,
+		ImpactSigma:           m.config.ImpactSigma,
+		ImpactLiquidityFactor: m.config.ImpactLiquidityFactor,
+	}
+	return execution.NewCostModel(cfg).SlippagePrice(execPrice, direction, quantity, adv, high, low)
 }
 
 // NewMockTrader creates a new mock trader for paper trading simulation.
@@ -109,6 +191,15 @@ func (m *MockTrader) Name() string { return "mock_trader" }
 
 func (m *MockTrader) HealthCheck(_ context.Context) error { return nil }
 
+// currentBar 返回某 symbol 的当根 bar（若回放编排注入了 barProvider）。
+// 供市价单取参考价、成本核取高低价/量。
+func (m *MockTrader) currentBar(symbol string) (Quote, bool) {
+	if m.barProvider == nil {
+		return Quote{}, false
+	}
+	return m.barProvider(symbol)
+}
+
 // SubmitOrder submits an order with A-share trading rules simulation.
 // For buy orders: deducts cash including commission and transfer fee.
 // For sell orders: credits cash after deducting commission, transfer fee, and stamp tax.
@@ -125,8 +216,16 @@ func (m *MockTrader) SubmitOrder(_ context.Context, symbol string, direction dom
 	}
 
 	execPrice := price
-	if orderType == domain.OrderTypeMarket && m.config.PriceProvider != nil {
-		execPrice = m.config.PriceProvider(symbol)
+	if orderType == domain.OrderTypeMarket {
+		// K5 切片 1：市价单优先取当根 bar 的 Close 作参考价（回放编排经
+		// SetCurrentBarProvider 注入），其次才落回旧的 PriceProvider。
+		// 这保证 paper 回放用「当根 bar」定价，与回测「quote.Close 作参考价」
+		// 完全同构；barProvider 为 nil 时逐位沿用旧 PriceProvider 行为。
+		if q, ok := m.currentBar(symbol); ok && q.Close > 0 {
+			execPrice = q.Close
+		} else if m.config.PriceProvider != nil {
+			execPrice = m.config.PriceProvider(symbol)
+		}
 	}
 	if execPrice <= 0 {
 		return nil, fmt.Errorf("invalid execution price: %.4f", execPrice)
@@ -143,8 +242,8 @@ func (m *MockTrader) SubmitOrder(_ context.Context, symbol string, direction dom
 }
 
 func (m *MockTrader) executeBuy(symbol string, orderType domain.OrderType, quantity float64, execPrice float64) (*OrderResult, error) {
-	slippage := execPrice * m.config.SlippageRate
-	fillPrice := execPrice + slippage
+	// K5 切片 1：成交价经成本落点（空模型 = 旧固定滑点，非空 = 共享成本核）。
+	fillPrice := m.applyExecutionCost(symbol, domain.DirectionLong, quantity, execPrice)
 	tradeValue := quantity * fillPrice
 	// S7-P1-1: delegate fee math to the shared primitive so tracker and
 	// mock_trader can never drift on the commission/transfer formula.
@@ -187,6 +286,8 @@ func (m *MockTrader) executeBuy(symbol string, orderType domain.OrderType, quant
 		Price:       execPrice,
 		Status:      "filled",
 		SubmittedAt: time.Now(),
+		FillPrice:   fillPrice,
+		Fee:         fb.Total(),
 	}
 	m.orders[result.OrderID] = result
 	m.persistOrder(result, execPrice, "filled", "")
@@ -227,8 +328,7 @@ func (m *MockTrader) executeSell(symbol string, orderType domain.OrderType, quan
 		quantity = pos.QuantityYesterday
 	}
 
-	slippage := execPrice * m.config.SlippageRate
-	fillPrice := execPrice - slippage
+	fillPrice := m.applyExecutionCost(symbol, domain.DirectionClose, quantity, execPrice)
 	tradeValue := quantity * fillPrice
 	// S7-P1-1: shared fee primitive — stamp tax applies on the sell side.
 	fb := portfolio.ComputeFees(tradeValue, true, m.feeSchedule())
@@ -254,6 +354,8 @@ func (m *MockTrader) executeSell(symbol string, orderType domain.OrderType, quan
 		Price:       execPrice,
 		Status:      "filled",
 		SubmittedAt: time.Now(),
+		FillPrice:   fillPrice,
+		Fee:         fb.Total(),
 	}
 	m.orders[result.OrderID] = result
 	m.persistOrder(result, execPrice, "filled", "")
@@ -495,8 +597,7 @@ func (m *MockTrader) flattenPosition(result *EmergencyFlattenResult, sym, reason
 		return
 	}
 
-	slippage := execPrice * m.config.SlippageRate
-	fillPrice := execPrice - slippage
+	fillPrice := m.applyExecutionCost(sym, domain.DirectionClose, qty, execPrice)
 	tradeValue := qty * fillPrice
 	// S7-P1-1: shared fee primitive — emergency flatten is a sell-side
 	// transaction (closing longs), so stamp tax applies.
@@ -541,6 +642,8 @@ func (m *MockTrader) flattenPosition(result *EmergencyFlattenResult, sym, reason
 		Status:      "filled",
 		SubmittedAt: time.Now(),
 		Message:     persistMsg,
+		FillPrice:   fillPrice,
+		Fee:         fb.Total(),
 	}
 	m.persistOrder(m.orders[orderID], fillPrice, "filled", persistMsg)
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/execution"
 	"github.com/ruoxizhnya/quant-trading/pkg/fees"
 )
 
@@ -25,6 +26,14 @@ type SimulatedBroker struct {
 	// the shared fees package so backtest / paper-trading / live stay
 	// in sync when rates change.
 	fees fees.AShareFees
+
+	// costModel 是共享执行成本核（K5 切片 1）。
+	//
+	// 改动前 fillOrder 用伪随机滑点 `(order.ID[0]%10 - 5.0)/1000.0`：
+	// 它既不可复现（取决于订单 ID 首字符），又与回测/paper 的成本模型
+	// 完全不同构。现改为走 pkg/execution —— 与回测撮合、MockTrader
+	// 同一段代码，滑点由 config.SlippageModel 决定。
+	costModel *execution.CostModel
 }
 
 // NewSimulatedBroker creates a new simulated broker
@@ -35,7 +44,20 @@ func NewSimulatedBroker(initialBalance float64) *SimulatedBroker {
 		positions: make(map[string]domain.Position),
 		balance:   initialBalance,
 		fees:      defaultFees,
+		costModel: execution.NewCostModel(domain.DefaultExecutionConfig()),
 	}
+}
+
+// SetExecutionConfig 替换本 broker 的执行成本配置（K5 切片 1）。
+//
+// 默认是 domain.DefaultExecutionConfig()（SlippageModel = "fixed"）。
+// 需要冲击模型时传入 SlippageModel="impact" + ImpactSigma 即可，与回测
+// 用同一份 ExecutionConfig 类型。本方法替换的是**成本模型**，不影响费用
+// 费率（fees 字段）。
+func (b *SimulatedBroker) SetExecutionConfig(cfg domain.ExecutionConfig) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.costModel = execution.NewCostModel(cfg)
 }
 
 // Connect connects to the simulated broker
@@ -141,9 +163,11 @@ func (b *SimulatedBroker) fillOrder(orderID string) {
 		fillPrice = 100.0 // Default simulated price
 	}
 
-	// Add small random slippage
-	slippage := (float64(order.ID[0]%10) - 5.0) / 1000.0
-	fillPrice = fillPrice * (1 + slippage)
+	// K5 切片 1：用共享成本核取代旧的伪随机滑点。SimulatedBroker 没有
+	// bar（无 high/low/volume），故 high=low=fillPrice、adv=0：
+	//   - "fixed" 模型不受影响；
+	//   - "impact" 因 adv=0 按文档退化为 fixed（不静默零冲击）。
+	fillPrice = b.costModel.SlippagePrice(fillPrice, order.Direction, order.Quantity, 0, fillPrice, fillPrice)
 	fillPrice = math.Round(fillPrice*100) / 100
 
 	order.Status = "filled"
