@@ -164,6 +164,12 @@ type Engine struct {
 	// When config.Seed is 0 the engine falls back to a time-based seed and
 	// the stream is non-replayable (intentional, for production runs).
 	rng *rand.Rand
+
+	// signalObserver 是 K5 切片 2 的信号对账钩子（可选）。非 nil 时每个
+	// 交易日 getSignals 产出 domain.Signal 后、撮合前回调——把回测侧信号
+	// 序列导出来，与 paper 侧（PaperSession.SignalCollector）的信号做
+	// ReconcileSignals 比对。nil = 不观察（零行为变化）。
+	signalObserver func(date time.Time, signals []domain.Signal)
 }
 
 // BacktestState is defined in state.go (P1-20) with internal locking
@@ -391,6 +397,18 @@ func (e *Engine) SetDataAdapter(adapter *marketdata.DataAdapter) {
 // goroutines without extra synchronization.
 func (e *Engine) RNG() *rand.Rand {
 	return e.rng
+}
+
+// SetSignalObserver 注册 K5 切片 2 的信号对账观察钩子（可选）。传 nil 取消。
+//
+// 观察点在 runBacktestInternal 的日循环内：getSignals 产出 domain.Signal 后、
+// processSignalsAndExecuteTrades 之前。此刻信号尚未受风控/持仓抵扣/资金约束
+// 影响，是与 paper 侧 PaperSession.SignalCollector 同构的那一层——正是信号
+// 对账（ReconcileSignals）要比对的输入。默认 nil，生产路径零行为变化。
+func (e *Engine) SetSignalObserver(observer func(date time.Time, signals []domain.Signal)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.signalObserver = observer
 }
 
 func (e *Engine) SetStore(store *storage.PostgresStore) {
@@ -767,6 +785,12 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 				Time("date", date).
 				Err(err).
 				Msg("Failed to get signals, skipping day")
+		}
+
+		// K5 切片 2：信号对账观察钩子（撮合前，信号尚未受风控/持仓抵扣
+		// 影响，与 paper 侧 PaperSession.SignalCollector 同构）。
+		if e.signalObserver != nil {
+			e.signalObserver(date, signals)
 		}
 
 		e.processSignalsAndExecuteTrades(ctx, state, signals, marketDataCache, pricesCache, regime, date, logger)

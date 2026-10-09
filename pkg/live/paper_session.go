@@ -51,6 +51,11 @@ type PaperSessionConfig struct {
 	Feed *BarReplayFeed
 	// Logger 可选；零值时用 zerolog.Nop()。
 	Logger zerolog.Logger
+	// SignalCollector 可选；非 nil 时每个交易日生成 domain.Signal 后回调
+	// （K5 切片 2 的信号对账用：把 paper 侧信号序列导出来，与回测侧
+	// getSignalsFromLocalStrategy 产出的信号做 ReconcileSignals 比对）。
+	// nil = 不收集（零行为变化）。
+	SignalCollector func(date time.Time, signals []domain.Signal)
 }
 
 // PaperSession 是 paper 回放的编排器：把「已落库的日线 bar」按时间回放、
@@ -84,6 +89,9 @@ type PaperSession struct {
 	// currentBars 是「当前回放日」的 bar 快照（symbol → Quote）。撮合前
 	// 更新，经 CurrentBarSource 钩子喂给 trader 定价/算成本。
 	currentBars map[string]Quote
+
+	// signalCollector 是 K5 切片 2 的信号对账钩子（可选）。
+	signalCollector func(date time.Time, signals []domain.Signal)
 }
 
 // NewPaperSession 依赖注入构造。缺 Provider / Clock / Trader 一律 fail-loud，
@@ -108,12 +116,13 @@ func NewPaperSession(cfg PaperSessionConfig) (*PaperSession, error) {
 		logger = zerolog.Nop()
 	}
 	return &PaperSession{
-		provider:    cfg.Provider,
-		feed:        feed,
-		trader:      cfg.Trader,
-		execCfg:     cfg.ExecutionConfig,
-		logger:      logger,
-		currentBars: map[string]Quote{},
+		provider:        cfg.Provider,
+		feed:            feed,
+		trader:          cfg.Trader,
+		execCfg:         cfg.ExecutionConfig,
+		logger:          logger,
+		currentBars:     map[string]Quote{},
+		signalCollector: cfg.SignalCollector,
 	}, nil
 }
 
@@ -205,6 +214,13 @@ func (s *PaperSession) Run(ctx context.Context, symbols []string, start, end tim
 			return nil, fmt.Errorf("paper session: signals at %s: %w", key, err)
 		}
 		domainSignals := toDomainSignals(stratSignals, d)
+
+		// K5 切片 2：信号对账钩子（在撮合前导出，此时信号尚未受 T+1/现金
+		// 约束影响，是与回测 getSignalsFromLocalStrategy 产出的信号同构的
+		// 那一层）。
+		if s.signalCollector != nil {
+			s.signalCollector(d, domainSignals)
+		}
 
 		// 撮合。
 		for _, sig := range domainSignals {
