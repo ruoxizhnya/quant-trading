@@ -119,7 +119,11 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - 对账器单测 8 条（一致/缺失/方向/强度/容差/顺序无关/确定性输出）
 - ⚠️ 告警接线**未做**：现有 `ReconciliationWorker`/`AlertDispatcher` 是「券商资金对账」（持仓/现金），零生产构造点且与信号对账是两码事；信号差异的「告警」以 `ReconcileSignals` 返回的差异列表 + 端到端 fail-loud 兑现，生产告警通道接线留待对账真正进实盘循环时
 
-### K6 · L3a WASM（P6）⬜（前置：K2）
+### K6 · L3a WASM（P6）切片 1 ✅ / 切片 2 ⬜ / 切片 3 ⬜（前置：K2）
+
+> **切片 1（2026-10-09 完成）**：wazero 入 go.mod + `WazeroRuntime` 落地 + `InProcessRuntime` 退役。
+> **切片 2（待做）**：host API 白名单（`get_bar(t_offset>0)` trap + `get_state`/`set_state`）+ import section 扫描器。
+> **切片 3（待做）**：协议改造 `generate_signals` → 逐 bar `on_bar(t)`（堵前视漏洞）。
 
 - **① 目标**：wazero 沙箱落地，host API 受限（`get_bar` 防前视 + `get_state`/`set_state`），仅在 L2 无法表达时启用（D2）。
 - **② 上下文**：蓝图 UC2；ADR-029 §3（WASM host API 契约）+ ADR-007 Phase 3（2026-10-08 对齐：轨道 B=L3a）；ADR-024（不做 plugin.Open）；`internal/sandbox/wasm/sandbox.go`（骨架，现用 InProcessRuntime fallback）。
@@ -127,6 +131,14 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：**仅 L2 无法表达时启用**（D2）；沙箱无文件/网络/时钟/随机源/goroutine。
 - **⑤ 验收**：`get_bar(t_offset>0)` → trap（防前视物理不可能）；WASM 策略断点 `SaveState`/`LoadState` 续跑一致；破坏验证——去掉 t_offset 检查 → 能读到未来数据（反证）。
 - **⑥ 边界**：只做 WASM 沙箱与 host API，不做 L2 算子（K3）、不做 L3b（K7）。
+
+**切片 1 交付明细（2026-10-09）**：
+- `go.mod` 加 `github.com/tetratelabs/wazero v1.12.0`
+- 新增 `internal/sandbox/wasm/wazero_runtime.go`：`WazeroRuntime`（Runtime/CompiledModule/Instance 三接口的真实隔离实现）
+  - 内存限制语义变更（已裁决）：wazero 是 **runtime 级**上限（`WithMemoryLimitPages`），不是 per-instance；现有 `Instantiate(memoryLimitBytes)` 参数本就是冗余（总是传同一个 `cfg.MaxMemoryBytes`），故收敛到 runtime 级，实例化时校验请求 ≤ 上限
+- 退役 `InProcessRuntime`（删除注入式 Go handler 模拟执行，约 220 行）+ `PluginHandler`/`inProcessModule`/`inProcessInstance`
+- 重写 `sandbox_test.go`（23 条全绿）：因本机无 wasm 编译工具链（无 tinygo/wat2wasm），测试用 `wasm_builder_test.go` 的极简 builder **结构化构造** wasm 字节（参考 wazero 官方 encodeModule），而非手写十六进制
+- 破坏验证：`Compile` 对无效字节不报错 → `TestWazeroRuntime_Compile_Invalid` 红 → 还原 → 绿 → 零残留
 
 ### K7 · L3b 信号注入（P7）⬜（前置：K2）
 
