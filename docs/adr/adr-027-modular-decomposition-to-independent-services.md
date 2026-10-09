@@ -1292,6 +1292,7 @@ in-process 执行 N 天。`getSignalsFromStrategyService` 这条路径**应当�
 | **reduction-service 的领域语言与 `as_of` 对接** | `Hotness` / `DecayHalfLife` / `WeightSeries` 如何映射到 SeriesSpec 的 `as_of` 与 `nan_policy`（新闻的可用时刻是发布时间还是次日开盘？） |
 | **AGENTS.md §2 与 ADR-024 的 `value`/`quality` 说法已过时** | 两处都写「`value` / `quality` 给不出默认表达式，明确失败」，但 `ai/yaml/generator.go:295-313` 实证：**两者都有默认表达式**（`cs_rank(neg(pe)) + cs_rank(neg(pb)) > 1.6` / `cs_rank(roe) + cs_rank(roa) > 1.6`），只有 `custom` 返回 `ok=false`。这是 P2-12 接入 pe/pb/roe/roa 之后未同步的漂移，按 Rule 1 / Rule 4 该修 |
 | **其余服务（evidence / compliance）的独立化** | 本 ADR 做 ai-service + 策略服务 + reduction-service；其余一次一个 |
+| **UI / web 前端拆独立 repo** | **用户 2026-10-09 确认：「UI 和 AI 都拆到单独 repo」。本 ADR 只覆盖后端 Go 服务（ai-service / 策略服务 / reduction-service），`web/`（Vue 3 SPA，当前在 monorepo 内、经 nginx 静态托管 + 反代）拆独立 git repo **未纳入本 ADR 的 8 步迁移顺序** —— 需单独 ADR（涉及：git 仓库拆分 / 前端构建产物发布 / nginx 反代契约边界）。**本 ADR 的「服务拓扑 3→5」与 compose「7 服务」均不含 web**，那说的是**后端服务**；web 是静态资产不是服务，拆 repo 是独立的发布/契约议题** |
 
 ---
 
