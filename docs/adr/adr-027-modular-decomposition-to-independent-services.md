@@ -33,15 +33,48 @@
 
 | 侧 | 内容 |
 |---|---|
-| **core · 仪器** | `expression`（原 `ai/expression`）· `backtest/contracts`（原 `ai/contracts`）· `indicator` · `backtest` · `risk` · `execalgo` · `strategy` · `portfolio` · `marketdata` · `storage` · `domain` · `fees` · `clock` · `msgbus` · `eventstore` · `kernel` · `validation` · `statistics` |
-| **AI · 实验员** | `ai/{client, prompts, loop, pipeline, search, agents, yaml, gene_pool, evolution, drift, factor, intent, templates, validator, causal, metrics}`；按 §5 第 8 步将加入 `strategy/copilot.go` 的 `CopilotService`（518 行）；`pkg/tools/builtin`（MCP 桥，归属待裁决） |
+| **core · 仪器** | `expression`（原 `ai/expression`）· `backtest/contracts`（原 `ai/contracts`）· `indicator` · `backtest` · `risk` · `execalgo` · `strategy` · `portfolio` · `marketdata` · `storage` · `domain` · `fees` · `clock` · `msgbus` · `eventstore` · `kernel` · `statistics` |
+| **AI · 实验员** | `ai/{client, prompts, loop, pipeline, search, agents, yaml, gene_pool, evolution, drift, factor, intent, templates, validator, causal, metrics}` · **`ai/validation`（原 `pkg/validation`，2026-10-09 归位）** · **`ai/tools`（原 `pkg/tools`，MCP 桥，2026-10-09 归位）**；按 §5 第 8 步将加入 `strategy/copilot.go` 的 `CopilotService`（518 行） |
 
 **不变量（由 `internal/repoguard/ai_boundary_test.go` 的 `TestPkgAIIsOnlyImportedByAllowedLayers` 强制）**：只有 `pkg/ai/*`、`pkg/tools/*`、`cmd/*`、`e2e/*` 可以 import `pkg/ai/*`；其余 `pkg/*` 一律禁止。**fail-closed**：白名单外的包（含新增包）默认拒绝；只扫生产代码（沿用本项目护栏惯例 —— 算子名防漂移护栏同样不扫测试）。
 
-### 两个待裁决点（不阻塞本步，但决定 §5 第 7/8 步的形态）
+### 两个归属点已裁决（2026-10-09）—— 判据：core 侧零引用 ⇒ 归 AI 层
 
-1. **`pkg/validation`（8 维统计校验）** —— 按「仪器」逻辑归 core；但 AI 实验循环**每次尝试都要调它**（`pkg/ai/loop/loop.go`），做进独立进程会引入 per-attempt 跨进程往返。三选项：core 出同步 API / 留 AI 侧（会造成两份真相，不建议）/ 暂时保持同进程（即 AI 暂不服务化）。**这条其实是「AI 要不要做成服务」的缩小版。**
-2. **`pkg/tools/builtin`（MCP 桥，10 文件 import `pkg/ai`）** —— 跟 AI 走（它是 AI 的手），还是留 core 当对外暴露面？
+若曦给的判据：**「AI 层每次都要用、而 core 层没有用它的地方 ⇒ 放进 AI 层」**，并要求用 DDD 复核。
+复核结论：判据成立，两处都该归 AI 层（已执行，commit `cff0a0f`）。
+
+| 包 | 规模 | 实测消费者 | DDD 判读 | 结论 |
+|---|---|---|---|---|
+| `validation` | 4920 行 | `cmd/handlers_explore` ＋ `pkg/ai/{loop,causal}`，**core 侧全零** | 它是**实验员对假设的判断**（6 维验证 → `Verdict` 概率/校准），不是回测·执行域的仪器 | → **`pkg/ai/validation`** |
+| `tools`（含 `builtin/`） | 10716 行 | 只有 `cmd/analysis`，**core 侧全零**；且 `builtin` 本就 import `pkg/ai` | MCP 桥是**开放主机服务 / 反腐败层（ACL）**，而 ACL 属于边界的**消费侧**（消费方是 agent） | → **`pkg/ai/tools`** |
+
+AI 边界护栏白名单同步收敛为 `[pkg/ai, cmd, e2e]`（`pkg/tools` 已不存在 —— 白名单必须是真实陈述）。
+
+**⚠️ 由此产生的契约变更（`validation` 归 AI 的前提，必须显式声明）**
+
+既然验证属 AI 层、core 不再持有验证能力，**策略库的写入契约**须改为：
+
+> **凡存入策略库（`research.strategies` / §5 第 7 步的策略服务）的策略，均已由 AI 层验证通过。**
+> core 侧的策略存储**不做也不应做**独立验证。（core 本就零引用 `validation` ⇒ 该契约在代码上已成立，
+> 本节把它从「巧合」升格为「声明」。）
+
+含义：验证不通过的产物**不得**进入策略库；若将来要支持「人工绕过 AI 直接注册策略」，
+必须先补一条 core 侧准入路径，并**重评本契约**。
+
+### 一处仍未定（但已给判据）：prompt 模板
+
+`pkg/ai/prompts/{factor_research,strategy_generate}.txt`（175 行）**零代码引用**，但**不是垃圾**：
+- `factor_research.txt` 带 `{{TOPIC}}` 占位符，内容**比活的 `research.go` 内联提示词更完整**
+  （含 PIT 语义说明、`pe/pb/ps` 非正取 NaN 的理由、4 个带 rationale 与 confidence 的样例因子）
+- `strategy_generate.txt` 的字段清单**恰好正确**，且它描述的是 **DSL 层（L0/L1）策略生成**
+  （JSON：params + factors + logic + risk_management），与 `pkg/ai/prompts.go` 的 `SystemPrompt`
+  （**Go 代码生成**，L2/L3）**不是同一层**
+
+⇒ **判定：保留**（删除会丢掉两处 prompt 契约的设计意图）。**待做**：接线 `factor_research.txt`
+（消除它与 `research.go` 内联提示词的**双真相** —— 与 OBS-06 / OBS-08 同一种病），
+并把两处词汇表都改为**从注册表派生**；`strategy_generate.txt` 待 L0/L1 生成链路建好后再接。
+⚠️ 注：`factor_research.txt` 的词汇表**仍漂移**（广告 `vwap` / `turnover_rate` / `returns` / `volatility`
+与不存在的 `pow(x,y)`）—— 未接线期间它不产生实际影响，接线时必须先修。
 
 ### 路径变更的连带影响
 

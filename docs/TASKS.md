@@ -254,6 +254,26 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ---
 
+## 四、AI / core 边界归属（2026-10-09 若曦拍板，DDD 判定）
+
+判据（若曦定的）：**「AI 层每次都要用、而 core 层没有用它的地方 ⇒ 放进 AI 层」**，并用 DDD 复核。
+
+| 包 | 判定 | 依据 | 状态 |
+|---|---|---|---|
+| `expression`（原 `pkg/ai/expression`） | → **core**（`pkg/expression`） | 零 AI 概念、零非确定性、只依赖 core ⇒ 一个核心层包住错了目录 | ✅ `55ea33f` |
+| `contracts`（原 `pkg/ai/contracts`） | → **core**（并入 `pkg/backtest/contracts`） | 1 个接口 `BacktestRunner`；6 个消费方里 4 个本就是 core | ✅ `55ea33f` |
+| `validation`（原 `pkg/validation`，4920 行） | → **AI**（`pkg/ai/validation`） | core 侧零引用；它是**实验员对假设的判断**（6 维 → `Verdict` 概率），不是回测·执行域的仪器 | ✅ `cff0a0f` |
+| `tools`（原 `pkg/tools`，10716 行，含 `builtin/`） | → **AI**（`pkg/ai/tools`） | core 侧零引用；MCP 桥 = 开放主机服务 / **ACL，属边界消费侧** | ✅ `cff0a0f` |
+| `strategy/copilot.go` 的 `CopilotService`（518 行） | → **AI** | 自然语言 → 生成代码 → 沙箱编译 → 回测 = 实验员的活，却住在仪器包里 | ⬜ 属 ADR-027 §5 第 8 步（ai-service） |
+| `pkg/ai/prompts/{factor_research,strategy_generate}.txt` | **保留 + 待接线** | 零引用的孤儿，但内容是**两处 prompt 契约**（DSL 层策略生成 / 因子研究）；`factor_research.txt` 与 `research.go` 内联提示词构成**双真相**（与 OBS-06/08 同病） | ⬜ 接线 + 词汇表从注册表派生 |
+| `pkg/backtest/marketimpact` | **待判** | 共享成本模型却住在 `backtest` 下；K5 的 paper 侧也要用它。**先例**：`pkg/fees` 同为共享成本模型，被 `backtest`/`live`/`portfolio`/`ai` 共用 | ⬜ 随 K5 |
+
+**契约变更（随 `validation` 归 AI 生效）**：**凡存入策略库的策略，均已由 AI 层验证通过**；core 侧的策略存储不做也不应做独立验证。详见 ADR-027 追加节。
+
+**不变量**（`internal/repoguard/ai_boundary_test.go` 强制）：只有 `pkg/ai/*`、`cmd/*`、`e2e/*` 可以 import `pkg/ai/*` —— 白名单式 **fail-closed**（新包默认拒绝），只扫生产代码。
+
+---
+
 ## 维护本文件
 
 - 新增 task 必须按 [AGENTS.md §8.5](../AGENTS.md) 写全六字段（目标/上下文/要求/约束与非目标/验收/边界）。
