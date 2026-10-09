@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/expression"
+	"github.com/ruoxizhnya/quant-trading/pkg/expression"
 )
 
 // ResearchAgent generates factor hypotheses and validates them

@@ -13,9 +13,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/intent"
 	yamlgen "github.com/ruoxizhnya/quant-trading/pkg/ai/yaml"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
@@ -73,7 +73,7 @@ type Result struct {
 // BacktestRunner is the canonical contract for running backtests.
 // S7-P1-3 (ODR-043): previously a local duplicate of the same
 // interface in pkg/strategy/copilot.go. Now a zero-cost type alias to
-// the single source of truth in pkg/ai/contracts. All existing code
+// the single source of truth in pkg/backtest/contracts. All existing code
 // (adapters, mocks, compile-time assertions) continues to work
 // unchanged because Go type aliases are transparent.
 type BacktestRunner = contracts.BacktestRunner

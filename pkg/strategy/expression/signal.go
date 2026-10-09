@@ -2,7 +2,7 @@
 // signal generation, position sizing, risk control, and the
 // ExpressionStrategy adapter that composes them into a strategy.Strategy.
 //
-// S7-P3-1 (ODR-043 Sprint 7): The AI expression engine (pkg/ai/expression)
+// S7-P3-1 (ODR-043 Sprint 7): The expression engine (pkg/expression)
 // was factor-only — it could evaluate a DSL formula to a numeric value but
 // had no way to turn that value into trading signals, size positions, or
 // enforce risk limits. This package fills those gaps:
@@ -12,7 +12,7 @@
 //   - RiskController:  weights → risk-checked weights
 //   - ExpressionStrategy: composes all three into a strategy.Strategy
 //
-// The package depends on pkg/ai/expression for the DSL parser/evaluator
+// The package depends on pkg/expression for the DSL parser/evaluator
 // and on pkg/strategy for the Strategy interface and BaseStrategy.
 package expression
 
@@ -21,8 +21,8 @@ import (
 	"math"
 	"sort"
 
-	aiexpr "github.com/ruoxizhnya/quant-trading/pkg/ai/expression"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	expr "github.com/ruoxizhnya/quant-trading/pkg/expression"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
@@ -54,7 +54,7 @@ type SignalConfig struct {
 // the provided evaluator and emits signals for passing symbols.
 type SignalGenerator struct {
 	cfg      SignalConfig
-	ast      *aiexpr.Expression
+	ast      *expr.Expression
 	lookback int
 }
 
@@ -77,7 +77,7 @@ func NewSignalGenerator(cfg SignalConfig) (*SignalGenerator, error) {
 		cfg.Direction = domain.DirectionLong
 	}
 
-	p := aiexpr.NewParser()
+	p := expr.NewParser()
 	expr, err := p.Parse(cfg.Expression)
 	if err != nil {
 		return nil, fmt.Errorf("signal: parse expression %q: %w", cfg.Expression, err)
@@ -104,7 +104,7 @@ func NewSignalGenerator(cfg SignalConfig) (*SignalGenerator, error) {
 //
 // Signals are returned in deterministic order (sorted by symbol) to
 // keep downstream sizing/risk reproducible.
-func (g *SignalGenerator) Generate(bars map[string][]domain.OHLCV, evaluator *aiexpr.Evaluator) ([]strategy.Signal, error) {
+func (g *SignalGenerator) Generate(bars map[string][]domain.OHLCV, evaluator *expr.Evaluator) ([]strategy.Signal, error) {
 	if evaluator == nil {
 		return nil, fmt.Errorf("signal: evaluator cannot be nil")
 	}

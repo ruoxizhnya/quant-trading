@@ -15,14 +15,14 @@ import (
 // depends on. The concrete *pkg/backtest/walkforward.WalkForwardEngine
 // satisfies it via an adapter in cmd/analysis/setup.go (composition root).
 //
-// We define the interface here (rather than in pkg/ai/contracts) because
+// We define the interface here (rather than in pkg/backtest/contracts) because
 // it takes domain.WalkForwardParams which would force contracts to
 // import more types. Keeping it local to builtin is the pragmatic
 // choice — the only consumer is this Tool, and the only implementor
 // is the adapter in setup.go.
 //
 // If a second consumer appears later (e.g. an AI agent), the interface
-// can be promoted to pkg/ai/contracts.
+// can be promoted to pkg/backtest/contracts.
 type WalkForwardRunner interface {
 	// RunWalkForward runs walk-forward validation for a named strategy
 	// over the given stock pool and date range, using train_days/test_days

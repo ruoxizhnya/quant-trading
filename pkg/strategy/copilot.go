@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/contracts"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
 
@@ -58,11 +58,11 @@ type BuildExecutor interface {
 // BacktestRunner is the canonical contract for running a backtest.
 // S7-P1-3 (ODR-043): previously defined as a local interface here AND
 // duplicated in pkg/ai/pipeline/pipeline.go. Now a zero-cost type alias
-// to the single source of truth in pkg/ai/contracts — all existing
+// to the single source of truth in pkg/backtest/contracts — all existing
 // adapters (*strategyEngineAdapter) and mocks continue to work
 // unchanged because Go type aliases are transparent.
 //
-// pkg/ai/contracts is a LEAF package (imports only pkg/domain), so
+// pkg/backtest/contracts is a LEAF package (imports only pkg/domain), so
 // this import does NOT re-introduce the strategy → ai reverse
 // dependency that S7-P1-2 removed (that was strategy → pkg/ai, the
 // main LLM client package; contracts is a separate leaf).

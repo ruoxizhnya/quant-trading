@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	aiexpr "github.com/ruoxizhnya/quant-trading/pkg/ai/expression"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	expr "github.com/ruoxizhnya/quant-trading/pkg/expression"
 )
 
-// mockFieldProvider implements aiexpr.DataProvider for signal tests.
+// mockFieldProvider implements expr.DataProvider for signal tests.
 // It returns per-symbol, per-field float64 slices so we can control
 // the cross-sectional snapshot the evaluator sees.
 type mockFieldProvider struct {
@@ -108,7 +108,7 @@ func TestGenerate_ComparisonFilter_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSignalGenerator: %v", err)
 	}
-	ev := aiexpr.NewEvaluator(provider)
+	ev := expr.NewEvaluator(provider)
 	signals, err := g.Generate(bars, ev)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -142,7 +142,7 @@ func TestGenerate_NoSymbolsPass(t *testing.T) {
 	}
 	bars := makeBars([]string{"A", "B"}, map[string]float64{"A": 5, "B": 8})
 	g, _ := NewSignalGenerator(SignalConfig{Expression: "close > 10"})
-	ev := aiexpr.NewEvaluator(provider)
+	ev := expr.NewEvaluator(provider)
 	signals, err := g.Generate(bars, ev)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -160,7 +160,7 @@ func TestGenerate_EmptyBars(t *testing.T) {
 		data:    map[string]map[string][]float64{},
 	}
 	g, _ := NewSignalGenerator(SignalConfig{Expression: "close > 10"})
-	ev := aiexpr.NewEvaluator(provider)
+	ev := expr.NewEvaluator(provider)
 	signals, err := g.Generate(map[string][]domain.OHLCV{}, ev)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -185,7 +185,7 @@ func TestGenerate_SellAction_ShortDirection(t *testing.T) {
 		Action:     "sell",
 		Direction:  domain.DirectionShort,
 	})
-	ev := aiexpr.NewEvaluator(provider)
+	ev := expr.NewEvaluator(provider)
 	signals, err := g.Generate(bars, ev)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -219,7 +219,7 @@ func TestGenerate_MinStrengthFiltering(t *testing.T) {
 		Expression:  "cs_rank(close)",
 		MinStrength: 0.5,
 	})
-	ev := aiexpr.NewEvaluator(provider)
+	ev := expr.NewEvaluator(provider)
 	signals, err := g.Generate(bars, ev)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -258,7 +258,7 @@ func TestGenerate_NaNValuesFiltered(t *testing.T) {
 	g, _ := NewSignalGenerator(SignalConfig{
 		Expression: "ts_delta(close, 1) > 10",
 	})
-	ev := aiexpr.NewEvaluator(provider)
+	ev := expr.NewEvaluator(provider)
 	signals, err := g.Generate(bars, ev)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -281,7 +281,7 @@ func TestGenerate_PriceFromBars(t *testing.T) {
 		"A": {{Close: 42.5, Date: time.Now()}},
 	}
 	g, _ := NewSignalGenerator(SignalConfig{Expression: "close > 10"})
-	ev := aiexpr.NewEvaluator(provider)
+	ev := expr.NewEvaluator(provider)
 	signals, err := g.Generate(bars, ev)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)

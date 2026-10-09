@@ -19,7 +19,7 @@ import (
 // PostgreSQL pool. The concrete types satisfy these interfaces
 // implicitly — no adapter is needed in setup.go.
 //
-// We don't promote these to pkg/ai/contracts because the return types
+// We don't promote these to pkg/backtest/contracts because the return types
 // (gene_pool.FactorGene, gene_pool.StrategyGene) would force contracts
 // to import gene_pool, breaking its leaf-package invariant.
 

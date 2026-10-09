@@ -4,10 +4,22 @@
 // here eliminates duplicate interface definitions across
 // pkg/strategy and pkg/ai/pipeline.
 //
-// This is a LEAF package: it imports only pkg/domain (for the
-// BacktestResult return type) and the standard library. It does NOT
-// import pkg/ai, pkg/strategy, or any other behavioral package, so
-// importing pkg/ai/contracts does NOT create a reverse dependency.
+// This is a LEAF package on the core side: it imports only pkg/domain
+// (for the BacktestResult return type) and the standard library. It does
+// NOT import pkg/ai, pkg/strategy, or any other behavioral package, so a
+// package importing pkg/backtest/contracts does NOT create a reverse
+// dependency.
+//
+// 2026-10-09 rehoming (ADR-027 §5 step 3): this contract was originally
+// parked in pkg/ai/contracts, which forced every consumer — including
+// pkg/strategy — to reach back into the AI layer, an illegal reverse edge.
+// But BacktestRunner is execution-carrier infrastructure, not an AI
+// capability: it is a plain domain-typed port with no LLM, prompt, or
+// non-determinism in it. It therefore belongs on the core side, and moved
+// to pkg/backtest/contracts alongside the rest of the backtest core, so
+// the dependency direction is now strictly ai → core. The S7-P1-3 /
+// ODR-043 rationale below (eliminating duplicate interface definitions)
+// is unchanged; only the package's home and thus the import path moved.
 //
 // Aliasing convention: packages that previously defined their own
 // BacktestRunner should replace the local interface definition with:

@@ -2,7 +2,7 @@
 // signal generation, position sizing, risk control, and the
 // ExpressionStrategy adapter that composes them into a strategy.Strategy.
 //
-// S7-P3-1 (ODR-043 Sprint 7): The AI expression engine (pkg/ai/expression)
+// S7-P3-1 (ODR-043 Sprint 7): The expression engine (pkg/expression)
 // was factor-only — it could evaluate a DSL formula to a numeric value but
 // had no way to turn that value into trading signals, size positions, or
 // enforce risk limits. This package fills those gaps:
@@ -10,10 +10,10 @@
 //   - SignalGenerator: DSL comparison expression → []strategy.Signal
 //   - PositionSizer:   signals → target weights (equal/strength/fixed)
 //   - RiskController:  weights → risk-checked weights
-//   - OHLCVDataProvider: bridges bars map → aiexpr.DataProvider
+//   - OHLCVDataProvider: bridges bars map → expr.DataProvider
 //   - ExpressionStrategy: composes all four into a strategy.Strategy
 //
-// The package depends on pkg/ai/expression for the DSL parser/evaluator
+// The package depends on pkg/expression for the DSL parser/evaluator
 // and on pkg/strategy for the Strategy interface and BaseStrategy.
 package expression
 
@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"sort"
 
-	aiexpr "github.com/ruoxizhnya/quant-trading/pkg/ai/expression"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	expr "github.com/ruoxizhnya/quant-trading/pkg/expression"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
@@ -67,7 +67,7 @@ func defaultExpressionStrategyConfig() ExpressionStrategyConfig {
 // strategy inside the backtest engine. The flow in GenerateSignals is:
 //
 //  1. Build OHLCVDataProvider from the bars map (strategy engine input).
-//  2. Build an aiexpr.Evaluator backed by that provider.
+//  2. Build an expr.Evaluator backed by that provider.
 //  3. SignalGenerator evaluates the DSL expression → raw signals.
 //  4. PositionSizer computes target weights from signals.
 //  5. RiskController filters/clamps weights (per-position cap, max open
@@ -278,7 +278,7 @@ func (s *ExpressionStrategy) GenerateSignals(ctx context.Context, bars map[strin
 
 	// 1. Build evaluator from bars (+ 注入的财报，P2-12)。
 	provider := NewOHLCVDataProviderWithFundamentals(bars, fundamentals)
-	evaluator := aiexpr.NewEvaluator(provider)
+	evaluator := expr.NewEvaluator(provider)
 
 	// 2. Generate raw signals.
 	signals, err := signalGen.Generate(bars, evaluator)

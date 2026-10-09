@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/agents"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/expression"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
+	"github.com/ruoxizhnya/quant-trading/pkg/expression"
 )
 
 // DiscoveryPipeline orchestrates the factor discovery process.

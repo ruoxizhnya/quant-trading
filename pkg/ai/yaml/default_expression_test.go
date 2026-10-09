@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/expression"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/intent"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/expression"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

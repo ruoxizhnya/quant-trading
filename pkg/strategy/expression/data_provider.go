@@ -5,8 +5,8 @@ import (
 	"math"
 	"sort"
 
-	aiexpr "github.com/ruoxizhnya/quant-trading/pkg/ai/expression"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	expr "github.com/ruoxizhnya/quant-trading/pkg/expression"
 )
 
 // ohlcvFields are the data fields extractable from domain.OHLCV bars.
@@ -34,8 +34,8 @@ var fundamentalFields = map[string]bool{
 }
 
 // OHLCVDataProvider adapts map[string][]domain.OHLCV (the strategy
-// GenerateSignals input shape) to the AI expression engine's
-// aiexpr.DataProvider interface.
+// GenerateSignals input shape) to the expression engine's
+// expr.DataProvider interface.
 //
 // This lets the SignalGenerator evaluate DSL expressions against the
 // same bar data the strategy engine already passes to plugins, without
@@ -220,4 +220,4 @@ func extractField(bar domain.OHLCV, field string) float64 {
 }
 
 // Compile-time interface satisfaction check.
-var _ aiexpr.DataProvider = (*OHLCVDataProvider)(nil)
+var _ expr.DataProvider = (*OHLCVDataProvider)(nil)

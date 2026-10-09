@@ -14,7 +14,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/contracts"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 )
 

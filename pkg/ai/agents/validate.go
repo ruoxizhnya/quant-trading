@@ -6,11 +6,11 @@ import (
 	"math"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/client"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/expression"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/metrics"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/search"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/validator"
+	"github.com/ruoxizhnya/quant-trading/pkg/expression"
 	"github.com/ruoxizhnya/quant-trading/pkg/statistics"
 )
 

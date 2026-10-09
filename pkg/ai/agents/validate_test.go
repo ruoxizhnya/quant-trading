@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/expression"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
+	"github.com/ruoxizhnya/quant-trading/pkg/expression"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

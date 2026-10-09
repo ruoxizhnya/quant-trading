@@ -11,7 +11,7 @@
 // ADR-024 的「自由度是负债」：表达力逐层放大，但每层都先问「上一层
 // 能不能做」。
 //
-// 新建包的理由：现有 pkg/ai/expression（operators.go / evaluator.go）
+// 新建包的理由：现有 pkg/expression（operators.go / evaluator.go）
 // 是 **L1 无状态表达式算子**（28 个算子全部 causal=true、state=false，
 // 见 ADR-028 §4 存量算子表），没有 ts_ewma / ts_rma / ts_kalman 等
 // L2 有状态算子。本包是它们的家，与 expression 分层而不混层。
