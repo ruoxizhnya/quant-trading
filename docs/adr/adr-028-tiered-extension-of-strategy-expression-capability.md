@@ -1,6 +1,7 @@
 # ADR-028: 策略与因子表达能力的分层扩展
 
 > **Status**: Proposed —— **定位由 [ADR-029](adr-029-ai-layer-2026-agent-practice-alignment.md) 调整为「轨道 A 的能力扩展」**（2026-10-06）；**与四层表达力对齐（2026-10-08 确认一致）**：本 ADR 的 L2 递推算子 = [design/kernel/target-architecture-modular-kernel.md](../design/kernel/target-architecture-modular-kernel.md) 四层模型的 L2（确定性有状态算子，优先级最高）；轨道 A 内部为 L0 / L1 / L2 三层，能用 L2 表达的不上轨道 B（D2）。
+> **路径注记（2026-10-09）**：本文出现的 `pkg/ai/expression` 现为 **`pkg/expression`**（core 侧，ADR-027 §5 第 3 步已执行）；正文保留 2026-10-06 时点的记录。
 > **Date**: 2026-10-06
 > **Category**: Architecture
 > **Related**: [ADR-023](adr-023-ai-experimenter-lab.md)（三层模型 · 验证器链 · 校准优于准确）· [ADR-024](adr-024-expression-as-execution-target.md)（表达式作为执行载体）· [ADR-027](adr-027-modular-decomposition-to-independent-services.md)（模块化拆分 · 策略服务）· **[ADR-029](adr-029-ai-layer-2026-agent-practice-alignment.md)（双轨执行载体 · WASM host API）** · [PRODUCT.md](../PRODUCT.md)

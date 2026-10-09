@@ -12,6 +12,44 @@
 
 ---
 
+## 执行记录：§5 第 3 步已落地 + AI / core 边界定义（2026-10-09 追加）
+
+**§5 第 3 步（移出 `ai/expression` + `ai/contracts` 破环）已执行完成。** 本节的边界定义即该步的验收依据，也是 §5 第 6/7/8 步（去全局单例 → 拆策略服务 → 拆 ai-service）的输入。
+
+### 为什么这两处是「放错目录」，而不是「AI 能力」
+
+§⑭ 已判定它们是「执行载体基础设施，不是 AI 能力」。2026-10-09 的独立源码取证把这条钉实：
+
+| 包 | 是什么 | 决定性证据 |
+|---|---|---|
+| `ai/expression` → **`pkg/expression`**（生产 ~2094 行） | DSL 解析 + 求值 + 算子注册表（「怎么算」） | 生产 import **只有** `pkg/indicator` + `pkg/statistics` + 标准库；实测无 `llm/prompt/http/time.Now/math/rand/os.Getenv` —— 一个**零 AI 概念、零非确定性**的 core 层包 |
+| `ai/contracts` → **`pkg/backtest/contracts/runner.go`**（1 个接口） | `BacktestRunner`（跑回测 = 仪器） | 只 import `pkg/domain`；6 个消费方里 **4 个是 core**（`pkg/strategy` + `pkg/tools`×3） |
+
+**「双向依赖」是症状，病根是边界画错在这两处**：core 要用 DSL 求值器 ⇒ 被逼出 `core → ai`。移出后依赖恢复为严格单向 **`ai → core`**（`go list -deps ./pkg/strategy/ | grep pkg/ai` 为空，改前 4 处）。
+
+### AI / core 边界定义
+
+判据：**「怎么算」= core（仪器）；「试什么 / 怎么试 / 试完怎么判」= AI（实验员）**。
+
+| 侧 | 内容 |
+|---|---|
+| **core · 仪器** | `expression`（原 `ai/expression`）· `backtest/contracts`（原 `ai/contracts`）· `indicator` · `backtest` · `risk` · `execalgo` · `strategy` · `portfolio` · `marketdata` · `storage` · `domain` · `fees` · `clock` · `msgbus` · `eventstore` · `kernel` · `validation` · `statistics` |
+| **AI · 实验员** | `ai/{client, prompts, loop, pipeline, search, agents, yaml, gene_pool, evolution, drift, factor, intent, templates, validator, causal, metrics}`；按 §5 第 8 步将加入 `strategy/copilot.go` 的 `CopilotService`（518 行）；`pkg/tools/builtin`（MCP 桥，归属待裁决） |
+
+**不变量（由 `internal/repoguard/ai_boundary_test.go` 的 `TestPkgAIIsOnlyImportedByAllowedLayers` 强制）**：只有 `pkg/ai/*`、`pkg/tools/*`、`cmd/*`、`e2e/*` 可以 import `pkg/ai/*`；其余 `pkg/*` 一律禁止。**fail-closed**：白名单外的包（含新增包）默认拒绝；只扫生产代码（沿用本项目护栏惯例 —— 算子名防漂移护栏同样不扫测试）。
+
+### 两个待裁决点（不阻塞本步，但决定 §5 第 7/8 步的形态）
+
+1. **`pkg/validation`（8 维统计校验）** —— 按「仪器」逻辑归 core；但 AI 实验循环**每次尝试都要调它**（`pkg/ai/loop/loop.go`），做进独立进程会引入 per-attempt 跨进程往返。三选项：core 出同步 API / 留 AI 侧（会造成两份真相，不建议）/ 暂时保持同进程（即 AI 暂不服务化）。**这条其实是「AI 要不要做成服务」的缩小版。**
+2. **`pkg/tools/builtin`（MCP 桥，10 文件 import `pkg/ai`）** —— 跟 AI 走（它是 AI 的手），还是留 core 当对外暴露面？
+
+### 路径变更的连带影响
+
+`ai/expression` / `ai/contracts` 在 §2.6.3、§5、§⑭ 等处是 **2026-10-06 的历史诊断记录**，按 ADR 惯例保留原样；**现行路径以本节为准**。其它文档已同步：`ARCHITECTURE.md`、`TASKS.md`、`ADR-028`、`ADR-030`。
+`ADR-015` 的包清单是 S7 阶段历史记录（其中 `expression/types.go`、`builtins.go` 在本步之前就已改名，属既有漂移），不再逐处修订。
+
+---
+
 ## Context
 
 ### 触发点

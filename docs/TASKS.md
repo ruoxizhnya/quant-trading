@@ -66,7 +66,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 > **切片 1 ✅（2026-10-08）**：L2 算子核心落地 `pkg/indicator/` —— **契约变更**（走 K0-P2-3 同款流程）：`Indicator.Update(bar)` → **`Update(x float64)`**（对齐 ADR-028 §7 的 `Step(x float64)`；bar 级抽取归调用方，「RMA over TrueRange」在旧签名下无法表达）+ 新增 **`SaveState`/`LoadState`**（ADR-028 §7 原文：「接口不预留状态序列化，后面补不进去」）。三算子：`RMA`（Wilder，init=前 N 根 SMA）/ `EWMA`（init=首值，warmup=`ceil(ln(1e-6)/ln(1-α))`）/ `Kalman`（标量线性局部水平模型，p0=r）＋ `RMABatch`/`EWMABatch`/`KalmanBatch` **双实现对偶（共享同一递推核）** ＋ `TrueRange` 助手。**33 顶层用例**：手算 fixture（抓公式错）＋ 三路一致性属性测试（抓路径分裂，容差 1e-12）＋ warmup 边界＋原子性 fail-loud；**ATR 验收**：20 根含跳空 bar，`RMABatch(tr,14)` 与手算 Wilder ATR 逐点一致（容差 1e-12）。
 > **ADR-028 §4 订正记录**：`ts_ewma` 样例数字与公式矛盾（α=0.3「约 20」实算 39；α=0.05「约 60」实算 269）——以公式 + tol=1e-6 为准，ADR 内已加订正注记。
-> **切片 2 ✅（2026-10-09，与 OBS-06 合并做）**：三算子**进 DSL** —— 新增 `pkg/ai/expression/registry.go` 作**算子名字的单一事实源**（31 个算子：13 ts + 4 cs + 6 一元 + 8 二元，声明 + 求值绑定在一处），`ast.go` 的四个硬编码列表与 evaluator 的三处 switch（含 `applyCrossSectionalOp` 的 `default: return values` 静默直通）全部改为查表；`ts_rma/ts_ewma/ts_kalman` 可解析、可求值（**复用 `pkg/indicator` 的 Batch**：每 symbol 一次算完整条再取下标）、被白名单认可、有 `Spec()`；新增 `DeriveWarmup`/`DeriveLookback`（ADR-028 §8：并行取 max、串行累加；任一 `State=true` ⇒ infinite），对齐附录 A（19 / max(19,14)=19 / 串行 18）。**契约变更**：`indicator.OperatorSpec.Init` `float64 → string`（受控词表），理由同 `Indicator.Update` 那次改型。护栏：注册表自洽测试 + **防漂移 AST 护栏**（算子名字面量只许出现在 `registry.go`）。
+> **切片 2 ✅（2026-10-09，与 OBS-06 合并做）**：三算子**进 DSL** —— 新增 `pkg/expression/registry.go`（2026-10-09 从 `pkg/ai/expression` 归位 core）作**算子名字的单一事实源**（31 个算子：13 ts + 4 cs + 6 一元 + 8 二元，声明 + 求值绑定在一处），`ast.go` 的四个硬编码列表与 evaluator 的三处 switch（含 `applyCrossSectionalOp` 的 `default: return values` 静默直通）全部改为查表；`ts_rma/ts_ewma/ts_kalman` 可解析、可求值（**复用 `pkg/indicator` 的 Batch**：每 symbol 一次算完整条再取下标）、被白名单认可、有 `Spec()`；新增 `DeriveWarmup`/`DeriveLookback`（ADR-028 §8：并行取 max、串行累加；任一 `State=true` ⇒ infinite），对齐附录 A（19 / max(19,14)=19 / 串行 18）。**契约变更**：`indicator.OperatorSpec.Init` `float64 → string`（受控词表），理由同 `Indicator.Update` 那次改型。护栏：注册表自洽测试 + **防漂移 AST 护栏**（算子名字面量只许出现在 `registry.go`）。
 
 - **① 目标**：indicators 模块落地 L2 确定性有状态算子（`ts_kalman`/`ts_ewma`/`ts_rma`），warmup 可静态推导（D2：能用 L2 不上 L3）。
 - **② 上下文**：蓝图 §6.3（L2 优先）；ADR-028 §2（L2 递推算子）+ §4 算子声明契约（含 `state` 字段）+ §8 warmup 推导；K2 的 `BarHandler`。
@@ -181,12 +181,14 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：三条不变量各有一条破坏腿（如 Submit 去掉 CheckOrder 调用 → 该护栏红），且反证腿证明护栏不是永真。
 - **⑥ 边界**：只做这三条护栏，不扩到其他语义约束。
 
-### K0-P2-2 · `strategy → ai/contracts` 循环未破 ⬜（技术债登记，防遗忘）
+### K0-P2-2 · `strategy → ai` 循环已破 ✅（2026-10-09 完成 ADR-027 §5 第 3 步）
 
-- **现状**：`go list` 实测 `pkg/strategy` 仍依赖 `pkg/ai/contracts`。ADR-027 §5 第 3 步指出「唯一非法边是 strategy → ai 方向的全部 4 处」，移出 `ai/expression` 与 `ai/contracts` 即**零逻辑改动破环**。
-- **为何 K0 不动**：D3 裁决先做进程内核模块化，ADR-027 的服务拆分推后。
-- **何时做**：随 ADR-027 落地；或至少先做其 §5 第 3 步的「expression 移出 `pkg/ai`」——这步不依赖拆服务，可独立先做。
-- **风险**：**越晚迁移成本越高**——K1/K2 会在 `pkg/strategy` 内继续加代码，依赖边会越缠越多。建议不晚于 K2 完成后处理。
+- **做了什么**：`git mv pkg/ai/expression pkg/expression`（6 生产 + 6 测试，零逻辑改动）；`pkg/ai/contracts/contracts.go` → `pkg/backtest/contracts/runner.go`（并入已存在的 LEAF 包，包名同 `contracts`）；改 18 个文件的 import/注释；`contracts_test.go` 拆两处落点（解掉「core 测试依赖 AI」）。
+- **破环证据**：`go list -deps ./pkg/strategy/ | grep pkg/ai` → **空**（改前 4 处）；core 侧（backtest / strategy / indicator / validation / risk / marketdata / portfolio / execalgo / kernel / expression / live / storage 及全部子包）**零 `pkg/ai` 依赖**。
+- **新增护栏**：`internal/repoguard/ai_boundary_test.go` 的 `TestPkgAIIsOnlyImportedByAllowedLayers` —— **白名单式 fail-closed**（仅 `pkg/ai|pkg/tools|cmd|e2e` 可 import `pkg/ai`；只扫生产代码）。破坏验证双向：既有包加 import → 红；**全新包加 import → 红**（默认拒绝性质）。
+- **边界定义**：见 ADR-027 §「执行记录：§5 第 3 步已落地 + AI / core 边界定义」（含两个待裁决点：`pkg/validation` 与 `pkg/tools/builtin` 的归属）。
+- **仍未做**：`pkg/strategy/copilot.go`（`CopilotService`，518 行）**归位到 AI 侧**属 ADR-027 §5 第 8 步（ai-service）—— 破环不需要它（修完上两项后它只 import core，边自然消失）。
+- **副产品**：新护栏自己报出 K4 遗漏的过时白名单条目（`pkg/backtest/marketimpact`），已单独提交（`bd39868`）。
 
 ---
 
@@ -246,7 +248,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | # | 问题 | 影响与处理 |
 |---|---|---|
 | K3a | **闸门不校验「标量参数位」的类型**：`ts_mean(close, volume)`、`ts_mean(close, ts_delay(volume,1))` 参数个数与节点都合法 ⇒ 过闸；但求值时 `firstScalar` 取到非标量（或 `NaN`）⇒ `int(NaN)` 未定义 ⇒ 窗口变荒谬值 ⇒ **整条序列 NaN**（假合法残留） | 危害被 OBS-01 兜住（判无效运行，不产出假结论），但浪费 AI 试验且报错无用。修法：`OperatorDef` 加 `ScalarParams []int`，闸门对这些位置要求 `*LiteralNode`（ADR-028 §4 的 `Series × Scalar` 签名本就该在闸门体现） |
-| K3b | **防漂移护栏只覆盖 `pkg/ai/expression`**：`pkg/ai/gene_pool/mutation.go:196` 有 `functions := []string{"abs","log","sqrt","sign","cs_rank","cs_zscore"}`；`pkg/ai/yaml/generator.go` 用字符串模板生成表达式；`pkg/ai/agents/*` 提示词里也写死算子名 | 现状**无实害**（名单内名字都在注册表），但注册表改名/删名会让生成器产出「过不了闸门」的表达式。修法：生成器改查 `AvailableOperators()`，或把护栏扩到生成器侧 |
+| K3b | **防漂移护栏只覆盖 `pkg/expression`**（2026-10-09 前为 `pkg/ai/expression`；护栏按包内相对路径扫描，搬家不破）：`pkg/ai/gene_pool/mutation.go:196` 有 `functions := []string{"abs","log","sqrt","sign","cs_rank","cs_zscore"}`；`pkg/ai/yaml/generator.go` 用字符串模板生成表达式；`pkg/ai/agents/*` 提示词里也写死算子名 | 现状**无实害**（名单内名字都在注册表），但注册表改名/删名会让生成器产出「过不了闸门」的表达式。修法：生成器改查 `AvailableOperators()`，或把护栏扩到生成器侧 |
 | K3c | **闸门的字段白名单与 provider 真实能力互相错配**（两个方向）：闸门放行 `market_cap`/`roe_ttm`/`eps`/`revenue`/`profit`/`sector`，而 `OHLCVDataProvider.GetField` 不认（**求值时报 unknown field，fail-loud**）；反过来 provider 支持 `ps`/`roa`，闸门**不认** ⇒ 用它们的表达式会被 fail-closed 闸门**误拒**（比前者更危险：挡住正经用法） | **并入 OBS-08**（序列可用性声明）：字段白名单必须由 provider/`SeriesSpec` 注册表**派生**，并声明「有数据 / 表为空」，把「不可用」在**闸门期**说清而不是留到求值期 |
 
 ---

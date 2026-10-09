@@ -1012,7 +1012,7 @@ AI 能力不由独立服务承载——`cmd/ai` (:8086) 已于 2026-09-18 删除
 
 | 组件 | 文件 | 职责 | 状态 |
 |------|------|------|------|
-| Expression Engine | `pkg/ai/expression/` | 因子表达式 DSL 解析、AST 求值、向量化计算 | ✅ 已实现 |
+| Expression Engine | `pkg/expression/` | 因子表达式 DSL 解析、AST 求值、向量化计算；**2026-10-09 从 `pkg/ai/expression` 归位 core**（ADR-027 §5 第 3 步：执行载体基础设施，非 AI 能力） | ✅ 已实现 |
 | Intent Parser | `pkg/ai/intent/` | 自然语言意图解析：中文/英文 → 结构化策略参数 | ✅ 已实现 |
 | YAML Generator | `pkg/ai/yaml/` | 结构化意图 → YAML 策略配置 | ✅ 已实现 |
 | Pipeline | `pkg/ai/pipeline/` | 完整流水线：意图解析 → YAML → 代码生成 → 编译验证 → 回测 | ✅ 已实现 |
