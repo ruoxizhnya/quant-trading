@@ -1,8 +1,8 @@
 package wasm
 
 // 极简 WASM binary 编码器（测试用）。参考 wazero 官方测试的 encodeModule
-// 做法，只支持本测试需要的子集：type / function / memory / export / code
-// 五个 section，无 import、无 data、无 global。
+// 做法，只支持本测试需要的子集：type / import / function / memory / export /
+// code 六个 section，无 data、无 global、无 table。
 //
 // 本文件只服务 sandbox_test.go，不引入生产代码路径。
 
@@ -10,6 +10,7 @@ package wasm
 const (
 	valI32 byte = 0x7f
 	valI64 byte = 0x7e
+	valF64 byte = 0x7c
 )
 
 // 指令 opcode（本测试用到的子集）
@@ -20,6 +21,8 @@ const (
 	opI64Shl        byte = 0x86
 	opI64Or         byte = 0x84
 	opI32Const      byte = 0x41
+	opF64Const      byte = 0x44
+	opCall          byte = 0x10
 	opBr            byte = 0x0c
 	opLoop          byte = 0x03
 	opEnd           byte = 0x0b
@@ -29,6 +32,14 @@ const (
 type wasmFuncType struct {
 	params  []byte
 	results []byte
+}
+
+// wasmImport 描述一个函数 import（module + name + 类型索引）。kind 恒为 0。
+// 导入函数按声明序编号，位于本地 funcs 之前（wasm 函数索引空间规则）。
+type wasmImport struct {
+	module  string
+	name    string
+	typeIdx uint32
 }
 
 // wasmExport 描述一个导出（name + kind + index）。
@@ -46,12 +57,16 @@ type wasmMemory struct {
 
 // wasmModule 是本编码器支持的最小模块模型。
 type wasmModule struct {
-	types  []wasmFuncType
-	funcs  []uint32 // 函数 → 类型索引
-	memory *wasmMemory
-	export []wasmExport
-	codes  [][]byte // 函数体（不含 locals 前缀，本测试无局部变量）
+	types   []wasmFuncType
+	imports []wasmImport // 导入函数（函数索引空间：先 imports 后 funcs）
+	funcs   []uint32     // 本地函数 → 类型索引
+	memory  *wasmMemory
+	export  []wasmExport
+	codes   [][]byte // 本地函数体（不含 locals 前缀，本测试无局部变量）
 }
+
+// funcIndexBase 是本地函数的起始索引（= 导入函数数）。
+func (m *wasmModule) funcIndexBase() uint32 { return uint32(len(m.imports)) }
 
 // encode 序列化为合法 wasm 二进制。
 func (m *wasmModule) encode() []byte {
@@ -71,6 +86,22 @@ func (m *wasmModule) encode() []byte {
 		}
 		return s
 	})
+
+	// Import section (id=2) —— wasm 规定 import 在 function 之前。
+	if len(m.imports) > 0 {
+		buf = appendSection(buf, 2, func(s []byte) []byte {
+			s = appendUleb128(s, uint32(len(m.imports)))
+			for _, imp := range m.imports {
+				s = appendUleb128(s, uint32(len(imp.module)))
+				s = append(s, imp.module...)
+				s = appendUleb128(s, uint32(len(imp.name)))
+				s = append(s, imp.name...)
+				s = append(s, 0x00) // kind = func
+				s = appendUleb128(s, imp.typeIdx)
+			}
+			return s
+		})
+	}
 
 	// Function section (id=3)
 	buf = appendSection(buf, 3, func(s []byte) []byte {

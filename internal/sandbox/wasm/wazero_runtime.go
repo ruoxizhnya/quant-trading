@@ -47,10 +47,16 @@ func NewWazeroRuntime(ctx context.Context, maxMemoryBytes int) *WazeroRuntime {
 
 // Compile implements Runtime. 对无效 wasm 字节，wazero 返回解析/校验错误，
 // 统一包装为 ErrModuleNotFound（沿用「Compile 收到无法解释为模块的字节」语义）。
+// 编译成功后执行 import section 扫描：任何非 env 白名单的 import 直接拒绝
+// （ADR-029 §3.4 的 fail-closed 能力隔离）。
 func (r *WazeroRuntime) Compile(ctx context.Context, wasmBytes []byte) (CompiledModule, error) {
 	cm, err := r.rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrModuleNotFound, err)
+	}
+	if err := ValidateImports(cm); err != nil {
+		_ = cm.Close(ctx)
+		return nil, err
 	}
 	return &wazeroCompiledModule{cm: cm, rt: r.rt, max: r.max}, nil
 }
