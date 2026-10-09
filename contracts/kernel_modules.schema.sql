@@ -2,7 +2,7 @@
 -- kernel_modules.schema.sql —— 模块化内核 DDL（K0 契约冻结 · 切片 1 + 切片 2）
 -- ============================================================================
 --
--- 冻结范围（K0 全部 8 张表）：
+-- 冻结范围（K0 全部 8 张表 + K7 追加 1 张）：
 --   * audit.message_log              —— 切片 1 冻结（下方第一段）
 --   * quant.portfolio_snapshot       —— 切片 2 追加（下方第二段）
 --   * quant.positions                —— 切片 2 追加
@@ -11,6 +11,7 @@
 --   * quant.fills                    —— 切片 2 追加
 --   * quant.recon_report             —— 切片 2 追加
 --   * quant.strategy_state           —— 切片 2 追加
+--   * quant.external_signals         —— K7 切片 1 追加（下方第三段，外部模型信号表）
 -- （表清单与归属见 docs/SPEC.md「模块化内核新表」一节，与蓝图
 --   §5 模块矩阵的「DB 归属」列一致。）
 --
@@ -25,6 +26,7 @@
 --   quant.fills              → exec-engine
 --   quant.recon_report       → exec-engine
 --   quant.strategy_state     → strategy-runtime
+--   quant.external_signals   → strategy-runtime
 --   （indicators 无表：状态在内存，因子缓存走 Redis；
 --     exec-algo 无表：状态在内存 + 子订单落 quant.orders。）
 --
@@ -195,3 +197,46 @@ CREATE TABLE IF NOT EXISTS quant.strategy_state (
 );
 
 CREATE INDEX IF NOT EXISTS idx_strategy_state_run ON quant.strategy_state (run_id);
+
+-- ============================================================================
+-- K7 契约冻结 · 切片 1 —— quant.external_signals（外部模型信号表）
+-- ============================================================================
+--
+-- 依据：docs/design/kernel/target-architecture-modular-kernel.md §6.4（L3b
+-- 外部模型信号注入）+ 蓝图 §5 模块矩阵 L3 行「quant.strategy_state + 信号表」
+-- （信号表的 DB 归属 = strategy-runtime 模块）。
+--
+-- 语义（冻结）：
+--   * 外部模型（进程外 ML）只写这张表，不直接下单；内核侧 SignalStrategy
+--     （Actor）按 as_of 拉取消费——自由度挡在内核外；
+--   * content_hash = sha256(可执行字段 model_id/symbol/direction/strength/
+--     as_of 的规范 JSON)，UNIQUE 约束做幂等去重 + 可追溯坐标（对齐 AGENTS.md
+--     citation = {source, dataset, key, as_of, content_hash}：source=model_id，
+--     key=symbol，as_of=as_of）；
+--   * as_of 是「按 as_of 拉取」防前视的锚点：消费查询 WHERE as_of <= upTo，
+--     未来信号物理不可见；
+--   * factors 是诊断快照（JSONB），非身份，不入 content_hash。
+--
+-- 合并时机（与 K0 冻结的 8 张表同）：本文件是契约证据，不直接执行。K1 实施时
+-- 并入 pkg/storage/postgres.go 的内联 migrate() DDL。当前运行时的建表入口是
+-- pkg/strategy/signal_store.go 的 SignalSchemaDDL（EnsureSchema 显式调用），
+-- 其 DDL 与本节逐字一致，以本契约文件为准。
+-- ============================================================================
+
+-- ── strategy-runtime：外部模型信号（SignalStore.Save 的落点） ──────────────
+CREATE TABLE IF NOT EXISTS quant.external_signals (
+    id           BIGSERIAL PRIMARY KEY,
+    model_id     TEXT NOT NULL,              -- 外部模型标识（source 位）
+    symbol       TEXT NOT NULL,              -- 标的（key 位）
+    direction    TEXT NOT NULL,              -- long / short / close
+    strength     DOUBLE PRECISION NOT NULL,  -- 强度（Save 层拒 NaN/±Inf）
+    as_of        TIMESTAMPTZ NOT NULL,       -- 信号生效交易日（防前视锚点）
+    content_hash TEXT NOT NULL,              -- 可执行字段 sha256（幂等 + 可追溯）
+    factors      JSONB,                      -- 诊断因子快照（非身份，不入哈希）
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_external_signals_hash UNIQUE (content_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_signals_lookup
+    ON quant.external_signals (model_id, symbol, as_of);
+

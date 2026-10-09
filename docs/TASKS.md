@@ -157,7 +157,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - 破坏验证：去掉 `OnBar` 里的 `withBarContext` 注入 → `TestOnBarSession_Protocol` 红 → 还原 → 绿 → 零残留
 - 全量 `go build ./...` + `go vet` + 4 包测试（wasm/repoguard/live/backtest）全绿，gofmt 干净
 
-### K7 · L3b 信号注入（P7）⬜（前置：K2）
+### K7 · L3b 信号注入（P7）✅ 完成（2026-10-09，两切片）（前置：K2）
 
 - **① 目标**：外部模型（进程外，任意 Python/ML 框架）产出信号注入内核，由策略消费（Actor 模式）。
 - **② 上下文**：蓝图 §6.4；nautilus `Actor.on_signal`；K2 的策略运行时。
@@ -165,6 +165,26 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：模型在进程外（自由度挡在内核外）；内核只认信号契约，仍确定可审阅。
 - **⑤ 验收**：外部模型信号注入 → 策略按信号下单；信号可追溯（content_hash 坐标）；破坏验证——注入未来日期的信号 → 拒绝。
 - **⑥ 边界**：只做信号注入与消费契约，不做模型训练、不做 L3a（K6）。
+
+> **消费形态（若曦 2026-10-09 拍板）**：**信号表 + 按 as_of 拉取**（非运行时回调推送）——外部模型只写 `quant.external_signals`，内核 `SignalStrategy` 逐 bar 按 `as_of <= bar.Date` 拉取；回测=重放历史、实盘=读到今天为止，同一段消费代码同构。**Actor 形态**：`SignalStrategy` 纯消费者（外部信号本身即策略，读信号转 `domain.Signal`），复用 K2 的 `BarHandler` 同构桥，零新执行模式。
+
+**切片 1 交付明细（2026-10-09）**：
+- `pkg/strategy/external_signal.go`：`ExternalSignal` 契约（ModelID/Symbol/Direction/Strength/AsOf/Factors）+ `SignalContentHash`（sha256 规范 JSON，**只哈希可执行字段** model_id/symbol/direction/strength/as_of，Factors 不入哈希——诊断非身份）+ `ValidateExternalSignal`（fail-loud 拒 ModelID/Symbol 空、Direction 非 long/short/close、Strength NaN/±Inf、AsOf 零值）+ `SignalStore` 接口（Save 幂等 / ListFor 按 as_of≤upTo 拉取）
+- `pkg/strategy/signal_store.go`：`PGSignalStore` + `SignalSchemaDDL`（`quant.external_signals`，UNIQUE content_hash）+ `EnsureSchema` + `Save`（`ON CONFLICT (content_hash) DO NOTHING` 幂等）+ `ListFor`（`WHERE model_id/symbol AND as_of<=$3 ORDER BY as_of`，**未来信号物理不可见**）
+- **信号对齐以 UTC 自然日为粒度**（`dayOf` 归一）：内核是日线驱动的，as_of 的时分秒无语义，统一归一到 00:00 UTC 消除「同一日不同时刻」的比较歧义（K5 signalKey 归一化的同源教训）
+- `contracts/kernel_modules.schema.sql` + `docs/SPEC.md` 追加 `quant.external_signals`（第 9 张表，归属 strategy-runtime）
+- 测试：content_hash 确定性/字段敏感性/Factors 不入哈希/时区归一 + ValidateExternalSignal 全分支 + 真库 roundtrip/幂等去重/ListFor 未来排除/排序/scope/fail-loud 拒绝
+- **破坏验证（切片 1）**：去掉 `ListFor` 的 `as_of <= $3` → `TestPGSignalStoreListForExcludesFuture` 红（读到未来信号）→ 还原绿
+
+**切片 2 交付明细（2026-10-09）**：
+- `pkg/strategy/signal_strategy.go`：`SignalStrategy`（**同时**实现 Strategy + BarHandler，引擎双模式接入据此走流式路径）。`OnBar` 拉取 as_of≤当日 → `rejectFutureSignals` 防前视拒绝 → 游标去重消费 → 游标推进；`SaveState`/`LoadState` 序列化游标 + pending（断点续跑）
+- **信号对齐语义（裁决）**：每条信号在「首个 bar 日期 >= as_of」那根 bar 消费一次——as_of 命中交易日→当天、非交易日→下一交易日、早于窗口首日→跳过（不倾倒历史）、晚于当前 bar→拒绝
+- 测试（`signal_strategy_test.go` 8 条）：信号→Signal 转换/首 bar 跳历史/周末顺延/游标去重/未来拒绝（含纯函数）/SaveLoad 续跑/LoadState 拒坏输入/接线 fail-loud
+- 端到端（`pkg/backtest/signal_inject_e2e_test.go`）：注入 buy+close 信号 → **2 条 domain.Signal → 2 笔成交**（注入即下单闭环）；未来信号反证腿 → 零成交且被 OBS-01 裁为 `invalid`（zero_trades）
+- **破坏验证（切片 2）**：去掉 `OnBar` 里的 `rejectFutureSignals` → `TestSignalStrategyRejectsFutureSignal` 红（未来信号被静默接受）→ 还原绿
+- 全量 `go build ./...` + `go vet` + strategy/repoguard/backtest 全绿；gofmt 干净
+
+> **⚠️ 已知边界（登记，不阻塞）**：① 信号表 DDL 尚未并入 `pkg/storage/postgres.go` 的 `migrate()`（同 `strategy_state` 先例，走 `EnsureSchema` 独立可安装，合并留后续切片）；② 外部模型的**写入入口**（HTTP API）未建——本切片只冻结 `SignalStore` 契约 + PG 实现，进程外模型直接写库或经将来 API；③ `SignalStrategy` 的消费是 O(N²) 全量拉取（每 bar 重读 as_of≤当日），游标去重保证正确性、性能优化留后续。
 
 ---
 
