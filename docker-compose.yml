@@ -187,13 +187,12 @@ services:
       DATABASE_DATABASE: quant_trading
       REDIS_URL: redis://host.docker.internal:6379
       DATA_SERVICE_URL: http://data-service:8081
-      STRATEGY_SERVICE_URL: http://strategy-service:8082
+      # STRATEGY_SERVICE_URL 已随 OBS-11（2026-10-09）删除：策略服务 standby
+      # （ADR-012），per-day HTTP 信号 fallback 不复存在。
       # P1-15 (Sprint 6, ODR-021): risk + execution merged into
       # analysis. RISK_SERVICE_URL kept as a legacy fallback only
       # — the engine prefers the in-process risk manager
-      # attached via WithRiskManager. STRATEGY_SERVICE_URL is
-      # still used as an external fallback if the in-process
-      # registry doesn't have the requested strategy.
+      # attached via WithRiskManager.
       AI_API_KEY: ${AI_API_KEY:-}
       AI_API_URL: ${AI_API_URL:-https://api.openai.com/v1/chat/completions}
       # 模型名。留空 = 回落 pkg/ai.DefaultModel（gpt-4o-mini）。

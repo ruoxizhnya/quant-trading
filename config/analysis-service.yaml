@@ -95,8 +95,8 @@ redis:
 data_service:
   url: "http://data-service:8081"
 
-strategy_service:
-  url: "http://strategy-service:8082"
+# strategy_service.url 已随 OBS-11（2026-10-09）删除：策略服务 standby
+# （ADR-012），信号只从引擎本地注册表产出，不存在 per-day HTTP fallback。
 
 # P1-15 (Sprint 6, ODR-021): risk + execution services merged into
 # analysis service. The `risk_service.url` and the

@@ -17,7 +17,6 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy/examples"
 )
@@ -57,31 +56,10 @@ type LoggingConfig struct {
 	Format string `mapstructure:"format"`
 }
 
-// SignalRequest represents the request body for generating signals.
-type SignalRequest struct {
-	StockPool    []string                  `json:"stock_pool" binding:"required"`
-	Date         string                    `json:"date" binding:"required"`
-	LookbackDays int                       `json:"lookback_days"`
-	MarketData   map[string][]domain.OHLCV `json:"market_data"`
-}
-
-// SignalResponse represents the response for signal generation.
-type SignalResponse struct {
-	Strategy string         `json:"strategy"`
-	Date     string         `json:"date"`
-	Signals  []SignalDetail `json:"signals"`
-	Count    int            `json:"count"`
-}
-
-// SignalDetail represents detailed signal information.
-type SignalDetail struct {
-	Symbol         string             `json:"symbol"`
-	Date           time.Time          `json:"date"`
-	Direction      domain.Direction   `json:"direction"`
-	Strength       float64            `json:"strength"`
-	CompositeScore float64            `json:"composite_score"`
-	Factors        map[string]float64 `json:"factors,omitempty"`
-}
+// ⚠️ SignalRequest / SignalResponse / SignalDetail 与 `POST /:name/signals`
+// 端点已随 OBS-11（2026-10-09）删除：策略服务 standby（ADR-012），该端点
+// 此前恒回 503，而引擎侧的 per-day HTTP 信号 fallback 也已删除——两端一起
+// 消灭，策略服务只承载「策略定义」（CRUD / reload），不再承载信号生成。
 
 func main() {
 	// Initialize logger
@@ -284,19 +262,8 @@ func registerRoutes(router *gin.Engine, logger zerolog.Logger) {
 			})
 		})
 
-		// Generate signals
-		strategies.POST("/:name/signals", func(c *gin.Context) {
-			name := c.Param("name")
-			logger.Debug().Str("strategy", name).Msg("signal generation requested")
-
-			// cmd/strategy is in standby per ADR-012 — return 503 with a
-			// descriptive message. The canonical strategy.Strategy interface
-			// (used by analysis-service backtest loops) is the active path.
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"error": "strategy service is in standby (ADR-012); use analysis-service backtest API",
-			})
-			_ = name
-		})
+		// Generate signals —— 端点已随 OBS-11 删除：standby 服务不再承载
+		// 信号生成（引擎侧 fallback 同步删除，未注册策略在引擎 fail-loud）。
 
 		// Hot-reload strategies
 		strategies.POST("/reload", func(c *gin.Context) {

@@ -60,9 +60,10 @@ type Engine struct {
 	// Market data provider (abstracted for testability)
 	provider marketdata.Provider
 
-	// External service URLs (for non-market-data calls: risk, strategy)
-	strategyServiceURL string
-	riskServiceURL     string
+	// External service URLs (for non-market-data calls: risk).
+	// strategyServiceURL 已随 OBS-11 删除——策略服务 standby（ADR-012），
+	// 信号只从本地注册表产出。
+	riskServiceURL string
 
 	// HTTP client for non-market-data service communication (with retry)
 	httpClient *httpclient.Client
@@ -208,10 +209,7 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 		return nil, apperrors.Wrap(err, apperrors.ErrCodeInvalidInput, "failed to unmarshal trading config", "NewEngine")
 	}
 
-	strategyServiceURL := v.GetString("strategy_service.url")
-	if strategyServiceURL == "" {
-		strategyServiceURL = "http://localhost:8082"
-	}
+	// strategy_service.url 已随 OBS-11 删除（策略信号只走本地注册表）。
 	riskServiceURL := v.GetString("risk_service.url")
 	if riskServiceURL == "" {
 		riskServiceURL = "http://localhost:8083"
@@ -279,18 +277,17 @@ func NewEngine(v *viper.Viper, provider marketdata.Provider, logger zerolog.Logg
 	stateStore := NewLRUStateStore(DefaultStateStoreCapacity)
 
 	eng := &Engine{
-		config:             config,
-		provider:           provider,
-		strategyServiceURL: strategyServiceURL,
-		riskServiceURL:     riskServiceURL,
-		httpClient:         httpclient.New("", 30*time.Second, 3),
-		logger:             componentLogger,
-		cache:              cache.NewCacheManager(componentLogger),
-		factor:             cache.NewFactorCacheAccessor(componentLogger),
-		stateStore:         stateStore,
-		liveBridge:         NewLiveBridge(componentLogger),
-		executionBridge:    executionBridge,
-		rng:                rng,
+		config:          config,
+		provider:        provider,
+		riskServiceURL:  riskServiceURL,
+		httpClient:      httpclient.New("", 30*time.Second, 3),
+		logger:          componentLogger,
+		cache:           cache.NewCacheManager(componentLogger),
+		factor:          cache.NewFactorCacheAccessor(componentLogger),
+		stateStore:      stateStore,
+		liveBridge:      NewLiveBridge(componentLogger),
+		executionBridge: executionBridge,
+		rng:             rng,
 	}
 	return eng, nil
 }
@@ -1189,16 +1186,22 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// getSignals retrieves trading signals from strategy service.
-// It first tries the local strategy registry (plugins/ directory) and
-// falls back to the external strategy service on miss.
+// getSignals retrieves trading signals from the local strategy registry.
+//
+// OBS-11（2026-10-09）：原先注册表 miss 时会 fallback 到策略服务的
+// `POST /strategies/:name/signals` —— 每个交易日把**全量 marketData** POST
+// 过网络要信号（慢、不可复现、把执行语义泄漏到服务边界外）。且该路径早已
+// 必然失败：ADR-012 后策略服务 standby，服务端端点恒回 503。故整条 fallback
+// 删除（含 strategyServiceURL 配置），miss 时 **fail-loud**：未注册的策略名
+// 是装配错误，当场报错并列出可用策略，而不是每天打一次注定 503 的 HTTP。
 func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool []string, marketData map[string][]domain.OHLCV, date time.Time, tracker *Tracker) ([]domain.Signal, error) {
-	// Step 1: Try local strategy registry first (plugins/ directory)
-	if strat, err := strategy.DefaultRegistry.Get(strategyName); err == nil {
-		return e.getSignalsFromLocalStrategy(ctx, strat, strategyName, marketData, date, tracker)
+	strat, err := strategy.DefaultRegistry.Get(strategyName)
+	if err != nil {
+		return nil, apperrors.Wrap(err, apperrors.ErrCodeNotFound,
+			fmt.Sprintf("strategy %q not registered (strategy-service signal fallback removed per OBS-11/ADR-012); available: %v",
+				strategyName, strategy.ListStrategies()), "getSignals")
 	}
-	// Step 2: Fall back to external strategy service
-	return e.getSignalsFromStrategyService(ctx, strategyName, stockPool, marketData, date)
+	return e.getSignalsFromLocalStrategy(ctx, strat, strategyName, marketData, date, tracker)
 }
 
 // getSignalsFromLocalStrategy generates signals via a locally-loaded strategy plugin.
@@ -1365,48 +1368,6 @@ func resolveDirection(s strategy.Signal) domain.Direction {
 		return domain.DirectionClose
 	}
 	return ""
-}
-
-// getSignalsFromStrategyService calls the external strategy service to generate signals.
-func (e *Engine) getSignalsFromStrategyService(ctx context.Context, strategyName string, stockPool []string, marketData map[string][]domain.OHLCV, date time.Time) ([]domain.Signal, error) {
-	url := fmt.Sprintf("%s/strategies/%s/signals", e.strategyServiceURL, strategyName)
-
-	stocks := make([]domain.Stock, len(stockPool))
-	for i, sym := range stockPool {
-		stocks[i] = domain.Stock{Symbol: sym}
-	}
-
-	reqBody := struct {
-		StockPool   []string                        `json:"stock_pool"`
-		Stocks      []domain.Stock                  `json:"stocks"`
-		MarketData  map[string][]domain.OHLCV       `json:"market_data"`
-		Fundamental map[string][]domain.Fundamental `json:"fundamental"`
-		Date        string                          `json:"date"`
-	}{
-		StockPool:   stockPool,
-		Stocks:      stocks,
-		MarketData:  marketData,
-		Fundamental: map[string][]domain.Fundamental{},
-		Date:        date.Format("2006-01-02"),
-	}
-
-	resp, err := e.httpClient.Post(ctx, url, reqBody)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, apperrors.Unavailable("strategy", fmt.Errorf("HTTP %d", resp.StatusCode))
-	}
-
-	var result struct {
-		Signals []domain.Signal `json:"signals"`
-	}
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		return nil, err
-	}
-
-	return result.Signals, nil
 }
 
 // calculatePosition calculates position size using risk service.
