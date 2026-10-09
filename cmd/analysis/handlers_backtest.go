@@ -103,37 +103,12 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 
 		api.GET("/:id/report", func(c *gin.Context) {
 			backtestID := c.Param("id")
-			status, err := engine.GetBacktestStatus(backtestID)
-			if err == nil && status == "completed" {
-				result, err := engine.GetBacktestResult(backtestID)
-				if err == nil && result != nil {
-					params, _ := engine.GetBacktestParams(backtestID)
-					resp := backtest.BacktestResponse{
-						ID:              backtestID,
-						Status:          "completed",
-						Strategy:        params.StrategyName,
-						StartDate:       result.StartDate.Format("2006-01-02"),
-						EndDate:         result.EndDate.Format("2006-01-02"),
-						TotalReturn:     result.TotalReturn,
-						AnnualReturn:    result.AnnualReturn,
-						SharpeRatio:     result.SharpeRatio,
-						SortinoRatio:    result.SortinoRatio,
-						MaxDrawdown:     result.MaxDrawdown,
-						MaxDrawdownDate: result.MaxDrawdownDate.Format("2006-01-02"),
-						WinRate:         result.WinRate,
-						TotalTrades:     result.TotalTrades,
-						WinTrades:       result.WinTrades,
-						LoseTrades:      result.LoseTrades,
-						AvgHoldingDays:  result.AvgHoldingDays,
-						CalmarRatio:     result.CalmarRatio,
-						StockPool:       params.StockPool,
-						InitialCapital:  params.InitialCapital,
-						PortfolioValues: result.PortfolioValues,
-						Trades:          result.Trades,
-					}
-					c.JSON(http.StatusOK, resp)
-					return
-				}
+			// OBS-01（切片 2）：透传引擎内存态里的真实状态（含 "invalid"），
+			// 不再硬编码 "completed"。共用 buildResponseFromState 使其与
+			// lookupBacktestResponse 口径一致。
+			if resp, ok := buildResponseFromState(engine, backtestID); ok {
+				c.JSON(http.StatusOK, resp)
+				return
 			}
 
 			job, err := jobService.GetJob(c.Request.Context(), backtestID)
@@ -294,40 +269,65 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 	registerBacktestLegacyRedirects(router)
 }
 
+// buildResponseFromState reconstructs the API response for a backtest whose
+// state is still resident in the engine's in-memory StateStore.
+//
+// OBS-01（切片 2）—— 为什么把它收敛成**唯一一处**：
+// GET /:id/report 与 lookupBacktestResponse（GET /:id/export/:format 用）
+// 原先各自内联了一份逐字段重建，且都把闸门写成 `status == "completed"`、
+// 把 Status 硬编码成 "completed"。这正是 OBS-01 读路径的病根：写路径
+// （引擎 buildBacktestResponse）学会说 "invalid" 之后，两条读路径仍会把
+// 同一份结果说成 "completed"（或把无效运行直接挡在门外、UI 读不到原因）。
+// 收敛到一个函数后，状态与 InvalidReasons 的透传只有一处实现，两条读路径
+// 不可能再各自漂移。
+//
+// 返回 (resp, true) 表示内存里有可读结果（"completed" 或 "invalid"）；
+// (zero, false) 表示内存里没有 / 状态不可读，调用方应退回 DB job 路径。
+// "invalid" 必须放行 —— 否则「为什么无效」在 UI 上不可见（与
+// Engine.GetBacktestResult 的闸门是同一裁决）。
+func buildResponseFromState(engine *backtest.Engine, backtestID string) (backtest.BacktestResponse, bool) {
+	status, err := engine.GetBacktestStatus(backtestID)
+	if err != nil || (status != "completed" && status != "invalid") {
+		return backtest.BacktestResponse{}, false
+	}
+	result, err := engine.GetBacktestResult(backtestID)
+	if err != nil || result == nil {
+		return backtest.BacktestResponse{}, false
+	}
+	params, _ := engine.GetBacktestParams(backtestID)
+	return backtest.BacktestResponse{
+		ID:              backtestID,
+		Status:          status,
+		Strategy:        params.StrategyName,
+		StartDate:       result.StartDate.Format("2006-01-02"),
+		EndDate:         result.EndDate.Format("2006-01-02"),
+		TotalReturn:     result.TotalReturn,
+		AnnualReturn:    result.AnnualReturn,
+		SharpeRatio:     result.SharpeRatio,
+		SortinoRatio:    result.SortinoRatio,
+		MaxDrawdown:     result.MaxDrawdown,
+		MaxDrawdownDate: result.MaxDrawdownDate.Format("2006-01-02"),
+		WinRate:         result.WinRate,
+		TotalTrades:     result.TotalTrades,
+		WinTrades:       result.WinTrades,
+		LoseTrades:      result.LoseTrades,
+		AvgHoldingDays:  result.AvgHoldingDays,
+		CalmarRatio:     result.CalmarRatio,
+		StockPool:       params.StockPool,
+		InitialCapital:  params.InitialCapital,
+		PortfolioValues: result.PortfolioValues,
+		Trades:          result.Trades,
+		InvalidReasons:  result.InvalidReasons,
+	}, true
+}
+
 // lookupBacktestResponse fetches a backtest result by ID, falling back from
 // in-memory (Engine) to stored job (JobService) when the in-memory copy
 // has been evicted. On error, writes the error response to the gin context
 // and returns the error to the caller (which should just `return`).
 func lookupBacktestResponse(c *gin.Context, backtestID string, engine *backtest.Engine, jobService *backtest.JobService, logger zerolog.Logger) (backtest.BacktestResponse, error) {
-	status, err := engine.GetBacktestStatus(backtestID)
-	if err == nil && status == "completed" {
-		result, err := engine.GetBacktestResult(backtestID)
-		if err == nil && result != nil {
-			params, _ := engine.GetBacktestParams(backtestID)
-			return backtest.BacktestResponse{
-				ID:              backtestID,
-				Status:          "completed",
-				Strategy:        params.StrategyName,
-				StartDate:       result.StartDate.Format("2006-01-02"),
-				EndDate:         result.EndDate.Format("2006-01-02"),
-				TotalReturn:     result.TotalReturn,
-				AnnualReturn:    result.AnnualReturn,
-				SharpeRatio:     result.SharpeRatio,
-				SortinoRatio:    result.SortinoRatio,
-				MaxDrawdown:     result.MaxDrawdown,
-				MaxDrawdownDate: result.MaxDrawdownDate.Format("2006-01-02"),
-				WinRate:         result.WinRate,
-				TotalTrades:     result.TotalTrades,
-				WinTrades:       result.WinTrades,
-				LoseTrades:      result.LoseTrades,
-				AvgHoldingDays:  result.AvgHoldingDays,
-				CalmarRatio:     result.CalmarRatio,
-				StockPool:       params.StockPool,
-				InitialCapital:  params.InitialCapital,
-				PortfolioValues: result.PortfolioValues,
-				Trades:          result.Trades,
-			}, nil
-		}
+	if resp, ok := buildResponseFromState(engine, backtestID); ok {
+		return resp, nil
 	}
 
 	job, err := jobService.GetJob(c.Request.Context(), backtestID)

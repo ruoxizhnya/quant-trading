@@ -166,6 +166,19 @@ func TestOBS01_EmptyUniverseIsInvalidRun(t *testing.T) {
 	assert.Equal(t, 0, resp.TotalTrades)
 	assert.Equal(t, 0, resp.UniverseMaxSize, "整轮没有任何交易日的票池非空")
 
+	// OBS-01 切片 2（读路径）：state store 里的状态也不得再是 "completed"，
+	// 且 GetBacktestResult 必须放行 "invalid" —— 否则 GET 端点 / 报告层
+	// 拿不到结果与 InvalidReasons，「为什么无效」在 UI 上不可见。
+	stateStatus, statusErr := eng.GetBacktestStatus(resp.ID)
+	require.NoError(t, statusErr)
+	assert.Equal(t, "invalid", stateStatus, "state store 的无效运行同样不得显示为 completed")
+
+	stored, resErr := eng.GetBacktestResult(resp.ID)
+	require.NoError(t, resErr, "无效运行的结果必须可读（GetBacktestResult 放行 invalid）")
+	require.NotNil(t, stored)
+	assert.Equal(t, resp.InvalidReasons, stored.InvalidReasons, "state store 结果与同步响应携带同一组原因")
+	assert.Len(t, resp.InvalidReasons, 3, "空票池：empty_universe + zero_trades + garbage_metric 三条")
+
 	// 断言：日志里没有成功字样，也没有无条件宣告「Backtest completed」。
 	logs := logBuf.String()
 	assert.NotContains(t, strings.ToLower(logs), "success", "无效运行日志不得出现 success")
@@ -214,6 +227,17 @@ func TestOBS01_NonEmptyUniverseWithTradesIsValid(t *testing.T) {
 	assert.Equal(t, "completed", resp.Status, "正常回测行为必须与改前一致")
 	assert.Greater(t, resp.TotalTrades, 0, "反证腿要求至少有 1 笔成交")
 	assert.Greater(t, resp.UniverseMaxSize, 0)
+
+	// OBS-01 切片 2（读路径反证腿）：有效运行的 state store 状态仍是
+	// "completed"、结果正常可读、无 InvalidReasons —— 读路径收口没有
+	// 把正常路径带偏。
+	stateStatus, statusErr := eng.GetBacktestStatus(resp.ID)
+	require.NoError(t, statusErr)
+	assert.Equal(t, "completed", stateStatus, "有效运行在 state store 里仍是 completed")
+	stored, resErr := eng.GetBacktestResult(resp.ID)
+	require.NoError(t, resErr)
+	require.NotNil(t, stored)
+	assert.Empty(t, stored.InvalidReasons, "有效运行的 state store 结果无 InvalidReasons")
 
 	t.Logf("反证腿：pool=%v status=%s total_trades=%d universe_max_size=%d",
 		pool, resp.Status, resp.TotalTrades, resp.UniverseMaxSize)

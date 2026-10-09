@@ -202,6 +202,27 @@ func TestEngine_GetBacktestResult_NotCompleted(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// OBS-01（切片 2）：无效运行（Status="invalid"）同样已经有结果可读，
+// GetBacktestResult 必须放行 —— 否则「为什么无效」（InvalidReasons）在
+// 报告层 / UI 上不可见。running / failed 仍拒绝（见上一条）。
+func TestEngine_GetBacktestResult_InvalidIsReadable(t *testing.T) {
+	eng := newTestEngine(t)
+	eng.stateStore.Put("test-invalid", &BacktestState{
+		ID:     "test-invalid",
+		Status: "invalid",
+		Result: &domain.BacktestResult{InvalidReasons: []string{"empty_universe", "zero_trades"}},
+	})
+
+	result, err := eng.GetBacktestResult("test-invalid")
+	require.NoError(t, err, "无效运行的结果必须可读")
+	require.NotNil(t, result)
+	assert.Equal(t, []string{"empty_universe", "zero_trades"}, result.InvalidReasons)
+
+	status, err := eng.GetBacktestStatus("test-invalid")
+	require.NoError(t, err)
+	assert.Equal(t, "invalid", status)
+}
+
 func TestEngine_GetBacktestTrades_NotFound(t *testing.T) {
 	eng := newTestEngine(t)
 	_, err := eng.GetBacktestTrades("nonexistent")

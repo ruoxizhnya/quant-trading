@@ -472,7 +472,18 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 
 	state.SetResult(result)
 	state.SetCompletedAt(time.Now())
-	state.SetStatus("completed")
+
+	// OBS-01（切片 2）：无效运行在 state store 里同样不得被写成「成功」。
+	// result.InvalidReasons 由 runBacktestInternal 在返回前算好并挂上（见
+	// 本函数下方返回前的裁定段），这里据它决定状态：无效 → "invalid"，
+	// 有效 → "completed"（正常路径行为一字不变）。读路径
+	// （GetBacktestResult / 两个 GET 端点）据此才能不再把同一份结果说成
+	// completed —— 那正是 OBS-01 读路径的另一半。
+	stateStatus := "completed"
+	if len(result.InvalidReasons) > 0 {
+		stateStatus = "invalid"
+	}
+	state.SetStatus(stateStatus)
 	state.Freeze()
 
 	return e.buildBacktestResponse(backtestID, req, state, result, initialCapital), nil
@@ -1548,7 +1559,11 @@ func (e *Engine) GetBacktestResult(backtestID string) (*domain.BacktestResult, e
 	}
 
 	status := state.GetStatus()
-	if status != "completed" {
+	// OBS-01（切片 2）：同时放行 "invalid" —— 无效运行同样已经产出了结果，
+	// 必须可读。否则「为什么无效」（result.InvalidReasons）在 UI / 报告层
+	// 不可见，调用方只会拿到一个 409，把「跑完了但结果无效」误报成
+	// 「还没跑完」。running / failed 仍拒绝（它们没有可读结果）。
+	if status != "completed" && status != "invalid" {
 		return nil, apperrors.New(apperrors.ErrCodeConflict, fmt.Sprintf("backtest not completed: %s", status)).WithOperation("GetBacktestResult")
 	}
 
