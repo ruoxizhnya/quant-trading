@@ -75,7 +75,15 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：`ts_rma(tr,14)` 与手算 Wilder ATR 逐点一致；三路一致性测试通过；warmup 推导与实际消耗 bar 数一致；破坏验证——改递推系数 → 属性测试变红。
 - **⑥ 边界**：只做 L2 算子与 warmup 推导，不做 WASM / 外部模型。
 
-### K4 · 执行算法 + 市场冲击（P4）⬜（前置：K1，独立）
+### K4 · 执行算法 + 市场冲击（P4）✅ 完成（2026-10-09）（前置：K1，独立）
+
+> **已完成**：`pkg/execalgo/{schedule,twap,vwap}.go` 落地 K0 冻结的 `ExecAlgorithm`（替换 stub）——`Schedule` 拆单（**Σ 子单量精确等于父单**，余数并入末片；`SubmitAt` 严格等差；子单号是 `(父单号, 片序号)` 的**纯函数**⇒幂等）、`OnBar` 到点产出 + `DueChildOrders` **取走即清空**（防重复报送，对齐 `BarHandler.Signals` 语义）、`OnFill` 进度累计；VWAP 按成交量 profile 加权，profile 退化（空/全 0/长度不符/负值）→ 等分并置 `Degraded` 标记。
+> **冲击接入**：`pkg/backtest/marketimpact` 的平方根模型此前**全仓零引用（死代码，与 `EventBus` 同类现象）**，现接入 `BacktestExecutionService` 的 `"impact"` 分支（滑点随 `orderQty/ADV` 增大；ADV 用当根 `quote.Volume` 代理；`Volume<=0` → 退化 fixed，不把「无数据」误读成「零成本」）。`ExecutionConfig` 加可选 `ImpactSigma`/`ImpactLiquidityFactor`。
+> **默认行为零变化**：engine 默认仍 `"fixed"`、默认滑点率不变，`fixed/variable/none` 分支逐字未动（回归腿钉住）。
+> **正证据**：TWAP `1000/7 → [143×6,142]` 且 `Σ=1000`、`SubmitAt` 相邻间隔全等；VWAP `profile[1,2,3,4] → 占比 0.1/0.2/0.3/0.4`；**大单滑点 0.0632 > 小单 0.0200（10:1 单量，比值 3.1623 = √10）**。
+> **审查加固（验收方做）**：子单 ID 幂等用例原本会被「时间戳派生 ID」骗过 —— Windows `time.Now()` 毫秒级粒度下背靠背两次调用取同一值 ⇒ **假绿（实测 PASS）**；已在 TWAP/VWAP 幂等用例中插 20ms 延迟，重放同一破坏**变红**（灵敏度平台无关）。
+> **待裁决（只登记）**：是否把 `"impact"` 设为**默认**滑点模型（会改变所有回测数值）。
+> **未做（后续）**：把 exec-algo 接进下单主路径（引擎/实盘按算法拆单 → 归 K5）；真实券商算法单；VWAP 的成交量预测（现只用给定 profile）。
 
 - **① 目标**：exec-algo 模块落地 TWAP/VWAP 执行算法（与策略同构 trait），撮合引擎加市场冲击模型（D5：模拟真实大单）。
 - **② 上下文**：蓝图 UC4（执行算法拆单）；nautilus `crates/trading/src/algorithm/`（TWAP 同构）；K1 的 exec-engine 挂点。

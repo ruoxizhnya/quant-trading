@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/marketimpact"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/fees"
 )
@@ -58,7 +59,7 @@ func (s *BacktestExecutionService) ExecuteOrder(order domain.Order, quote Quote)
 
 	switch order.OrderType {
 	case domain.OrderTypeMarket:
-		executionPrice = s.applySlippage(quote.Close, order.Direction, quote)
+		executionPrice = s.applySlippage(quote.Close, order.Direction, quote, order.Quantity)
 	case domain.OrderTypeLimit:
 		if order.LimitPrice <= 0 {
 			return domain.Trade{}, fmt.Errorf("invalid limit price: %f", order.LimitPrice)
@@ -107,8 +108,12 @@ func (s *BacktestExecutionService) SetSlippageModel(model string) {
 	s.slippageModel = model
 }
 
-// applySlippage applies slippage to the execution price
-func (s *BacktestExecutionService) applySlippage(price float64, direction domain.Direction, quote Quote) float64 {
+// applySlippage applies slippage to the execution price.
+//
+// orderQty was added by K4 so the "impact" branch can size impact against
+// the order's participation in volume. The existing "fixed" / "variable" /
+// "none" branches ignore it and are byte-for-byte unchanged.
+func (s *BacktestExecutionService) applySlippage(price float64, direction domain.Direction, quote Quote, orderQty float64) float64 {
 	switch s.slippageModel {
 	case "fixed":
 		// Sprint 6 P1-22 (ODR-013): pulled the literal 0.001
@@ -128,6 +133,35 @@ func (s *BacktestExecutionService) applySlippage(price float64, direction domain
 			return price * (1 + slippage)
 		}
 		return price * (1 - slippage)
+	case "impact":
+		// K4（D5）：平方根市场冲击模型——滑点随 orderQty/ADV 增大，
+		// 使「大单滑点 > 小单滑点」成为可测事实。
+		//
+		// ADV 代理口径（裁决）：用当根 quote.Volume 近似 ADV。真实 ADV 是
+		// 过去 N 日平均成交量，本切片不引入历史窗口状态（撮合服务无该
+		// 状态），Volume 是 Q5 现状能拿到的最接近的量纲——局限见报告：
+		// 单日量尖峰/地量都会让冲击被高估/低估。
+		//
+		// quote.Volume <= 0 → 无法估 ADV，**退化为 fixed 滑点**而非
+		// 零冲击：静默返回零会让「无成交量数据」被误读成「无冲击、成本
+		// 为零」，是危险的乐观偏差。退化到 fixed 至少保持与旧模型一致
+		// 的保守 haircut。
+		if quote.Volume <= 0 {
+			slippage := fees.FixedSlippageRate
+			if direction == domain.DirectionLong {
+				return price * (1 + slippage)
+			}
+			return price * (1 - slippage)
+		}
+		model := marketimpact.MarketImpactModel{
+			Sigma:           s.config.ImpactSigma,
+			LiquidityFactor: s.config.ImpactLiquidityFactor,
+		}
+		impact := model.CalculateImpact(orderQty, quote.Volume)
+		if direction == domain.DirectionLong {
+			return price * (1 + impact)
+		}
+		return price * (1 - impact)
 	case "none":
 		return price
 	default:
