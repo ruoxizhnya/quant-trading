@@ -92,7 +92,10 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：TWAP 拆单后子订单时间分布均匀；市场冲击下大单滑点 > 小单滑点；破坏验证——去掉冲击模型 → 大小单滑点相同（反证）。
 - **⑥ 边界**：只做执行算法与冲击模型，不做策略、不做真实券商。
 
-### K5 · 实盘 paper（P5）⬜（前置：K2）
+### K5 · 实盘 paper（P5）切片 1 ✅ / 切片 2 ⬜（前置：K2）
+
+> **切片 1（本步完成，2026-10-09）**：读法 A 的 paper 回放链路 —— 回放与回测**同一批**日线 bar（不造 tick→bar 假聚合层），用**同一段代码**的执行成本核撮合。若曦拍板：paper 与回测必须吃同一批输入，差异才只可能来自执行机制 ⇒ 对账才可归因。
+> **切片 2（待做）**：同构对账比对 + 超阈告警（D1）。
 
 - **① 目标**：DataSource=RealtimeFeed + Broker=Mock 的 paper trading 跑通，并与同策略同日回测做同构对账（D1）。
 - **② 上下文**：蓝图 §4.1.1 实盘-ready 分寸 + UC3；`pkg/live/`（Broker/MockTrader/OrderManager/reconciliation）；`live-trading.md`；K2 的同构桥。
@@ -100,6 +103,14 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：**只做 paper，不接真实券商**（D1）；核心抽象按实盘-ready 设计留冗余，实现只 paper。
 - **⑤ 验收**：同一策略 paper 与回测信号/成交一致（容差内）；对账差异超阈触发告警；破坏验证——paper 与回测用不同时钟 → 对账报差异。
 - **⑥ 边界**：只做 paper trading 与同构对账，不做真实券商、不做合规报送。
+
+**切片 1 交付明细（2026-10-09）**：
+- `pkg/backtest/marketimpact` → `pkg/marketimpact`（提到顶层，与 `pkg/fees` 平级 —— 共享成本模型归位）
+- 新增 `pkg/execution`（共享执行成本核 `CostModel`：fixed/variable/impact/none 四种滑点 + 佣金，**回测与 paper 走同一段代码**）
+- 新增 `pkg/live/bar_replay_feed.go`（`BarReplayFeed`：按「交易日升序 × symbol 字典序」回放 bar 包成 Quote，同步 pull、`VirtualClock` 推进、时间倒退 fail-loud）
+- 新增 `pkg/live/paper_session.go`（`PaperSession`：日循环编排，窗口 `Date<=d` 防前视，产出确定性 `PaperFill`）
+- `MockTrader` / `SimulatedBroker` 换掉伪随机滑点（`order.ID[0]%10`），走共享成本核；`OrderResult` 加 `FillPrice`/`Fee` 字段
+- 测试：回放确定性 / 时间倒退护栏 / 防前视（批式+流式探针）/ 成本同构（fixed+impact，含独立解析锚点）/ 真库只读冒烟
 
 ### K6 · L3a WASM（P6）⬜（前置：K2）
 
@@ -266,7 +277,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | `tools`（原 `pkg/tools`，10716 行，含 `builtin/`） | → **AI**（`pkg/ai/tools`） | core 侧零引用；MCP 桥 = 开放主机服务 / **ACL，属边界消费侧** | ✅ `cff0a0f` |
 | `strategy/copilot.go` 的 `CopilotService`（518 行） | → **AI** | 自然语言 → 生成代码 → 沙箱编译 → 回测 = 实验员的活，却住在仪器包里 | ⬜ 属 ADR-027 §5 第 8 步（ai-service） |
 | `pkg/ai/prompts/{factor_research,strategy_generate}.txt` | **保留 + 待接线** | 零引用的孤儿，但内容是**两处 prompt 契约**（DSL 层策略生成 / 因子研究）；`factor_research.txt` 与 `research.go` 内联提示词构成**双真相**（与 OBS-06/08 同病） | ⬜ 接线 + 词汇表从注册表派生 |
-| `pkg/backtest/marketimpact` | **待判** | 共享成本模型却住在 `backtest` 下；K5 的 paper 侧也要用它。**先例**：`pkg/fees` 同为共享成本模型，被 `backtest`/`live`/`portfolio`/`ai` 共用 | ⬜ 随 K5 |
+| `pkg/backtest/marketimpact` | → **core**（`pkg/marketimpact`） | 共享成本模型却住在 `backtest` 下；K5 的 paper 侧也要用它 ⇒ 提到顶层与 `pkg/fees` 平级（`pkg/fees` 同为共享成本模型，被 `backtest`/`live`/`portfolio`/`ai` 共用） | ✅ K5 切片 1 |
 
 **契约变更（随 `validation` 归 AI 生效）**：**凡存入策略库的策略，均已由 AI 层验证通过**；core 侧的策略存储不做也不应做独立验证。详见 ADR-027 追加节。
 
