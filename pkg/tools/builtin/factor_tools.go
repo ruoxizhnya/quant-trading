@@ -108,7 +108,7 @@ func (t *ValidateFactorTool) Execute(ctx context.Context, args map[string]interf
 			"level":          "L1",
 			"passed":         passed,
 			"reason":         gateReasonL1(passed),
-			"recommendation": gateRecommendationL1(passed),
+			"recommendation": l1FailureRecommendation(),
 		}, nil
 	}
 
@@ -125,7 +125,7 @@ func (t *ValidateFactorTool) Execute(ctx context.Context, args map[string]interf
 			"level":          "L1",
 			"passed":         passed,
 			"reason":         gateReasonL1(passed),
-			"recommendation": gateRecommendationL1(passed),
+			"recommendation": l1FailureRecommendation(),
 		}, nil
 	}
 
@@ -140,6 +140,17 @@ func (t *ValidateFactorTool) Execute(ctx context.Context, args map[string]interf
 		"reason":         gateReasonL1(passed),
 		"recommendation": gateRecommendationL1(passed),
 	}, nil
+}
+
+// l1FailureRecommendation builds the L1 failure recommendation text with
+// the DSL's legal field set appended (grouped by data source). This lets
+// an agent that tripped the gate self-correct: it sees exactly which
+// fields exist and which source each belongs to (OBS-08 切片 1, 3.6).
+//
+// 只改文本内容 —— JSON 输出字段结构（valid/inputs/ast/error/level/
+// passed/reason/recommendation）保持不变。
+func l1FailureRecommendation() string {
+	return gateRecommendationL1(false) + " " + expression.AvailableFieldsHint()
 }
 
 // ─── ComputeFactorICTool ───────────────────────────────────────────────

@@ -30,6 +30,12 @@ func (m *mockFieldProvider) GetField(symbol, field string, lookback int) ([]floa
 
 func (m *mockFieldProvider) GetSymbols() []string { return m.symbols }
 
+// Fields 声明该测试替身能供应的字段。Fields() 不被 evaluator 消费，仅供
+// expr.DataProvider 接口满足（OBS-08 切片 1）。这里给出行情全集。
+func (m *mockFieldProvider) Fields() []string {
+	return []string{"close", "high", "low", "open", "turnover", "volume"}
+}
+
 // makeBars builds a bars map where each symbol has one OHLCV bar with
 // the given close price (used for Signal.Price verification).
 func makeBars(symbols []string, prices map[string]float64) map[string][]domain.OHLCV {

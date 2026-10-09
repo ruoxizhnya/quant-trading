@@ -11,6 +11,42 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/expression"
 )
 
+// factorDSLSyntax 生成研究提示词里的「Factor Expression DSL Syntax」段。
+//
+// OBS-08：字段与算子的清单**从注册表派生**（pkg/expression 是唯一事实源），
+// 不再硬编码。硬编码的代价是双向的 —— 2026-10-09 实测该段曾广告 `market_cap`
+// （provider 永不可供的幻影字段，会让 AI 产出必然过不了闸门的表达式），
+// 同时漏掉 `ps`/`roa`/`revenue`/`profit` 与 9 个算子
+// （`ts_max`/`ts_min`/`ts_sum`/`ts_ewma`/`ts_rma`/`ts_kalman`/`cs_neutralize`/
+// `neg`/`exp` 与全部比较算子），让 AI 白白少用已有能力。
+func factorDSLSyntax() string {
+	var tsOps, csOps, mathOps, binOps []string
+	for _, op := range expression.AvailableOperators() { // 已按字典序
+		switch {
+		case expression.IsTimeSeriesOp(op):
+			tsOps = append(tsOps, op)
+		case expression.IsCrossSectionalOp(op):
+			csOps = append(csOps, op)
+		case expression.IsMathOp(op):
+			mathOps = append(mathOps, op)
+		default:
+			binOps = append(binOps, op)
+		}
+	}
+	return fmt.Sprintf(
+		"- Data fields: %s\n"+
+			"- Time-series ops: %s\n"+
+			"- Cross-sectional ops: %s\n"+
+			"- Math ops: %s\n"+
+			"- Arithmetic / comparison: %s",
+		strings.Join(expression.AvailableDataFields(), ", "),
+		strings.Join(tsOps, ", "),
+		strings.Join(csOps, ", "),
+		strings.Join(mathOps, ", "),
+		strings.Join(binOps, ", "),
+	)
+}
+
 // ResearchAgent generates factor hypotheses and validates them
 type ResearchAgent struct {
 	llm *ai.Client
@@ -51,11 +87,7 @@ Generate a factor hypothesis with the following format:
 4. Rationale (why this factor should work in A-share market)
 
 Factor Expression DSL Syntax:
-- Data fields: close, open, high, low, volume, turnover, market_cap, pe, pb, roe
-- Time-series ops: ts_mean(x, window), ts_std(x, window), ts_delay(x, periods), ts_delta(x, periods), ts_pct_change(x, periods), ts_corr(x, y, window), ts_rank(x, window)
-- Cross-sectional ops: cs_rank(x), cs_zscore(x), cs_percentile(x)
-- Math ops: abs(x), log(x), sqrt(x), sign(x)
-- Arithmetic: +, -, *, /, ^
+%s
 
 Example formulas:
 - Momentum: ts_pct_change(close, 20)
@@ -69,7 +101,7 @@ Output ONLY valid JSON:
   "category": "momentum",
   "formula": "ts_pct_change(close, 20)",
   "rationale": "explanation"
-}`, topic)
+}`, topic, factorDSLSyntax())
 
 	messages := []ai.ChatMessage{
 		{Role: "system", Content: "You are a quantitative research analyst. Output ONLY valid JSON."},

@@ -201,7 +201,8 @@ func IsMathOp(op string) bool {
 }
 
 // IsDataField 报告 name 是否为已知数据字段（单一事实源：registry.go 的
-// dataFields）。
+// fieldRegistry）。
 func IsDataField(name string) bool {
-	return dataFields[name]
+	_, ok := fieldRegistry[name]
+	return ok
 }

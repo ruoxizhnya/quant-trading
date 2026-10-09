@@ -5,10 +5,29 @@ import (
 	"math"
 )
 
-// DataProvider provides time-series data for evaluation
+// DataProvider provides time-series data for evaluation.
 type DataProvider interface {
 	GetField(symbol string, field string, lookback int) ([]float64, error)
 	GetSymbols() []string
+
+	// Fields 返回本 provider **能供应**的数据字段名（升序、无重复）。
+	//
+	// 这是「provider 的能力声明」—— 它和语言侧注册表（registry.go 的
+	// fieldRegistry / AvailableFields）是两件事：
+	//   - 注册表回答「这个字段名在 DSL 里是否**合法**」；
+	//   - Fields() 回答「这个 provider **真的能取到**哪些字段」。
+	//
+	// 二者必须对齐：注册了的字段若 provider 供不了，就是「假合法」——AI
+	// 在闸门通过、求值才炸；provider 能供的字段若没注册，就是「误拒」——
+	// 正经用法被挡在门外。跨包护栏（pkg/strategy/expression/
+	// data_provider_fields_test.go）把两侧钉死，禁止再漂移。
+	//
+	// 2026-10（OBS-08 切片 1）：新增此方法。此前闸门白名单是手写 map，
+	// 与唯一生产 provider 实测能力错配（放行 market_cap/eps/roe_ttm 等
+	// 永远无法求值的字段，又拦掉 provider 支持的 ps/roa）。把能力交给
+	// provider 自报、由护栏对齐，是「名字合法集合只能有一处」在字段上的
+	// 同款收敛（OBS-06 已对算子名做过）。
+	Fields() []string
 }
 
 // Evaluator evaluates AST nodes against market data

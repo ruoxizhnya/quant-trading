@@ -38,6 +38,11 @@ func (m *mockDataProvider) GetSymbols() []string {
 	return syms
 }
 
+// Fields 声明该测试替身能供应的字段（OBS-08 切片 1 接口要求）。
+func (m *mockDataProvider) Fields() []string {
+	return []string{"close", "high", "low", "open", "volume"}
+}
+
 func newMockProvider() *mockDataProvider {
 	return &mockDataProvider{
 		data: map[string]map[string][]float64{

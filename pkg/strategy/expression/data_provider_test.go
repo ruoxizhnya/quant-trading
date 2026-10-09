@@ -250,3 +250,89 @@ func TestFundamentalSeries_NegativeMultipleIsNaN(t *testing.T) {
 func fptr(v float64) *float64 { return &v }
 
 func mathIsNaN(v float64) bool { return v != v }
+
+// ─── OBS-08 切片 1：revenue / profit 接线 + 两类「不可用」报错 ──────────
+
+// TestFundamentalValue_RevenueProfit：revenue→f.Revenue、profit→f.NetProfit。
+// domain.Fundamental 里这两个字段早已存在，只是此前没在 fundamentalValue
+// 里接线 —— 这个测试证明补上后能真的求出值（不是 NaN、不是 0）。
+func TestFundamentalValue_RevenueProfit(t *testing.T) {
+	f := domain.Fundamental{Revenue: fptr(1234.5), NetProfit: fptr(-67.8)}
+
+	gotRev, ok := fundamentalValue(f, "revenue")
+	if !ok {
+		t.Fatal("revenue 应可取值")
+	}
+	if !approxEqual(gotRev, 1234.5) {
+		t.Errorf("revenue = %.2f, want 1234.5（应来自 f.Revenue）", gotRev)
+	}
+
+	gotProfit, ok := fundamentalValue(f, "profit")
+	if !ok {
+		t.Fatal("profit 应可取值")
+	}
+	// 净利润为负是有意义的（亏损），必须原样返回，不能被抹成 NaN/0。
+	if !approxEqual(gotProfit, -67.8) {
+		t.Errorf("profit = %.2f, want -67.8（应来自 f.NetProfit，且负值保留）", gotProfit)
+	}
+}
+
+// TestGetField_RevenueProfit_EndToEnd 走一遍 GetField 端到端（PIT 对齐）。
+func TestGetField_RevenueProfit_EndToEnd(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	bars := []domain.OHLCV{
+		{Symbol: "A", Date: base, Close: 1},
+		{Symbol: "A", Date: base.AddDate(0, 0, 1), Close: 2},
+	}
+	records := map[string][]domain.Fundamental{
+		"A": {{Symbol: "A", Date: base, Revenue: fptr(9), NetProfit: fptr(3)}},
+	}
+	p := NewOHLCVDataProviderWithFundamentals(
+		map[string][]domain.OHLCV{"A": bars}, records)
+
+	for f, want := range map[string]float64{"revenue": 9, "profit": 3} {
+		got, err := p.GetField("A", f, 0)
+		if err != nil {
+			t.Fatalf("GetField(%s): %v", f, err)
+		}
+		for i, v := range got {
+			if !approxEqual(v, want) {
+				t.Errorf("%s[%d] = %.2f, want %.2f", f, i, v, want)
+			}
+		}
+	}
+}
+
+// TestGetField_SectorIsGroup_NotSupplied：sector 在注册表里（来源 group），
+// 但本 provider 不供应 —— 报错必须说「属于 group 数据源、当前 provider 不
+// 供应」，而不是笼统的 "unknown field"（OBS-08 3.4）。
+func TestGetField_SectorIsGroup_NotSupplied(t *testing.T) {
+	p := NewOHLCVDataProvider(map[string][]domain.OHLCV{"A": makeBarsN("A", 3)})
+	_, err := p.GetField("A", "sector", 0)
+	if err == nil {
+		t.Fatal("sector：provider 不供应，应报错")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "group") || !strings.Contains(msg, "不供应") {
+		t.Errorf("sector 报错应说明「属于 group 数据源、当前 provider 不供应」，got: %v", err)
+	}
+	if strings.Contains(msg, "未知字段") || strings.Contains(msg, "unknown field") {
+		t.Errorf("sector 是注册表里的 group 标签，不应被报成「未知字段」，got: %v", err)
+	}
+}
+
+// TestGetField_TrulyUnknownField：完全没登记的字段报「未知字段」并附可用清单。
+func TestGetField_TrulyUnknownField(t *testing.T) {
+	p := NewOHLCVDataProvider(map[string][]domain.OHLCV{"A": makeBarsN("A", 3)})
+	_, err := p.GetField("A", "definitely_not_a_field", 0)
+	if err == nil {
+		t.Fatal("未知字段应报错")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "未知字段") {
+		t.Errorf("完全未登记的字段应报「未知字段」，got: %v", err)
+	}
+	if !strings.Contains(msg, "可用字段") {
+		t.Errorf("未知字段报错应附可用字段清单，got: %v", err)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	expr "github.com/ruoxizhnya/quant-trading/pkg/expression"
@@ -19,18 +20,23 @@ var ohlcvFields = map[string]bool{
 	"turnover": true,
 }
 
-// fundamentalFields 是表达式里能用的基本面字段（P2-12）。
+// fundamentalFields 是表达式里能用的基本面字段（P2-12；OBS-08 切片 1 补
+// revenue/profit）。
 //
 // 没有它们之前，value / quality 两类意图只能明确失败 —— 引擎不是"不支持"，
 // 是"不给假数字"（ADR-024）。现在按 PIT 接进来：每个交易日取**该日已可用**
 // 的最新一期财报，取不到就是 NaN（不是 0 —— PE 缺失被读成 0 会变成"极便宜"，
 // 那是 P2-10 修掉的那个坑）。
+//
+// 这张表 + ohlcvFields 的并集必须与 Fields() 一致（后者是兑外的能力声明）。
 var fundamentalFields = map[string]bool{
-	"pe":  true,
-	"pb":  true,
-	"ps":  true,
-	"roe": true,
-	"roa": true,
+	"pe":      true,
+	"pb":      true,
+	"ps":      true,
+	"roe":     true,
+	"roa":     true,
+	"revenue": true, // → f.Revenue
+	"profit":  true, // → f.NetProfit（财报口径的净利润）
 }
 
 // OHLCVDataProvider adapts map[string][]domain.OHLCV (the strategy
@@ -82,15 +88,45 @@ func (p *OHLCVDataProvider) GetSymbols() []string {
 	return p.symbols
 }
 
+// Fields 返回本 provider 能供应的数据字段名（升序、无重复）——
+// expr.DataProvider 的能力声明（OBS-08 切片 1）。
+//
+// 这里是**手写的能力清单**，刻意不展开自 ohlcvFields/fundamentalFields 的
+// 内部 map：护栏（pkg/strategy/expression/data_provider_fields_test.go）要
+// 把它和语言侧注册表（expr.AvailableDataFields()）钉成双向相等，只有两侧
+// 各自**独立声明**，漂移才会被真正抓到。
+//
+// 注意：`sector` 不在其中 —— 它是 group 分组标签，本 provider 不供应，
+// 求值期会给出「属于 group 数据源」的可读报错（见 GetField）。
+func (p *OHLCVDataProvider) Fields() []string {
+	return []string{
+		// 行情（market）
+		"close", "high", "low", "open",
+		// 基本面（fundamentals）—— 注意全局按字典序，故 market 的 turnover/
+		// volume 排在 fundamentals 之后
+		"pb", "pe", "profit", "ps", "revenue", "roa", "roe",
+		// 行情（续）
+		"turnover", "volume",
+	}
+}
+
 // GetField returns the per-bar values for the requested field of the
 // given symbol.
 //
 // Supported fields:
 //   - 行情：open, high, low, close, volume, turnover
-//   - 基本面（P2-12）：pe, pb, ps, roe, roa —— 需要构造时传入财报数据
+//   - 基本面（P2-12 / OBS-08）：pe, pb, ps, roe, roa, revenue, profit
+//     —— 需要构造时传入财报数据
 //
 // 基本面没传进来时，pe/pb 之类**报错而不是返回 0**：给一串 0 会让估值
 // 表达式「看起来能跑」，产出的却是最危险的假信号（PE=0 = 白送的股票）。
+//
+// 未知字段的报错**区分两类「不可用」**（OBS-08 切片 1，3.4）：
+//   - 字段不在语言注册表里 →「未知字段 X（可用字段：…）」；
+//   - 字段在注册表里、但本 provider 不供应（如 group 标签 sector）→
+//     「字段 X 属于 <来源> 数据源，当前 provider 不供应（可用字段：…）」。
+//
+// 两类都点名可用字段，便于 AI 自纠而不是对着 "unknown field" 干瞪眼。
 //
 // If lookback > 0 and the series is longer than lookback, only the
 // most recent `lookback` bars are returned. If lookback <= 0, all bars
@@ -117,13 +153,25 @@ func (p *OHLCVDataProvider) GetField(symbol, field string, lookback int) ([]floa
 		}
 		vals = p.fundamentalSeries(symbol, field, bars)
 	default:
-		return nil, fmt.Errorf("data_provider: unknown field %q", field)
+		return nil, p.unavailableFieldError(field)
 	}
 
 	if lookback > 0 && len(vals) > lookback {
 		vals = vals[len(vals)-lookback:]
 	}
 	return vals, nil
+}
+
+// unavailableFieldError 为「provider 供不了的字段」构造可读报错，区分
+// 「语言里根本没这个字段」与「语言里有、但本 provider 不供应」两种情况。
+func (p *OHLCVDataProvider) unavailableFieldError(field string) error {
+	avail := strings.Join(p.Fields(), ", ")
+	if src, ok := expr.FieldSourceOf(field); ok {
+		return fmt.Errorf(
+			"data_provider: 字段 %q 属于 %s 数据源，当前 provider 不供应（可用字段：%s）",
+			field, src, avail)
+	}
+	return fmt.Errorf("data_provider: 未知字段 %q（可用字段：%s）", field, avail)
 }
 
 // fundamentalSeries 把财报对齐到每根 K 线：第 i 根 K 线用「截至该日已可用」
@@ -170,7 +218,9 @@ func (p *OHLCVDataProvider) fundamentalSeries(
 // 排除（见 operators.csRank），既不出信号也不占排名位。
 //
 // 盈利率（roe / roa）可以为负且有意义 —— 「差」本身就是低排名的理由，
-// 所以原样返回。
+// 所以原样返回。营收 / 净利润（revenue / profit，OBS-08 切片 1 接线）同理：
+// 它们是财报的绝对值口径，缺失 = nil → 未披露，非缺失时原样返回（亏损 =
+// 负净利润有意义）。
 func fundamentalValue(f domain.Fundamental, field string) (float64, bool) {
 	var p *float64
 	// 估值倍数用 NaN 兜住非正值
@@ -186,6 +236,15 @@ func fundamentalValue(f domain.Fundamental, field string) (float64, bool) {
 		p = f.ROE
 	case "roa":
 		p = f.ROA
+	case "revenue":
+		// OBS-08 切片 1：domain.Fundamental.Revenue 早已存在但未接线。
+		// 营收可以为负（极罕见，通常是数据口径问题），但它是有量纲的
+		// 绝对值、不是「估值倍数」，故不套 nonPositiveIsNaN。
+		p = f.Revenue
+	case "profit":
+		// 同理接 domain.Fundamental.NetProfit。净利润为负是有意义的
+		// （亏损），原样返回 —— 抹成 NaN 反而丢失「越亏越差」的信息。
+		p = f.NetProfit
 	default:
 		return 0, false
 	}

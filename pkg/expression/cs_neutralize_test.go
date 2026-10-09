@@ -42,6 +42,10 @@ func (m *mockProvider) GetField(symbol, field string, lookback int) ([]float64, 
 
 func (m *mockProvider) GetSymbols() []string { return m.symbols }
 
+// Fields 声明该测试替身能供应的字段（OBS-08 切片 1 接口要求）。
+// 该 mock 的数据里含 close 与 sector（分组标签）。
+func (m *mockProvider) Fields() []string { return []string{"close", "sector"} }
+
 // newGroupedProvider builds a provider with 4 symbols where `close`
 // is [1,2,3,4] and `sector` groups them as [A,A,B,B] (encoded as 1,1,2,2).
 func newGroupedProvider() *mockProvider {

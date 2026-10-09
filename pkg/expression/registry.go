@@ -100,30 +100,64 @@ type OperatorDef struct {
 	unaryEval unaryEvalFunc
 }
 
-// ─── 数据字段白名单（IdentifierNode 的单一事实源） ─────────────────────
+// ─── 数据字段注册表（IdentifierNode 的单一事实源） ─────────────────────
 //
 // 停牌/缺失语义由 SeriesSpec.nan_policy 声明（ADR-028 §5/§9）；这里只负责
-// 「这个名字是不是已知字段」。`sector` 是 cs_neutralize 的分组标签，属于
-// 表达式可引用的已知字段（AST 注释明确举它为例），故一并登记。
-var dataFields = map[string]bool{
+// 「这个名字是不是已知字段」，并声明它属于哪类**数据来源**（FieldSource）。
+//
+// ─── 为什么带来源 ─────────────────────────────────────────────────────
+//
+// 此前字段白名单是一张扁平的 `map[string]bool`（OBS-08 前的病灶）：它既
+// 不知道字段从哪来，也没跟任何 provider 对齐过，于是放行了 6 个 provider
+// 永远求不出的字段（`market_cap`/`roe_ttm`/`eps`/… = 假合法），又拦掉了
+// provider 真正支持的 2 个（`ps`/`roa` = 误拒）。带来源后：
+//   - 每条字段声明它属于 market / fundamentals / group 中的哪一类；
+//   - provider 侧用 Fields() 自报能供应的字段，护栏把「注册表里来源非
+//     group 的字段集合」与「provider 能供应的字段集合」钉成双向相等。
+//
+// ─── 三类来源 ─────────────────────────────────────────────────────────
+//
+//   - market：来自行情（OHLCV）—— open/high/low/close/volume/turnover；
+//   - fundamentals：来自财报（domain.Fundamental / PIT 对齐）；
+//   - group：**不是数据字段**，是 `cs_neutralize(x, group)` 的分组标签。
+//     `sector` 是唯一一个，它依赖 storage 的 stock_sector_map（当前 0 行，
+//     可用性声明属 OBS-08 切片 2，本切片只把它从「数据字段」正名为「分组
+//     标签」并保留其语法合法性）。
+//
+// ⚠️ 曾登记但被移除（OBS-08 切片 1，④类）：`market_cap` / `roe_ttm` /
+// `eps` —— `domain.Fundamental` 里根本没有这三个字段，provider 永远求不出
+// 值，留在闸门里就是「假合法」，只会让 AI 反复撞墙。**若将来 domain 补上
+// 对应字段（并在 provider 的 fundamentalValue/Fields 里实现），重新加入即可。**
+type FieldSource string
+
+const (
+	// FieldSourceMarket 行情来源（OHLCV）。
+	FieldSourceMarket FieldSource = "market"
+	// FieldSourceFundamentals 财报来源（domain.Fundamental，PIT 对齐）。
+	FieldSourceFundamentals FieldSource = "fundamentals"
+	// FieldSourceGroup 横截面分组标签（cs_neutralize 的 group 参数）——不是数据字段。
+	FieldSourceGroup FieldSource = "group"
+)
+
+// fieldRegistry 是字段名合法集合的**唯一权威来源**：字段 → 来源。
+var fieldRegistry = map[string]FieldSource{
 	// 行情
-	"open":     true,
-	"high":     true,
-	"low":      true,
-	"close":    true,
-	"volume":   true,
-	"turnover": true,
-	// 基本面
-	"market_cap": true,
-	"pe":         true,
-	"pb":         true,
-	"roe":        true,
-	"roe_ttm":    true,
-	"eps":        true,
-	"revenue":    true,
-	"profit":     true,
-	// 横截面分组标签（cs_neutralize 的 group 参数）
-	"sector": true,
+	"open":     FieldSourceMarket,
+	"high":     FieldSourceMarket,
+	"low":      FieldSourceMarket,
+	"close":    FieldSourceMarket,
+	"volume":   FieldSourceMarket,
+	"turnover": FieldSourceMarket,
+	// 基本面（对应 domain.Fundamental 的 PE/PB/PS/ROE/ROA/Revenue/NetProfit）
+	"pe":      FieldSourceFundamentals,
+	"pb":      FieldSourceFundamentals,
+	"ps":      FieldSourceFundamentals,
+	"roe":     FieldSourceFundamentals,
+	"roa":     FieldSourceFundamentals,
+	"revenue": FieldSourceFundamentals,
+	"profit":  FieldSourceFundamentals,
+	// 横截面分组标签（cs_neutralize 的 group 参数）——不是数据字段
+	"sector": FieldSourceGroup,
 }
 
 // operatorRegistry 是唯一的名字合法集合。map 便于 O(1) 查表；
@@ -474,14 +508,48 @@ func AvailableOperators() []string {
 	return names
 }
 
-// AvailableFields 返回全部已知数据字段（升序）。
+// AvailableFields 返回全部已知字段名（升序，**含 group 标签**）——即
+// 「DSL 里语法合法的字段名」全集。签名与语义与 OBS-08 之前保持一致。
 func AvailableFields() []string {
-	fields := make([]string, 0, len(dataFields))
-	for f := range dataFields {
+	fields := make([]string, 0, len(fieldRegistry))
+	for f := range fieldRegistry {
 		fields = append(fields, f)
 	}
 	sort.Strings(fields)
 	return fields
+}
+
+// AvailableFieldsInSource 返回某来源下的全部字段名（升序）。未知来源 →
+// 空切片。source=FieldSourceGroup 时返回分组标签（如 sector）。
+func AvailableFieldsInSource(source FieldSource) []string {
+	fields := make([]string, 0)
+	for f, s := range fieldRegistry {
+		if s == source {
+			fields = append(fields, f)
+		}
+	}
+	sort.Strings(fields)
+	return fields
+}
+
+// AvailableDataFields 返回**真正的数据字段**（升序）——即来源非 group 的
+// 全部字段。`sector` 是分组标签，不算数据字段，故被排除。这是「provider
+// 应当供应哪些字段」的权威集合，供跨包护栏（pkg/strategy/expression）对齐。
+func AvailableDataFields() []string {
+	fields := make([]string, 0, len(fieldRegistry))
+	for f, s := range fieldRegistry {
+		if s != FieldSourceGroup {
+			fields = append(fields, f)
+		}
+	}
+	sort.Strings(fields)
+	return fields
+}
+
+// FieldSourceOf 返回字段名所属来源；未登记 → (_, false)。
+func FieldSourceOf(name string) (FieldSource, bool) {
+	s, ok := fieldRegistry[name]
+	return s, ok
 }
 
 // availableOperatorsHint 生成「（可用算子：a, b, …）」后缀，供闸门/求值报错
@@ -490,9 +558,27 @@ func availableOperatorsHint() string {
 	return "（可用算子：" + strings.Join(AvailableOperators(), ", ") + "）"
 }
 
-// availableFieldsHint 生成「（可用字段：a, b, …）」后缀。
-func availableFieldsHint() string {
-	return "（可用字段：" + strings.Join(AvailableFields(), ", ") + "）"
+// AvailableFieldsHint 生成「（可用字段：…）」后缀，**按来源分组**列出全部
+// 合法字段，供闸门/工具/求值报错指明合法集合，便于 AI 自纠（OBS-08）。
+//
+// 形如：（可用字段：market: close, high, …；fundamentals: pb, pe, …；group: sector）
+func AvailableFieldsHint() string {
+	return "（可用字段：" + fieldsBySourceString() + "）"
+}
+
+// fieldsBySourceString 把注册表按来源分组渲染成 "market: a, b；fundamentals: …"。
+// 来源顺序固定为 market → fundamentals → group，保证输出稳定可断言。
+func fieldsBySourceString() string {
+	order := []FieldSource{FieldSourceMarket, FieldSourceFundamentals, FieldSourceGroup}
+	parts := make([]string, 0, len(order))
+	for _, src := range order {
+		fields := AvailableFieldsInSource(src)
+		if len(fields) == 0 {
+			continue
+		}
+		parts = append(parts, string(src)+": "+strings.Join(fields, ", "))
+	}
+	return strings.Join(parts, "；")
 }
 
 // ─── 语法 + 算子闸门（Expression.Validate 的单一实现） ────────────────
@@ -509,7 +595,7 @@ func validateNode(node Node, path string) error {
 
 	case *IdentifierNode:
 		if !IsDataField(n.Name) {
-			return fmt.Errorf("%s: unknown data field %q%s", path, n.Name, availableFieldsHint())
+			return fmt.Errorf("%s: unknown data field %q%s", path, n.Name, AvailableFieldsHint())
 		}
 		return nil
 

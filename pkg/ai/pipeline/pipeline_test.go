@@ -720,6 +720,9 @@ func (m *mockDataProvider) GetSymbols() []string {
 	return []string{"AAPL", "GOOGL"}
 }
 
+// Fields 声明该测试替身能供应的字段（OBS-08 切片 1 接口要求）。
+func (m *mockDataProvider) Fields() []string { return []string{"close"} }
+
 // ─── S7-P3-2 Phase 4: ExecuteFromYAML tests ──────────────────────────
 
 // uniqueYAMLName builds a strategy name unique per test invocation
