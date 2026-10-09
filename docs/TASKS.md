@@ -119,11 +119,11 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - 对账器单测 8 条（一致/缺失/方向/强度/容差/顺序无关/确定性输出）
 - ⚠️ 告警接线**未做**：现有 `ReconciliationWorker`/`AlertDispatcher` 是「券商资金对账」（持仓/现金），零生产构造点且与信号对账是两码事；信号差异的「告警」以 `ReconcileSignals` 返回的差异列表 + 端到端 fail-loud 兑现，生产告警通道接线留待对账真正进实盘循环时
 
-### K6 · L3a WASM（P6）切片 1 ✅ / 切片 2 ✅ / 切片 3 ⬜（前置：K2）
+### K6 · L3a WASM（P6）切片 1 ✅ / 切片 2 ✅ / 切片 3 ✅（前置：K2）
 
 > **切片 1（2026-10-09 完成）**：wazero 入 go.mod + `WazeroRuntime` 落地 + `InProcessRuntime` 退役。
 > **切片 2（2026-10-09 完成）**：host API 白名单 + `get_bar(t_offset>0)` trap + import section 扫描器。
-> **切片 3（待做）**：协议改造 `generate_signals` → 逐 bar `on_bar(t)`（堵前视漏洞）。
+> **切片 3（2026-10-09 完成）**：协议改造 `generate_signals` → 逐 bar `on_bar(t)` + `finalize`（堵前视漏洞）+ 状态断点续跑一致性。
 
 - **① 目标**：wazero 沙箱落地，host API 受限（`get_bar` 防前视 + `get_state`/`set_state`），仅在 L2 无法表达时启用（D2）。
 - **② 上下文**：蓝图 UC2；ADR-029 §3（WASM host API 契约）+ ADR-007 Phase 3（2026-10-08 对齐：轨道 B=L3a）；ADR-024（不做 plugin.Open）；`internal/sandbox/wasm/sandbox.go`（骨架，现用 InProcessRuntime fallback）。
@@ -149,6 +149,13 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - 新增 `ValidateImports`（import section 扫描器）：扫描 `CompiledModule.ImportedFunctions()`，拒绝任何「非 env 模块」或「非白名单函数」的 import；接入 `WazeroRuntime.Compile`（fail-closed）
 - 测试（`host_api_test.go`）：get_bar 过去/当前/负数偏移正确返回、**未来偏移 trap**、get_state/set_state 往返一致、import 扫描器拒绝越权 import（含非 env 模块）
 - 破坏验证 3 条：去掉 t_offset 检查 → `TestHostGetBar_FutureTraps` 红（读到未来值）→ 还原绿；去掉 import 扫描 → `TestValidateImports_Forbidden` 红 → 还原绿；ReadMemory 去 copy → 红 → 还原绿
+
+**切片 3 交付明细（2026-10-09）**：
+- 协议改造 `generate_signals` → 逐 bar `on_bar(t)` + `finalize`（ADR-029 §3.3 / ADR-007 2026-10-06 注记）：新增 `internal/sandbox/wasm/on_bar_session.go`（`OnBarSession`：`Initialize`（写 params@0、调 `initialize`、期望返回 0）→ `OnBar(ctx, bc)`（`withBarContext` 注入、调 `on_bar` 传 `uint64(uint32(bc.T))`）→ `Finalize(ctx, bc)`（调 finalize、解 ptr/len）→ `Close`）
+- 退役旧协议：删除 `sandbox.go` 末尾 `StrategyPluginSession`（generate_signals）块 + `sandbox_test.go` 里的 `wasmStrategy`/`TestStrategyPluginSession_InitializeAndGenerate`；`wasm_builder_test.go` 增 `opDrop`（0x1a）清 get_bar 返回值残留
+- 测试（`on_bar_session_test.go`，3 条全绿）：`TestOnBarSession_Protocol`（5 bar 累积、空 finalize）、`TestOnBarSession_NoBarContext`（fail-loud）、`TestStateCheckpointResume`（BarContext.State 快照/恢复 ⇒ get_state 读回 "30"）
+- 破坏验证：去掉 `OnBar` 里的 `withBarContext` 注入 → `TestOnBarSession_Protocol` 红 → 还原 → 绿 → 零残留
+- 全量 `go build ./...` + `go vet` + 4 包测试（wasm/repoguard/live/backtest）全绿，gofmt 干净
 
 ### K7 · L3b 信号注入（P7）⬜（前置：K2）
 
