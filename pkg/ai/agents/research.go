@@ -19,7 +19,20 @@ import (
 // 同时漏掉 `ps`/`roa`/`revenue`/`profit` 与 9 个算子
 // （`ts_max`/`ts_min`/`ts_sum`/`ts_ewma`/`ts_rma`/`ts_kalman`/`cs_neutralize`/
 // `neg`/`exp` 与全部比较算子），让 AI 白白少用已有能力。
-func factorDSLSyntax() string {
+// factorDSLSyntax 渲染提示词里的 DSL 语法段（算子与字段清单一律**从注册表
+// 派生**，不硬编码）。
+//
+// avail 是字段可用性地图（来自 expression.FieldAvailability 的真库探测）：
+//   - 非 nil 时：只把**有数据**的字段列进「可用」，并把「已登记但源表为空」
+//     的字段单列一段、明确禁止使用 —— 这是 OBS-08 切片 2 的落点；
+//   - nil 时：未做可用性探测，退回能力层全集（不列「不可用」段）。
+//
+// ─── 为什么要单列「不可用」而不是干脆不提 ──────────────────────────
+// 实测 stock_fundamentals / stock_sector_map 均为 0 行，于是 pe/pb/ps/roe/
+// roa/revenue/profit/sector 这 8 个字段语法合法、过闸门、provider 也认，
+// **但求值必然拿不到数据**。只把它们从清单里删掉，AI 会因为「记得有这些
+// 字段」而反复尝试；明确标注「已知但当前无数据、别用」，才能让它一次就绕开。
+func factorDSLSyntax(avail map[string]bool) string {
 	var tsOps, csOps, mathOps, binOps []string
 	for _, op := range expression.AvailableOperators() { // 已按字典序
 		switch {
@@ -33,23 +46,49 @@ func factorDSLSyntax() string {
 			binOps = append(binOps, op)
 		}
 	}
-	return fmt.Sprintf(
-		"- Data fields: %s\n"+
-			"- Time-series ops: %s\n"+
-			"- Cross-sectional ops: %s\n"+
-			"- Math ops: %s\n"+
-			"- Arithmetic / comparison: %s",
-		strings.Join(expression.AvailableDataFields(), ", "),
-		strings.Join(tsOps, ", "),
-		strings.Join(csOps, ", "),
-		strings.Join(mathOps, ", "),
-		strings.Join(binOps, ", "),
-	)
+
+	fields := expression.AvailableDataFieldsWith(avail)
+	out := "- Data fields: " + strings.Join(fields, ", ") + "\n"
+	if avail != nil {
+		if unusable := unavailableDataFields(avail); len(unusable) > 0 {
+			out += "- UNUSABLE NOW (registered, but their source table is EMPTY — " +
+				"do NOT use them; any formula using them yields no data): " +
+				strings.Join(unusable, ", ") + "\n"
+		}
+	}
+	out += "- Time-series ops: " + strings.Join(tsOps, ", ") + "\n" +
+		"- Cross-sectional ops: " + strings.Join(csOps, ", ") + "\n" +
+		"- Math ops: " + strings.Join(mathOps, ", ") + "\n" +
+		"- Arithmetic / comparison: " + strings.Join(binOps, ", ")
+	return out
+}
+
+// unavailableDataFields 返回「已登记但当前无数据」的数据字段（升序）。
+// avail 为 nil 时返回空（未探测 = 不做不可用判断）。
+func unavailableDataFields(avail map[string]bool) []string {
+	if avail == nil {
+		return nil
+	}
+	out := make([]string, 0)
+	for _, f := range expression.AvailableDataFields() {
+		if !avail[f] {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // ResearchAgent generates factor hypotheses and validates them
 type ResearchAgent struct {
 	llm *ai.Client
+
+	// availability 是字段可用性地图（来自 expression.FieldAvailability 的
+	// 真库探测）。nil = 尚未探测（提示词退回能力层全集）。
+	//
+	// 之所以做成**可注入**而非构造时直连 DB：本包（AI 侧）不该替调用方决定
+	// 数据源，且 ResearchAgent 当前**零生产构造点**（只有测试在用），留注入
+	// 口比在构造函数里塞一个 pool 更轻。
+	availability map[string]bool
 }
 
 // NewResearchAgent creates a new research agent
@@ -57,6 +96,14 @@ func NewResearchAgent() *ResearchAgent {
 	return &ResearchAgent{
 		llm: ai.NewClient(),
 	}
+}
+
+// SetAvailability 注入字段可用性地图（OBS-08 切片 2）。
+//
+// 调用方应在生成假设前用 expression.FieldAvailability(ctx, probe) 探测一次
+// 并注入；不注入则提示词不做可用性过滤（行为与切片 2 之前一致）。
+func (a *ResearchAgent) SetAvailability(avail map[string]bool) {
+	a.availability = avail
 }
 
 // FactorHypothesis represents a generated factor hypothesis
@@ -76,6 +123,13 @@ func (a *ResearchAgent) GenerateHypothesis(ctx context.Context, topic string) (*
 		return nil, fmt.Errorf("AI client not configured")
 	}
 
+	// Quality 示例依赖基本面字段；源表为空时它反而是**误导**（提示词自己
+	// 示范了一个必然拿不到数据的写法），故不可用则换成明确的跳过说明。
+	qualityExample := "- Quality: roe / pe"
+	if a.availability != nil && (!a.availability["roe"] || !a.availability["pe"]) {
+		qualityExample = "- Quality: (SKIP — fundamental fields have no data right now; prefer price/volume factors)"
+	}
+
 	prompt := fmt.Sprintf(`You are a quantitative research analyst specializing in A-share market factors.
 
 Research Topic: "%s"
@@ -93,7 +147,7 @@ Example formulas:
 - Momentum: ts_pct_change(close, 20)
 - Mean Reversion: cs_rank(ts_mean(close, 5) / ts_mean(close, 20))
 - Volatility: ts_std(close, 20) / ts_mean(close, 20)
-- Quality: roe / pe
+%s
 
 Output ONLY valid JSON:
 {
@@ -101,7 +155,7 @@ Output ONLY valid JSON:
   "category": "momentum",
   "formula": "ts_pct_change(close, 20)",
   "rationale": "explanation"
-}`, topic, factorDSLSyntax())
+}`, topic, factorDSLSyntax(a.availability), qualityExample)
 
 	messages := []ai.ChatMessage{
 		{Role: "system", Content: "You are a quantitative research analyst. Output ONLY valid JSON."},
