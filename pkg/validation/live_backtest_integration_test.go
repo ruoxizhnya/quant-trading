@@ -256,6 +256,9 @@ func runLiveBacktest(t *testing.T, ctx context.Context, store *storage.PostgresS
 		TotalTrades:     resp.TotalTrades,
 		PortfolioValues: resp.PortfolioValues,
 		Trades:          resp.Trades,
+		// OBS-01：把引擎算出的票池统计一并带过来，验证器的「票池非空」维
+		// 才读得到真实的非空票池（否则会被误判成无效运行）。
+		UniverseMaxSize: resp.UniverseMaxSize,
 	}
 }
 

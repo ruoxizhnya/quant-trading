@@ -33,6 +33,14 @@ const (
 	DimensionCausal      = "causal"
 )
 
+// DimensionUniverse 是 OBS-01 新增的「票池非空」维。
+//
+// 它不属于原来那六个「评估策略好坏」的维度，而是**运行有效性**的前置检查：
+// 一个空票池跑出来的任何数字都无从评价（0 成交、垃圾指标），所以票池为空
+// 时这一维进 Dimensions 且概率 0；票池非空时**不进 map**（= 不参与综合概率，
+// 避免把正常回测打成低分）。语义与「未评估维度不出现在 map」一致。
+const DimensionUniverse = "universe"
+
 // DefaultAlpha 是名义显著性水平。
 const DefaultAlpha = 0.05
 

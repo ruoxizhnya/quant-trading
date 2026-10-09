@@ -114,6 +114,26 @@ func ValidateProposal(p Proposal) Verdict {
 
 	periods := len(p.Result.PortfolioValues)
 
+	// --- 票池非空（OBS-01）---
+	//
+	// 数据源：Proposal.Result 里的引擎票池统计（UniverseMaxSize）—— 引擎算一次、
+	// 这里只读，不重算（单一实现）。空票池是「运行有效性」的前置失败：整轮回测
+	// 一个可交易标的都没有，后面每一维都在给垃圾数字打分。所以空票池让这一维
+	// 进 Dimensions 且概率 0（会被综合概率的 min 拉到 0，等于一票否决）。
+	//
+	// 票池非空时**不进 map** —— 沿用「未评估维度不出现在 map」的既有语义，
+	// 避免把正常回测无端打成低分。
+	if p.Result.UniverseMaxSize <= 0 {
+		v.Dimensions[DimensionUniverse] = 0
+		v.Challenges = append(v.Challenges, Challenge{
+			Dimension: DimensionUniverse,
+			Severity:  SeverityBlocking,
+			Message: "回测期间票池始终为空（没有任何一个交易日有可交易标的）—— " +
+				"这是一次无效运行：0 成交与垃圾指标不构成任何可评价的证据，" +
+				"结论受限于此，先确认票池/数据源再谈其它维度。",
+		})
+	}
+
 	// --- 统计 ---
 	if p.NumTrials > 0 && periods > 0 {
 		sr := ValidateStatistical(StatisticalInput{
@@ -280,7 +300,7 @@ func finalizeVerdict(v *Verdict) {
 	// 顺序固定 —— 同一个提案两次跑出来的 weakest 必须一样。
 	order := []string{
 		DimensionStatistical, DimensionEconomic, DimensionRobustness,
-		DimensionBias, DimensionRedundancy, DimensionCausal,
+		DimensionBias, DimensionRedundancy, DimensionCausal, DimensionUniverse,
 	}
 	// 缺的维度（未评估）也要排进来，否则因果维这种"后补"的一维
 	// 会因为不在 order 里而被漏掉。

@@ -188,6 +188,19 @@ type BacktestResponse struct {
 	Trades          []domain.Trade          `json:"trades,omitempty"`
 	StockPool       []string                `json:"stock_pool,omitempty"`
 	InitialCapital  float64                 `json:"initial_capital,omitempty"`
+
+	// InvalidReasons 是「无效运行」裁定的 Code 列表（OBS-01）。
+	//
+	// 形状裁决：无效**不进** Error —— Error 只承载真实错误（取不到日历、
+	// 参数非法等），拿它装「无效」会让调用方分不清「这次跑失败了」和
+	// 「这次跑完了但结果是无效的」。无效是一个**结果属性**，所以走独立字段；
+	// 同步地，无效时 Status = "invalid"（见 OBS-01：Status 是调用方的判据）。
+	InvalidReasons []string `json:"invalid_reasons,omitempty"`
+
+	// UniverseMaxSize 是整轮回测里票池规模的最大值（OBS-01，0 = 空票池）。
+	// 挂在响应上是为了让下游（验证器 / 报告层）能读到引擎算出的票池统计，
+	// 而不必自己重算。
+	UniverseMaxSize int `json:"universe_max_size,omitempty"`
 }
 
 // --- Constants (moved from constants.go) ---

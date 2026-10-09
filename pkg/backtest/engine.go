@@ -568,7 +568,7 @@ func (e *Engine) newBacktestState(backtestID string, req BacktestRequest, stockP
 // buildBacktestResponse assembles the success BacktestResponse from the
 // completed state and result.
 func (e *Engine) buildBacktestResponse(backtestID string, req BacktestRequest, state *BacktestState, result *domain.BacktestResult, initialCapital float64) *BacktestResponse {
-	return &BacktestResponse{
+	resp := &BacktestResponse{
 		ID:              backtestID,
 		Status:          "completed",
 		Strategy:        req.Strategy,
@@ -593,7 +593,18 @@ func (e *Engine) buildBacktestResponse(backtestID string, req BacktestRequest, s
 		Trades:          result.Trades,
 		StockPool:       req.StockPool,
 		InitialCapital:  initialCapital,
+		UniverseMaxSize: result.UniverseMaxSize,
 	}
+
+	// OBS-01：无效运行在响应里显式区别于「完成」—— Status=invalid 且带上
+	// 原因 Code。调用方（报告层 / 自动化层 / API）据此走失败或无效路径，
+	// 而不是把它当成一次成功观测。Error 保持只给真实错误（不装无效）。
+	if len(result.InvalidReasons) > 0 {
+		resp.Status = "invalid"
+		resp.InvalidReasons = result.InvalidReasons
+	}
+
+	return resp
 }
 
 // lookupStrategyGitHash returns the short git hash of the currently-loaded
@@ -666,6 +677,11 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 	prevCloseCache := make(map[string]float64)
 	var pricesCache map[string]float64
 
+	// OBS-01：记录整轮回测里「票池规模」的最大值（逐日）。它不参与任何
+	// 交易逻辑，只是把「票池是不是一直为空」如实带出日循环 —— 引擎不新增
+	// 跨服务的解析逻辑，空票池的裁定交给 contracts.CheckValidity。
+	maxUniverseSize := 0
+
 	for i, date := range tradingDays {
 		select {
 		case <-ctx.Done():
@@ -684,6 +700,11 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		// P2-4：池子按当天在市名单过滤，外加「还持仓的」（含已退市待平仓）。
 		held := heldSymbols(state.Tracker)
 		universe := e.eligibleUniverse(params.StockPool, date, held)
+
+		// OBS-01：票池规模统计 —— 见 maxUniverseSize 声明处。
+		if n := len(universe); n > maxUniverseSize {
+			maxUniverseSize = n
+		}
 
 		marketDataCache, pricesCache, stockCache, updatedPrevClose := e.fetchMarketDataForDay(
 			ctx, universe, params, date, prevCloseCache, logger,
@@ -775,12 +796,31 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		params.InitialCapital,
 	)
 
-	logger.Info().
-		Float64("total_return", result.TotalReturn).
-		Float64("sharpe_ratio", result.SharpeRatio).
-		Float64("max_drawdown", result.MaxDrawdown).
-		Int("total_trades", result.TotalTrades).
-		Msg("Backtest completed")
+	// OBS-01：把票池统计挂到结果上（供验证器 / 报告层读取），并跑一次
+	// 「有效运行」裁定。裁定只挂在结果上，**不改变正常路径** —— 有效的
+	// 回测依旧 Status=completed、nil error；无效的也只是多一组 Code。
+	result.UniverseMaxSize = maxUniverseSize
+	result.InvalidReasons = InvalidReasonCodes(CheckValidity(&result))
+
+	if len(result.InvalidReasons) > 0 {
+		// 无效运行：不再无条件报「Backtest completed」。原因如实带出，
+		// 让日志读者一眼看出「这次不算成功，不算观测」。
+		logger.Warn().
+			Float64("total_return", result.TotalReturn).
+			Float64("sharpe_ratio", result.SharpeRatio).
+			Float64("max_drawdown", result.MaxDrawdown).
+			Int("total_trades", result.TotalTrades).
+			Int("universe_max_size", result.UniverseMaxSize).
+			Strs("invalid_reasons", result.InvalidReasons).
+			Msg("Backtest produced an invalid run — result marked Status=invalid")
+	} else {
+		logger.Info().
+			Float64("total_return", result.TotalReturn).
+			Float64("sharpe_ratio", result.SharpeRatio).
+			Float64("max_drawdown", result.MaxDrawdown).
+			Int("total_trades", result.TotalTrades).
+			Msg("Backtest completed")
+	}
 
 	return &result, nil
 }

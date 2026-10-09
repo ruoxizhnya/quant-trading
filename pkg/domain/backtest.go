@@ -19,6 +19,18 @@ type BacktestResult struct {
 	CalmarRatio     float64          `json:"calmar_ratio"`
 	PortfolioValues []PortfolioValue `json:"portfolio_values"`
 	Trades          []Trade          `json:"trades"`
+
+	// UniverseMaxSize 是整轮回测里「任一个交易日的 eligibleUniverse 规模」
+	// 的最大值（OBS-01）。0 表示没有任何一个交易日的票池非空 —— 这是
+	// CheckValidity 判定 empty_universe 的唯一依据。
+	//
+	// 引擎在日循环里记录它；其它消费方（验证器 / 报告层）只读，不重算。
+	UniverseMaxSize int `json:"universe_max_size,omitempty"`
+
+	// InvalidReasons 是「无效运行」裁定结果的 Code 列表（OBS-01），由引擎
+	// 用 contracts.CheckValidity 计算后挂上。空 = 有效运行。消费方读它，
+	// 而不是各自重算 —— 单一实现，避免口径漂移。
+	InvalidReasons []string `json:"invalid_reasons,omitempty"`
 }
 
 type PortfolioValue struct {

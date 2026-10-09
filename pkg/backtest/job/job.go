@@ -340,6 +340,25 @@ func (s *JobService) StartJob(parentCtx context.Context, jobID string) {
 			return
 		}
 
+		// OBS-01：无效运行（空票池 / 0 成交 / 零值日期 / 垃圾指标）不得再报
+		// 「Backtest completed successfully」，也不得持久化成 completed ——
+		// 它走失败路径，原因 Code 可见，让作业调用方能判出「这次不算成功」。
+		if len(result.InvalidReasons) > 0 {
+			reason := "backtest produced an invalid run: " + strings.Join(result.InvalidReasons, ", ")
+			s.logger.Error().
+				Str("job_id", jobID).
+				Dur("elapsed", elapsed).
+				Int("total_trades", result.TotalTrades).
+				Int("universe_max_size", result.UniverseMaxSize).
+				Strs("invalid_reasons", result.InvalidReasons).
+				Msg("Backtest produced an invalid run — result marked Status=invalid")
+			if dbErr := s.store.UpdateJobFailed(jobCtx, jobID, reason); dbErr != nil {
+				s.logger.Error().Err(dbErr).Str("job_id", jobID).Msg("Failed to mark invalid run as failed")
+			}
+			s.cancelFuncs.Delete(jobID)
+			return
+		}
+
 		s.logger.Info().
 			Str("job_id", jobID).
 			Dur("elapsed", elapsed).

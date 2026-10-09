@@ -48,6 +48,8 @@ func sampleResult() *domain.BacktestResult {
 		AvgHoldingDays:  12,
 		MaxDrawdown:     -0.18,
 		PortfolioValues: causalEquityCurve(300, 0.0005, 0.05),
+		// OBS-01：正常回测的票池非空 —— 见 aggregate_test.go resultFixture。
+		UniverseMaxSize: 40,
 		Trades: []domain.Trade{{
 			Symbol: "600000.SH", Direction: domain.DirectionLong,
 			Quantity: 1000, Price: 50, Timestamp: time.Now(),

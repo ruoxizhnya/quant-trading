@@ -37,7 +37,29 @@ type (
 	PriceLimitConfig = contracts.PriceLimitConfig
 	BacktestRequest  = contracts.BacktestRequest
 	BacktestResponse = contracts.BacktestResponse
+	// InvalidReason (OBS-01) re-exported so parent-package callers and tests
+	// can reference the validity verdict type without importing contracts.
+	InvalidReason = contracts.InvalidReason
 )
+
+// OBS-01 「无效运行」裁定的 Code 常量，re-export 自 contracts（单一实现）。
+const (
+	InvalidEmptyUniverse = contracts.InvalidEmptyUniverse
+	InvalidZeroTrades    = contracts.InvalidZeroTrades
+	InvalidZeroStartDate = contracts.InvalidZeroStartDate
+	InvalidGarbageMetric = contracts.InvalidGarbageMetric
+)
+
+// CheckValidity (OBS-01) 是 contracts.CheckValidity 的薄包装 —— Go 没有函数
+// 别名，包内调用点（engine.go）与包内测试统一走这个名字。
+func CheckValidity(res *domain.BacktestResult) []InvalidReason {
+	return contracts.CheckValidity(res)
+}
+
+// InvalidReasonCodes re-exports contracts.InvalidReasonCodes.
+func InvalidReasonCodes(reasons []InvalidReason) []string {
+	return contracts.InvalidReasonCodes(reasons)
+}
 
 // Const aliases. The fee-rate constants are double-aliased
 // (contracts -> fees), preserving the single-source-of-truth invariant

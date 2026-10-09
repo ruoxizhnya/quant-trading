@@ -115,7 +115,10 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ## 二、最高优先级独立工单
 
-### OBS-01 · 空票池假成功必须 fail-loud ⬜ —— 强烈建议最先做
+### OBS-01 · 空票池假成功必须 fail-loud 🔶 切片 1 完成，读路径待收口
+
+> **切片 1 ✅（2026-10-09）**：裁定 + 报告层 + 自动化层落地 —— `pkg/backtest/contracts/validity.go`（纯函数 `CheckValidity`，4 个稳定 Code：`empty_universe` / `zero_trades` / `zero_start_date` / `garbage_metric`，垃圾阈值 `|x|>1e12` 网住 MaxFloat64/NaN/±Inf）；`domain.BacktestResult` 增 `UniverseMaxSize` + `InvalidReasons`（引擎算一次、下游只读不重算）；引擎**正常路径行为不变**、无效时日志不再无条件报 completed 且同步响应 `Status="invalid"`；`pipeline`×2 / `job` 不再宣告 successfully（job 走 failed + error_msg）；**`loop` 的 `a.OK` 加裁定前置 ⇒ 无效运行按 failed 计、伪造观测不再进 `history`/`observed`**（否则 `adjP=1-(1-rawP)^N` 算出的 p 值是假的）；验证器新增 `universe` 维（空 → 进 Dimensions 且 0；非空 → 不进 map）。真库证据（只读）：空票池 `status=invalid`、reasons 三条；反证腿（真库 2024 全年 3 票）`status=completed`、25 笔成交不受影响。
+> **切片 2 ⬜（读路径收口）**：`cmd/analysis/handlers_backtest.go:107` 与 `:303` 两个 GET 端点仍读 engine state store 的 `"completed"`（根因 `engine.go:475` 无条件 `SetStatus("completed")`）并硬编码 `Status:"completed"` ⇒ **同一缺陷的读路径另一半仍会显示「成功」**。修法：`engine.go:475` 无效时置 `"invalid"`；`buildBacktestResponse`（`engine.go:571`）透传真实状态；`GetBacktestResult` 的状态闸门（`engine.go:1550`）放行 `"invalid"`（否则 UI 读不到原因）；两个 GET 端点透传状态 + 附 `InvalidReasons`。**前端需能显示第三种状态**（UI 呈现属后续任务）。
 
 - **① 目标**：回测/验证在「0 交易 / 空票池」时必须 **fail-loud**（报错或显式标记），不得报成功并产出伪造观测值。
 - **② 上下文**：ADR-030 OBS-01（`docs/adr/adr-030-draft-observed-improvements.md`）；实测：`total_trades=0` + `start_date=0001-01-01`（零值）+ `sortino_ratio=1.797e308`（MaxFloat64 垃圾值）仍报成功；根因 `index_constituents`/`sectors`/`stock_sector_map` 全 0 行 ⇒ YAML 默认 `universe: csi300` 解析为空票池；`pkg/ai/loop/loop.go` 会把这些伪造观测计入 `NumTrials` ⇒ **多重检验校正（`pkg/validation/statistical.go` `adjP=1-(1-rawP)^N`）算出的 p 值是假的**。

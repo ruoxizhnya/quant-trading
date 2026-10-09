@@ -399,8 +399,9 @@ func (p *Pipeline) run(ctx context.Context, result *Result, description string, 
 			p.fail(result, StageBacktest, fmt.Sprintf("Backtest failed: %v", err))
 			return err
 		}
-		result.BacktestResult = btResult
-		p.log(result, "Backtest completed successfully")
+		if err := p.recordBacktestOutcome(result, btResult); err != nil {
+			return err
+		}
 	} else {
 		p.log(result, "Stage 5/5: Skipping backtest (no runner provided)")
 	}
@@ -525,8 +526,9 @@ func (p *Pipeline) ExecuteFromYAML(ctx context.Context, yamlStr string, runner B
 			p.fail(result, StageBacktest, fmt.Sprintf("Backtest failed: %v", err))
 			return result, err
 		}
-		result.BacktestResult = btResult
-		p.log(result, "Backtest completed successfully")
+		if err := p.recordBacktestOutcome(result, btResult); err != nil {
+			return result, err
+		}
 	} else {
 		p.log(result, "Stage 3/3: Skipping backtest (no runner provided)")
 	}
@@ -676,6 +678,31 @@ func (p *Pipeline) runBacktest(ctx context.Context, name string, universe []stri
 	}
 
 	return btResult, nil
+}
+
+// recordBacktestOutcome 把一次回测结果收进 pipeline（OBS-01）。
+//
+// 有效运行：照旧记日志 "Backtest completed successfully"。
+// 无效运行（空票池 / 0 成交 / 零值日期 / 垃圾指标）：**不得**再报成功 ——
+// 走失败路径，把引擎给出的 InvalidReasons Code 显式带进 BacktestError，
+// 并返回 error，让调用方（loop / 前端 / 作业层）能判出「这次不算成功」。
+//
+// 结果本身仍挂到 result.BacktestResult 上：失败不等于信息丢失，调用方
+// 仍可读到无效原因。
+func (p *Pipeline) recordBacktestOutcome(result *Result, btResult *domain.BacktestResult) error {
+	result.BacktestResult = btResult
+	if btResult == nil {
+		return nil
+	}
+	if len(btResult.InvalidReasons) > 0 {
+		msg := fmt.Sprintf("backtest produced an invalid run: %s",
+			strings.Join(btResult.InvalidReasons, ", "))
+		result.BacktestError = msg
+		p.fail(result, StageBacktest, msg)
+		return fmt.Errorf("%s", msg)
+	}
+	p.log(result, "Backtest completed successfully")
+	return nil
 }
 
 // registerOrConfigure handles strategy registration with collision

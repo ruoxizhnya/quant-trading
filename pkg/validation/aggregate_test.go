@@ -41,6 +41,10 @@ func resultFixture(periods int, sharpe float64, nTrades int) *domain.BacktestRes
 		TotalTrades:     nTrades,
 		PortfolioValues: values,
 		Trades:          trades,
+		// OBS-01：这份 fixture 模拟的是「引擎跑出来的正常回测」—— 引擎总会
+		// 把票池统计挂上。这里显式给一个非空票池，否则新加的「票池非空」维
+		// 会把正常结果误判成无效运行（详见 aggregate.go 的 DimensionUniverse）。
+		UniverseMaxSize: 40,
 	}
 }
 

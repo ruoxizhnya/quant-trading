@@ -213,9 +213,14 @@ func (c *Controller) Run(ctx context.Context, cfg Config) (*RunResult, error) {
 			a.ExperimentID = res.ExperimentID
 			idBySeq[seq] = res.ExperimentID
 		}
-		// 只有「跑完了且有回测结果」才算成功。失败时 Value 保持 0，
-		// 但不能让它混进最优评选 —— 一个没跑出来的 0 会被误读成好结果。
-		if err == nil && res != nil && res.BacktestResult != nil {
+		// 只有「跑完了、有回测结果、且不是无效运行」才算成功。失败时 Value
+		// 保持 0，但不能让它混进最优评选 —— 一个没跑出来的 0 会被误读成好结果。
+		//
+		// OBS-01：无效运行（空票池 / 0 成交 / 零值日期 / 垃圾指标）按失败处理。
+		// 引擎已把裁定挂在 result.InvalidReasons 上，这里只消费、不重算 ——
+		// 伪造的观测绝不能计入 NumTrials，否则多重检验校正（statistical.go
+		// 的 adjP=1-(1-rawP)^N）算出来的 p 值是假的。
+		if err == nil && res != nil && res.BacktestResult != nil && len(res.BacktestResult.InvalidReasons) == 0 {
 			a.OK = true
 			a.Value = objective(res.BacktestResult)
 		}
