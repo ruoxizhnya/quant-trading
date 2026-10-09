@@ -8,12 +8,12 @@
 // # Runtime abstraction
 //
 // The concrete WASM execution is abstracted behind the Runtime
-// interface. The production implementation will use wazero (a pure-Go
-// WebAssembly runtime); until wazero is added to go.mod, an
-// InProcessRuntime fallback is provided. The fallback simulates the
-// WASM memory model in-process (no real isolation) but exercises the
-// same API surface, so callers can develop and test against the
-// sandbox today and swap in wazero later without code changes.
+// interface. The production implementation is WazeroRuntime (wazero, a
+// pure-Go WebAssembly runtime), which provides **real isolation** — the
+// wasm bytecode runs in a constrained linear memory and can only call
+// host functions that were explicitly imported (the host API whitelist).
+// (The pre-K6 InProcessRuntime fallback that simulated the WASM model
+// in-process has been retired.)
 //
 // # Strategy plugin protocol
 //
@@ -29,7 +29,7 @@
 //
 // # Usage
 //
-//	sb := wasm.NewSandbox(wasm.NewInProcessRuntime(), wasm.Config{
+//	sb := wasm.NewSandbox(wasm.NewWazeroRuntime(ctx, 64<<20), wasm.Config{
 //	    MaxMemoryBytes:  64 << 20, // 64 MB
 //	    MaxExecutionTime: 30 * time.Second,
 //	})
@@ -41,7 +41,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -94,10 +93,10 @@ func (c Config) withDefaults() Config {
 	return out
 }
 
-// ─── Runtime interface (wazero-backed or in-process) ──────────────
+// ─── Runtime interface (wazero-backed) ───────────────────────────
 
-// Runtime is the abstract WASM runtime. Implementations include
-// InProcessRuntime (fallback) and a future WazeroRuntime.
+// Runtime is the abstract WASM runtime. The production implementation
+// is WazeroRuntime (see wazero_runtime.go).
 type Runtime interface {
 	// Compile parses wasmBytes and returns a compiled module.
 	Compile(ctx context.Context, wasmBytes []byte) (CompiledModule, error)
@@ -109,7 +108,8 @@ type Runtime interface {
 // instantiated one or more times.
 type CompiledModule interface {
 	// Instantiate creates a new instance with its own isolated memory.
-	// memoryLimitBytes caps the instance's linear memory growth.
+	// memoryLimitBytes caps the instance's linear memory growth（K6 起该上限
+	// 由 runtime 级统一约束，此参数校验请求 ≤ runtime 上限，见 WazeroRuntime）。
 	Instantiate(ctx context.Context, memoryLimitBytes int) (Instance, error)
 	// Exports returns the list of exported function names.
 	Exports() []string
@@ -153,231 +153,6 @@ func UnpackPtrLen(packed uint64) (ptr uint32, length uint32) {
 	ptr = binary.LittleEndian.Uint32(buf[:4])
 	length = binary.LittleEndian.Uint32(buf[4:])
 	return ptr, length
-}
-
-// ─── InProcessRuntime (fallback) ─────────────────────────────────
-//
-// InProcessRuntime simulates the WASM execution model in-process.
-// It does NOT provide real isolation — the plugin code runs in the
-// host goroutine. It exists so callers can develop and test the
-// sandbox API before wazero is integrated.
-//
-// "WASM bytes" are interpreted as a module name; the runtime looks
-// up a registered PluginHandler to execute calls. This lets tests
-// inject deterministic plugin implementations.
-
-// PluginHandler is the function signature for in-process plugins.
-// It receives the instance (for memory access), the called function
-// name, and the call arguments, and returns the call results.
-// The name parameter lets a single handler dispatch multiple exports
-// (e.g. "initialize" vs "generate_signals").
-type PluginHandler func(inst Instance, name string, args []uint64) ([]uint64, error)
-
-// InProcessRuntime is a Runtime that executes plugins in-process.
-// It is safe for concurrent use.
-type InProcessRuntime struct {
-	mu      sync.RWMutex
-	plugins map[string]PluginHandler
-	exports map[string][]string // moduleName → exported function names
-	closed  bool
-}
-
-// NewInProcessRuntime creates an empty InProcessRuntime.
-// Use RegisterPlugin to add modules.
-func NewInProcessRuntime() *InProcessRuntime {
-	return &InProcessRuntime{
-		plugins: make(map[string]PluginHandler),
-		exports: make(map[string][]string),
-	}
-}
-
-// RegisterPlugin registers an in-process plugin under the given module
-// name. The wasmBytes passed to Compile must be []byte(moduleName).
-// exportNames lists the function names the module "exports" (returned
-// by CompiledModule.Exports).
-func (r *InProcessRuntime) RegisterPlugin(moduleName string, handler PluginHandler, exportNames []string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.plugins[moduleName] = handler
-	r.exports[moduleName] = exportNames
-}
-
-// Compile implements Runtime. wasmBytes is interpreted as a UTF-8
-// module name that must have been previously registered via
-// RegisterPlugin.
-func (r *InProcessRuntime) Compile(_ context.Context, wasmBytes []byte) (CompiledModule, error) {
-	r.mu.RLock()
-	if r.closed {
-		r.mu.RUnlock()
-		return nil, errors.New("wasm: runtime closed")
-	}
-	r.mu.RUnlock()
-
-	name := string(wasmBytes)
-	r.mu.RLock()
-	handler, ok := r.plugins[name]
-	exports := r.exports[name]
-	r.mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrModuleNotFound, name)
-	}
-	return &inProcessModule{name: name, handler: handler, exports: exports}, nil
-}
-
-// Close implements Runtime.
-func (r *InProcessRuntime) Close(_ context.Context) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.closed = true
-	r.plugins = nil
-	r.exports = nil
-	return nil
-}
-
-// inProcessModule implements CompiledModule for the in-process runtime.
-type inProcessModule struct {
-	name    string
-	handler PluginHandler
-	exports []string
-}
-
-func (m *inProcessModule) Instantiate(_ context.Context, memoryLimitBytes int) (Instance, error) {
-	if memoryLimitBytes <= 0 {
-		memoryLimitBytes = DefaultMaxMemory
-	}
-	return &inProcessInstance{
-		memory:   make([]byte, 0, 4096),
-		memLimit: memoryLimitBytes,
-		handler:  m.handler,
-		exports:  m.exports,
-	}, nil
-}
-
-func (m *inProcessModule) Exports() []string {
-	out := make([]string, len(m.exports))
-	copy(out, m.exports)
-	return out
-}
-
-func (m *inProcessModule) Close(_ context.Context) error { return nil }
-
-// inProcessInstance implements Instance for the in-process runtime.
-type inProcessInstance struct {
-	mu       sync.Mutex
-	memory   []byte
-	memLimit int
-	handler  PluginHandler
-	exports  []string
-	closed   bool
-}
-
-func (inst *inProcessInstance) ensureSize(needed uint32) error {
-	if int(needed) > inst.memLimit {
-		return fmt.Errorf("%w: need %d bytes, limit %d", ErrMemoryLimitExceeded, needed, inst.memLimit)
-	}
-	if int(needed) > len(inst.memory) {
-		// Grow in powers of two for efficiency.
-		newSize := uint32(len(inst.memory))
-		if newSize == 0 {
-			newSize = 4096
-		}
-		for newSize < needed {
-			newSize *= 2
-		}
-		if int(newSize) > inst.memLimit {
-			newSize = uint32(inst.memLimit)
-		}
-		grown := make([]byte, newSize)
-		copy(grown, inst.memory)
-		inst.memory = grown
-	}
-	return nil
-}
-
-func (inst *inProcessInstance) WriteMemory(offset uint32, data []byte) error {
-	inst.mu.Lock()
-	defer inst.mu.Unlock()
-	if inst.closed {
-		return errors.New("wasm: instance closed")
-	}
-	end := offset + uint32(len(data))
-	if err := inst.ensureSize(end); err != nil {
-		return err
-	}
-	copy(inst.memory[offset:end], data)
-	return nil
-}
-
-func (inst *inProcessInstance) ReadMemory(offset uint32, length uint32) ([]byte, error) {
-	inst.mu.Lock()
-	defer inst.mu.Unlock()
-	if inst.closed {
-		return nil, errors.New("wasm: instance closed")
-	}
-	end := offset + length
-	if int(end) > len(inst.memory) {
-		return nil, fmt.Errorf("%w: read [%d:%d] from %d-byte memory", ErrMemoryOutOfBounds, offset, end, len(inst.memory))
-	}
-	out := make([]byte, length)
-	copy(out, inst.memory[offset:end])
-	return out, nil
-}
-
-func (inst *inProcessInstance) MemorySize() uint32 {
-	inst.mu.Lock()
-	defer inst.mu.Unlock()
-	return uint32(len(inst.memory))
-}
-
-func (inst *inProcessInstance) Call(ctx context.Context, name string, args ...uint64) ([]uint64, error) {
-	inst.mu.Lock()
-	if inst.closed {
-		inst.mu.Unlock()
-		return nil, errors.New("wasm: instance closed")
-	}
-	// Verify the function is exported.
-	exported := false
-	for _, e := range inst.exports {
-		if e == name {
-			exported = true
-			break
-		}
-	}
-	handler := inst.handler
-	inst.mu.Unlock()
-
-	if !exported {
-		return nil, fmt.Errorf("%w: %s", ErrFunctionNotExported, name)
-	}
-	if handler == nil {
-		return nil, fmt.Errorf("%w: %s (no handler)", ErrFunctionNotExported, name)
-	}
-	// The handler runs in-process; the context timeout still applies.
-	// We run it in a goroutine so we can enforce the deadline.
-	type result struct {
-		vals []uint64
-		err  error
-	}
-	done := make(chan result, 1)
-	go func() {
-		// Re-acquire the instance pointer (not the lock) for the handler.
-		vals, err := handler(inst, name, args)
-		done <- result{vals, err}
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("%w: %s: %v", ErrTimeout, name, ctx.Err())
-	case r := <-done:
-		return r.vals, r.err
-	}
-}
-
-func (inst *inProcessInstance) Close() error {
-	inst.mu.Lock()
-	defer inst.mu.Unlock()
-	inst.closed = true
-	inst.memory = nil
-	return nil
 }
 
 // ─── WASMSandbox ─────────────────────────────────────────────────
