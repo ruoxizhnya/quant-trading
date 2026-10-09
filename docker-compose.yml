@@ -10,7 +10,7 @@
 #     data-service     :8081   多源数据接入
 #     strategy-service :8082   策略注册表（standby per ADR-012）
 #     analysis-service :8085   回测 + 风控 + 执行 + 鉴权（ODR-021 合并后）
-#     web              :8080   Vue 3 SPA（nginx），/api 反代到 analysis
+#   （web :8080 前端已拆仓 → quant-trading-ui，2026-10-09）
 #
 # **为什么把数据库挪出容器**：Docker Desktop 在本机受沙箱限制（启动时会拉起
 # wsl.exe 而在程序黑名单里，且起来之后还会自发退出），把最该稳的一层挂在最不稳
@@ -216,28 +216,9 @@ services:
       data-service:
         condition: service_healthy
 
-  web:
-    # AUD-32：官方前端（web/，Vue 3 + Vite）的构建与托管。
-    # 之前它只能 `npm run dev` 跑在 :5173，compose 里连个服务都没有 ——
-    # 于是 cmd/analysis/static/ 那套 legacy HTML 成了唯一的服务端 UI。
-    build:
-      context: .
-      dockerfile: Dockerfile.web
-    ports:
-      # 前端也只发布到回环 —— 与后端保持同一条不变量，别让它成为那个缺口。
-      - "127.0.0.1:8080:8080"
-    depends_on:
-      # nginx 里 /api 反代到 analysis-service:8085。用 resolver + 变量
-      # 写法（见 deploy/nginx-spa.conf），后端晚起来也不会让 nginx 启动失败，
-      # 但 depends_on 仍然要写：它保证 /health 探针打过去时后端已经在听。
-      analysis-service:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
+# 注意：web 服务已随前端拆仓移除（2026-10-09，web/ → quant-trading-ui）。
+# 前端现在由 quant-trading-ui 仓独立构建/托管（该仓的 Dockerfile 与
+# deploy/nginx-spa.conf），后端仍是本仓的 analysis-service:8085。
 
 # 注意：原先这里声明了 postgres_data / redis_data 两个卷。
 # 数据库与缓存移出容器后它们不再被任何服务挂载。**本文件不再声明**，但

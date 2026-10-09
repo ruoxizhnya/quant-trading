@@ -103,41 +103,9 @@ jobs:
         env:
           TUSHARE_TOKEN: ""
 
-  frontend:
-    name: Frontend (lint / typecheck / test)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-
-    steps:
-      - uses: actions/checkout@v4
-
-      # Node 22：eslint 10 要求 ^20.19.0 || ^22.13.0 || >=24，vitest 4 要求
-      # >=20.19；用 22 这档 LTS 覆盖两者。
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      # 用 ci 而不是 install：lockfile 不同步时直接失败，而不是悄悄改依赖树。
-      - name: Install
-        run: npm ci
-
-      # eslint 目前是 0 error / 大量 warning，退出码 0；这里只守 error。
-      # 想升级成「warning 也拦」需要先把存量清掉，别在这里加 --max-warnings 0
-      # ——那会让 CI 开门即红。
-      - name: Lint
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      # `npm test` 内部先跑 lint:tests（vitest toBe(expected, "message") 误用的
-      # 静态扫描），再跑 vitest。
-      - name: Test
-        run: npm test
+  # frontend job 已随前端拆仓移除（2026-10-09，web/ → quant-trading-ui）。
+  # 前端 lint / typecheck / test 的 CI 现在由 quant-trading-ui 仓自己的
+  # workflow 承担（见该仓 .github/workflows/ci.yml）。
 
   docs:
     name: Doc link check
