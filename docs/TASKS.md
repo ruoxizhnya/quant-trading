@@ -119,10 +119,10 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - 对账器单测 8 条（一致/缺失/方向/强度/容差/顺序无关/确定性输出）
 - ⚠️ 告警接线**未做**：现有 `ReconciliationWorker`/`AlertDispatcher` 是「券商资金对账」（持仓/现金），零生产构造点且与信号对账是两码事；信号差异的「告警」以 `ReconcileSignals` 返回的差异列表 + 端到端 fail-loud 兑现，生产告警通道接线留待对账真正进实盘循环时
 
-### K6 · L3a WASM（P6）切片 1 ✅ / 切片 2 ⬜ / 切片 3 ⬜（前置：K2）
+### K6 · L3a WASM（P6）切片 1 ✅ / 切片 2 ✅ / 切片 3 ⬜（前置：K2）
 
 > **切片 1（2026-10-09 完成）**：wazero 入 go.mod + `WazeroRuntime` 落地 + `InProcessRuntime` 退役。
-> **切片 2（待做）**：host API 白名单（`get_bar(t_offset>0)` trap + `get_state`/`set_state`）+ import section 扫描器。
+> **切片 2（2026-10-09 完成）**：host API 白名单 + `get_bar(t_offset>0)` trap + import section 扫描器。
 > **切片 3（待做）**：协议改造 `generate_signals` → 逐 bar `on_bar(t)`（堵前视漏洞）。
 
 - **① 目标**：wazero 沙箱落地，host API 受限（`get_bar` 防前视 + `get_state`/`set_state`），仅在 L2 无法表达时启用（D2）。
@@ -139,6 +139,16 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - 退役 `InProcessRuntime`（删除注入式 Go handler 模拟执行，约 220 行）+ `PluginHandler`/`inProcessModule`/`inProcessInstance`
 - 重写 `sandbox_test.go`（23 条全绿）：因本机无 wasm 编译工具链（无 tinygo/wat2wasm），测试用 `wasm_builder_test.go` 的极简 builder **结构化构造** wasm 字节（参考 wazero 官方 encodeModule），而非手写十六进制
 - 破坏验证：`Compile` 对无效字节不报错 → `TestWazeroRuntime_Compile_Invalid` 红 → 还原 → 绿 → 零残留
+
+**切片 2 交付明细（2026-10-09）**：
+- 新增 `internal/sandbox/wasm/host_api.go`：host API 白名单（`get_bar`/`get_series_len`/`get_symbol_count`/`get_cross_section`/`get_state`/`set_state`/`emit_signal`/`log`），模块名固定 `env`
+  - **`get_bar(t_offset>0)` / `get_cross_section(t_offset>0)` 直接 panic → wazero 转 wasm trap**（前视物理不可能）
+  - 数据模型（per-symbol 实例）：ADR-029 §3 的 get_bar 签名无 symbol 参数 ⇒ 一个 WASM 实例绑定「当前 symbol 序列」（`BarContext.Series`），跨 symbol 用 `get_cross_section(t_offset, idx)`
+  - `BarContext` 经 `context.WithValue` 注入（wazero host 函数 ctx 是调用链透传，实测确认）
+  - `get_state`/`set_state` 宿主管理持久化状态（切片 3 的 SaveState/LoadState 续跑一致性依赖它）
+- 新增 `ValidateImports`（import section 扫描器）：扫描 `CompiledModule.ImportedFunctions()`，拒绝任何「非 env 模块」或「非白名单函数」的 import；接入 `WazeroRuntime.Compile`（fail-closed）
+- 测试（`host_api_test.go`）：get_bar 过去/当前/负数偏移正确返回、**未来偏移 trap**、get_state/set_state 往返一致、import 扫描器拒绝越权 import（含非 env 模块）
+- 破坏验证 3 条：去掉 t_offset 检查 → `TestHostGetBar_FutureTraps` 红（读到未来值）→ 还原绿；去掉 import 扫描 → `TestValidateImports_Forbidden` 红 → 还原绿；ReadMemory 去 copy → 红 → 还原绿
 
 ### K7 · L3b 信号注入（P7）⬜（前置：K2）
 
