@@ -13,6 +13,17 @@ import (
 // GenerateAgent generates trading strategy code from natural language descriptions.
 type GenerateAgent struct {
 	llm *ai.Client
+
+	// availability 是字段可用性地图（来自 expression.FieldAvailability 的
+	// 真库探测）。nil = 尚未探测（提示词退回能力层全集）。
+	// 与 ResearchAgent 同构：由调用方注入，本包不替调用方决定数据源。
+	availability map[string]bool
+}
+
+// SetAvailability 注入字段可用性地图（OBS-08 切片 2）。
+// 不注入则提示词不做可用性过滤（行为与切片 2 之前一致）。
+func (a *GenerateAgent) SetAvailability(avail map[string]bool) {
+	a.availability = avail
 }
 
 // NewGenerateAgent creates a new generate agent.
@@ -59,6 +70,12 @@ Generate a trading strategy with the following format:
 4. Factor Formulas (list of factor expressions)
 5. Strategy Logic (pseudocode for signal generation)
 
+Factor Expression DSL Syntax:
+%s
+
+A-share market constraints (must be respected):
+%s
+
 Output ONLY valid JSON:
 {
   "name": "strategy_name",
@@ -68,7 +85,7 @@ Output ONLY valid JSON:
   ],
   "factors": ["ts_mean(close, 20)", "ts_std(close, 60)"],
   "logic": "Buy when price > moving average"
-}`, description)
+}`, description, factorDSLSyntax(a.availability), strategyDomainGuidance())
 
 	messages := []ai.ChatMessage{
 		{Role: "system", Content: "You are a quantitative strategy developer. Output ONLY valid JSON."},
@@ -103,6 +120,33 @@ Output ONLY valid JSON:
 	}
 
 	return template, nil
+}
+
+// strategyDomainGuidance 是策略生成提示词里的**领域知识**段：A 股交易约束
+// 与基本面字段的 PIT / NaN 语义。
+//
+// ─── 来源与为什么保留（OBS-08 切片 2 的 prompts 裁决）──────────────
+// 这段内容原在 `pkg/ai/prompts/strategy_generate.txt`（零引用的死文件）。
+// 清理时判定它**不是可重建的资产**：里面的洞察（负值 P/E 是亏损不是便宜、
+// 故排名要用 neg(pe)）是自写的领域知识，无法从注册表或代码自动生成；而
+// generate.go 原来的活提示词恰恰缺这些。故知识**合并进活提示词**，文件删除
+// —— 消除「两份提示词」的双真相（与 OBS-06 / OBS-08 同一病根）。
+//
+// 抽成函数是为了可测：这段知识若被后人改丢，测试会红（见
+// generate_prompt_test.go）。
+func strategyDomainGuidance() string {
+	return `- T+1: shares bought today cannot be sold today
+- Daily price limit: ±10% (ST stocks ±5%)
+- Short selling is not available for most stocks
+- Include stop-loss / position sizing / max-drawdown control in the strategy logic
+
+Fundamental fields (pe/pb/ps/roe/roa), when available:
+- PIT: each bar only sees what was already disclosed that day
+- They require the backtest engine to be given financial reports; without them
+  the expression fails loudly (it does NOT silently substitute zeros)
+- pe / pb / ps are NaN when non-positive — a negative P/E means the company is
+  losing money, NOT that it is cheap. Ranking on neg(pe) therefore never
+  rewards loss-makers.`
 }
 
 // GenerateFromFactors generates a strategy that combines multiple factors.
