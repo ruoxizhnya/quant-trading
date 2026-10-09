@@ -214,7 +214,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | OBS-06 ✅ 完成（2026-10-09，随 K3 切片 2 合并） | DSL 语法闸门不校验算子名 —— 已在 `Expression.Validate()` 补算子/字段/参数个数闸门（fail-closed，报错带位置与可用清单），`validate_factor` 解析后必过闸门 | — |
 | OBS-07 | tokenizer 不支持 `>=`/`<=`/`AND`/`OR`/`NOT` | 中 |
 | OBS-08 切片 1 ✅ 完成（2026-10-09） | 字段注册表收敛为**单一事实源** + 与 provider 对齐：`DataProvider` 加 `Fields()` 能力声明（5 处实现同步：1 生产 + 4 假）；注册表升级为**带来源**（market / fundamentals / group）；**修误拒**（`ps`/`roa` 现被闸门接受）、**补实现**（`revenue`/`profit` 由 `domain.Fundamental` 的 `Revenue`/`NetProfit` 接线 —— 此前只有声明没有实现）、**清假合法**（`market_cap`/`roe_ttm`/`eps` 从注册表移除：`domain.Fundamental` 无此三字段 ⇒ 永不可求值，留在闸门里就是让 AI 反复撞墙）；求值报错区分「字段不在语言里」vs「字段属于 X 源但本 provider 不供应」；新增**跨包防漂移护栏**（注册表非 group 字段 ≡ `OHLCVDataProvider.Fields()`，双向点名）。**并**：研究提示词 `research.go` 的字段/算子清单改为**从注册表派生**（此前硬编码，广告幻影 `market_cap` 且漏掉 9 个算子与 4 个字段）+ 新增护栏 | — |
-| OBS-08 切片 2 ✅ 完成（2026-10-09，`e97f0cd` + `ec33ec3`） | **序列注册表 + 可用性声明**（`SeriesSpec` 此前只存在于 `registry.go:126` 一句注释里）：声明每个字段/序列的**当前可用性**（例如 `stock_sector_map` 0 行 ⇒ `sector` 不可用），让 AI 不再对着空数据静默产垃圾。**并**（本轮新发现）：`pkg/ai/prompts/factor_research.txt` 与 `strategy_generate.txt` 是**零引用的死资产**（Go / 最新文档 / 脚本 / CI 全无引用，仅 `docs/archive/` 提到），且 `factor_research.txt` 的字段清单**同样漂移**（广告 `vwap` / `turnover_rate` / `returns` / `volatility`）。**待裁决：接线它**（当作研究提示词，字段从注册表派生）**还是删除它** | **可用性声明已做**（`e97f0cd` + `ec33ec3`）：见下方交付明细。**prompts/\*.txt 接线或删仍待若曦裁决**（用户 2026-10-09 明说「推进完 OBS-08 之后我再来做决策」） |
+| OBS-08 切片 2 ✅ 完成（2026-10-09，`e97f0cd` + `ec33ec3`） | **序列注册表 + 可用性声明**（`SeriesSpec` 此前只存在于 `registry.go:126` 一句注释里）：声明每个字段/序列的**当前可用性**（例如 `stock_sector_map` 0 行 ⇒ `sector` 不可用），让 AI 不再对着空数据静默产垃圾。**并**（本轮新发现）：`pkg/ai/prompts/factor_research.txt` 与 `strategy_generate.txt` 是**零引用的死资产**（Go / 最新文档 / 脚本 / CI 全无引用，仅 `docs/archive/` 提到），且 `factor_research.txt` 的字段清单**同样漂移**（广告 `vwap` / `turnover_rate` / `returns` / `volatility`）。**待裁决：接线它**（当作研究提示词，字段从注册表派生）**还是删除它** | **可用性声明已做**（`e97f0cd` + `ec33ec3`）：见下方交付明细。**prompts/\*.txt 已清理**（`6455566`）：`factor_research.txt` 删除（漂移死资产，被 `research.go` 派生版超越）、`strategy_generate.txt` 的领域知识合并进 `generate.go` 活提示词后删除（消除双真相） |
 > **OBS-08 切片 2 交付明细（2026-10-09）**
 >
 > **取证（决定性事实）**：真库 `stock_fundamentals` **0 行**、`stock_sector_map` **0 行** ⇒ 15 个注册字段里**只有 6 个行情字段真能用**，7 个基本面字段 + `sector` 全是空数据的坑。而 `research.go` 此前把 14 个数据字段**全部广告给 AI**，且提示词示例里还有 `- Quality: roe / pe` —— **提示词自己在示范用零数据字段**。
@@ -233,7 +233,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 >
 > **⚠️ 踩坑（第 N 次脆弱断言）**：`strings.Contains(dataLine, "pe")` 命中了 **"open"**（o-**pe**-n）⇒ 把正确输出误判成错。改按逗号解析成**精确字段集合**比对。与记忆里「隔离判断别按行位置」同类：**断言要做精确匹配，子串 Contains 在字段名这种短词上必然踩雷。**
 >
-> **登记未做**：① 完整 `SeriesSpec` + `Provider.GetSeries`（ADR-028 §5/§5.1）——那是**大工程**（要动 5 个 Provider 实现），本切片只做了可用性这一层；② `pkg/ai/agents` 提示词里的**示例表达式**（`research.go` 的算子清单已派生，示例仍是硬编码，同 K3b 登记项）；③ prompts/*.txt 接线或删（待裁决）。
+> **登记未做**：① 完整 `SeriesSpec` + `Provider.GetSeries`（ADR-028 §5/§5.1）——那是**大工程**（要动 5 个 Provider 实现），本切片只做了可用性这一层；② `pkg/ai/agents` 提示词里的**示例表达式**（`research.go` 的算子清单已派生，示例仍是硬编码，同 K3b 登记项）；③ prompts/*.txt 已清理（`6455566`：factor_research.txt 删、strategy_generate.txt 知识合并进 generate.go 后删）。
 
 | OBS-11 | per-day HTTP 反模式 `getSignalsFromStrategyService` 待删（策略服务只传定义不传信号） | 中（随 K1/K2） |
 | OBS-12 | Copilot 对外 API 契约与前端脱节（四层缺陷叠加） | 中 |
@@ -352,7 +352,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | `validation`（原 `pkg/validation`，4920 行） | → **AI**（`pkg/ai/validation`） | core 侧零引用；它是**实验员对假设的判断**（6 维 → `Verdict` 概率），不是回测·执行域的仪器 | ✅ `cff0a0f` |
 | `tools`（原 `pkg/tools`，10716 行，含 `builtin/`） | → **AI**（`pkg/ai/tools`） | core 侧零引用；MCP 桥 = 开放主机服务 / **ACL，属边界消费侧** | ✅ `cff0a0f` |
 | `strategy/copilot.go` 的 `CopilotService`（518 行） | → **AI** | 自然语言 → 生成代码 → 沙箱编译 → 回测 = 实验员的活，却住在仪器包里 | ⬜ 属 ADR-027 §5 第 8 步（ai-service） |
-| `pkg/ai/prompts/{factor_research,strategy_generate}.txt` | **保留 + 待接线** | 零引用的孤儿，但内容是**两处 prompt 契约**（DSL 层策略生成 / 因子研究）；`factor_research.txt` 与 `research.go` 内联提示词构成**双真相**（与 OBS-06/08 同病） | ⬜ 接线 + 词汇表从注册表派生 |
+| `pkg/ai/prompts/{factor_research,strategy_generate}.txt` | **✅ 已清理（`6455566`）** | 零引用的孤儿；`factor_research.txt` 严重漂移（广告 7 个幻影字段）被 `research.go` 派生版超越 ⇒ 删；`strategy_generate.txt` 的领域知识（负 PE 是亏损、用 neg(pe) 等）合并进 `generate.go` 活提示词 ⇒ 删文件。消除双真相 | ✅ |
 | `pkg/backtest/marketimpact` | → **core**（`pkg/marketimpact`） | 共享成本模型却住在 `backtest` 下；K5 的 paper 侧也要用它 ⇒ 提到顶层与 `pkg/fees` 平级（`pkg/fees` 同为共享成本模型，被 `backtest`/`live`/`portfolio`/`ai` 共用） | ✅ K5 切片 1 |
 
 **契约变更（随 `validation` 归 AI 生效）**：**凡存入策略库的策略，均已由 AI 层验证通过**；core 侧的策略存储不做也不应做独立验证。详见 ADR-027 追加节。
