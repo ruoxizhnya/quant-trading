@@ -237,8 +237,8 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 | OBS-11 ✅ 完成（2026-10-09，`d2ccdc6`） | per-day HTTP 反模式 `getSignalsFromStrategyService` 待删（策略服务只传定义不传信号）—— **已两端同拆**：① 引擎侧删 `getSignalsFromStrategyService` + getSignals 的 fallback 分支 + `strategyServiceURL` 字段/配置读取（唯一消费者），未注册策略改 **fail-loud**（报错点名策略名 + 可用清单 + OBS-11 标注）；② 服务端删 `POST /:name/signals` 端点（ADR-012 后恒回 503 的死哨兵）+ SignalRequest/Response/Detail 类型；③ 清理 `strategy_service.url` 配置段 + compose `STRATEGY_SERVICE_URL` env。**决定性事实**：ADR-012 后该路径是**必然失败**的死路径（本地注册表 miss → HTTP → 恒 503）——比「建了没接」更糟，删除零风险。测试：未注册 fail-loud（错误无 HTTP/503 痕迹）+ 已注册仍走本地路径（反证腿）。httpClient 字段保留（detect_regime/position/stop-loss 等其它服务调用仍在用——**是否同属反模式属 risk-service 议题，不在 OBS-11 范围**） | 中（随 K1/K2） |
 | OBS-12 ✅ 完成（2026-10-09，core `cbef8a6` / ui `166d7bc`，跨两仓） | Copilot 对外 API 契约与前端脱节（四层缺陷叠加）—— **取证重映射后修复**：① 四层缺陷的**现状**与 ADR-030 记载已不同——`handlers_copilot.go` 里的同步版 `generateStrategyHandler`（description 契约 + OpenAI 直调）是**零引用死代码**（~150 行），活契约自始就是**异步 job**（POST 202 `{job_id,status}` + `GET /generate/:job_id` 轮询端点**已存在**）；② core 侧：删死代码块（含 5 个失效 import）；③ ui 侧：`CopilotRequest` 对齐 `GenerateParams`（`description`，修复「发 `{prompt}` 输入被吞」）、删从未对上过的 `CopilotResponse`、`copilot.ts` 补 `pollCopilotJob`（白名单终态集 `generated/backtest_complete/llm_failed/sandbox_rejected/build_failed/backtest_failed`，刻意不用「非 pending 即终态」——误判终态会把半成品当结果展示，白名单的错误方向是超时可见）、`Copilot.vue` 轮询到终态**如实展示**产物/`build_error`/`backtest_error`（build_failed 仍展示代码供审阅；sandbox_rejected 提示需配 `copilot.working_dir`），删除「策略已生成」谎言兜底。验证：ui typecheck 0 错 / lint 0 error / **208 测试全过**；缺陷④（working_dir 空 ⇒ sandbox_rejected）是**部署态配置**，后端 fail-closed 行为正确，前端已能如实呈现 | 治理建议「契约同源校验」登记为后续（openapi→TS 类型生成 + CI 断言） |
-| OBS-09 | 三份 ADR 引用成环且全 Proposed（027→028→029→027） | 低（治理） |
-| OBS-10 | 服务数 5→7 与 ADR-019（Service 合并，仍 Accepted）方向相反，需显式 supersede | 低（治理） |
+| OBS-09 | ✅ 2026-10-09：027/028/029 成环引用澄清为**单向依赖**——028/029 的能力部分（K3/K6/K7）已随内核线解耦落地，服务边界条目显式标注「待 027 服务拆分落地后重评」 | 低（治理） |
+| OBS-10 | ✅ 2026-10-09：ADR-027 头部补 **Reconcile（ADR-019）**——019 的合并判断全部保留，反转前提是内核模块化已冻结边界，服务拆分是可选部署形态 | 低（治理） |
 
 ---
 
