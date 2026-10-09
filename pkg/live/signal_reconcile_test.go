@@ -120,3 +120,28 @@ func TestReconcileSignals_DeterministicOutput(t *testing.T) {
 	assert.Equal(t, d1, d2, "输出必须确定")
 	assert.Equal(t, "000001.SZ", d1[0].Symbol, "缺失差异按 (date, symbol) 升序，最早的先出")
 }
+
+// TestReconcileSignals_TimeNormalization 证明「同一时刻、仅 time.Location 表达
+// 不同」的信号必须对齐到同一键——不能因为 time.Time 的 loc 指针不同而误报
+// missing。这是对 signalKey 用 time.Time 当 map 键的加固验证：time.FixedZone
+// 每次返回**新指针**，与 time.UTC 指针不同，`==` 会失配。
+func TestReconcileSignals_TimeNormalization(t *testing.T) {
+	// 回测侧用 time.UTC；paper 侧用 time.FixedZone("UTC", 0) —— 同一时刻、
+	// 同一 UTC 偏移，但 loc 是**不同的指针**。
+	paper := []domain.Signal{{
+		Symbol:    "000001.SZ",
+		Date:      time.Date(2026, 1, 5, 0, 0, 0, 0, time.FixedZone("UTC", 0)),
+		Direction: domain.DirectionLong,
+		Strength:  1.0,
+		OrderType: domain.OrderTypeMarket,
+	}}
+	backtest := []domain.Signal{{
+		Symbol:    "000001.SZ",
+		Date:      time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC),
+		Direction: domain.DirectionLong,
+		Strength:  1.0,
+		OrderType: domain.OrderTypeMarket,
+	}}
+	diff := ReconcileSignals(paper, backtest, DefaultSignalReconcileConfig())
+	assert.Empty(t, diff, "同一时刻（仅 loc 指针不同）必须对齐，不得误报 missing")
+}

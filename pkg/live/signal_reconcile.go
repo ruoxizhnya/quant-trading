@@ -64,9 +64,20 @@ func (d SignalDiscrepancy) String() string {
 }
 
 // signalKey 是对账的归一化键：同一交易日、同一 symbol 的信号应当一一对应。
+//
+// date 存的是**归一化后的 UTC 自然日**（字符串），而不是裸 time.Time——
+// time.Time 内部有 wall clock + monotonic clock + location 三个分量，两个
+// 「同一时刻」只要 monotonic 或 location 不同就 `!=`，拿它当 map 键会让
+// 对账器静默把同一天读成两个键、误报 missing。归一化到 UTC 自然日字符串后，
+// 键的比较只取决于「是哪一天」，与时刻/时区表达无关。
 type signalKey struct {
-	date   time.Time
+	date   string // UTC 自然日，格式 "2006-01-02"
 	symbol string
+}
+
+// signalKeyFor 从一条信号构造归一化键。
+func signalKeyFor(s domain.Signal) signalKey {
+	return signalKey{date: dayKey(s.Date), symbol: s.Symbol}
 }
 
 // ReconcileSignals 比对 paper 与回测两侧产出的信号序列，返回差异列表。
@@ -116,8 +127,8 @@ func ReconcileSignals(paper, backtest []domain.Signal, cfg SignalReconcileConfig
 		}
 	}
 	sort.Slice(keys, func(i, j int) bool {
-		if !keys[i].date.Equal(keys[j].date) {
-			return keys[i].date.Before(keys[j].date)
+		if keys[i].date != keys[j].date {
+			return keys[i].date < keys[j].date
 		}
 		return keys[i].symbol < keys[j].symbol
 	})
@@ -132,7 +143,7 @@ func ReconcileSignals(paper, backtest []domain.Signal, cfg SignalReconcileConfig
 			// 回测有、paper 无。
 			for _, bs := range b {
 				out = append(out, SignalDiscrepancy{
-					Date:        k.date,
+					Date:        bs.Date,
 					Symbol:      k.symbol,
 					Kind:        KindSignalMissingPaper,
 					BacktestVal: signalDesc(bs),
@@ -143,7 +154,7 @@ func ReconcileSignals(paper, backtest []domain.Signal, cfg SignalReconcileConfig
 			// paper 有、回测无。
 			for _, ps := range p {
 				out = append(out, SignalDiscrepancy{
-					Date:     k.date,
+					Date:     ps.Date,
 					Symbol:   k.symbol,
 					Kind:     KindSignalMissingBacktest,
 					PaperVal: signalDesc(ps),
@@ -157,12 +168,12 @@ func ReconcileSignals(paper, backtest []domain.Signal, cfg SignalReconcileConfig
 	return out
 }
 
-// groupSignals 把信号按 (date, symbol) 归组。同键内的顺序由 compareSignalLists
-// 里的排序决定，这里不排（避免二次排序）。
+// groupSignals 把信号按归一化键 (UTC 自然日, symbol) 归组。同键内的顺序由
+// compareSignalLists 里的排序决定，这里不排（避免二次排序）。
 func groupSignals(signals []domain.Signal) map[signalKey][]domain.Signal {
 	m := map[signalKey][]domain.Signal{}
 	for _, s := range signals {
-		k := signalKey{date: s.Date, symbol: s.Symbol}
+		k := signalKeyFor(s)
 		m[k] = append(m[k], s)
 	}
 	return m
@@ -184,7 +195,7 @@ func compareSignalLists(k signalKey, paper, backtest []domain.Signal, cfg Signal
 		switch {
 		case i >= len(paper):
 			out = append(out, SignalDiscrepancy{
-				Date:        k.date,
+				Date:        backtest[i].Date,
 				Symbol:      k.symbol,
 				Kind:        KindSignalMissingPaper,
 				BacktestVal: signalDesc(backtest[i]),
@@ -192,7 +203,7 @@ func compareSignalLists(k signalKey, paper, backtest []domain.Signal, cfg Signal
 			})
 		case i >= len(backtest):
 			out = append(out, SignalDiscrepancy{
-				Date:     k.date,
+				Date:     paper[i].Date,
 				Symbol:   k.symbol,
 				Kind:     KindSignalMissingBacktest,
 				PaperVal: signalDesc(paper[i]),
@@ -211,7 +222,7 @@ func compareSignals(k signalKey, p, b domain.Signal, cfg SignalReconcileConfig) 
 
 	if p.Direction != b.Direction {
 		out = append(out, SignalDiscrepancy{
-			Date:        k.date,
+			Date:        p.Date,
 			Symbol:      k.symbol,
 			Kind:        KindSignalDirection,
 			PaperVal:    string(p.Direction),
@@ -221,7 +232,7 @@ func compareSignals(k signalKey, p, b domain.Signal, cfg SignalReconcileConfig) 
 
 	if math.Abs(p.Strength-b.Strength) > cfg.StrengthTolerance {
 		out = append(out, SignalDiscrepancy{
-			Date:        k.date,
+			Date:        p.Date,
 			Symbol:      k.symbol,
 			Kind:        KindSignalStrength,
 			PaperVal:    fmt.Sprintf("%.10f", p.Strength),
@@ -231,7 +242,7 @@ func compareSignals(k signalKey, p, b domain.Signal, cfg SignalReconcileConfig) 
 
 	if p.OrderType != b.OrderType {
 		out = append(out, SignalDiscrepancy{
-			Date:        k.date,
+			Date:        p.Date,
 			Symbol:      k.symbol,
 			Kind:        KindSignalOrderType,
 			PaperVal:    string(p.OrderType),
@@ -241,7 +252,7 @@ func compareSignals(k signalKey, p, b domain.Signal, cfg SignalReconcileConfig) 
 
 	if math.Abs(p.LimitPrice-b.LimitPrice) > cfg.LimitPriceTolerance {
 		out = append(out, SignalDiscrepancy{
-			Date:        k.date,
+			Date:        p.Date,
 			Symbol:      k.symbol,
 			Kind:        KindSignalLimitPrice,
 			PaperVal:    fmt.Sprintf("%.6f", p.LimitPrice),
