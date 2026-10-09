@@ -92,10 +92,10 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：TWAP 拆单后子订单时间分布均匀；市场冲击下大单滑点 > 小单滑点；破坏验证——去掉冲击模型 → 大小单滑点相同（反证）。
 - **⑥ 边界**：只做执行算法与冲击模型，不做策略、不做真实券商。
 
-### K5 · 实盘 paper（P5）切片 1 ✅ / 切片 2 ⬜（前置：K2）
+### K5 · 实盘 paper（P5）切片 1 ✅ / 切片 2 ✅（前置：K2）
 
-> **切片 1（本步完成，2026-10-09）**：读法 A 的 paper 回放链路 —— 回放与回测**同一批**日线 bar（不造 tick→bar 假聚合层），用**同一段代码**的执行成本核撮合。若曦拍板：paper 与回测必须吃同一批输入，差异才只可能来自执行机制 ⇒ 对账才可归因。
-> **切片 2（待做）**：同构对账比对 + 超阈告警（D1）。
+> **切片 1（2026-10-09）**：读法 A 的 paper 回放链路 —— 回放与回测**同一批**日线 bar（不造 tick→bar 假聚合层），用**同一段代码**的执行成本核撮合。若曦拍板：paper 与回测必须吃同一批输入，差异才只可能来自执行机制 ⇒ 对账才可归因。
+> **切片 2（2026-10-09 完成）**：**信号对账**（若曦拍板「信号为核心」）—— 同一策略、同一批 bar、同一窗口语义，paper 与回测两侧独立产出的信号序列**逐条一致**（`ReconcileSignals` 零差异）。对**信号**而非**成交**，因为成交差异会被 T+1/现金约束/风控污染（两侧本就不同），信号在执行机制之前、只由喂给策略的 bar 序列决定，是「同构验证」里最干净、最可证伪的一层。
 
 - **① 目标**：DataSource=RealtimeFeed + Broker=Mock 的 paper trading 跑通，并与同策略同日回测做同构对账（D1）。
 - **② 上下文**：蓝图 §4.1.1 实盘-ready 分寸 + UC3；`pkg/live/`（Broker/MockTrader/OrderManager/reconciliation）；`live-trading.md`；K2 的同构桥。
@@ -111,6 +111,13 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - 新增 `pkg/live/paper_session.go`（`PaperSession`：日循环编排，窗口 `Date<=d` 防前视，产出确定性 `PaperFill`）
 - `MockTrader` / `SimulatedBroker` 换掉伪随机滑点（`order.ID[0]%10`），走共享成本核；`OrderResult` 加 `FillPrice`/`Fee` 字段
 - 测试：回放确定性 / 时间倒退护栏 / 防前视（批式+流式探针）/ 成本同构（fixed+impact，含独立解析锚点）/ 真库只读冒烟
+
+**切片 2 交付明细（2026-10-09）**：
+- 新增 `pkg/live/signal_reconcile.go`：纯函数 `ReconcileSignals(paper, backtest []domain.Signal, cfg)`，比对键=(date,symbol)，比 direction/strength/order_type/limit_price；**刻意忽略 portfolio**（纯 bar 驱动才是信号的可对账层，依赖 portfolio 的差异属执行机制）
+- 两侧信号暴露钩子（默认 nil 零行为变化）：paper 侧 `PaperSessionConfig.SignalCollector`（撮合前回调）；回测侧 `Engine.SetSignalObserver`（getSignals 后、撮合前回调）
+- 端到端测试 `pkg/backtest/signal_reconcile_e2e_test.go`：同一批合成 bar，两侧独立跑 → 91 条信号逐条一致（正证据）；截断窗口 → 5 条差异被点名（反证腿）
+- 对账器单测 8 条（一致/缺失/方向/强度/容差/顺序无关/确定性输出）
+- ⚠️ 告警接线**未做**：现有 `ReconciliationWorker`/`AlertDispatcher` 是「券商资金对账」（持仓/现金），零生产构造点且与信号对账是两码事；信号差异的「告警」以 `ReconcileSignals` 返回的差异列表 + 端到端 fail-loud 兑现，生产告警通道接线留待对账真正进实盘循环时
 
 ### K6 · L3a WASM（P6）⬜（前置：K2）
 
