@@ -138,7 +138,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 |---|---|---|
 | OBS-06 ✅ 完成（2026-10-09，随 K3 切片 2 合并） | DSL 语法闸门不校验算子名 —— 已在 `Expression.Validate()` 补算子/字段/参数个数闸门（fail-closed，报错带位置与可用清单），`validate_factor` 解析后必过闸门 | — |
 | OBS-07 | tokenizer 不支持 `>=`/`<=`/`AND`/`OR`/`NOT` | 中 |
-| OBS-08 | 序列注册表缺「可用性声明」（11 张表全 0 行，AI 在空表上静默产垃圾） | 高（与 OBS-01 同源） |
+| OBS-08 | 序列注册表缺「可用性声明」（11 张表全 0 行，AI 在空表上静默产垃圾）；**并**：闸门的字段白名单须由 provider 派生（现与 `OHLCVDataProvider` 错配：放行了它不认的 `market_cap`/`eps`/…，又拦掉了它支持的 `ps`/`roa` —— 见 K3c） | 高（与 OBS-01 同源） |
 | OBS-11 | per-day HTTP 反模式 `getSignalsFromStrategyService` 待删（策略服务只传定义不传信号） | 中（随 K1/K2） |
 | OBS-12 | Copilot 对外 API 契约与前端脱节（四层缺陷叠加） | 中 |
 | OBS-09 | 三份 ADR 引用成环且全 Proposed（027→028→029→027） | 低（治理） |
@@ -230,6 +230,16 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | K1-P2-2 | **回滚 error 被静默丢弃**：`rollbackLocked` 的 Stop error 直接丢弃（注释论证「避免掩盖根因」），但 Stop 失败=资源泄漏，无人知晓 | 接管时（至少 log 或包进返回 error 的 message） |
 | K1-P2-3 | **eventstore 模块的资源归属未定**：`EventStoreModule.Stop` 不关 pool（归 pkg/storage 统一 Close）——影子期正确，但接管后必须裁决「pool 是内核资源（模块 Stop 关）还是应用层资源（保持现状）」 | 接管时（与 setup.go 的 gracefulShutdown 归属一起裁决） |
 | K1-P2-4 | **模块回调内核会死锁**：`Boot/Shutdown` 全程持 `k.mu`；`Clock()/Bus()/Store()` 不加锁安全，但模块若在 Init/Start/Stop 里调 `Module()`（加锁）会死锁。注释已声明「模块拿不到内核引用」 | 作为**未来模块约束**登记：模块不得在生命周期方法内回调 `Module()` |
+
+### K3 切片 2（+OBS-06）审查发现（2026-10-09，含真库核对）
+
+> **通过项**：注册表（31 算子）结构清晰，`selfWarmup/selfLookback` 由实参推导，闸门递归覆盖四类节点，`DeriveWarmup/Lookback` 与 ADR-028 §8 及附录 A 对齐。**真库核对**（把 `factor_genes.formula` / `experiments.expression` / `strategy_genes.params` / `strategies.params` 的存量表达式全部喂给新闸门）：**可解析 1 条、被拒 0 条** ⇒ 无「既有表达式被判非法」的回归。`pow` 不在注册表（历史 `IsMathOp` 有它但无实现）——复查用它的三处（agent 提示词 / 基因池名单 / yaml 生成器）都没用，无现网影响。
+
+| # | 问题 | 影响与处理 |
+|---|---|---|
+| K3a | **闸门不校验「标量参数位」的类型**：`ts_mean(close, volume)`、`ts_mean(close, ts_delay(volume,1))` 参数个数与节点都合法 ⇒ 过闸；但求值时 `firstScalar` 取到非标量（或 `NaN`）⇒ `int(NaN)` 未定义 ⇒ 窗口变荒谬值 ⇒ **整条序列 NaN**（假合法残留） | 危害被 OBS-01 兜住（判无效运行，不产出假结论），但浪费 AI 试验且报错无用。修法：`OperatorDef` 加 `ScalarParams []int`，闸门对这些位置要求 `*LiteralNode`（ADR-028 §4 的 `Series × Scalar` 签名本就该在闸门体现） |
+| K3b | **防漂移护栏只覆盖 `pkg/ai/expression`**：`pkg/ai/gene_pool/mutation.go:196` 有 `functions := []string{"abs","log","sqrt","sign","cs_rank","cs_zscore"}`；`pkg/ai/yaml/generator.go` 用字符串模板生成表达式；`pkg/ai/agents/*` 提示词里也写死算子名 | 现状**无实害**（名单内名字都在注册表），但注册表改名/删名会让生成器产出「过不了闸门」的表达式。修法：生成器改查 `AvailableOperators()`，或把护栏扩到生成器侧 |
+| K3c | **闸门的字段白名单与 provider 真实能力互相错配**（两个方向）：闸门放行 `market_cap`/`roe_ttm`/`eps`/`revenue`/`profit`/`sector`，而 `OHLCVDataProvider.GetField` 不认（**求值时报 unknown field，fail-loud**）；反过来 provider 支持 `ps`/`roa`，闸门**不认** ⇒ 用它们的表达式会被 fail-closed 闸门**误拒**（比前者更危险：挡住正经用法） | **并入 OBS-08**（序列可用性声明）：字段白名单必须由 provider/`SeriesSpec` 注册表**派生**，并声明「有数据 / 表为空」，把「不可用」在**闸门期**说清而不是留到求值期 |
 
 ---
 
