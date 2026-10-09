@@ -41,6 +41,58 @@ from pathlib import Path
 # 例：[PRODUCT.md](PRODUCT.md) / [ADR](adr/adr-001.md#decision)
 LINK_RE = re.compile(r"\]\((?!https?://|mailto:|#)([^)]+?\.md)(#[^)]*)?\)")
 
+# ─── 跨仓链接豁免（2026-10-09 文档拆仓）──────────────────────────────
+# 拆仓后 core 仓留存的活跃文档（SPEC/TASKS/live-trading）仍引用着已迁到
+# quant-trading-docs / quant-trading-agent / quant-trading-ui 的文档。这些链接
+# **目标真实存在**（只是不在 core 仓），不是坏链。检查器对命中下列前缀/文件的
+# 链接跳过，而不是误报成死链。
+#
+# ⚠️ 维护：再次迁出文档时，把迁出的目录/文件追加进这里。否则检查器会对跨仓
+# 引用误报坏链 —— 那会训练人忽略红灯，比没检查更糟。
+MIGRATED_PREFIXES = (
+    "adr/",                    # → quant-trading-docs
+    "guides/",                 # → quant-trading-docs
+    "hermes/",                 # → quant-trading-agent
+    "design/equitydeep/",      # → quant-trading-docs
+    "design/pages/",           # → quant-trading-ui
+    "archive/odr/",            # → quant-trading-docs
+    "archive/superseded-adr/",  # → quant-trading-docs
+    "archive/reports-",        # → quant-trading-docs
+)
+MIGRATED_FILES = {
+    # 顶层 → quant-trading-docs
+    "ADR.md", "AGENTS_TEMPLATE.md", "ARCHITECTURE.md", "PRODUCT.md",
+    "ROADMAP.md", "TEST.md", "VISION.md",
+    # design 根下（前端设计系统）→ quant-trading-ui
+    "design/index.md", "design/principles.md", "design/visual.md",
+    "design/components.md", "design/interaction.md", "design/backtest-engine-design.md",
+    # archive 根下 → docs / agent
+    "archive/IMPLEMENTATION_PLAN.md", "archive/NEXT_STEPS.md",
+    "archive/REORG-PLAN.md", "archive/RESEARCH-equitydeep-legacy.md",
+    "archive/ROADMAP-history.md", "archive/TASKS-2026-10-08-archived.md",
+    "archive/TASKS-history.md", "archive/VISION-full.md", "archive/tasks-phase-2.md",
+    "archive/agent-best-practice-2026-10.md",
+    # archive/plans 部分 → agent + docs
+    "archive/plans-2026-Q3/s7-p3-2-phase4-execute-from-yaml.md",
+    "archive/plans-2026-Q3/s7-p3-2-yaml-expression-loader.md",
+    "archive/plans-2026-Q3/s7-p3-3-phase5-6-completion.md",
+    "archive/plans-2026-Q3/s7-p3-3-tools-registry.md",
+    "archive/plans-2026-Q3/s7-p3-5-doc-drift-odr-021-sync.md",
+    "archive/plans-2026-Q3/s7-p3-6-adr-status-sync.md",
+    # archive/research 部分 → docs
+    "archive/research-2026-Q2/CODE_REVIEW_REPORT.md",
+    "archive/research-2026-Q2/DOC_MGMT_RESEARCH.md",
+    "archive/research-2026-Q2/PHASE3-PLAN.md",
+    "archive/research-2026-Q2/QUANT_SOFTWARE_DESIGN_ANALYSIS.md",
+    "archive/research-2026-Q2/REPORT_ASSESSMENT_AND_GOVERNANCE_PLAN.md",
+    "archive/research-2026-Q2/phase-gate-reviews.md",
+}
+
+
+def _is_migrated(target: str) -> bool:
+    """target 是否指向已迁出 core 仓的文档（跨仓链接，非坏链）。"""
+    return target in MIGRATED_FILES or target.startswith(MIGRATED_PREFIXES)
+
 # 代码块与行内代码：里面的 `[x](y.md)` 是**引文**（例如审计报告在表格里引用
 # 一条坏链作为证据），不是导航链接。渲染出来也不是链接，不该被当成坏链告警 ——
 # 否则修好它反而等于抹掉证据。
@@ -169,6 +221,7 @@ def check_entry_frontmatter(root: Path) -> list[tuple[Path, list[str]]]:
 
 def check(root: Path, include_archive: bool) -> list[tuple[Path, str]]:
     broken: list[tuple[Path, str]] = []
+    root_abs = root.resolve()
     for md in find_markdown_files(root, include_archive):
         try:
             text = md.read_text(encoding="utf-8")
@@ -178,6 +231,13 @@ def check(root: Path, include_archive: bool) -> list[tuple[Path, str]]:
             target = match.group(1)
             resolved = (md.parent / target).resolve()
             if not resolved.exists():
+                # 相对 docs 根的规范化路径（用 / 分隔），供 _is_migrated 匹配。
+                try:
+                    rel = resolved.relative_to(root_abs).as_posix()
+                except ValueError:
+                    rel = None
+                if rel and _is_migrated(rel):
+                    continue  # 跨仓链接：目标已迁出，不是坏链
                 broken.append((md, target))
     return broken
 
