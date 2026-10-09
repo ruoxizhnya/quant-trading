@@ -26,7 +26,7 @@ func TestClassify_FailClosed(t *testing.T) {
 // 403 for trader?").
 //
 // The tool list below must mirror cmd/analysis/setup.go's
-// registerBuiltinTools. Names are duplicated deliberately: pkg/tools
+// registerBuiltinTools. Names are duplicated deliberately: pkg/ai/tools
 // must not import cmd/analysis, so the shared source of truth is the
 // name string, and this test is what keeps the two sides in sync.
 func TestClassify_RegisteredToolsHaveRows(t *testing.T) {
@@ -65,7 +65,7 @@ func TestClassify_RegisteredToolsHaveRows(t *testing.T) {
 	for _, n := range registered {
 		if !classified[n] {
 			t.Errorf("Tool %q is registered in setup.go but has no row in sideEffectRegistry — "+
-				"it will fail closed to admin-only. Add a row to pkg/tools/sideeffect.go.", n)
+				"it will fail closed to admin-only. Add a row to pkg/ai/tools/sideeffect.go.", n)
 		}
 	}
 }

@@ -10,7 +10,7 @@ import (
 // OBS-01：把「假成功」（票池为空 / 0 成交 / 零值日期 / 垃圾指标）从
 // 「成功」里摘出来，收敛成一处纯函数 + 一组稳定的 Code。
 //
-// 落点为什么在 contracts（而不是 pkg/backtest 或 pkg/validation）：
+// 落点为什么在 contracts（而不是 pkg/backtest 或 pkg/ai/validation）：
 //   - contracts 是叶子包（只依赖 domain / fees / market），任何消费方
 //     （引擎本身、job、pipeline、loop）引用它都不会引入 import 环。
 //   - 裁定输入是 domain.BacktestResult（引擎的产物），输出是纯数据 —— 不放

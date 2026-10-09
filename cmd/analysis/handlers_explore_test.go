@@ -13,9 +13,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/loop"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/pipeline"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/validation"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
-	"github.com/ruoxizhnya/quant-trading/pkg/validation"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/client"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 )
 
 // ─── mock factor API server ───────────────────────────────────────────

@@ -12,7 +12,7 @@ package main
 // The tests use fake Tool fixtures (echoTool / strictTool / failingTool)
 // rather than real builtin tools so the handler layer is exercised in
 // isolation — builtin tools have their own coverage in
-// pkg/tools/builtin/*_test.go.
+// pkg/ai/tools/builtin/*_test.go.
 
 import (
 	"bytes"
@@ -26,7 +26,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 )
 
 // ============================================================

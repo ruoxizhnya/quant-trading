@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/client"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 )
 
 // FactorComputeTool wraps client.FactorClient.ComputeFactor into a Tool.

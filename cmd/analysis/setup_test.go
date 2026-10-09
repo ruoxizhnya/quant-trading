@@ -162,7 +162,7 @@ func (stubResearchProfile) GetResearchProfile(_ context.Context, _ string) (*sto
 // buildToolsRegistry registers all 19 tools (8 original S7-P3-3 tools +
 // 8 Hermes Phase 1 tools + 1 Hermes Phase 2.2 tool + 1 Hermes Phase 2.3 tool
 // + 1 EQD-P2-1 tool) with the correct names. This is the wiring-level test —
-// individual tool behavior is covered in pkg/tools/builtin/*_test.go.
+// individual tool behavior is covered in pkg/ai/tools/builtin/*_test.go.
 //
 // Reuses stubBacktestRunner from handlers_pipeline_test.go (same package).
 func TestBuildToolsRegistry_RegistersAll19Tools(t *testing.T) {

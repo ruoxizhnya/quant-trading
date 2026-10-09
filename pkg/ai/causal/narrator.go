@@ -1,9 +1,9 @@
 // Package causal 是验证器链「因果维」（P2-9f）的语言模型适配器。
 //
 // 它只做一件事：把一次提案讲成一个**可被证伪**的理论。验证那件事不在这里
-// —— 预测对不对由 pkg/validation 用确定性检验判定，模型没有裁判权。
+// —— 预测对不对由 pkg/ai/validation 用确定性检验判定，模型没有裁判权。
 //
-// 分两个包是因为依赖方向：pkg/validation 不认识任何 LLM（它必须能在没有
+// 分两个包是因为依赖方向：pkg/ai/validation 不认识任何 LLM（它必须能在没有
 // 模型的情况下被测试），pkg/ai 那边才是模型客户端所在的地方。
 package causal
 
@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai"
-	"github.com/ruoxizhnya/quant-trading/pkg/validation"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/validation"
 )
 
 // Narrator 用 LLM 讲机制 + 下可证伪的预测。

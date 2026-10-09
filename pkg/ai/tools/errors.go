@@ -9,7 +9,7 @@
 //
 // This is a LEAF-style package for interfaces + Registry: it imports
 // only the standard library. Concrete Tool implementations live in
-// pkg/tools/builtin/ to keep this package free of reverse dependencies.
+// pkg/ai/tools/builtin/ to keep this package free of reverse dependencies.
 package tools
 
 import "errors"

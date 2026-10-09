@@ -16,7 +16,7 @@ package main
 //   4. The L1→save chain: validate a factor, then save it.
 //
 // The builtin tools have their own unit-level coverage in
-// pkg/tools/builtin/*_test.go; these tests add the HTTP-layer
+// pkg/ai/tools/builtin/*_test.go; these tests add the HTTP-layer
 // integration dimension.
 
 import (
@@ -34,9 +34,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools/builtin"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools/builtin"
 )
 
 // ──────────────────────────────────────────────────────────────────────

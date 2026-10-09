@@ -5,7 +5,7 @@
 // invoked via the /api/tools HTTP API.
 //
 // These implementations live in a subpackage (rather than in
-// pkg/tools/ itself) to keep pkg/tools/ a pure interfaces+Registry
+// pkg/ai/tools/ itself) to keep pkg/ai/tools/ a pure interfaces+Registry
 // package with no reverse dependencies on pkg/ai, pkg/strategy, or
 // pkg/domain.
 package builtin
@@ -14,8 +14,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 )
 
 // BacktestTool wraps a contracts.BacktestRunner into a tools.Tool.

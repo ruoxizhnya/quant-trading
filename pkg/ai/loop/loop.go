@@ -14,9 +14,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/pipeline"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/validation"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
-	"github.com/ruoxizhnya/quant-trading/pkg/validation"
 )
 
 // TryRunner 跑一次尝试。*pipeline.Pipeline 天然满足它。

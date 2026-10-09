@@ -425,7 +425,7 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 	//
 	// AUD-02 (ODR-065 H5): WithToolsAuth applies per-tool RBAC on
 	// POST /api/tools/:name, keyed off the tool's audited side-effect
-	// class (pkg/tools/sideeffect.go). save_factor / save_strategy
+	// class (pkg/ai/tools/sideeffect.go). save_factor / save_strategy
 	// mutate the gene pool and now require trader-or-admin; everything
 	// unclassified requires admin (fail-closed).
 	NewToolsHandler(deps.ToolsRegistry, deps.Logger,

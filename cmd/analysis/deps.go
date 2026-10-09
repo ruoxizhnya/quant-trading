@@ -11,6 +11,7 @@ package main
 
 import (
 	"github.com/rs/zerolog"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
@@ -19,7 +20,6 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/risk"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 	"github.com/spf13/viper"
 )
 

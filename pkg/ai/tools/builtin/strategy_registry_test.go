@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 )
 
 // uniqueStrategyName builds a strategy name unique per test invocation

@@ -16,10 +16,10 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/loop"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/pipeline"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/search"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/validation"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
-	"github.com/ruoxizhnya/quant-trading/pkg/validation"
 )
 
 // verdictSink 把验证器裁决写回实验日志那一行（P2-9 接线）。
@@ -33,7 +33,7 @@ type verdictSink interface {
 }
 
 // exploreBias 是偏差维（P2-9d）的输入，来自**当前底座的实测状态**而不是
-// 猜的。改这两行之前先看 pkg/validation/bias.go 顶部的接线状态注释。
+// 猜的。改这两行之前先看 pkg/ai/validation/bias.go 顶部的接线状态注释。
 //
 // 留空的字段是**真的没查过**，不是"没问题" —— 未评估的子维度不进概率，
 // 只给 note。谎称干净比承认没查更危险。

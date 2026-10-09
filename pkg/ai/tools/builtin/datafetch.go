@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 )
 
 // DataSourceClient is a minimal HTTP client for the data-service

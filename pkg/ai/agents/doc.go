@@ -12,7 +12,7 @@
 //   - **交互层（已废）**：原计划的「前端 AI 组件」从未建成，由 Hermes
 //     Agent 的自然语言交互取代。这才是 ODR-046 真正废掉的东西。
 //   - **能力层（在用）**：本包的 Go agent 是 pipeline 的实现细节。Hermes
-//     通过 MCP 工具层（pkg/tools/builtin/）调用底座，`cmd/analysis` 的
+//     通过 MCP 工具层（pkg/ai/tools/builtin/）调用底座，`cmd/analysis` 的
 //     pipeline 则在进程内直接调用本包 —— 两条路都通到同一批能力。
 //
 // 所以：新代码**不直接面向用户**暴露这些 agent，但在 pipeline 内部继续

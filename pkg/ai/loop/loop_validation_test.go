@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/pipeline"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/validation"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
-	"github.com/ruoxizhnya/quant-trading/pkg/validation"
 )
 
 // 验证器链（P2-9）接进循环的取证。

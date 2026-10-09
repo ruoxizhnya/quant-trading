@@ -22,6 +22,8 @@ import (
 	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai"
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/client"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools/builtin"
 	"github.com/ruoxizhnya/quant-trading/pkg/alert"
 	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
@@ -34,8 +36,6 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/risk"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools/builtin"
 	"github.com/spf13/viper"
 )
 

@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 )
 
 // ─── Narrow interfaces for testability ─────────────────────────────────

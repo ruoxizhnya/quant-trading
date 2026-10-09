@@ -23,9 +23,15 @@ package repoguard
 // `pkg/ai/...` package ONLY if the importing package lives under one of:
 //
 //   - pkg/ai/...   — the AI layer itself
-//   - pkg/tools/... — builtin tools that bridge into the AI layer
 //   - cmd/...      — the composition root
 //   - e2e/...      — end-to-end entry points
+//
+// 2026-10-09: the former `pkg/tools/...` allowance is gone. `pkg/tools` and
+// `pkg/validation` turned out to be AI-layer packages in all but name — core
+// had zero references to either — so they were moved under `pkg/ai` as
+// `pkg/ai/tools` and `pkg/ai/validation`. The whitelist shrank accordingly,
+// so it now states the boundary that actually holds rather than naming a
+// directory that no longer exists.
 //
 // Any other package that imports `pkg/ai/...` is a violation and fails the
 // test. The check is fail-closed: the allowlist names what is permitted, so
@@ -63,10 +69,9 @@ import (
 // reverse edge. Keep this list short and justified — adding an entry loosens
 // the boundary.
 var aiAllowedImporterPrefixes = []string{
-	"pkg/ai",    // the AI layer itself
-	"pkg/tools", // builtin tools that bridge into the AI layer
-	"cmd",       // composition root
-	"e2e",       // end-to-end entry points
+	"pkg/ai", // the AI layer itself (incl. pkg/ai/tools, pkg/ai/validation)
+	"cmd",    // composition root
+	"e2e",    // end-to-end entry points
 }
 
 func TestPkgAIIsOnlyImportedByAllowedLayers(t *testing.T) {

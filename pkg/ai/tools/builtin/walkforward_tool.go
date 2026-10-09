@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 )
 
 // ─── WalkForwardRunner (narrow interface) ─────────────────────────────

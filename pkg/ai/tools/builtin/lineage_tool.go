@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 )
 
 // ═══════════════════════════════════════════════════════════════════════

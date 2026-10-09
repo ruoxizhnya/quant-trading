@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/ai/client"
+	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 	"github.com/ruoxizhnya/quant-trading/pkg/expression"
-	"github.com/ruoxizhnya/quant-trading/pkg/tools"
 )
 
 // ─── ValidateFactorTool ────────────────────────────────────────────────
