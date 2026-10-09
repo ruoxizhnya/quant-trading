@@ -20,7 +20,7 @@ func (invalidRunner) RunBacktest(ctx context.Context, req contracts.BacktestRequ
 	return &contracts.BacktestResponse{
 		Status:          "invalid",
 		InvalidReasons:  []string{"empty_universe", "zero_trades"},
-		UniverseMaxSize: 0,
+		UniverseMaxSize: intPtr(0),
 		TotalTrades:     0,
 	}, nil
 }
@@ -77,3 +77,7 @@ func TestJobService_ValidRunStillCompleted(t *testing.T) {
 	got := waitJobSettled(t, store, job.ID)
 	assert.Equal(t, "completed", got["status"], "正常作业照旧 completed —— 护栏不误伤")
 }
+
+// intPtr 返回 int 的指针（OBS-01 审查修复：UniverseMaxSize 改为 *int，
+// nil = 未评估、0 = 明确为空 —— 未知不等于空）。
+func intPtr(v int) *int { return &v }

@@ -810,7 +810,9 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 	// OBS-01：把票池统计挂到结果上（供验证器 / 报告层读取），并跑一次
 	// 「有效运行」裁定。裁定只挂在结果上，**不改变正常路径** —— 有效的
 	// 回测依旧 Status=completed、nil error；无效的也只是多一组 Code。
-	result.UniverseMaxSize = maxUniverseSize
+	// 指针：nil = 未评估。引擎一定填值（哪怕是 0 = 明确为空），
+	// 所以这里取地址即可 —— 见 domain.BacktestResult.UniverseMaxSize 注记。
+	result.UniverseMaxSize = &maxUniverseSize
 	result.InvalidReasons = InvalidReasonCodes(CheckValidity(&result))
 
 	if len(result.InvalidReasons) > 0 {
@@ -821,7 +823,7 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 			Float64("sharpe_ratio", result.SharpeRatio).
 			Float64("max_drawdown", result.MaxDrawdown).
 			Int("total_trades", result.TotalTrades).
-			Int("universe_max_size", result.UniverseMaxSize).
+			Int("universe_max_size", maxUniverseSize).
 			Strs("invalid_reasons", result.InvalidReasons).
 			Msg("Backtest produced an invalid run — result marked Status=invalid")
 	} else {

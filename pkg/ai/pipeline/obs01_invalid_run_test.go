@@ -24,7 +24,7 @@ func TestExecute_InvalidRunGoesFailurePath(t *testing.T) {
 	p := newValidityPipeline()
 	runner := &mockBacktestRunner{result: &domain.BacktestResult{
 		TotalTrades:     0,
-		UniverseMaxSize: 0,
+		UniverseMaxSize: intPtr(0),
 		InvalidReasons:  []string{"empty_universe", "zero_trades", "garbage_metric"},
 		SortinoRatio:    1.7976931348623157e308,
 	}}
@@ -49,7 +49,7 @@ func TestExecute_ValidRunKeepsSuccessPath(t *testing.T) {
 	p := newValidityPipeline()
 	runner := &mockBacktestRunner{result: &domain.BacktestResult{
 		TotalTrades:     12,
-		UniverseMaxSize: 40,
+		UniverseMaxSize: intPtr(40),
 		SharpeRatio:     1.1,
 		TotalReturn:     0.18,
 		// 无 InvalidReasons = 有效运行
@@ -64,3 +64,7 @@ func TestExecute_ValidRunKeepsSuccessPath(t *testing.T) {
 	assert.Contains(t, joined, "Backtest completed successfully",
 		"有效运行照旧报成功 —— 护栏不能误伤正常路径")
 }
+
+// intPtr 返回 int 的指针（OBS-01 审查修复：UniverseMaxSize 改为 *int，
+// nil = 未评估、0 = 明确为空 —— 未知不等于空）。
+func intPtr(v int) *int { return &v }

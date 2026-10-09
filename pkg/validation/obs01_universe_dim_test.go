@@ -9,7 +9,7 @@ import "testing"
 
 func TestAggregate_EmptyUniverseIsScoredZero(t *testing.T) {
 	res := resultFixture(300, 1.0, 40)
-	res.UniverseMaxSize = 0 // 空票池
+	res.UniverseMaxSize = intPtr(0) // 空票池（明确为空）
 
 	v := ValidateProposal(Proposal{
 		Result:    res,
@@ -57,6 +57,23 @@ func TestAggregate_NonEmptyUniverseIsNotInDimensions(t *testing.T) {
 	if _, ok := v.Dimensions[DimensionUniverse]; ok {
 		t.Fatalf("票池非空时该维不该进 Dimensions（会无端压低正常回测），实际 %v",
 			v.Dimensions)
+	}
+	if v.Probability <= 0 {
+		t.Fatalf("正常回测的概率不该被这一维拉到 0，实际 %.3f", v.Probability)
+	}
+}
+
+// TestAggregate_UnassessedUniverseIsNotInDimensions 是审查修复的护栏：
+// nil（未评估）**不进 map** —— 与「未评估维度不出现在 map」同一语义；
+// 把未评估当空票池会无端压低（或一票否决）别的生产路径的结果。
+func TestAggregate_UnassessedUniverseIsNotInDimensions(t *testing.T) {
+	res := resultFixture(300, 1.0, 40)
+	res.UniverseMaxSize = nil // 未评估（别的生产路径没填）≠ 空票池
+
+	v := ValidateProposal(Proposal{Result: res, NumTrials: 3})
+
+	if _, ok := v.Dimensions[DimensionUniverse]; ok {
+		t.Fatalf("未评估时该维不该进 Dimensions（nil 不等于 0），实际 %v", v.Dimensions)
 	}
 	if v.Probability <= 0 {
 		t.Fatalf("正常回测的概率不该被这一维拉到 0，实际 %.3f", v.Probability)

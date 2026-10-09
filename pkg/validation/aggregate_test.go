@@ -44,7 +44,7 @@ func resultFixture(periods int, sharpe float64, nTrades int) *domain.BacktestRes
 		// OBS-01：这份 fixture 模拟的是「引擎跑出来的正常回测」—— 引擎总会
 		// 把票池统计挂上。这里显式给一个非空票池，否则新加的「票池非空」维
 		// 会把正常结果误判成无效运行（详见 aggregate.go 的 DimensionUniverse）。
-		UniverseMaxSize: 40,
+		UniverseMaxSize: intPtr(40),
 	}
 }
 
@@ -220,3 +220,7 @@ func TestAggregate_AllUnassessedIsNeutral(t *testing.T) {
 		t.Fatal("连回测结果都没有，必须是 blocking")
 	}
 }
+
+// intPtr 返回 int 的指针（OBS-01 审查修复：UniverseMaxSize 改为 *int，
+// nil = 未评估、0 = 明确为空 —— 未知不等于空）。
+func intPtr(v int) *int { return &v }

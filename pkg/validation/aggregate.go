@@ -123,7 +123,9 @@ func ValidateProposal(p Proposal) Verdict {
 	//
 	// 票池非空时**不进 map** —— 沿用「未评估维度不出现在 map」的既有语义，
 	// 避免把正常回测无端打成低分。
-	if p.Result.UniverseMaxSize <= 0 {
+	// nil（未评估）**不进 map** —— 与「未评估维度不出现在 map」同一语义；
+	// 把未评估当空票池同样会无端压低（或一票否决）别的生产路径的结果。
+	if p.Result.UniverseMaxSize != nil && *p.Result.UniverseMaxSize <= 0 {
 		v.Dimensions[DimensionUniverse] = 0
 		v.Challenges = append(v.Challenges, Challenge{
 			Dimension: DimensionUniverse,

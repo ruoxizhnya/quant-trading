@@ -349,7 +349,7 @@ func (s *JobService) StartJob(parentCtx context.Context, jobID string) {
 				Str("job_id", jobID).
 				Dur("elapsed", elapsed).
 				Int("total_trades", result.TotalTrades).
-				Int("universe_max_size", result.UniverseMaxSize).
+				Int("universe_max_size", derefIntOr(result.UniverseMaxSize, -1)).
 				Strs("invalid_reasons", result.InvalidReasons).
 				Msg("Backtest produced an invalid run — result marked Status=invalid")
 			if dbErr := s.store.UpdateJobFailed(jobCtx, jobID, reason); dbErr != nil {
@@ -630,4 +630,13 @@ func recordToJob(r *JobRecord) *Job {
 		StartedAt:   r.StartedAt,
 		CompletedAt: r.CompletedAt,
 	}
+}
+
+// derefIntOr 解引用 int 指针（nil 用 fallback 表示）—— OBS-01：票池规模是 *int，
+// nil = 未评估，日志里用 -1 一眼能看出。
+func derefIntOr(p *int, fallback int) int {
+	if p == nil {
+		return fallback
+	}
+	return *p
 }

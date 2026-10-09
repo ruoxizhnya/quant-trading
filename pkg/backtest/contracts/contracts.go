@@ -197,10 +197,14 @@ type BacktestResponse struct {
 	// 同步地，无效时 Status = "invalid"（见 OBS-01：Status 是调用方的判据）。
 	InvalidReasons []string `json:"invalid_reasons,omitempty"`
 
-	// UniverseMaxSize 是整轮回测里票池规模的最大值（OBS-01，0 = 空票池）。
+	// UniverseMaxSize 是整轮回测里票池规模的最大值（OBS-01）。
 	// 挂在响应上是为了让下游（验证器 / 报告层）能读到引擎算出的票池统计，
 	// 而不必自己重算。
-	UniverseMaxSize int `json:"universe_max_size,omitempty"`
+	//
+	// **指针语义**（审查修复 2026-10-09）：nil = 未评估（生产者没填），
+	// 0 = 明确为空。把未知编码成 0 会让其它 BacktestResult 生产路径被误判
+	// 为「空票池」—— 见 domain.BacktestResult.UniverseMaxSize 的注记。
+	UniverseMaxSize *int `json:"universe_max_size,omitempty"`
 }
 
 // --- Constants (moved from constants.go) ---

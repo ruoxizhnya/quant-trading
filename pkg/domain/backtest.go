@@ -21,11 +21,16 @@ type BacktestResult struct {
 	Trades          []Trade          `json:"trades"`
 
 	// UniverseMaxSize 是整轮回测里「任一个交易日的 eligibleUniverse 规模」
-	// 的最大值（OBS-01）。0 表示没有任何一个交易日的票池非空 —— 这是
-	// CheckValidity 判定 empty_universe 的唯一依据。
+	// 的最大值（OBS-01）。**指针是必要的**：nil = 未评估/未知（生产者没填），
+	// 0 = 明确为空 —— 两者语义完全不同。
+	//
+	// 审查发现（2026-10-09）：把「未知」编码成 0，会让任何没填该字段的结果
+	// （batch / walkforward / metrics 等其它 BacktestResult 生产路径）被误判
+	// 为「空票池」而一票否决 —— 这是 fail-loud 机制最不能容忍的假阳性
+	// （假红灯会训练人忽略红灯）。故：nil ⇒ 不下判断；0 ⇒ 无效运行。
 	//
 	// 引擎在日循环里记录它；其它消费方（验证器 / 报告层）只读，不重算。
-	UniverseMaxSize int `json:"universe_max_size,omitempty"`
+	UniverseMaxSize *int `json:"universe_max_size,omitempty"`
 
 	// InvalidReasons 是「无效运行」裁定结果的 Code 列表（OBS-01），由引擎
 	// 用 contracts.CheckValidity 计算后挂上。空 = 有效运行。消费方读它，

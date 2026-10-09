@@ -44,11 +44,11 @@ func (f *validityTryRunner) Execute(ctx context.Context, description string, run
 		SharpeRatio:     1.2,
 		TotalTrades:     5,
 		PortfolioValues: values,
-		UniverseMaxSize: 30,
+		UniverseMaxSize: ptr(30),
 	}
 	if f.invalidSeqs[ec.Seq] {
 		bt.TotalTrades = 0
-		bt.UniverseMaxSize = 0
+		bt.UniverseMaxSize = ptr(0)
 		bt.InvalidReasons = []string{"empty_universe", "zero_trades"}
 	}
 

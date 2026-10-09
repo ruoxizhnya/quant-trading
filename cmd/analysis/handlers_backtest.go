@@ -318,6 +318,7 @@ func buildResponseFromState(engine *backtest.Engine, backtestID string) (backtes
 		PortfolioValues: result.PortfolioValues,
 		Trades:          result.Trades,
 		InvalidReasons:  result.InvalidReasons,
+		UniverseMaxSize: result.UniverseMaxSize,
 	}, true
 }
 

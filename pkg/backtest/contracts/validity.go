@@ -61,7 +61,11 @@ func CheckValidity(res *domain.BacktestResult) []InvalidReason {
 
 	var reasons []InvalidReason
 
-	if res.UniverseMaxSize <= 0 {
+	// nil = 未评估（生产者没填该字段）⇒ **不下判断**：未知不等于空。
+	// 把未知当空，会让其它 BacktestResult 生产路径（batch / walkforward /
+	// metrics）被误判为无效运行 —— 见 domain.BacktestResult.UniverseMaxSize
+	// 的审查注记。0 = 明确为空 ⇒ 无效。
+	if res.UniverseMaxSize != nil && *res.UniverseMaxSize <= 0 {
 		reasons = append(reasons, InvalidReason{
 			Code: InvalidEmptyUniverse,
 			Detail: "整个回测区间内没有任何一个交易日的票池非空（eligibleUniverse 始终为空）—— " +

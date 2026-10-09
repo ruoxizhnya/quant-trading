@@ -164,7 +164,8 @@ func TestOBS01_EmptyUniverseIsInvalidRun(t *testing.T) {
 	assert.Contains(t, resp.InvalidReasons, "empty_universe")
 	assert.Contains(t, resp.InvalidReasons, "zero_trades")
 	assert.Equal(t, 0, resp.TotalTrades)
-	assert.Equal(t, 0, resp.UniverseMaxSize, "整轮没有任何交易日的票池非空")
+	require.NotNil(t, resp.UniverseMaxSize, "引擎必须填该字段（0 = 明确为空）")
+	assert.Equal(t, 0, *resp.UniverseMaxSize, "整轮没有任何交易日的票池非空")
 
 	// OBS-01 切片 2（读路径）：state store 里的状态也不得再是 "completed"，
 	// 且 GetBacktestResult 必须放行 "invalid" —— 否则 GET 端点 / 报告层
@@ -186,7 +187,7 @@ func TestOBS01_EmptyUniverseIsInvalidRun(t *testing.T) {
 	assert.Contains(t, logs, "invalid run", "无效运行日志应明示无效")
 
 	t.Logf("场景1：status=%s invalid_reasons=%v total_trades=%d universe_max_size=%d",
-		resp.Status, resp.InvalidReasons, resp.TotalTrades, resp.UniverseMaxSize)
+		resp.Status, resp.InvalidReasons, resp.TotalTrades, derefInt(resp.UniverseMaxSize))
 	t.Logf("场景1 引擎日志（尾部）：%s", tailLines(logs, 3))
 }
 
@@ -226,7 +227,8 @@ func TestOBS01_NonEmptyUniverseWithTradesIsValid(t *testing.T) {
 	assert.Empty(t, resp.InvalidReasons, "正常回测不该有任何 InvalidReasons")
 	assert.Equal(t, "completed", resp.Status, "正常回测行为必须与改前一致")
 	assert.Greater(t, resp.TotalTrades, 0, "反证腿要求至少有 1 笔成交")
-	assert.Greater(t, resp.UniverseMaxSize, 0)
+	require.NotNil(t, resp.UniverseMaxSize)
+	assert.Greater(t, *resp.UniverseMaxSize, 0)
 
 	// OBS-01 切片 2（读路径反证腿）：有效运行的 state store 状态仍是
 	// "completed"、结果正常可读、无 InvalidReasons —— 读路径收口没有
@@ -240,7 +242,7 @@ func TestOBS01_NonEmptyUniverseWithTradesIsValid(t *testing.T) {
 	assert.Empty(t, stored.InvalidReasons, "有效运行的 state store 结果无 InvalidReasons")
 
 	t.Logf("反证腿：pool=%v status=%s total_trades=%d universe_max_size=%d",
-		pool, resp.Status, resp.TotalTrades, resp.UniverseMaxSize)
+		pool, resp.Status, resp.TotalTrades, derefInt(resp.UniverseMaxSize))
 }
 
 func tailLines(s string, n int) string {
@@ -250,4 +252,12 @@ func tailLines(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// derefInt 解引用（nil 用 -1 表示，日志里一眼能看出「未评估」）。
+func derefInt(p *int) int {
+	if p == nil {
+		return -1
+	}
+	return *p
 }
