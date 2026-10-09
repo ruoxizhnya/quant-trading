@@ -87,6 +87,27 @@ type OperatorDef struct {
 	Category OpCategory
 	Arity    int
 	Spec     indicator.OperatorSpec
+
+	// ScalarParams 声明哪些参数位必须是**标量**——即不依赖任何序列数据的
+	// 常量表达式。索引从 0 起；nil 表示该算子没有标量参数位。
+	//
+	// ─── 为什么要有这个字段（K3a）───────────────────────────────────
+	// ADR-028 §4 的签名（如 `ts_mean : Series × Scalar → Series`）此前只是
+	// Spec.Signature 里的一句**字符串**，闸门不校验它 ⇒ `ts_mean(close,
+	// volume)` 参数个数与节点形态都合法、能过闸，但求值时 firstScalar 取到
+	// 序列首值（成交量）或 NaN ⇒ `int(NaN)` 未定义 ⇒ 窗口荒谬 ⇒ **整条序列
+	// NaN**。这是「假合法残留」：危害被 OBS-01 兜住（判无效运行，不产出假
+	// 结论），但白白浪费一次 AI 试验，且报错信息毫无指向性。
+	//
+	// 把标量位声明成字段后，闸门能在**解析期**把它拦住，报错直接点名参数位。
+	//
+	// ─── 裁决：要求是「常量表达式」而不是「字面量」─────────────────
+	// 严格只认 *LiteralNode 会误拒合法的常量写法（例如用 `1/20` 表达 EWMA
+	// 衰减率 α）—— 误拒比假合法更危险（K3c 教训）。故判定标准为「子树不引用
+	// 任何序列数据」：字面量、纯常量的 + - * / ^ 与一元变换都算标量；
+	// 出现 IdentifierNode / 时序算子 / 横截面算子则不算。见 isConstantExpr。
+	ScalarParams []int
+
 	// selfWarmup / selfLookback：本算子**自身**对 warmup / lookback 的贡献，
 	// 按实参推导（args 为该算子的参数 AST）。nil ⇒ 贡献 0。
 	//
@@ -166,6 +187,7 @@ var operatorRegistry = map[string]OperatorDef{
 	// ══ 时序算子（存量 FIR，stateless，causal，Lookback/Warmup 由参数决定）══
 	"ts_mean": {
 		Name: "ts_mean", Category: CatTimeSeries, Arity: 2,
+		ScalarParams: []int{1},
 		Spec:         seriesStatelessSpec("ts_mean", "ts_mean : Series × Scalar → Series"),
 		selfWarmup:   windowSelfWarmup,
 		selfLookback: windowSelfLookback,
@@ -173,6 +195,7 @@ var operatorRegistry = map[string]OperatorDef{
 	},
 	"ts_std": {
 		Name: "ts_std", Category: CatTimeSeries, Arity: 2,
+		ScalarParams: []int{1},
 		Spec:         seriesStatelessSpec("ts_std", "ts_std : Series × Scalar → Series"),
 		selfWarmup:   windowSelfWarmup,
 		selfLookback: windowSelfLookback,
@@ -180,6 +203,7 @@ var operatorRegistry = map[string]OperatorDef{
 	},
 	"ts_sum": {
 		Name: "ts_sum", Category: CatTimeSeries, Arity: 2,
+		ScalarParams: []int{1},
 		Spec:         seriesStatelessSpec("ts_sum", "ts_sum : Series × Scalar → Series"),
 		selfWarmup:   windowSelfWarmup,
 		selfLookback: windowSelfLookback,
@@ -187,6 +211,7 @@ var operatorRegistry = map[string]OperatorDef{
 	},
 	"ts_max": {
 		Name: "ts_max", Category: CatTimeSeries, Arity: 2,
+		ScalarParams: []int{1},
 		Spec:         seriesStatelessSpec("ts_max", "ts_max : Series × Scalar → Series"),
 		selfWarmup:   windowSelfWarmup,
 		selfLookback: windowSelfLookback,
@@ -194,6 +219,7 @@ var operatorRegistry = map[string]OperatorDef{
 	},
 	"ts_min": {
 		Name: "ts_min", Category: CatTimeSeries, Arity: 2,
+		ScalarParams: []int{1},
 		Spec:         seriesStatelessSpec("ts_min", "ts_min : Series × Scalar → Series"),
 		selfWarmup:   windowSelfWarmup,
 		selfLookback: windowSelfLookback,
@@ -201,6 +227,7 @@ var operatorRegistry = map[string]OperatorDef{
 	},
 	"ts_delay": {
 		Name: "ts_delay", Category: CatTimeSeries, Arity: 2,
+		ScalarParams: []int{1},
 		Spec:         seriesStatelessSpec("ts_delay", "ts_delay : Series × Scalar → Series"),
 		selfWarmup:   periodSelfWarmup,
 		selfLookback: periodSelfLookback,
@@ -208,6 +235,7 @@ var operatorRegistry = map[string]OperatorDef{
 	},
 	"ts_delta": {
 		Name: "ts_delta", Category: CatTimeSeries, Arity: 2,
+		ScalarParams: []int{1},
 		Spec:         seriesStatelessSpec("ts_delta", "ts_delta : Series × Scalar → Series"),
 		selfWarmup:   periodSelfWarmup,
 		selfLookback: periodSelfLookback,
@@ -215,6 +243,7 @@ var operatorRegistry = map[string]OperatorDef{
 	},
 	"ts_pct_change": {
 		Name: "ts_pct_change", Category: CatTimeSeries, Arity: 2,
+		ScalarParams: []int{1},
 		Spec:         seriesStatelessSpec("ts_pct_change", "ts_pct_change : Series × Scalar → Series"),
 		selfWarmup:   periodSelfWarmup,
 		selfLookback: periodSelfLookback,
@@ -222,6 +251,7 @@ var operatorRegistry = map[string]OperatorDef{
 	},
 	"ts_corr": {
 		Name: "ts_corr", Category: CatTimeSeries, Arity: 3,
+		ScalarParams: []int{2},
 		Spec:         seriesStatelessSpec("ts_corr", "ts_corr : Series × Series × Scalar → Series"),
 		selfWarmup:   windowSelfWarmupAt2,
 		selfLookback: windowSelfLookbackAt2,
@@ -231,6 +261,7 @@ var operatorRegistry = map[string]OperatorDef{
 	},
 	"ts_rank": {
 		Name: "ts_rank", Category: CatTimeSeries, Arity: 2,
+		ScalarParams: []int{1},
 		Spec:         seriesStatelessSpec("ts_rank", "ts_rank : Series × Scalar → Series"),
 		selfWarmup:   windowSelfWarmup,
 		selfLookback: windowSelfLookback,
@@ -243,6 +274,7 @@ var operatorRegistry = map[string]OperatorDef{
 	// 不在 expression 里写第二份递推（ADR-028 §7 双实现共享核）。
 	"ts_rma": {
 		Name: "ts_rma", Category: CatTimeSeries, Arity: 2,
+		ScalarParams: []int{1},
 		Spec:         recursiveSpec("ts_rma", "ts_rma : Series × Scalar → Series", "sma(first,N)"),
 		selfWarmup:   rmaSelfWarmup,
 		selfLookback: stateSelfLookback, // ∞（0 + State=true）
@@ -252,6 +284,7 @@ var operatorRegistry = map[string]OperatorDef{
 	},
 	"ts_ewma": {
 		Name: "ts_ewma", Category: CatTimeSeries, Arity: 2,
+		ScalarParams: []int{1},
 		Spec:         recursiveSpec("ts_ewma", "ts_ewma : Series × Scalar → Series", "x[0]"),
 		selfWarmup:   ewmaSelfWarmup,
 		selfLookback: stateSelfLookback, // ∞
@@ -261,6 +294,7 @@ var operatorRegistry = map[string]OperatorDef{
 	},
 	"ts_kalman": {
 		Name: "ts_kalman", Category: CatTimeSeries, Arity: 3,
+		ScalarParams: []int{1, 2},
 		Spec:         recursiveSpec("ts_kalman", "ts_kalman : Series × Scalar × Scalar → Series", "p0=r"),
 		selfWarmup:   kalmanSelfWarmup,
 		selfLookback: stateSelfLookback, // ∞
@@ -588,6 +622,64 @@ func fieldsBySourceString() string {
 // 的算子）被判「合法」。闸门同时校验参数个数（`ts_mean(close)` 这类拦截）。
 
 // ValidateNode 递归校验单个 AST 节点（path 是位置面包屑，见下）。
+// isConstantExpr 报告一棵子树是否是**标量**（常量表达式）——即不依赖任何
+// 序列数据，可以在解析期就折叠成一个数。
+//
+// ─── 判定（K3a）─────────────────────────────────────────────────────
+//   - LiteralNode（裸数字）→ 是；
+//   - UnaryOpNode / BinaryOpNode（两侧都是常量）→ 是（允许 `1/20` 这类写法
+//     表达衰减率，避免误拒）；
+//   - FunctionNode 但算子是**一元逐元素**算子且参数皆常量 → 是（如 `neg(5)`）；
+//   - IdentifierNode（数据字段）→ **否**（这是 K3a 要拦的病根：
+//     `ts_mean(close, volume)` 的 volume 会被引擎当窗口长度用）；
+//   - FunctionNode 且是**时序**算子 → **否**（如 `ts_delay(volume,1)`，
+//     它输出的是序列不是标量）；
+//   - CrossSectionalNode → **否**（同样输出序列）。
+//
+// 为什么不是「只认字面量」：只认 *LiteralNode 会误拒 `1/20` 这类合法常量
+// 写法——误拒比假合法更危险（K3c 教训：把正经用法挡在外面，比放一条垃圾
+// 进来更伤）。判定标准收敛到「是否引用序列数据」这一条语义线上。
+func isConstantExpr(n Node) bool {
+	switch v := n.(type) {
+	case *LiteralNode:
+		return true
+	case *UnaryOpNode:
+		return isConstantExpr(v.Expr)
+	case *BinaryOpNode:
+		return isConstantExpr(v.Left) && isConstantExpr(v.Right)
+	case *FunctionNode:
+		def, ok := operatorRegistry[v.Name]
+		if !ok || def.Category != CatUnary {
+			return false // 时序算子 / 未知算子 ⇒ 产出序列，不是标量
+		}
+		for _, arg := range v.Args {
+			if !isConstantExpr(arg) {
+				return false
+			}
+		}
+		return true
+	default:
+		// IdentifierNode / CrossSectionalNode / 未知节点
+		return false
+	}
+}
+
+// describeNode 给报错用的节点简述（不打印整棵子树，避免报错过长）。
+func describeNode(n Node) string {
+	switch v := n.(type) {
+	case *IdentifierNode:
+		return fmt.Sprintf("数据字段 %q（序列，不是标量）", v.Name)
+	case *FunctionNode:
+		return fmt.Sprintf("算子 %q(...)（产出序列，不是标量）", v.Name)
+	case *CrossSectionalNode:
+		return fmt.Sprintf("横截面算子 %q(...)（产出序列，不是标量）", v.Op)
+	case *LiteralNode:
+		return "字面量"
+	default:
+		return fmt.Sprintf("%T", n)
+	}
+}
+
 func validateNode(node Node, path string) error {
 	switch n := node.(type) {
 	case *LiteralNode:
@@ -624,6 +716,23 @@ func validateNode(node Node, path string) error {
 		if len(n.Args) != def.Arity {
 			return fmt.Errorf("%s: operator %q expects %d argument(s), got %d",
 				path, n.Name, def.Arity, len(n.Args))
+		}
+		// K3a：标量参数位必须是不依赖序列数据的常量表达式。
+		//
+		// 拦的是「参数个数与节点形态都合法、但语义上把序列当标量用」的假合法
+		// —— 例如 ts_mean(close, volume)：过闸后求值时 firstScalar 取到成交量
+		// 首值（或 NaN）⇒ int(NaN) 未定义 ⇒ 窗口荒谬 ⇒ 整条序列 NaN。
+		// 在解析期拦住，报错点名参数位，AI 能自纠。
+		for _, i := range def.ScalarParams {
+			if i < 0 || i >= len(n.Args) {
+				// 注册表自身声明越界 ⇒ 闸门配置错误，fail-loud（不静默跳过）。
+				return fmt.Errorf("%s: operator %q 的 ScalarParams 声明越界 [%d]（arity=%d，注册表错误）",
+					path, n.Name, i, len(n.Args))
+			}
+			if !isConstantExpr(n.Args[i]) {
+				return fmt.Errorf("%s: operator %q 的第 %d 个参数必须是标量（常量），got %s",
+					path, n.Name, i, describeNode(n.Args[i]))
+			}
 		}
 		for i, arg := range n.Args {
 			if err := validateNode(arg, fmt.Sprintf("%s.arg[%d]", path, i)); err != nil {
