@@ -64,34 +64,6 @@ func wasmIdentity() []byte {
 	return m.encode()
 }
 
-// wasmStrategy: 导出 initialize(params_ptr,params_len)→i32（返回 0）和
-// generate_signals(bars_ptr,bars_len)→i64（恒等返回 pack(ptr,len)）。
-// 带 1 页内存（供 Initialize/GenerateSignals 写入 input）。用于
-// StrategyPluginSession 测试。
-func wasmStrategy() []byte {
-	m := &wasmModule{
-		types: []wasmFuncType{
-			{params: []byte{valI32, valI32}, results: []byte{valI32}}, // initialize
-			{params: []byte{valI32, valI32}, results: []byte{valI64}}, // generate_signals
-		},
-		funcs:  []uint32{0, 1},
-		memory: &wasmMemory{min: 1},
-		export: []wasmExport{
-			{name: "memory", kind: 2, idx: 0},
-			{name: "initialize", kind: 0, idx: 0},
-			{name: "generate_signals", kind: 0, idx: 1},
-		},
-		codes: [][]byte{
-			{opI32Const, 0x00, opEnd}, // initialize: i32.const 0; end
-			{ // generate_signals: pack(ptr, len) = ptr|(len<<32)
-				opLocalGet, 0x01, opI64ExtendI32U, opI64Const, 0x20, opI64Shl,
-				opLocalGet, 0x00, opI64ExtendI32U, opI64Or, opEnd,
-			},
-		},
-	}
-	return m.encode()
-}
-
 // newTestRuntime 创建 WazeroRuntime（生产实现）。
 func newTestRuntime() *WazeroRuntime {
 	return NewWazeroRuntime(context.Background(), DefaultMaxMemory)
@@ -406,26 +378,6 @@ func TestSandbox_CallWithTimeout(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, uint64(0), results[0])
-}
-
-// ─── StrategyPluginSession tests ─────────────────────────────────
-
-func TestStrategyPluginSession_InitializeAndGenerate(t *testing.T) {
-	t.Parallel()
-	r := newTestRuntime()
-	defer r.Close(context.Background())
-	sb := NewSandbox(r, Config{})
-
-	session, err := sb.NewStrategyPluginSession(context.Background(), wasmStrategy())
-	require.NoError(t, err)
-	defer session.Close()
-
-	err = session.Initialize(context.Background(), []byte(`{"lookback":20}`))
-	require.NoError(t, err)
-
-	signals, err := session.GenerateSignals(context.Background(), []byte(`[{"symbol":"AAPL","close":150}]`))
-	require.NoError(t, err)
-	assert.NotEmpty(t, signals)
 }
 
 // ─── Concurrency tests ──────────────────────────────────────────

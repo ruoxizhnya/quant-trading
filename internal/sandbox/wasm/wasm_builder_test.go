@@ -23,6 +23,7 @@ const (
 	opI32Const      byte = 0x41
 	opF64Const      byte = 0x44
 	opCall          byte = 0x10
+	opDrop          byte = 0x1a
 	opBr            byte = 0x0c
 	opLoop          byte = 0x03
 	opEnd           byte = 0x0b
