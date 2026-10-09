@@ -36,6 +36,7 @@
 package expression
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -160,25 +161,58 @@ const (
 	FieldSourceGroup FieldSource = "group"
 )
 
-// fieldRegistry 是字段名合法集合的**唯一权威来源**：字段 → 来源。
-var fieldRegistry = map[string]FieldSource{
+// ─── 物理数据表（可用性探测的对象）───────────────────────────────────
+//
+// 集中成常量：这些表名同时被 fieldRegistry 的 DependsOn、可用性探测与护栏
+// 引用，散落成字符串迟早拼错（拼错 = 探测一张不存在的表 = 永远「不可用」）。
+const (
+	// TableOHLCV 日线行情（前复权）——本项目唯一有大量数据的表。
+	TableOHLCV = "ohlcv_daily_qfq"
+	// TableFundamentals 财报（PIT 对齐）。
+	TableFundamentals = "stock_fundamentals"
+	// TableSectorMap 个股 → 板块映射（cs_neutralize 的 sector 分组标签来源）。
+	TableSectorMap = "stock_sector_map"
+)
+
+// FieldDef 是一个字段的完整声明：来源类别 + 依赖的物理数据表。
+//
+// ─── 为什么要有 DependsOn（OBS-08 切片 2）───────────────────────────
+// OBS-08 切片 1 把字段白名单与 **provider 能力**对齐了（provider 代码认不认
+// 这个字段）。但「provider 认」不等于「表里有数据」：实测
+// `stock_fundamentals` 与 `stock_sector_map` 都是 **0 行**（免费 Tushare
+// 额度拉不到），于是 pe/pb/ps/roe/roa/revenue/profit/sector 这 8 个字段
+// 语法合法、过闸门、provider 也认，**但求值必然拿不到数据** —— AI 对着空
+// 数据静默产垃圾（危害被 OBS-01 兜住，但白白浪费一轮试验）。
+//
+// 故字段声明要再往下走一层：从「能力」到「可用性」。DependsOn 指明该字段的
+// 数据来自哪张物理表，可用性探测据此判定「当前有没有数据」。
+type FieldDef struct {
+	// Source 是来源类别（market / fundamentals / group）。
+	Source FieldSource
+	// DependsOn 是该字段的数据来源表（可用性探测的对象）。空串 = 无物理表
+	// 依赖（纯派生字段，恒可用）。
+	DependsOn string
+}
+
+// fieldRegistry 是字段名合法集合的**唯一权威来源**：字段 → 声明。
+var fieldRegistry = map[string]FieldDef{
 	// 行情
-	"open":     FieldSourceMarket,
-	"high":     FieldSourceMarket,
-	"low":      FieldSourceMarket,
-	"close":    FieldSourceMarket,
-	"volume":   FieldSourceMarket,
-	"turnover": FieldSourceMarket,
+	"open":     {Source: FieldSourceMarket, DependsOn: TableOHLCV},
+	"high":     {Source: FieldSourceMarket, DependsOn: TableOHLCV},
+	"low":      {Source: FieldSourceMarket, DependsOn: TableOHLCV},
+	"close":    {Source: FieldSourceMarket, DependsOn: TableOHLCV},
+	"volume":   {Source: FieldSourceMarket, DependsOn: TableOHLCV},
+	"turnover": {Source: FieldSourceMarket, DependsOn: TableOHLCV},
 	// 基本面（对应 domain.Fundamental 的 PE/PB/PS/ROE/ROA/Revenue/NetProfit）
-	"pe":      FieldSourceFundamentals,
-	"pb":      FieldSourceFundamentals,
-	"ps":      FieldSourceFundamentals,
-	"roe":     FieldSourceFundamentals,
-	"roa":     FieldSourceFundamentals,
-	"revenue": FieldSourceFundamentals,
-	"profit":  FieldSourceFundamentals,
+	"pe":      {Source: FieldSourceFundamentals, DependsOn: TableFundamentals},
+	"pb":      {Source: FieldSourceFundamentals, DependsOn: TableFundamentals},
+	"ps":      {Source: FieldSourceFundamentals, DependsOn: TableFundamentals},
+	"roe":     {Source: FieldSourceFundamentals, DependsOn: TableFundamentals},
+	"roa":     {Source: FieldSourceFundamentals, DependsOn: TableFundamentals},
+	"revenue": {Source: FieldSourceFundamentals, DependsOn: TableFundamentals},
+	"profit":  {Source: FieldSourceFundamentals, DependsOn: TableFundamentals},
 	// 横截面分组标签（cs_neutralize 的 group 参数）——不是数据字段
-	"sector": FieldSourceGroup,
+	"sector": {Source: FieldSourceGroup, DependsOn: TableSectorMap},
 }
 
 // operatorRegistry 是唯一的名字合法集合。map 便于 O(1) 查表；
@@ -558,7 +592,7 @@ func AvailableFields() []string {
 func AvailableFieldsInSource(source FieldSource) []string {
 	fields := make([]string, 0)
 	for f, s := range fieldRegistry {
-		if s == source {
+		if s.Source == source {
 			fields = append(fields, f)
 		}
 	}
@@ -572,7 +606,7 @@ func AvailableFieldsInSource(source FieldSource) []string {
 func AvailableDataFields() []string {
 	fields := make([]string, 0, len(fieldRegistry))
 	for f, s := range fieldRegistry {
-		if s != FieldSourceGroup {
+		if s.Source != FieldSourceGroup {
 			fields = append(fields, f)
 		}
 	}
@@ -582,8 +616,96 @@ func AvailableDataFields() []string {
 
 // FieldSourceOf 返回字段名所属来源；未登记 → (_, false)。
 func FieldSourceOf(name string) (FieldSource, bool) {
-	s, ok := fieldRegistry[name]
-	return s, ok
+	def, ok := fieldRegistry[name]
+	if !ok {
+		return "", false
+	}
+	return def.Source, true
+}
+
+// ─── 可用性声明（OBS-08 切片 2）─────────────────────────────────────
+//
+// 与「能力层」的分工（重要，别混）：
+//   - 能力层（切片 1 已做）：provider 代码认不认这个字段 —— `AvailableDataFields()`
+//     是这一层的权威集合，被跨包护栏（≡ OHLCVDataProvider.Fields()）钉住；
+//   - 可用性层（本切片）：那张表里**当前有没有数据**。
+//
+// 「认」不等于「有」。实测 stock_fundamentals / stock_sector_map 均为 0 行。
+// 所以本层**不改**能力层的任何语义，只在它之上叠加一个运行时判定。
+
+// AvailabilityProbe 探测一张物理表当前是否有数据。
+//
+// 由**调用方注入**（本包不连数据库 —— 表达式引擎是纯计算层，不该知道 DB）。
+// 语义：返回 (有数据, error)。error 表示「探测本身失败」，与「探测成功但没
+// 数据」是两回事，前者必须 fail-loud（不能当成「不可用」悄悄降级，否则
+// 库挂了会伪装成「字段没数据」）。
+type AvailabilityProbe func(ctx context.Context, table string) (bool, error)
+
+// FieldAvailability 按 probe 判定每个字段当前是否有数据。
+//
+// 返回字段名 → 是否有数据。**只含已登记字段**，未登记字段不在返回里。
+// 无依赖表（DependsOn 为空）的字段恒为 true（纯派生，不依赖数据）。
+//
+// 探测失败（error）→ 整体返回 error，不给部分结果：一份「部分正确」的可用
+// 性地图比没有更危险（AI 会相信里面「可用」的那几个）。
+func FieldAvailability(ctx context.Context, probe AvailabilityProbe) (map[string]bool, error) {
+	if probe == nil {
+		return nil, fmt.Errorf("expression: FieldAvailability 的 probe 为 nil（需由调用方注入数据来源探测）")
+	}
+	// 同表只探一次（一张表通常被多个字段依赖）。
+	tableOK := make(map[string]bool)
+	out := make(map[string]bool, len(fieldRegistry))
+	for field, def := range fieldRegistry {
+		if def.DependsOn == "" {
+			out[field] = true
+			continue
+		}
+		if ok, cached := tableOK[def.DependsOn]; cached {
+			out[field] = ok
+			continue
+		}
+		ok, err := probe(ctx, def.DependsOn)
+		if err != nil {
+			return nil, fmt.Errorf("expression: 字段 %q 的依赖表 %q 可用性探测失败: %w", field, def.DependsOn, err)
+		}
+		tableOK[def.DependsOn] = ok
+		out[field] = ok
+	}
+	return out, nil
+}
+
+// AvailableDataFieldsWith 在能力层之上叠加可用性：只返回**当前有数据**的
+// 数据字段（升序）。
+//
+// avail 为 nil 时等价于 AvailableDataFields()（不叠加可用性，能力层全集）——
+// 调用方拿不到探测结果时的降级行为，**语义明确**（不是「全部可用」，而是
+// 「未做可用性过滤」）。调用方应优先传入真实探测结果。
+func AvailableDataFieldsWith(avail map[string]bool) []string {
+	all := AvailableDataFields()
+	if avail == nil {
+		return all
+	}
+	out := make([]string, 0, len(all))
+	for _, f := range all {
+		if avail[f] {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// FieldsDependingOn 返回依赖给定物理表的全部字段名（升序）。
+//
+// 用途：数据补上/清空时，一眼看出影响哪些字段；也是护栏与诊断的入口。
+func FieldsDependingOn(table string) []string {
+	out := make([]string, 0, len(fieldRegistry))
+	for f, def := range fieldRegistry {
+		if def.DependsOn == table {
+			out = append(out, f)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // availableOperatorsHint 生成「（可用算子：a, b, …）」后缀，供闸门/求值报错
