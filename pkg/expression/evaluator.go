@@ -287,6 +287,36 @@ func applyBinaryOp(op string, a, b float64) float64 {
 			return 1
 		}
 		return 0
+	case ">=":
+		if a >= b {
+			return 1
+		}
+		return 0
+	case "<=":
+		if a <= b {
+			return 1
+		}
+		return 0
+	case "AND":
+		// NaN 必须传播（OBS-07）：Go 里 NaN != 0 恒为 true，若不特判，
+		// 「谓词 AND NaN」会组合出 1 —— 假信号。与比较算子（NaN 参与
+		// 比较得 false → 0，语义是「不满足」）不同，AND/OR 是**组合**谓词，
+		// 任何一个操作数未知，结果就未知，传 NaN 让下游（闸门/验证器）看见。
+		if math.IsNaN(a) || math.IsNaN(b) {
+			return math.NaN()
+		}
+		if a != 0 && b != 0 {
+			return 1
+		}
+		return 0
+	case "OR":
+		if math.IsNaN(a) || math.IsNaN(b) {
+			return math.NaN()
+		}
+		if a != 0 || b != 0 {
+			return 1
+		}
+		return 0
 	default:
 		return math.NaN()
 	}
@@ -318,6 +348,16 @@ func applyUnaryOp(op string, v float64) float64 {
 		return 0
 	case "exp":
 		return math.Exp(v)
+	case "NOT":
+		// NaN 传播（OBS-07，语义见 applyBinaryOp 的 AND 注释）：
+		// Go 里 NaN == 0 恒为 false，不特判的话 NOT(NaN) 会得 1 —— 假信号。
+		if math.IsNaN(v) {
+			return math.NaN()
+		}
+		if v == 0 {
+			return 1
+		}
+		return 0
 	default:
 		return math.NaN()
 	}

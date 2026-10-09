@@ -44,6 +44,7 @@ var sampleExpr = map[string]string{
 	"sqrt": "sqrt(close)",
 	"sign": "sign(close)",
 	"exp":  "exp(close)",
+	"NOT":  "not close > 0",
 	// binary
 	"+":  "close + open",
 	"-":  "close - open",
@@ -53,6 +54,11 @@ var sampleExpr = map[string]string{
 	">":  "close > open",
 	"<":  "close < open",
 	"==": "close == open",
+	">=": "close >= open",
+	"<=": "close <= open",
+	// 逻辑关键字（OBS-07）
+	"AND": "close > 0 AND open > 0",
+	"OR":  "close > 0 OR open > 0",
 }
 
 func TestRegistry_SelfConsistency(t *testing.T) {

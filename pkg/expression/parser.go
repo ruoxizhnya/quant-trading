@@ -36,6 +36,11 @@ const (
 	tokenGT
 	tokenLT
 	tokenEQ
+	tokenGE
+	tokenLE
+	tokenAND
+	tokenOR
+	tokenNOT
 	// Add more operators as needed
 )
 
@@ -116,7 +121,20 @@ func tokenize(formula string) ([]token, error) {
 			for i < len(runes) && (unicode.IsLetter(runes[i]) || unicode.IsDigit(runes[i]) || runes[i] == '_') {
 				i++
 			}
-			tokens = append(tokens, token{typ: tokenIdentifier, val: string(runes[start:i])})
+			word := string(runes[start:i])
+			// 逻辑关键字（OBS-07）：大小写不敏感，统一归一到大写形态。
+			// 注册表里也以大写登记（AND/OR/NOT），与全小写的字段名/函数名
+			// 在视觉上区分。无同名冲突（注册表无 and/or/not 字段或函数）。
+			switch strings.ToUpper(word) {
+			case "AND":
+				tokens = append(tokens, token{typ: tokenAND, val: "AND"})
+			case "OR":
+				tokens = append(tokens, token{typ: tokenOR, val: "OR"})
+			case "NOT":
+				tokens = append(tokens, token{typ: tokenNOT, val: "NOT"})
+			default:
+				tokens = append(tokens, token{typ: tokenIdentifier, val: word})
+			}
 			continue
 		}
 
@@ -139,9 +157,21 @@ func tokenize(formula string) ([]token, error) {
 		case '^':
 			tokens = append(tokens, token{typ: tokenPow, val: "^"})
 		case '>':
-			tokens = append(tokens, token{typ: tokenGT, val: ">"})
+			// >= 优先于 >（两字符算子必须先识别，否则 `>=` 会被拆成
+			// `>` + `= `，后者在 tokenizer 里直接报 unexpected '='）。
+			if i+1 < len(runes) && runes[i+1] == '=' {
+				tokens = append(tokens, token{typ: tokenGE, val: ">="})
+				i++
+			} else {
+				tokens = append(tokens, token{typ: tokenGT, val: ">"})
+			}
 		case '<':
-			tokens = append(tokens, token{typ: tokenLT, val: "<"})
+			if i+1 < len(runes) && runes[i+1] == '=' {
+				tokens = append(tokens, token{typ: tokenLE, val: "<="})
+				i++
+			} else {
+				tokens = append(tokens, token{typ: tokenLT, val: "<"})
+			}
 		case '=':
 			if i+1 < len(runes) && runes[i+1] == '=' {
 				tokens = append(tokens, token{typ: tokenEQ, val: "=="})
@@ -159,8 +189,66 @@ func tokenize(formula string) ([]token, error) {
 	return tokens, nil
 }
 
-// parseExpression parses the top-level expression (handles comparisons)
+// parseExpression parses the top-level expression.
+//
+// 优先级链（低 → 高，OBS-07）：OR → AND → NOT → 比较 → 加减 → 乘除 → 幂 → 一元。
+// 与主流语言一致的裁决：
+//   - 比较**高于** AND/OR：`a > 1 AND b > 2` = `(a>1) AND (b>2)`（若比较低于
+//     AND，`a > 1 AND b` 会先算 `1 AND b`，语义荒谬）；
+//   - NOT **低于**比较、高于 AND：`NOT a > b` = `NOT(a > b)`。若 NOT 放进
+//     parseUnary（最高优先级），`NOT a > b` 会变成 `(NOT a) > b` —— 把逐元素
+//     取反后的序列再比较，几乎从不是书写者的本意；
+//   - AND 高于 OR：`a AND b OR c` = `(a AND b) OR c`。
 func (p *Parser) parseExpression() (Node, error) {
+	return p.parseOr()
+}
+
+// parseOr parses logical OR (lowest precedence).
+func (p *Parser) parseOr() (Node, error) {
+	left, err := p.parseAnd()
+	if err != nil {
+		return nil, err
+	}
+
+	for p.match(tokenOR) {
+		right, err := p.parseAnd()
+		if err != nil {
+			return nil, err
+		}
+		left = &BinaryOpNode{Op: "OR", Left: left, Right: right}
+	}
+
+	return left, nil
+}
+
+// parseAnd parses logical AND.
+func (p *Parser) parseAnd() (Node, error) {
+	left, err := p.parseNot()
+	if err != nil {
+		return nil, err
+	}
+
+	for p.match(tokenAND) {
+		right, err := p.parseNot()
+		if err != nil {
+			return nil, err
+		}
+		left = &BinaryOpNode{Op: "AND", Left: left, Right: right}
+	}
+
+	return left, nil
+}
+
+// parseNot parses logical NOT（前缀，低于比较、右结合可叠加）。
+func (p *Parser) parseNot() (Node, error) {
+	if p.match(tokenNOT) {
+		expr, err := p.parseNot()
+		if err != nil {
+			return nil, err
+		}
+		return &UnaryOpNode{Op: "NOT", Expr: expr}, nil
+	}
+
 	return p.parseComparison()
 }
 
@@ -209,7 +297,7 @@ func (p *Parser) parseComparison() (Node, error) {
 		return nil, err
 	}
 
-	for p.match(tokenGT, tokenLT, tokenEQ) {
+	for p.match(tokenGT, tokenLT, tokenEQ, tokenGE, tokenLE) {
 		op := p.previous().val
 		right, err := p.parseAdditive()
 		if err != nil {

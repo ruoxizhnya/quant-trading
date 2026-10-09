@@ -18,8 +18,8 @@
 //
 //   - 时间序列 ts_*（13 个）= 10 个存量 FIR 算子 + 3 个 L2 递推算子（K3 切片 2）
 //   - 横截面 cs_*（4 个）
-//   - 一元（6 个）：neg / abs / log / sqrt / sign / exp
-//   - 二元（8 个）：+ - * / ^ > < ==
+//   - 一元（7 个）：neg / abs / log / sqrt / sign / exp / NOT（OBS-07）
+//   - 二元（12 个）：+ - * / ^ > < == 及 >= <= AND OR（OBS-07）
 //
 // 每个算子一条 OperatorDef：名字 / 类别 / 参数个数 / indicator.OperatorSpec
 // （ADR-028 §4 七项）/ 求值绑定。参数化算子的 Lookback / Warmup 是「参数的
@@ -367,6 +367,17 @@ var operatorRegistry = map[string]OperatorDef{
 	"sign": unaryDef("sign"),
 	"exp":  unaryDef("exp"),
 
+	// ══ 逻辑关键字（OBS-07）══
+	//
+	// NOT 是一元逐元素算子：v==0 → 1，else 0（NaN 传播）。注册名用大写
+	// "NOT"——它是**关键字**（tokenizer 大小写不敏感地归一），与字段名/
+	// 函数名（全小写）在视觉上区分开。
+	//
+	// 优先级裁决：NOT 在 parseNot 层（低于比较、高于 AND）——`NOT a > b`
+	// 解析为 `NOT(a > b)` 而不是 `(NOT a) > b`。后者会把逐元素取反后的序列
+	// 再拿去比较，语义完全不同且几乎从不是书写者的本意。
+	"NOT": unaryDef("NOT"),
+
 	// ══ 二元逐元素算子（lookback=0）══
 	//
 	// 求值绑定在 evaluator.go 的 applyBinaryOp（按符号 switch）；此处只登记
@@ -379,6 +390,22 @@ var operatorRegistry = map[string]OperatorDef{
 	">":  binaryDef(">"),
 	"<":  binaryDef("<"),
 	"==": binaryDef("=="),
+
+	// ══ 比较与逻辑关键字（OBS-07）══
+	//
+	// >= / <=：与 > / < / == 同语义（逐点谓词，满足 1 否则 0）。
+	//
+	// AND / OR：逻辑组合，非零为真、结果 0/1，**NaN 传播**。NaN 传播是
+	// 硬性语义（见 applyBinaryOp 注释）：Go 里 `NaN != 0` 为 true，若不传播，
+	// `cs_rank(x) > 0.8 AND NaN` 会组合出 1——假信号。
+	//
+	// 优先级裁决：比较 > AND > OR（`a > 1 AND b > 2 OR c > 3` =
+	// `((a>1 AND b>2) OR c>3)`，与主流语言一致）。实现在 parser 的
+	// parseOr → parseAnd 链。
+	">=":  binaryDef(">="),
+	"<=":  binaryDef("<="),
+	"AND": binaryDef("AND"),
+	"OR":  binaryDef("OR"),
 }
 
 // ─── Spec 构造助手 ────────────────────────────────────────────────────
