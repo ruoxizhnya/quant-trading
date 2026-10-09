@@ -208,6 +208,65 @@ func TestInstance_ReadOutOfBounds(t *testing.T) {
 	assert.ErrorIs(t, err, ErrMemoryOutOfBounds)
 }
 
+// TestInstance_ReadMemoryIsCopy 钉死 ReadMemory 的**隔离性**：返回的切片是副本，
+// 调用方修改它不得污染 wasm 内存（退役前的 InProcessRuntime 是 make+copy 语义，
+// wazero 的 Memory.Read 返回 write-through view，必须显式 copy 才能保住隔离）。
+func TestInstance_ReadMemoryIsCopy(t *testing.T) {
+	t.Parallel()
+	r := newTestRuntime()
+	defer r.Close(context.Background())
+	mod, _ := r.Compile(context.Background(), wasmIdentity())
+	inst, _ := mod.Instantiate(context.Background(), DefaultMaxMemory)
+	defer inst.Close()
+
+	err := inst.WriteMemory(0, []byte("original"))
+	require.NoError(t, err)
+
+	read, err := inst.ReadMemory(0, 8)
+	require.NoError(t, err)
+
+	// 修改返回值，再读一次，必须还是原文。
+	read[0] = 'X'
+	again, err := inst.ReadMemory(0, 8)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("original"), again, "ReadMemory 返回值必须是副本，改它不得污染 wasm 内存")
+}
+
+// TestInstance_WriteMemoryGrows 钉死 WriteMemory 的 grow 语义：写超过当前内存
+// 大小的数据，应当 grow（接口契约「Grows memory if needed」），而非报越界。
+func TestInstance_WriteMemoryGrows(t *testing.T) {
+	t.Parallel()
+	r := newTestRuntime()
+	defer r.Close(context.Background())
+	mod, _ := r.Compile(context.Background(), wasmIdentity())
+	inst, _ := mod.Instantiate(context.Background(), DefaultMaxMemory)
+	defer inst.Close()
+
+	// wasmIdentity 声明 1 页（64KB）。写 128KB 应触发 grow 并成功。
+	big := make([]byte, 128*1024)
+	err := inst.WriteMemory(0, big)
+	assert.NoError(t, err, "写超过当前页的数据应 grow 而非报越界（接口契约）")
+
+	read, err := inst.ReadMemory(0, uint32(len(big)))
+	require.NoError(t, err)
+	assert.Equal(t, big, read)
+}
+
+// TestInstance_MemoryLimitExceeded 钉死 grow 超上限的报错：runtime 上限 64KB，
+// 写 128KB 需要 2 页，grow 被 WithMemoryLimitPages 拒绝 → ErrMemoryLimitExceeded。
+func TestInstance_MemoryLimitExceeded(t *testing.T) {
+	t.Parallel()
+	r := NewWazeroRuntime(context.Background(), 65536) // 1 页 = 64KB 上限
+	defer r.Close(context.Background())
+	mod, _ := r.Compile(context.Background(), wasmIdentity())
+	inst, _ := mod.Instantiate(context.Background(), 65536)
+	defer inst.Close()
+
+	big := make([]byte, 128*1024) // 需要 2 页，超 1 页上限
+	err := inst.WriteMemory(0, big)
+	assert.ErrorIs(t, err, ErrMemoryLimitExceeded)
+}
+
 func TestInstance_Call_NotExported(t *testing.T) {
 	t.Parallel()
 	r := newTestRuntime()

@@ -35,12 +35,13 @@ func NewWazeroRuntime(ctx context.Context, maxMemoryBytes int) *WazeroRuntime {
 	if maxMemoryBytes <= 0 {
 		maxMemoryBytes = DefaultMaxMemory
 	}
-	// 向上取整到页（wazero 页 = 64KB）。
+	// 向上取整到页（wazero 页 = 64KB）。max 存页对齐后的字节数，与 wazero 的
+	// 实际上限一致（避免「max 存原始值、wazero 按页取整」两套口径）。
 	pages := (maxMemoryBytes + 65535) / 65536
 	rtCfg := wazero.NewRuntimeConfig().WithMemoryLimitPages(uint32(pages))
 	return &WazeroRuntime{
 		rt:  wazero.NewRuntimeWithConfig(ctx, rtCfg),
-		max: maxMemoryBytes,
+		max: pages * 65536,
 	}
 }
 
@@ -100,12 +101,26 @@ type wazeroInstance struct {
 	mod api.Module
 }
 
-// WriteMemory implements Instance. wazero 的 Write 返回 bool（false = 越界/超限），
-// 映射为 ErrMemoryOutOfBounds 或 ErrMemoryLimitExceeded。
+// WriteMemory implements Instance. 接口契约「Grows memory if needed」：wazero 的
+// Write 不会自动 grow（越界返回 false），故先尝试直接写，失败则 grow 到需要
+// 的页数再写；grow 超过 runtime 上限（WithMemoryLimitPages）→ ErrMemoryLimitExceeded。
 func (i *wazeroInstance) WriteMemory(offset uint32, data []byte) error {
 	mem := i.mod.Memory()
 	if mem == nil {
 		return errors.New("wasm: module has no memory")
+	}
+	if mem.Write(offset, data) {
+		return nil
+	}
+
+	// 写失败 = 当前内存不够。按接口契约 grow 到需要的大小。
+	needed := offset + uint32(len(data))
+	curPages := mem.Size() / 65536
+	needPages := (needed + 65535) / 65536
+	if needPages > curPages {
+		if _, ok := mem.Grow(needPages - curPages); !ok {
+			return fmt.Errorf("%w: need %d pages (limit %d)", ErrMemoryLimitExceeded, needPages, curPages)
+		}
 	}
 	if !mem.Write(offset, data) {
 		return fmt.Errorf("%w: write [%d:%d]", ErrMemoryOutOfBounds, offset, offset+uint32(len(data)))
@@ -113,7 +128,9 @@ func (i *wazeroInstance) WriteMemory(offset uint32, data []byte) error {
 	return nil
 }
 
-// ReadMemory implements Instance.
+// ReadMemory implements Instance. wazero 的 Read 返回 write-through **view**，
+// 必须显式 copy —— 否则调用方修改返回值会污染 wasm 内存，与退役前
+// InProcessRuntime 的 make+copy 隔离语义回归。
 func (i *wazeroInstance) ReadMemory(offset uint32, length uint32) ([]byte, error) {
 	mem := i.mod.Memory()
 	if mem == nil {
@@ -123,7 +140,9 @@ func (i *wazeroInstance) ReadMemory(offset uint32, length uint32) ([]byte, error
 	if !ok {
 		return nil, fmt.Errorf("%w: read [%d:%d]", ErrMemoryOutOfBounds, offset, offset+length)
 	}
-	return buf, nil
+	out := make([]byte, length)
+	copy(out, buf)
+	return out, nil
 }
 
 // MemorySize implements Instance.
