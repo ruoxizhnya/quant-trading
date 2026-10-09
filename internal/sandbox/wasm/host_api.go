@@ -27,7 +27,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sort"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -103,8 +102,8 @@ func trapNoContext(fn string) {
 
 // InstantiateHostModule 在 runtime 上实例化 host 白名单模块 "env"。
 // 必须在实例化任何依赖它的 wasm 策略模块**之前**调用。
-func InstantiateHostModule(ctx context.Context, r wazero.Runtime) error {
-	_, err := r.NewHostModuleBuilder(HostModuleName).
+func (r *WazeroRuntime) InstantiateHostModule(ctx context.Context) error {
+	_, err := r.rt.NewHostModuleBuilder(HostModuleName).
 		NewFunctionBuilder().WithFunc(hostGetBar).Export(HostFnGetBar).
 		NewFunctionBuilder().WithFunc(hostGetSeriesLen).Export(HostFnGetSeriesLen).
 		NewFunctionBuilder().WithFunc(hostGetSymbolCount).Export(HostFnGetSymbolCount).
@@ -270,14 +269,3 @@ func hostEmitSignal(ctx context.Context, symbolIdx, action int32, strength float
 // hostLog 实现 log(level i32, msg_ptr i32, msg_len i32) → void。
 // 刻意空实现：沙箱内日志不落盘、不外发（ADR-029 §3.2 无文件/网络）。
 func hostLog(_ context.Context, _ api.Module, _, _, _ uint32) {}
-
-// sortedSymbolKeys 返回 Series 的 symbol 键按字典序排序。目前 BarContext 用
-// Symbols 切片承载顺序（构造方保证有序），此函数保留给未来 map 形态的迁移。
-func sortedSymbolKeys(m map[string]float64) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}

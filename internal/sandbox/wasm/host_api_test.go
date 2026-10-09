@@ -76,7 +76,7 @@ func wasmGetBarWithOffset() []byte {
 func newHostRuntime(t *testing.T) *WazeroRuntime {
 	t.Helper()
 	r := NewWazeroRuntime(context.Background(), DefaultMaxMemory)
-	require.NoError(t, InstantiateHostModule(context.Background(), r.rt))
+	require.NoError(t, r.InstantiateHostModule(context.Background()))
 	t.Cleanup(func() { r.Close(context.Background()) })
 	return r
 }
