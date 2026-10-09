@@ -146,7 +146,8 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 |---|---|---|
 | OBS-06 ✅ 完成（2026-10-09，随 K3 切片 2 合并） | DSL 语法闸门不校验算子名 —— 已在 `Expression.Validate()` 补算子/字段/参数个数闸门（fail-closed，报错带位置与可用清单），`validate_factor` 解析后必过闸门 | — |
 | OBS-07 | tokenizer 不支持 `>=`/`<=`/`AND`/`OR`/`NOT` | 中 |
-| OBS-08 | 序列注册表缺「可用性声明」（11 张表全 0 行，AI 在空表上静默产垃圾）；**并**：闸门的字段白名单须由 provider 派生（现与 `OHLCVDataProvider` 错配：放行了它不认的 `market_cap`/`eps`/…，又拦掉了它支持的 `ps`/`roa` —— 见 K3c） | 高（与 OBS-01 同源） |
+| OBS-08 切片 1 ✅ 完成（2026-10-09） | 字段注册表收敛为**单一事实源** + 与 provider 对齐：`DataProvider` 加 `Fields()` 能力声明（5 处实现同步：1 生产 + 4 假）；注册表升级为**带来源**（market / fundamentals / group）；**修误拒**（`ps`/`roa` 现被闸门接受）、**补实现**（`revenue`/`profit` 由 `domain.Fundamental` 的 `Revenue`/`NetProfit` 接线 —— 此前只有声明没有实现）、**清假合法**（`market_cap`/`roe_ttm`/`eps` 从注册表移除：`domain.Fundamental` 无此三字段 ⇒ 永不可求值，留在闸门里就是让 AI 反复撞墙）；求值报错区分「字段不在语言里」vs「字段属于 X 源但本 provider 不供应」；新增**跨包防漂移护栏**（注册表非 group 字段 ≡ `OHLCVDataProvider.Fields()`，双向点名）。**并**：研究提示词 `research.go` 的字段/算子清单改为**从注册表派生**（此前硬编码，广告幻影 `market_cap` 且漏掉 9 个算子与 4 个字段）+ 新增护栏 | — |
+| OBS-08 切片 2 ⬜ | **序列注册表 + 可用性声明**（`SeriesSpec` 目前只存在于 `registry.go:105` 一句注释里）：声明每个字段/序列的**当前可用性**（例如 `stock_sector_map` 0 行 ⇒ `sector` 不可用），让 AI 不再对着空数据静默产垃圾。**并**（本轮新发现）：`pkg/ai/prompts/factor_research.txt` 与 `strategy_generate.txt` 是**零引用的死资产**（Go / 最新版文档 / 脚本 / CI 全无引用，仅 `docs/archive/` 提到），且 `factor_research.txt` 的字段清单**同样漂移**（广告 `vwap` / `turnover_rate` / `returns` / `volatility`）。**待裁决：接线它**（当作研究提示词，字段从注册表派生）**还是删除它** | 高（与 OBS-01 同源） |
 | OBS-11 | per-day HTTP 反模式 `getSignalsFromStrategyService` 待删（策略服务只传定义不传信号） | 中（随 K1/K2） |
 | OBS-12 | Copilot 对外 API 契约与前端脱节（四层缺陷叠加） | 中 |
 | OBS-09 | 三份 ADR 引用成环且全 Proposed（027→028→029→027） | 低（治理） |

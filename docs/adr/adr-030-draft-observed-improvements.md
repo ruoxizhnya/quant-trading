@@ -218,6 +218,14 @@ ADR-028 附录 B 已逐条判为「真能力缺口」：
 - **后果**：AI 挖因子在空表上**静默产出垃圾**，与 OBS-01 同源。
 - **建议**：`SeriesSpec` 增加 `availability`（行数 / 标的覆盖率 / 最后更新日期），
   DAG 求值前对不可用序列 **fail-loud**；`Provider.GetSeries` 在缺失时返回明确错误而非空切片。
+- **执行状态（2026-10-09）**：**切片 1 已完成**（详见 [TASKS.md](../TASKS.md) §三 OBS-08 切片 1）——
+  字段名一侧的「双真相」已消除：`DataProvider` 加 `Fields()` 能力声明、字段注册表带来源
+  （market / fundamentals / group）、修误拒（`ps` / `roa` 现被闸门接受）、补实现
+  （`revenue` / `profit` 由 `domain.Fundamental` 接线）、清掉 3 个**永不可求值**的假合法字段
+  （`market_cap` / `roe_ttm` / `eps` —— `domain.Fundamental` 里本就没有）、新增跨包防漂移护栏；
+  研究提示词的字段/算子清单一并改为**从注册表派生**（此前硬编码，广告幻影字段且漏 9 个算子）。
+  **切片 2 待做**：即上面第 3 条建议本身（`SeriesSpec.availability`），另加一条本轮新发现 ——
+  `pkg/ai/prompts/*.txt` 是**零引用的死资产**且其字段清单同样漂移，**接线它还是删除它待裁决**。
 
 ### G3 — 治理与文档
 
