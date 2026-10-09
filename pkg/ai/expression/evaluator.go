@@ -124,6 +124,12 @@ func (e *Evaluator) evaluateUnaryOp(n *UnaryOpNode, lookback int) (map[string][]
 }
 
 func (e *Evaluator) evaluateFunction(n *FunctionNode, lookback int) (map[string][]float64, error) {
+	// 算子类别查注册表（单一事实源）。未登记的一律显式报错，不静默直通。
+	cat, ok := OperatorCategory(n.Name)
+	if !ok || (cat != CatTimeSeries && cat != CatUnary) {
+		return nil, fmt.Errorf("unknown operator: %s%s", n.Name, availableOperatorsHint())
+	}
+
 	// Evaluate all arguments
 	argResults := make([]map[string][]float64, len(n.Args))
 	for i, arg := range n.Args {
@@ -175,12 +181,11 @@ func (e *Evaluator) evaluateFunction(n *FunctionNode, lookback int) (map[string]
 
 // isUnaryOp reports whether name is an element-wise unary operator
 // (handled by applyUnaryOp) rather than a time-series operator.
+//
+// 类别查注册表（此前是此处一份 switch + registry 一份声明的双重事实源）。
 func isUnaryOp(name string) bool {
-	switch name {
-	case "neg", "abs", "log", "sqrt", "sign", "exp":
-		return true
-	}
-	return false
+	cat, ok := OperatorCategory(name)
+	return ok && cat == CatUnary
 }
 
 func (e *Evaluator) evaluateCrossSectional(n *CrossSectionalNode, lookback int) (map[string][]float64, error) {
@@ -221,7 +226,10 @@ func (e *Evaluator) evaluateCrossSectional(n *CrossSectionalNode, lookback int) 
 		}
 	}
 
-	ranked := applyCrossSectionalOp(n.Op, latestValues, groupValues)
+	ranked, err := applyCrossSectionalOp(n.Op, latestValues, groupValues)
+	if err != nil {
+		return nil, err
+	}
 	for i, symbol := range symbols {
 		result[symbol] = []float64{ranked[i]}
 	}
@@ -296,96 +304,45 @@ func applyUnaryOp(op string, v float64) float64 {
 	}
 }
 
-// applyTimeSeriesOp applies a time-series operator
+// applyTimeSeriesOp 按时序算子名查注册表取求值绑定。
+//
+// 未登记算子 → 显式报错（此前是 switch + default 报错，但名字集合是
+// evaluator.go 里第二份硬编码）。L2 递推算子（ts_rma/ts_ewma/ts_kalman）的
+// 绑定复用 indicator 包的 Batch 实现，对每个 symbol 一次算完整条序列。
 func applyTimeSeriesOp(op string, args [][]float64) ([]float64, error) {
-	if len(args) == 0 {
-		return nil, fmt.Errorf("no arguments")
+	def, ok := operatorRegistry[op]
+	if !ok || def.Category != CatTimeSeries || def.tsEval == nil {
+		return nil, fmt.Errorf("unknown time-series operator: %s%s", op, availableOperatorsHint())
 	}
-
-	switch op {
-	case "ts_mean":
-		if len(args) != 2 {
-			return nil, fmt.Errorf("ts_mean requires 2 arguments")
-		}
-		window := int(args[1][0])
-		return tsMean(args[0], window), nil
-	case "ts_std":
-		if len(args) != 2 {
-			return nil, fmt.Errorf("ts_std requires 2 arguments")
-		}
-		window := int(args[1][0])
-		return tsStd(args[0], window), nil
-	case "ts_sum":
-		if len(args) != 2 {
-			return nil, fmt.Errorf("ts_sum requires 2 arguments")
-		}
-		window := int(args[1][0])
-		return tsSum(args[0], window), nil
-	case "ts_max":
-		if len(args) != 2 {
-			return nil, fmt.Errorf("ts_max requires 2 arguments")
-		}
-		window := int(args[1][0])
-		return tsMax(args[0], window), nil
-	case "ts_min":
-		if len(args) != 2 {
-			return nil, fmt.Errorf("ts_min requires 2 arguments")
-		}
-		window := int(args[1][0])
-		return tsMin(args[0], window), nil
-	case "ts_delay":
-		if len(args) != 2 {
-			return nil, fmt.Errorf("ts_delay requires 2 arguments")
-		}
-		periods := int(args[1][0])
-		return tsDelay(args[0], periods), nil
-	case "ts_delta":
-		if len(args) != 2 {
-			return nil, fmt.Errorf("ts_delta requires 2 arguments")
-		}
-		periods := int(args[1][0])
-		return tsDelta(args[0], periods), nil
-	case "ts_pct_change":
-		if len(args) != 2 {
-			return nil, fmt.Errorf("ts_pct_change requires 2 arguments")
-		}
-		periods := int(args[1][0])
-		return tsPctChange(args[0], periods), nil
-	case "ts_corr":
-		if len(args) != 3 {
-			return nil, fmt.Errorf("ts_corr requires 3 arguments")
-		}
-		window := int(args[2][0])
-		return tsCorr(args[0], args[1], window), nil
-	case "ts_rank":
-		if len(args) != 2 {
-			return nil, fmt.Errorf("ts_rank requires 2 arguments")
-		}
-		window := int(args[1][0])
-		return tsRank(args[0], window), nil
-	default:
-		return nil, fmt.Errorf("unknown time-series operator: %s", op)
+	if len(args) != def.Arity {
+		return nil, fmt.Errorf("%s requires %d arguments, got %d", op, def.Arity, len(args))
 	}
+	return def.tsEval(args)
 }
 
-// applyCrossSectionalOp applies a cross-sectional operator.
+// firstScalar 取标量参数序列的首值；空序列返回 NaN（调用方已由闸门保证
+// 参数是常量字面量 ⇒ 长度 1，此处的防御仅为直接的稳健性）。
+func firstScalar(xs []float64) float64 {
+	if len(xs) == 0 {
+		return math.NaN()
+	}
+	return xs[0]
+}
+
+// applyCrossSectionalOp 按横截面算子名查注册表取求值绑定。
+//
+// **此前 default 分支是 `return values`（静默直通）** —— 未登记算子原样返回
+// 输入，等于偷偷放行一个不存在的算子。收敛后未登记一律显式报错。
 //
 // For 1-arg ops (cs_rank, cs_zscore, cs_percentile), group is nil and
 // ignored. For cs_neutralize, group carries the per-symbol categorical
 // labels used for per-group mean subtraction.
-func applyCrossSectionalOp(op string, values, group []float64) []float64 {
-	switch op {
-	case "cs_rank":
-		return csRank(values)
-	case "cs_zscore":
-		return csZScore(values)
-	case "cs_percentile":
-		return csPercentile(values)
-	case "cs_neutralize":
-		return csNeutralize(values, group)
-	default:
-		return values
+func applyCrossSectionalOp(op string, values, group []float64) ([]float64, error) {
+	def, ok := operatorRegistry[op]
+	if !ok || def.Category != CatCrossSectional || def.csEval == nil {
+		return nil, fmt.Errorf("unknown cross-sectional operator: %s%s", op, availableOperatorsHint())
 	}
+	return def.csEval(values, group), nil
 }
 
 // Helper functions

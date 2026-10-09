@@ -12,9 +12,15 @@ import (
 // ─── ValidateFactorTool ────────────────────────────────────────────────
 //
 // L1 validation gate: checks that a factor expression parses successfully
-// under the expression DSL grammar. Does NOT compute values — that is
+// under the expression DSL grammar **and passes the operator/field gate**
+// (`expression.Expression.Validate`). Does NOT compute values — that is
 // the job of factor.compute / compute_factor_ic. Cheap (<1ms), so an
 // agent should always call this before committing to a longer compute.
+//
+// OBS-06: parsing alone is not enough. `CROSS(MA(close,5), MA(close,20))`
+// parses (both are just function-call syntax) but both operators are
+// unknown. The gate is **fail-closed**: any operator name not in the
+// registry, any unknown data field, any arity mismatch → valid=false.
 //
 // Tool name: "validate_factor"
 // Input: expression (required)
@@ -24,14 +30,15 @@ import (
 // GateDecision (see gate.go). They let Hermes uniformly check "did this
 // gate pass?" without parsing tool-specific fields. For L1:
 //   - level    = "L1"
-//   - passed   = valid (the parse result)
+//   - passed   = valid (parse + gate result)
 //   - reason   = "passed" or "syntax_error"
 //   - recommendation = LLM-facing actionable hint (Chinese)
 //
-// Note on error semantics: a parse failure is NOT returned as a Go error
-// from Execute — it's a successful validation result with valid=false.
-// The agent reads the `valid` flag and decides whether to retry. Tool-
-// level errors (missing args) are still returned as ErrInvalidArgs.
+// Note on error semantics: a parse failure OR a gate failure is NOT
+// returned as a Go error from Execute — it's a successful validation
+// result with valid=false. The agent reads the `valid` flag and decides
+// whether to retry. Tool-level errors (missing args) are still returned
+// as ErrInvalidArgs.
 type ValidateFactorTool struct{}
 
 var _ tools.Tool = (*ValidateFactorTool)(nil)
@@ -92,6 +99,23 @@ func (t *ValidateFactorTool) Execute(ctx context.Context, args map[string]interf
 	if err != nil {
 		// Parse failure is a validation result, not a tool error. The
 		// agent inspects valid=false and the error string to retry.
+		passed := false
+		return map[string]interface{}{
+			"valid":          false,
+			"inputs":         []string{},
+			"ast":            "",
+			"error":          err.Error(),
+			"level":          "L1",
+			"passed":         passed,
+			"reason":         gateReasonL1(passed),
+			"recommendation": gateRecommendationL1(passed),
+		}, nil
+	}
+
+	// OBS-06：Parse 成功 ≠ 合法。必须再跑语法 + 算子闸门
+	// （expression.Expression.Validate）。fail-closed —— 未登记算子 /
+	// 未知字段 / 参数个数不符，一律不通过。
+	if err := parsed.Validate(); err != nil {
 		passed := false
 		return map[string]interface{}{
 			"valid":          false,

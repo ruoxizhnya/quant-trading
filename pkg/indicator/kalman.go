@@ -1,6 +1,6 @@
 // Kalman（一维线性标量局部水平模型 / local level model）。
 //
-// ─── 声明（供切片 2 填 OperatorSpec，本切片不产出 Spec()） ────────────
+// ─── 声明（K3 切片 2：由 Spec() 产出 OperatorSpec） ────────────────────
 //
 //	causal  = true
 //	state   = true
@@ -127,6 +127,23 @@ func (k *Kalman) Value() (float64, error) {
 
 // Warmup 返回预热所需标量数 = 1（首观测即产出最优线性估计，无平均窗）。
 func (k *Kalman) Warmup() int { return 1 }
+
+// Spec 产出本实例的算子声明（ADR-028 §4 七项）。
+//
+// Kalman 的参数（q、r）不改变 warmup（恒为 1），但 Lookback=∞（递推状态）
+// 与 Init 规则仍由本方法声明。
+func (k *Kalman) Spec() OperatorSpec {
+	return OperatorSpec{
+		Name:      "ts_kalman",
+		Signature: "ts_kalman : Series × Scalar × Scalar → Series",
+		Lookback:  0, // ∞：递推状态表达（K0 约定：0 + State=true）
+		Causal:    true,
+		State:     true,
+		Warmup:    k.Warmup(),
+		Init:      "p0=r", // 弥散先验 + 一个观测的极限：p0 = r
+		NaNPolicy: "unknown→NaN",
+	}
+}
 
 // Reset 清空状态回到初始态（保留参数 q、r）。
 func (k *Kalman) Reset() { k.core = newKalmanCore(k.core.q, k.core.r) }

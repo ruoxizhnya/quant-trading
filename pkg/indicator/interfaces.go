@@ -80,6 +80,22 @@ type Indicator interface {
 //   - NaNPolicy：NaN / unknown 的传播规则（停牌 = unknown，见
 //     ADR-028 §9）。
 //
+// ─── 2026-10-09 · K3 切片 2 契约变更（Init 改型：float64 → string） ───
+//
+// 变更：Init 由 **float64 改为 string**（受控词表）。
+//   - 裁决理由：ADR-028 §4 的 init 列填的是**规则**（「ts_rma 前 N 根 SMA」、
+//     「ts_ewma 首值 = x[0]」、「ts_iir 零初始状态」…），float64 一个数都装
+//     不下这些真实规则 —— 与 K3 切片 1 的 `Update(bar)→Update(x float64)` 同
+//     一类问题（载体类型表达不了契约语义）。沿用 K0-P2-3 流程：改型 + 同步
+//     守卫/合规测试 + 注释写裁决 + 破坏验证。
+//   - 受控词表（本次落地的取值，未在词表内即违约）：
+//     "none"           无初始化规则（无状态算子）
+//     "x[0]"           首值 = 第一个观测（ts_ewma / ts_drawdown 的 peak）
+//     "sma(first,N)"   前 N 根简单均值作种子（ts_rma = Wilder 定义）
+//     "p0=r"           初始方差取观测噪声 r（ts_kalman 的弥散先验极限）
+//     "zero"           零初始状态（ts_iir / ts_cumsum）
+//     "inf(never)"     初始为「从未发生」（ts_since 的哨兵）
+//
 // K0 只冻结这 7 项的**载体**，不做注册表与校验器（属 K1+）。
 type OperatorSpec struct {
 	Name      string
@@ -88,7 +104,7 @@ type OperatorSpec struct {
 	Causal    bool
 	State     bool
 	Warmup    int
-	Init      float64
+	Init      string
 	NaNPolicy string
 }
 

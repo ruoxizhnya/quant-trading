@@ -122,7 +122,18 @@ type Expression struct {
 	Category string   // "momentum" | "value" | "quality" | "custom"
 }
 
-// Validate checks if the expression AST is valid
+// Validate 是 L1 的**语法 + 算子闸门**（单一实现：validate_factor 与
+// agents 两条路共用；见 registry.go 的 validateNode）。
+//
+// 它递归走 AST 并 fail-closed 校验：
+//   - FunctionNode.Name / CrossSectionalNode.Op / 一元 / 二元算子名必须在
+//     注册表里（未登记 → 报错并列出可用算子名，便于 AI 自纠）；
+//   - 参数个数与注册表声明一致（`ts_mean(close)` 这类拦截）；
+//   - IdentifierNode.Name 必须是已知数据字段。
+//
+// 修 OBS-06：此前这里只判 formula/AST 非空，Parse 成功即 valid=true，于是
+// `CROSS(MA(close,5), MA(close,20))`（两个都不存在的算子）被判「合法」。
+// 现在算子名合法集合有单一事实源（注册表），未登记一律不通过。
 func (e *Expression) Validate() error {
 	if e.Formula == "" {
 		return fmt.Errorf("formula cannot be empty")
@@ -130,7 +141,7 @@ func (e *Expression) Validate() error {
 	if e.AST == nil {
 		return fmt.Errorf("AST cannot be nil")
 	}
-	return nil
+	return validateNode(e.AST, "root")
 }
 
 // ExtractInputs extracts all required data fields from the AST
@@ -168,46 +179,29 @@ func extractInputsRecursive(node Node, inputs map[string]bool) {
 	}
 }
 
-// IsTimeSeriesOp checks if an operator is a time-series operator
+// IsTimeSeriesOp 报告 op 是否为已登记的时序算子。
+//
+// 名字合法集合由 registry.go 的 operatorRegistry 单一提供（此前是此处一份
+// 与 evaluator.go 一份的硬编码 slice —— 会漂移，是 OBS-06 的成因之一）。
 func IsTimeSeriesOp(op string) bool {
-	tsOps := []string{"ts_mean", "ts_std", "ts_corr", "ts_delay", "ts_rank", "ts_delta", "ts_sum", "ts_max", "ts_min", "ts_pct_change"}
-	for _, tsOp := range tsOps {
-		if op == tsOp {
-			return true
-		}
-	}
-	return false
+	def, ok := operatorRegistry[op]
+	return ok && def.Category == CatTimeSeries
 }
 
-// IsCrossSectionalOp checks if an operator is a cross-sectional operator
+// IsCrossSectionalOp 报告 op 是否为已登记的横截面算子。
 func IsCrossSectionalOp(op string) bool {
-	csOps := []string{"cs_rank", "cs_zscore", "cs_percentile", "cs_neutralize"}
-	for _, csOp := range csOps {
-		if op == csOp {
-			return true
-		}
-	}
-	return false
+	def, ok := operatorRegistry[op]
+	return ok && def.Category == CatCrossSectional
 }
 
-// IsMathOp checks if an operator is a math operator
+// IsMathOp 报告 op 是否为已登记的一元逐元素算子（neg/abs/log/sqrt/sign/exp）。
 func IsMathOp(op string) bool {
-	mathOps := []string{"abs", "log", "sqrt", "sign", "exp", "pow"}
-	for _, mathOp := range mathOps {
-		if op == mathOp {
-			return true
-		}
-	}
-	return false
+	def, ok := operatorRegistry[op]
+	return ok && def.Category == CatUnary
 }
 
-// IsDataField checks if a name is a valid data field
+// IsDataField 报告 name 是否为已知数据字段（单一事实源：registry.go 的
+// dataFields）。
 func IsDataField(name string) bool {
-	dataFields := []string{"open", "high", "low", "close", "volume", "turnover", "market_cap", "pe", "pb", "roe", "roe_ttm", "eps", "revenue", "profit"}
-	for _, field := range dataFields {
-		if name == field {
-			return true
-		}
-	}
-	return false
+	return dataFields[name]
 }

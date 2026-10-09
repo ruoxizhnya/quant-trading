@@ -314,21 +314,19 @@ func (p *Parser) parseFunctionCall(name string) (Node, error) {
 		return nil, fmt.Errorf("expected ')'")
 	}
 
-	// Check if it's a cross-sectional operator
+	// 横截面算子：类别与参数个数一律查注册表（单一事实源）。此前这里靠
+	// 硬编码一个算子名判 2 参，是「名字合法集合没有单一事实源」的一处，
+	// OBS-06 收敛时一并消除。
 	if IsCrossSectionalOp(name) {
-		// cs_neutralize is the only 2-arg cross-sectional op:
-		// cs_neutralize(expr, group). All others (cs_rank, cs_zscore,
-		// cs_percentile) take exactly 1 arg.
-		if name == "cs_neutralize" {
-			if len(args) != 2 {
-				return nil, fmt.Errorf("%s requires exactly 2 arguments (expr, group), got %d", name, len(args))
-			}
-			return &CrossSectionalNode{Op: name, Expr: args[0], Group: args[1]}, nil
+		arity := OperatorArity(name)
+		if len(args) != arity {
+			return nil, fmt.Errorf("%s requires exactly %d argument(s), got %d", name, arity, len(args))
 		}
-		if len(args) != 1 {
-			return nil, fmt.Errorf("%s requires exactly 1 argument, got %d", name, len(args))
+		node := &CrossSectionalNode{Op: name, Expr: args[0]}
+		if arity == 2 {
+			node.Group = args[1]
 		}
-		return &CrossSectionalNode{Op: name, Expr: args[0]}, nil
+		return node, nil
 	}
 
 	return &FunctionNode{Name: name, Args: args}, nil

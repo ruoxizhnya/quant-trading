@@ -62,11 +62,11 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：同一批式策略对象在回测（VirtualClock+快照）与 paper（LiveClock+feed）跑，**代码一行不动**、信号一致；流式策略 `SaveState`/`LoadState` 断点续跑结果一致；破坏验证——`get_bar(t_offset>0)` → trap。
 - **⑥ 边界**：只做策略运行时的双模式与同构桥，不做具体 L2 算子（K3）或 WASM（K6）。
 
-### K3 · L2 算子（P3）🔶 切片 1 完成（算子核心），切片 2 待做（表达式注册）（前置：K2）
+### K3 · L2 算子（P3）✅ 完成（2026-10-09，两切片）（前置：K2）
 
 > **切片 1 ✅（2026-10-08）**：L2 算子核心落地 `pkg/indicator/` —— **契约变更**（走 K0-P2-3 同款流程）：`Indicator.Update(bar)` → **`Update(x float64)`**（对齐 ADR-028 §7 的 `Step(x float64)`；bar 级抽取归调用方，「RMA over TrueRange」在旧签名下无法表达）+ 新增 **`SaveState`/`LoadState`**（ADR-028 §7 原文：「接口不预留状态序列化，后面补不进去」）。三算子：`RMA`（Wilder，init=前 N 根 SMA）/ `EWMA`（init=首值，warmup=`ceil(ln(1e-6)/ln(1-α))`）/ `Kalman`（标量线性局部水平模型，p0=r）＋ `RMABatch`/`EWMABatch`/`KalmanBatch` **双实现对偶（共享同一递推核）** ＋ `TrueRange` 助手。**33 顶层用例**：手算 fixture（抓公式错）＋ 三路一致性属性测试（抓路径分裂，容差 1e-12）＋ warmup 边界＋原子性 fail-loud；**ATR 验收**：20 根含跳空 bar，`RMABatch(tr,14)` 与手算 Wilder ATR 逐点一致（容差 1e-12）。
 > **ADR-028 §4 订正记录**：`ts_ewma` 样例数字与公式矛盾（α=0.3「约 20」实算 39；α=0.05「约 60」实算 269）——以公式 + tol=1e-6 为准，ADR 内已加订正注记。
-> **切片 2 待做**：表达式引擎注册（三算子进 `pkg/ai/expression` evaluator）；`OperatorSpec` 落地（**`Init float64` 装不下「SMA of first N」这类规则，需裁决**）；warmup 由 AST 递归推导（ADR-028 §8）；OBS-06 算子白名单（可与本切片合并做）。
+> **切片 2 ✅（2026-10-09，与 OBS-06 合并做）**：三算子**进 DSL** —— 新增 `pkg/ai/expression/registry.go` 作**算子名字的单一事实源**（31 个算子：13 ts + 4 cs + 6 一元 + 8 二元，声明 + 求值绑定在一处），`ast.go` 的四个硬编码列表与 evaluator 的三处 switch（含 `applyCrossSectionalOp` 的 `default: return values` 静默直通）全部改为查表；`ts_rma/ts_ewma/ts_kalman` 可解析、可求值（**复用 `pkg/indicator` 的 Batch**：每 symbol 一次算完整条再取下标）、被白名单认可、有 `Spec()`；新增 `DeriveWarmup`/`DeriveLookback`（ADR-028 §8：并行取 max、串行累加；任一 `State=true` ⇒ infinite），对齐附录 A（19 / max(19,14)=19 / 串行 18）。**契约变更**：`indicator.OperatorSpec.Init` `float64 → string`（受控词表），理由同 `Indicator.Update` 那次改型。护栏：注册表自洽测试 + **防漂移 AST 护栏**（算子名字面量只许出现在 `registry.go`）。
 
 - **① 目标**：indicators 模块落地 L2 确定性有状态算子（`ts_kalman`/`ts_ewma`/`ts_rma`），warmup 可静态推导（D2：能用 L2 不上 L3）。
 - **② 上下文**：蓝图 §6.3（L2 优先）；ADR-028 §2（L2 递推算子）+ §4 算子声明契约（含 `state` 字段）+ §8 warmup 推导；K2 的 `BarHandler`。
@@ -136,7 +136,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 | 工单 | 一句话 | 优先级 |
 |---|---|---|
-| OBS-06 | DSL 语法闸门不校验算子名（`CROSS(MA(...))` 两个不存在算子判 `valid=true`）——L1 补算子白名单 | 高（假合法） |
+| OBS-06 ✅ 完成（2026-10-09，随 K3 切片 2 合并） | DSL 语法闸门不校验算子名 —— 已在 `Expression.Validate()` 补算子/字段/参数个数闸门（fail-closed，报错带位置与可用清单），`validate_factor` 解析后必过闸门 | — |
 | OBS-07 | tokenizer 不支持 `>=`/`<=`/`AND`/`OR`/`NOT` | 中 |
 | OBS-08 | 序列注册表缺「可用性声明」（11 张表全 0 行，AI 在空表上静默产垃圾） | 高（与 OBS-01 同源） |
 | OBS-11 | per-day HTTP 反模式 `getSignalsFromStrategyService` 待删（策略服务只传定义不传信号） | 中（随 K1/K2） |

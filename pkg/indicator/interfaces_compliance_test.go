@@ -137,28 +137,46 @@ func TestOperatorSpecHasADR028SevenFields(t *testing.T) {
 	assertFieldType(t, typ, "State", reflect.TypeOf(true))
 	assertFieldType(t, typ, "Lookback", reflect.TypeOf(int(0)))
 	assertFieldType(t, typ, "Warmup", reflect.TypeOf(int(0)))
-	assertFieldType(t, typ, "Init", reflect.TypeOf(float64(0)))
+	// Init 于 K3 切片 2 由 float64 改型为 string（受控词表：none / x[0] /
+	// sma(first,N) / p0=r / zero / inf(never)）——float64 装不下任何一条真实
+	// 初始化规则。此断言与契约同步，改回数值类型即编译期/测试期红。
+	assertFieldType(t, typ, "Init", reflect.TypeOf(""))
 }
 
 // TestThreeOperatorsSatisfyIndicator 是编译期守卫的反射版：三个算子的
 // 具体类型都必须完整实现 Indicator 的 7 个方法（防止将来某算子漏改签名）。
+//
+// K3 切片 2：三算子各多了一个 **`Spec() OperatorSpec`**（参数化算子的
+// OperatorSpec 由实例产出，见各算子文件）。故具体类型方法数 =
+// 接口 7 方法 + Spec = 8；这里显式断言 Spec 的存在与产出。
 func TestThreeOperatorsSatisfyIndicator(t *testing.T) {
 	iface := reflect.TypeOf((*indicator.Indicator)(nil)).Elem()
+	type specProvider interface{ Spec() indicator.OperatorSpec }
 	for _, tc := range []struct {
-		name string
+		typ  string
+		want string
 		v    any
 	}{
-		{"RMA", &indicator.RMA{}},
-		{"EWMA", &indicator.EWMA{}},
-		{"Kalman", &indicator.Kalman{}},
+		{"RMA", "ts_rma", &indicator.RMA{}},
+		{"EWMA", "ts_ewma", &indicator.EWMA{}},
+		{"Kalman", "ts_kalman", &indicator.Kalman{}},
 	} {
 		typ := reflect.TypeOf(tc.v)
 		if !typ.Implements(iface) {
-			t.Errorf("%s 未实现 Indicator 接口", tc.name)
+			t.Errorf("%s 未实现 Indicator 接口", tc.typ)
 			continue
 		}
-		if got := typ.NumMethod(); got != iface.NumMethod() {
-			t.Errorf("%s 方法数 = %d, want %d", tc.name, got, iface.NumMethod())
+		// 接口 7 方法 + Spec = 8。
+		if got, want := typ.NumMethod(), iface.NumMethod()+1; got != want {
+			t.Errorf("%s 方法数 = %d, want %d（接口 7 + Spec）", tc.typ, got, want)
+		}
+		sp, ok := tc.v.(specProvider)
+		if !ok {
+			t.Errorf("%s 缺 Spec() OperatorSpec（K3 切片 2 契约）", tc.typ)
+			continue
+		}
+		if got := sp.Spec().Name; got != tc.want {
+			t.Errorf("%s.Spec().Name = %q, want %q", tc.typ, got, tc.want)
 		}
 	}
 }

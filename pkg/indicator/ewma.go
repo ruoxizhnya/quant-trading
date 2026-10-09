@@ -1,6 +1,6 @@
 // EWMA（指数加权移动平均）。
 //
-// ─── 声明（供切片 2 填 OperatorSpec，本切片不产出 Spec()） ────────────
+// ─── 声明（K3 切片 2：由 Spec() 产出 OperatorSpec） ────────────────────
 //
 //	causal  = true
 //	state   = true
@@ -127,6 +127,23 @@ func (e *EWMA) Value() (float64, error) {
 
 // Warmup 返回预热所需标量数（= max(1, ceil(ln(1e-6)/ln(1-α)))）。
 func (e *EWMA) Warmup() int { return e.core.warm }
+
+// Spec 产出本实例的算子声明（ADR-028 §4 七项）。
+//
+// 参数化算子：Warmup 随 α 变化（EWMA(α).Spec().Warmup ==
+// ceil(ln(1e-6)/ln(1-α))），由实例给出。
+func (e *EWMA) Spec() OperatorSpec {
+	return OperatorSpec{
+		Name:      "ts_ewma",
+		Signature: "ts_ewma : Series × Scalar → Series",
+		Lookback:  0, // ∞：递推状态表达（K0 约定：0 + State=true）
+		Causal:    true,
+		State:     true,
+		Warmup:    e.Warmup(),
+		Init:      "x[0]", // 首值 = 第一个观测
+		NaNPolicy: "unknown→NaN",
+	}
+}
 
 // Reset 清空状态回到初始态（保留参数 α）。
 func (e *EWMA) Reset() { e.core = newEWMACore(e.core.alpha) }
