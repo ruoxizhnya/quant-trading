@@ -214,7 +214,27 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | OBS-06 ✅ 完成（2026-10-09，随 K3 切片 2 合并） | DSL 语法闸门不校验算子名 —— 已在 `Expression.Validate()` 补算子/字段/参数个数闸门（fail-closed，报错带位置与可用清单），`validate_factor` 解析后必过闸门 | — |
 | OBS-07 | tokenizer 不支持 `>=`/`<=`/`AND`/`OR`/`NOT` | 中 |
 | OBS-08 切片 1 ✅ 完成（2026-10-09） | 字段注册表收敛为**单一事实源** + 与 provider 对齐：`DataProvider` 加 `Fields()` 能力声明（5 处实现同步：1 生产 + 4 假）；注册表升级为**带来源**（market / fundamentals / group）；**修误拒**（`ps`/`roa` 现被闸门接受）、**补实现**（`revenue`/`profit` 由 `domain.Fundamental` 的 `Revenue`/`NetProfit` 接线 —— 此前只有声明没有实现）、**清假合法**（`market_cap`/`roe_ttm`/`eps` 从注册表移除：`domain.Fundamental` 无此三字段 ⇒ 永不可求值，留在闸门里就是让 AI 反复撞墙）；求值报错区分「字段不在语言里」vs「字段属于 X 源但本 provider 不供应」；新增**跨包防漂移护栏**（注册表非 group 字段 ≡ `OHLCVDataProvider.Fields()`，双向点名）。**并**：研究提示词 `research.go` 的字段/算子清单改为**从注册表派生**（此前硬编码，广告幻影 `market_cap` 且漏掉 9 个算子与 4 个字段）+ 新增护栏 | — |
-| OBS-08 切片 2 ⬜ | **序列注册表 + 可用性声明**（`SeriesSpec` 目前只存在于 `registry.go:105` 一句注释里）：声明每个字段/序列的**当前可用性**（例如 `stock_sector_map` 0 行 ⇒ `sector` 不可用），让 AI 不再对着空数据静默产垃圾。**并**（本轮新发现）：`pkg/ai/prompts/factor_research.txt` 与 `strategy_generate.txt` 是**零引用的死资产**（Go / 最新版文档 / 脚本 / CI 全无引用，仅 `docs/archive/` 提到），且 `factor_research.txt` 的字段清单**同样漂移**（广告 `vwap` / `turnover_rate` / `returns` / `volatility`）。**待裁决：接线它**（当作研究提示词，字段从注册表派生）**还是删除它** | 高（与 OBS-01 同源） |
+| OBS-08 切片 2 ✅ 完成（2026-10-09，`e97f0cd` + `ec33ec3`） | **序列注册表 + 可用性声明**（`SeriesSpec` 此前只存在于 `registry.go:126` 一句注释里）：声明每个字段/序列的**当前可用性**（例如 `stock_sector_map` 0 行 ⇒ `sector` 不可用），让 AI 不再对着空数据静默产垃圾。**并**（本轮新发现）：`pkg/ai/prompts/factor_research.txt` 与 `strategy_generate.txt` 是**零引用的死资产**（Go / 最新文档 / 脚本 / CI 全无引用，仅 `docs/archive/` 提到），且 `factor_research.txt` 的字段清单**同样漂移**（广告 `vwap` / `turnover_rate` / `returns` / `volatility`）。**待裁决：接线它**（当作研究提示词，字段从注册表派生）**还是删除它** | **可用性声明已做**（`e97f0cd` + `ec33ec3`）：见下方交付明细。**prompts/\*.txt 接线或删仍待若曦裁决**（用户 2026-10-09 明说「推进完 OBS-08 之后我再来做决策」） |
+> **OBS-08 切片 2 交付明细（2026-10-09）**
+>
+> **取证（决定性事实）**：真库 `stock_fundamentals` **0 行**、`stock_sector_map` **0 行** ⇒ 15 个注册字段里**只有 6 个行情字段真能用**，7 个基本面字段 + `sector` 全是空数据的坑。而 `research.go` 此前把 14 个数据字段**全部广告给 AI**，且提示词示例里还有 `- Quality: roe / pe` —— **提示词自己在示范用零数据字段**。
+>
+> **裁决：可用性是「能力层」之上的第三层，不混为一谈**——能力层 = provider 代码认不认（切片 1 已做，被跨包护栏 `AvailableDataFields() ≡ OHLCVDataProvider.Fields()` 钉住）；可用性层 = 那张表里**当前有没有数据**。「认」不等于「有」。故 `AvailableDataFields()` 语义**一字未改**（护栏不破），新增的是它之上的运行时判定。
+> - `fieldRegistry` 值从 `FieldSource` 扩为 `FieldDef{Source, DependsOn}`；表名收成常量（`TableOHLCV`/`TableFundamentals`/`TableSectorMap`），防拼写漂移
+> - `AvailabilityProbe func(ctx, table) (bool, error)` —— **注入式**，expression 包不连 DB（纯计算层不该知道数据库）
+> - `FieldAvailability(ctx, probe)`：同表只探一次；**探测失败 fail-loud 整体报错**，不降级成「不可用」（库挂了若被当成「字段没数据」，AI 会以为本来就没有，静默降级比报错危险）
+> - `AvailableDataFieldsWith(avail)`：`avail==nil` 明确语义为「未做可用性过滤」而非「全部可用」
+> - `FieldsDependingOn(table)`：表 ↔ 字段反查（数据补上/清空时一眼看出影响面）
+> - **提示词接线**（`ec33ec3`）：`factorDSLSyntax(avail)` 只把有数据的字段列进「可用」，并**单列一段 `UNUSABLE NOW` 点名禁用**空数据字段；`roe / pe` 示例在基本面不可用时换成明确跳过说明。只删不标注不够——AI 会因「记得有这些字段」反复尝试
+> - **为什么单列「不可用」而不是干脆不提**：删掉会让 AI 重复撞墙；标注才能一次绕开
+> - **测试**：纯函数（fake probe）5 条 + 注册表自洽（DependsOn 必须是已知表常量）+ **真库核对**（判定 ≡ 真库行数，不把「业务现状」钉成不变式以免数据补上后假红）+ 提示词护栏（可用清单不含空数据字段、UNUSABLE 段点名禁用）
+> - **破坏验证 2 条**：探测结果强制 true → 3 条红（含真库核对点名 `pb` 与真实 0 行不一致）→ 还原绿；`unavailableDataFields` 恒空 → 提示词护栏红 → 还原绿
+> - **真库现状输出**：可用字段 = `[close high low open turnover volume]`（仅 6 个）
+>
+> **⚠️ 踩坑（第 N 次脆弱断言）**：`strings.Contains(dataLine, "pe")` 命中了 **"open"**（o-**pe**-n）⇒ 把正确输出误判成错。改按逗号解析成**精确字段集合**比对。与记忆里「隔离判断别按行位置」同类：**断言要做精确匹配，子串 Contains 在字段名这种短词上必然踩雷。**
+>
+> **登记未做**：① 完整 `SeriesSpec` + `Provider.GetSeries`（ADR-028 §5/§5.1）——那是**大工程**（要动 5 个 Provider 实现），本切片只做了可用性这一层；② `pkg/ai/agents` 提示词里的**示例表达式**（`research.go` 的算子清单已派生，示例仍是硬编码，同 K3b 登记项）；③ prompts/*.txt 接线或删（待裁决）。
+
 | OBS-11 | per-day HTTP 反模式 `getSignalsFromStrategyService` 待删（策略服务只传定义不传信号） | 中（随 K1/K2） |
 | OBS-12 | Copilot 对外 API 契约与前端脱节（四层缺陷叠加） | 中 |
 | OBS-09 | 三份 ADR 引用成环且全 Proposed（027→028→029→027） | 低（治理） |
