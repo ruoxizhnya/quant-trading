@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/ruoxizhnya/quant-trading/internal/bootstrap"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/bootstrap"
 	"github.com/ruoxizhnya/quant-trading/pkg/compliance"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
 	_ "github.com/ruoxizhnya/quant-trading/pkg/strategy/plugins"

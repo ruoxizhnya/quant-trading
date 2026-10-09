@@ -75,7 +75,7 @@ func TestApplyGinModeSetsGlobalMode(t *testing.T) {
 // gin's run mode is a process-wide global (see ginmode.go). A call to
 // gin's SetMode is allowed in exactly two places:
 //
-//  1. internal/httpserver/ginmode.go — the one production helper, applied
+//  1. pkg/httpserver/ginmode.go — the one production helper, applied
 //     once per process during startup;
 //  2. inside a `func TestMain` in a _test.go file — the AUD-12 / AUD-28
 //     pattern, which runs before any test goroutine starts.
@@ -115,7 +115,7 @@ func TestGinSetModeOnlyInSanctionedPlaces(t *testing.T) {
 			return relErr
 		}
 		rel = filepath.ToSlash(rel)
-		if rel == "internal/httpserver/ginmode.go" {
+		if rel == "pkg/httpserver/ginmode.go" {
 			return nil
 		}
 		offenders = append(offenders, ginSetModeOffenders(t, path, rel)...)
@@ -124,7 +124,7 @@ func TestGinSetModeOnlyInSanctionedPlaces(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Empty(t, offenders,
-		"gin.SetMode 只允许出现在 internal/httpserver/ginmode.go，"+
+		"gin.SetMode 只允许出现在 pkg/httpserver/ginmode.go，"+
 			"或测试文件的 TestMain 里；其它位置请改用 httpserver.ApplyGinMode，"+
 			"并在启动期调一次")
 }
@@ -186,7 +186,7 @@ func ginSetModeCalls(body *ast.BlockStmt) []token.Pos {
 }
 
 // repoRoot returns the repository root, derived from this file's location
-// (<root>/internal/httpserver/ginmode_test.go).
+// (<root>/pkg/httpserver/ginmode_test.go).
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)

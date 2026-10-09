@@ -25,7 +25,6 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/data-service ./cmd/data && \
     CGO_ENABLED=0 GOOS=linux go build -o /app/strategy-service ./cmd/strategy && \
     CGO_ENABLED=0 GOOS=linux go build -o /app/analysis-service ./cmd/analysis \\
-    CGO_ENABLED=0 GOOS=linux go build -o /app/ai-service ./cmd/ai
 
 # Final stage
 FROM alpine:3.19
@@ -39,7 +38,6 @@ RUN apk add --no-cache ca-certificates curl
 COPY --from=builder /app/data-service /app/data-service
 COPY --from=builder /app/strategy-service /app/strategy-service
 COPY --from=builder /app/analysis-service /app/analysis-service
-COPY --from=builder /app/ai-service /app/ai-service
 
 # Copy config files
 COPY config /app/config

@@ -20,7 +20,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
+	"github.com/ruoxizhnya/quant-trading/pkg/httpserver"
 	"net/http"
 	"time"
 

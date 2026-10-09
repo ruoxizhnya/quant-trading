@@ -275,7 +275,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **破环证据**：`go list -deps ./pkg/strategy/ | grep pkg/ai` → **空**（改前 4 处）；core 侧（backtest / strategy / indicator / validation / risk / marketdata / portfolio / execalgo / kernel / expression / live / storage 及全部子包）**零 `pkg/ai` 依赖**。
 - **新增护栏**：`internal/repoguard/ai_boundary_test.go` 的 `TestPkgAIIsOnlyImportedByAllowedLayers` —— **白名单式 fail-closed**（仅 `pkg/ai|pkg/tools|cmd|e2e` 可 import `pkg/ai`；只扫生产代码）。破坏验证双向：既有包加 import → 红；**全新包加 import → 红**（默认拒绝性质）。
 - **边界定义**：见 ADR-027 §「执行记录：§5 第 3 步已落地 + AI / core 边界定义」（含两个待裁决点：`pkg/validation` 与 `pkg/tools/builtin` 的归属）。
-- **仍未做**：`pkg/strategy/copilot.go`（`CopilotService`，518 行）**归位到 AI 侧**属 ADR-027 §5 第 8 步（ai-service）—— 破环不需要它（修完上两项后它只 import core，边自然消失）。
+- **✅ 2026-10-09 AI 拆仓两阶段全部落地**：阶段 1（`94f2b78`）ai-service 独立进程（:8086，`cmd/ai`），共享装配上收 `internal/bootstrap`（后随阶段 2 提升 `pkg/bootstrap` + `pkg/sandbox` + `pkg/httpserver`，因 Go internal 可见性规则跨模块不可 import），analysis 对 copilot/pipeline/explore/tools 四族路由改**纯反代**（前端与 openapi 契约零改动）。阶段 2（本 commit）`pkg/ai`(141 文件) + `pkg/copilot`(原 strategy/copilot.go) + `cmd/ai` + AI 装配 builder 物理迁入 `quant-trading-agent`（独立 go module，require core + replace，**单向依赖**）。core 的 ai_boundary 护栏改写为新不变量：pkg/ai 目录不许回来 + core 不许 import pkg/ai/agent 模块（破坏验证两条腿红）。compose 的 ai-service 经 additional_contexts 传 core 上下文构建。
 - **副产品**：新护栏自己报出 K4 遗漏的过时白名单条目（`pkg/backtest/marketimpact`），已单独提交（`bd39868`）。
 
 ---
@@ -351,7 +351,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | `contracts`（原 `pkg/ai/contracts`） | → **core**（并入 `pkg/backtest/contracts`） | 1 个接口 `BacktestRunner`；6 个消费方里 4 个本就是 core | ✅ `55ea33f` |
 | `validation`（原 `pkg/validation`，4920 行） | → **AI**（`pkg/ai/validation`） | core 侧零引用；它是**实验员对假设的判断**（6 维 → `Verdict` 概率），不是回测·执行域的仪器 | ✅ `cff0a0f` |
 | `tools`（原 `pkg/tools`，10716 行，含 `builtin/`） | → **AI**（`pkg/ai/tools`） | core 侧零引用；MCP 桥 = 开放主机服务 / **ACL，属边界消费侧** | ✅ `cff0a0f` |
-| `strategy/copilot.go` 的 `CopilotService`（518 行） | → **AI** | 自然语言 → 生成代码 → 沙箱编译 → 回测 = 实验员的活，却住在仪器包里 | ⬜ 属 ADR-027 §5 第 8 步（ai-service） |
+| `strategy/copilot.go` 的 `CopilotService`（518 行） | → **AI** | 自然语言 → 生成代码 → 沙箱编译 → 回测 = 实验员的活，却住在仪器包里 | ✅ 2026-10-09 随 AI 拆仓阶段 2 迁入 agent 仓 `pkg/copilot` |
 | `pkg/ai/prompts/{factor_research,strategy_generate}.txt` | **✅ 已清理（`6455566`）** | 零引用的孤儿；`factor_research.txt` 严重漂移（广告 7 个幻影字段）被 `research.go` 派生版超越 ⇒ 删；`strategy_generate.txt` 的领域知识（负 PE 是亏损、用 neg(pe) 等）合并进 `generate.go` 活提示词 ⇒ 删文件。消除双真相 | ✅ |
 | `pkg/backtest/marketimpact` | → **core**（`pkg/marketimpact`） | 共享成本模型却住在 `backtest` 下；K5 的 paper 侧也要用它 ⇒ 提到顶层与 `pkg/fees` 平级（`pkg/fees` 同为共享成本模型，被 `backtest`/`live`/`portfolio`/`ai` 共用） | ✅ K5 切片 1 |
 

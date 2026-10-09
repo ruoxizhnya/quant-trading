@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
+	"github.com/ruoxizhnya/quant-trading/pkg/httpserver"
 	"net/http"
 	"path/filepath"
 

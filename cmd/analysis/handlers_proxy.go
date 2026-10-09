@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
+	"github.com/ruoxizhnya/quant-trading/pkg/httpserver"
 	"io"
 	"net/http"
 	"net/http/httputil"

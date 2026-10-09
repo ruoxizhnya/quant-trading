@@ -175,21 +175,6 @@ func TestRegistry_ListStrategies(t *testing.T) {
 	assert.Len(t, list, 3)
 }
 
-func TestCopilotService_NewService(t *testing.T) {
-	svc := NewCopilotService()
-	require.NotNil(t, svc)
-
-	generated, buildable, backtested := svc.Stats()
-	assert.Equal(t, int64(0), generated)
-	assert.Equal(t, int64(0), buildable)
-	assert.Equal(t, int64(0), backtested)
-}
-
-func TestCopilotService_IsConfigured(t *testing.T) {
-	svc := NewCopilotService()
-	assert.False(t, svc.IsConfigured())
-}
-
 func TestParameter_DefaultValues(t *testing.T) {
 	params := []Parameter{
 		{Name: "period", Type: "int", Default: 20, Description: "Lookback period"},

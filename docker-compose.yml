@@ -217,13 +217,18 @@ services:
 
   # ── ai-service :8086（AI 拆仓阶段 1，ADR-027 §5 第 8 步前置切片）────────
   # Copilot / pipeline / explore / tools 四族 handler 的宿主进程。
+  # 源码在 quant-trading-agent 仓（阶段 2 迁入）；构建经 additional_contexts
+  # 把 core 仓作为命名上下文 `core` 传入（go.mod 的 replace ../quant-trading
+  # 在镜像内解析到它），见 agent 仓的 Dockerfile。
   # analysis-service 对同名路径族做纯反代（handlers_ai_proxy.go），前端与
   # openapi 契约零改动。鉴权不变量与 analysis 完全同构：open-access 只许
   # 发布到 127.0.0.1（检查 3c + local-stack netstat 双闸）。
   ai-service:
     build:
-      context: .
-      dockerfile: Dockerfile.service
+      context: ../quant-trading-agent
+      additional_contexts:
+        - core=.
+      dockerfile: Dockerfile
     entrypoint: ["/bin/sh", "/app/wait-for-deps.sh"]
     command: ["/app/ai-service"]
     ports:

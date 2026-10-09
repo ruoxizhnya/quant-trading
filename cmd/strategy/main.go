@@ -16,7 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 
-	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
+	"github.com/ruoxizhnya/quant-trading/pkg/httpserver"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy/examples"
 )

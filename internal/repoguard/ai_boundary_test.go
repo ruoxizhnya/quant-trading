@@ -1,52 +1,27 @@
 package repoguard
 
-// Structural guard: **only the allowed higher layers may import `pkg/ai/...`**.
+// Structural guard: **the AI layer no longer lives in this repo, and core
+// must never point at it**.
 //
-// Why this exists. The dependency graph is meant to be one-way: `ai → core`.
-// The AI layer sits on top and may reach down into the core (`pkg/domain`,
-// `pkg/backtest`, `pkg/strategy`, …), but a core package must never reach
-// back up into `pkg/ai`. That "reverse edge" is exactly what let
-// `pkg/strategy` depend on `pkg/ai` — first on the LLM client (S7-P1-2),
-// then again on `pkg/ai/contracts`, and `pkg/strategy/expression` on
-// `pkg/ai/expression`. Each one was invisible until someone looked at the
-// import graph by hand.
+// Why this exists. The dependency graph is one-way: `agent -> core`. The AI
+// layer (`pkg/ai` + CopilotService + its composition builders) moved to the
+// quant-trading-agent repo on 2026-10-09 (ADR-027 §5 step 8 前置切片，AI 拆仓
+// 阶段 2). Before that move, this same guard enforced a whitelist of layers
+// allowed to import `pkg/ai` — it caught the pkg/strategy reverse edges that
+// motivated S7-P1-2, and it caught internal/bootstrap the day the shared
+// builders were created. Now the invariant it pins is stronger and simpler:
 //
-// 2026-10-09 (ADR-027 §5 step 3) broke the last of these by rehoming two
-// packages that never belonged in the AI layer at all: the expression DSL
-// engine (`pkg/ai/expression` → `pkg/expression`) and the `BacktestRunner`
-// execution-carrier contract (`pkg/ai/contracts` → `pkg/backtest/contracts`).
-// This guard is the other half of that change: it makes the boundary a
-// **structural** property, so the next reverse edge fails CI instead of
-// quietly shipping.
+//  1. `pkg/ai` must NOT exist in this repo (a re-added directory fails CI).
+//  2. No production file may import `.../pkg/ai` (belt) ...
+//  3. ... nor the agent module at all (suspenders): core is a LIBRARY for
+//     agent, never a client of it. The reverse edge would re-create the
+//     repo-level cycle that forced the split in the first place.
 //
-// Rule (whitelist, fail-closed): a **production** .go file may import a
-// `pkg/ai/...` package ONLY if the importing package lives under one of:
-//
-//   - pkg/ai/...   — the AI layer itself
-//   - cmd/...      — the composition root
-//   - e2e/...      — end-to-end entry points
-//
-// 2026-10-09: the former `pkg/tools/...` allowance is gone. `pkg/tools` and
-// `pkg/validation` turned out to be AI-layer packages in all but name — core
-// had zero references to either — so they were moved under `pkg/ai` as
-// `pkg/ai/tools` and `pkg/ai/validation`. The whitelist shrank accordingly,
-// so it now states the boundary that actually holds rather than naming a
-// directory that no longer exists.
-//
-// Any other package that imports `pkg/ai/...` is a violation and fails the
-// test. The check is fail-closed: the allowlist names what is permitted, so
-// a brand-new package that imports `pkg/ai` is rejected by default rather
-// than silently accepted.
-//
-// Boundary of this check:
-//   - Only production code is scanned. `_test.go` files are skipped by
-//     convention — same as the operator-name drift guard, which also does
-//     not scan tests (a test may legitimately reach into a layer to assert
-//     on it; the shipped dependency graph is what we are pinning).
-//   - Only imports inside this module are considered.
-//   - Imports are collected from every parsed non-test .go file regardless
-//     of build constraints, so a platform-gated reverse edge still counts.
-//   - Files that fail to parse are reported as errors, not skipped silently.
+// History worth keeping: the original whitelist version of this guard is in
+// git history (2026-10-09 and earlier). Its fail-closed philosophy — name
+// what is permitted, reject everything else — carries over: any NEW
+// cross-repo dependency must go through a deliberate change here, not a
+// quiet import.
 
 import (
 	"fmt"
@@ -64,24 +39,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// aiAllowedImporterPrefixes lists the module-relative directory prefixes
-// whose packages are permitted to import `pkg/ai/...`. Everything else is a
-// reverse edge. Keep this list short and justified — adding an entry loosens
-// the boundary.
-var aiAllowedImporterPrefixes = []string{
-	"pkg/ai", // the AI layer itself (incl. pkg/ai/tools, pkg/ai/validation)
-	"cmd",    // composition root
-	"e2e",    // end-to-end entry points
-}
-
-func TestPkgAIIsOnlyImportedByAllowedLayers(t *testing.T) {
+func TestAILayerIsGoneFromCore(t *testing.T) {
 	t.Parallel()
 
 	root := filepath.Join("..", "..")
 	mod := readModulePath(t, root)
 	aiPrefix := mod + "/pkg/ai"
+	agentPrefix := "github.com/ruoxizhnya/quant-trading-agent"
 
-	// Each violation is rendered as "<importer> -> <pkg/ai/...>".
+	// 不变量 1：pkg/ai 目录不许回来（有人 re-add 整层 = 退回拆仓前）。
+	if _, err := os.Stat(filepath.Join(root, "pkg", "ai")); err == nil {
+		t.Errorf("pkg/ai 目录存在于 core 仓 —— AI 层已迁往 quant-trading-agent；" +
+			"在这里 re-add 会重新制造仓级环。若确需共享某段 AI 代码，请放到 agent 仓" +
+			"或与 core 明确解耦的新包，并在 ADR-027 记录裁决")
+	}
+
+	// 不变量 2+3：core 的任何生产代码不得 import pkg/ai 或 agent 模块。
 	var violations []string
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -114,9 +87,6 @@ func TestPkgAIIsOnlyImportedByAllowedLayers(t *testing.T) {
 		if importer == "" {
 			return nil // outside the module
 		}
-		if aiImporterAllowed(importer) {
-			return nil
-		}
 
 		for _, imp := range file.Imports {
 			p, uerr := strconv.Unquote(imp.Path.Value)
@@ -124,8 +94,10 @@ func TestPkgAIIsOnlyImportedByAllowedLayers(t *testing.T) {
 				continue
 			}
 			if p == aiPrefix || strings.HasPrefix(p, aiPrefix+"/") {
-				imported := strings.TrimPrefix(p, mod+"/")
-				violations = append(violations, importer+" -> "+imported)
+				violations = append(violations, importer+" -> "+strings.TrimPrefix(p, mod+"/")+"（AI 层已迁出 core）")
+			}
+			if p == agentPrefix || strings.HasPrefix(p, agentPrefix+"/") {
+				violations = append(violations, importer+" -> "+p+"（core 不得依赖 agent 仓：依赖方向必须是单向 agent → core）")
 			}
 		}
 		return nil
@@ -134,10 +106,9 @@ func TestPkgAIIsOnlyImportedByAllowedLayers(t *testing.T) {
 
 	sort.Strings(violations)
 	assert.Empty(t, violations,
-		"pkg/ai 只能被这些前缀的包导入（fail-closed 白名单：%v）。"+
-			"下面这些 import 构成了指向 AI 层的反向边，必须消除"+
-			"（把被依赖的代码归位到 core 侧，或把消费者上移到允许的层）：\n%s",
-		aiAllowedImporterPrefixes, strings.Join(violations, "\n"))
+		"core 对 AI 层的依赖必须为零（AI 拆仓阶段 2 的不变量）。"+
+			"下面这些 import 是反向边，必须消除：\n%s",
+		strings.Join(violations, "\n"))
 }
 
 // importerDirRel returns the module-relative (slash-separated) directory of
@@ -158,13 +129,3 @@ func importerDirRel(root, filePath string) string {
 	return rel
 }
 
-// aiImporterAllowed reports whether the module-relative package directory is
-// permitted to import pkg/ai/... .
-func aiImporterAllowed(rel string) bool {
-	for _, prefix := range aiAllowedImporterPrefixes {
-		if rel == prefix || strings.HasPrefix(rel, prefix+"/") {
-			return true
-		}
-	}
-	return false
-}

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/ruoxizhnya/quant-trading/internal/bootstrap"
+	"github.com/ruoxizhnya/quant-trading/pkg/bootstrap"
 )
 
 // P0-4: 鉴权默认关闭 —— 无 JWT_SECRET 时服务静默进入 open-access，

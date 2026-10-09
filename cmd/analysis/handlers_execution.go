@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"crypto/subtle"
-	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
+	"github.com/ruoxizhnya/quant-trading/pkg/httpserver"
 	"net/http"
 	"strings"
 	"sync"

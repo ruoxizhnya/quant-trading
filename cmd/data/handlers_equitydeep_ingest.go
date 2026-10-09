@@ -16,7 +16,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
+	"github.com/ruoxizhnya/quant-trading/pkg/httpserver"
 	"net/http"
 	"strings"
 

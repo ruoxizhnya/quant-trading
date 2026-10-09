@@ -20,7 +20,7 @@ package main
 // RegisterRoutes method.
 
 import (
-	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
+	"github.com/ruoxizhnya/quant-trading/pkg/httpserver"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

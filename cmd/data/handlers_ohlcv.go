@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
+	"github.com/ruoxizhnya/quant-trading/pkg/httpserver"
 	"net/http"
 	"sync"
 

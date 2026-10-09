@@ -33,7 +33,7 @@
 - **状态**: 底座核心功能已完成；**执行载体已定型为表达式**（[ADR-024](docs/adr/adr-024-expression-as-execution-target.md)）——
   LLM 生成的 Go 代码只是**可审阅 artifact**，不加载、不执行
 - **入口**: `cmd/analysis/main.go` (后端), `cmd/data/main.go` (数据服务), `web/src/main.ts` (前端)
-  - ~~`cmd/ai` (AI 服务 :8086)~~ 已于 2026-09-18 删除（TASKS P2-5）：零调用方且建在废弃交互层的定位上。AI 能力走 `cmd/analysis` 的 MCP 工具层
+  - `cmd/ai` (AI 服务 :8086) —— **2026-10-09 起 AI 层整体迁往 `quant-trading-agent` 仓**（AI 拆仓，ADR-027 §5 第 8 步前置切片）：`pkg/ai` + `CopilotService` + 四族 AI handler（copilot/pipeline/explore/tools）现在住在 agent 仓；本仓的 analysis-service 对这四族路由做纯反代（`handlers_ai_proxy.go`），前端与 openapi 契约不变。依赖方向单向 agent→core（repoguard 钉住）
 - **构建**: `go build ./...` (后端), `npm run build` (前端)
 
 ### 技术栈
@@ -44,6 +44,7 @@
 | 前端 SPA | Vue 3 + Naive UI | :5173 (dev) |
 | 数据服务 | Go + Gin | :8081 |
 | 策略服务 | Go + Gin | :8082 (备用 per ADR-012) |
+| **AI 服务** | Go + Gin | :8086（**源码在 `quant-trading-agent` 仓**，2026-10-09 AI 拆仓；compose 经 additional_contexts 构建） |
 | **风控 + 执行** | **in-process** | **合并到 analysis (per ODR-021, P1-15)** |
 | 数据库 | PostgreSQL | :5432 |
 | 缓存 | Redis | :6379 |

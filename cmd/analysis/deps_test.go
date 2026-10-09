@@ -126,7 +126,7 @@ func newMinimalDeps() *ServerDeps {
 			// the /metrics handler still works (returns an empty scrape).
 			return observability.NewMetrics()
 		}(),
-		Store:         &storage.PostgresStore{},
+		Store: &storage.PostgresStore{},
 	}
 }
 
