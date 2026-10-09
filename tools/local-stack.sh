@@ -28,7 +28,7 @@ ROOT_WIN="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_WIN"
 
 # 容器服务 → 宿主端口（与 docker-compose.yml 的 127.0.0.1: 映射一一对应）
-SERVICES="data-service:8081 strategy-service:8082 analysis-service:8085 web:8080"
+SERVICES="data-service:8081 strategy-service:8082 analysis-service:8085 ai-service:8086"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
 
 COMPOSE="docker-compose"

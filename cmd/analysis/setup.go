@@ -1,35 +1,27 @@
 package main
 
-// This file contains builder functions extracted from main() to keep
-// main() a thin orchestration layer (S7-P2-3, ODR-043). Each builder
-// constructs a single service or group of related services from viper
-// config and is independently testable.
+// This file keeps the analysis-only builders and thin delegation shims
+// to internal/bootstrap (AI 拆仓阶段 1：共享装配上收为 bootstrap 包，
+// AI 部分随阶段 2 迁往 quant-trading-agent 仓）。
+//
+// 委托 shim 的理由：main.go / deps.go / 测试对这批函数的调用点与断言
+// **零改动**（沿用 K1 切片 2「现有装配块一行不改」的同一裁决精神）。
+// shim 体内的转发是唯一允许的改动；任何行为差异都必须发生在
+// bootstrap 包里并被其测试覆盖。
 
 import (
 	"context"
-	"fmt"
-	"net"
 	"net/http"
 	"os"
-	"os/signal"
-	"strings"
-	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/quant-trading/internal/httpserver"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/client"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools/builtin"
+	"github.com/ruoxizhnya/quant-trading/internal/bootstrap"
 	"github.com/ruoxizhnya/quant-trading/pkg/alert"
 	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
-	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/live"
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
@@ -39,120 +31,80 @@ import (
 	"github.com/spf13/viper"
 )
 
-// initMetrics constructs the four ADR-017 §1 core metrics, registers
-// them with the Prometheus default registry, attaches Go runtime
-// collectors, and wires the metrics into the package-level httpClient
-// transport so outbound calls record http_client_requests_total.
+// ─── 委托 shim（共享 builder 已上收 internal/bootstrap）────────────────
+
 func initMetrics(logger zerolog.Logger) *observability.Metrics {
-	m := observability.NewMetrics()
-	m.Register()
-	m.RegisterCollectors(
-		collectors.NewGoCollector(),
-		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-	)
-	// Wire the metrics into the httpClient transport so every
-	// outbound call records http_client_requests_total.
-	if t, ok := httpClient.Transport.(*observability.HTTPTransport); ok {
-		t.Metrics = m
-	}
-	logger.Info().Msg("observability: 4 core metrics registered (ADR-017 §1)")
-	return m
+	return bootstrap.InitMetrics(logger)
 }
 
-// loadConfig reads the analysis-service YAML config. The path is taken
-// from CONFIG_PATH env var, defaulting to config/analysis-service.yaml.
-// It also sets the global zerolog level from the config.
+// loadConfig reads the analysis-service YAML config (bootstrap.LoadConfig
+// with the analysis default path).
 func loadConfig(logger zerolog.Logger) *viper.Viper {
-	v := viper.New()
-	configPath := os.Getenv("CONFIG_PATH")
-	if configPath == "" {
-		configPath = "config/analysis-service.yaml"
-	}
-	v.SetConfigFile(configPath)
-	v.SetConfigType("yaml")
-	v.AutomaticEnv()
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	// P0-4: 密钥只允许从 env 注入（YAML 是入库的）。两个名字都认，
-	// JWT_SECRET 是历史用法，AUTH_JWT_SECRET 与 AutomaticEnv 的键名一致。
-	_ = v.BindEnv("auth.jwt_secret", "JWT_SECRET", "AUTH_JWT_SECRET")
-	_ = v.BindEnv("auth.allow_insecure", "AUTH_INSECURE")
-	_ = v.BindEnv("auth.insecure_exposure", "AUTH_INSECURE_EXPOSURE")
-
-	if err := v.ReadInConfig(); err != nil {
-		logger.Fatal().Err(err).Msg("Failed to read config file")
-	}
-
-	logLevel := v.GetString("logging.level")
-	level, err := zerolog.ParseLevel(logLevel)
-	if err != nil {
-		level = zerolog.InfoLevel
-	}
-	zerolog.SetGlobalLevel(level)
-	return v
+	return bootstrap.LoadConfig(logger, "config/analysis-service.yaml")
 }
 
-// buildBacktestEngine constructs the core backtest engine and the HTTP
-// data provider. The HTTP provider is returned separately because it's
-// also used to build the DataAdapter later in buildDataServices.
 func buildBacktestEngine(v *viper.Viper, logger zerolog.Logger) (*backtest.Engine, marketdata.Provider) {
-	dataServiceURL := v.GetString("data_service.url")
-	if dataServiceURL == "" {
-		dataServiceURL = "http://localhost:8081"
-	}
-	httpProvider := marketdata.NewHTTPProvider(dataServiceURL, logger)
-	engine, err := backtest.NewEngine(v, httpProvider, logger)
-	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to initialize backtest engine")
-	}
-	return engine, httpProvider
+	return bootstrap.BuildBacktestEngine(v, logger)
 }
 
-// buildRiskManager constructs the in-process risk manager (P1-15,
-// ODR-021) from viper config keys under risk_manager.*.
 func buildRiskManager(v *viper.Viper, logger zerolog.Logger) *risk.RiskManager {
-	riskCfg := risk.RiskManagerConfig{
-		TargetVolatility:    v.GetFloat64("risk_manager.target_volatility"),
-		MaxPositionWeight:   v.GetFloat64("risk_manager.max_position_weight"),
-		MinPositionWeight:   v.GetFloat64("risk_manager.min_position_weight"),
-		ATRPeriod:           v.GetInt("risk_manager.stoploss.atr_period"),
-		BaseMultiplier:      v.GetFloat64("risk_manager.stoploss.base_multiplier"),
-		BullMultiplier:      v.GetFloat64("risk_manager.stoploss.bull_multiplier"),
-		BearMultiplier:      v.GetFloat64("risk_manager.stoploss.bear_multiplier"),
-		SidewaysMultiplier:  v.GetFloat64("risk_manager.stoploss.sideways_multiplier"),
-		TakeProfitMult:      v.GetFloat64("risk_manager.take_profit.atr_multiplier"),
-		VolLookbackDays:     v.GetInt("risk_manager.volatility.lookback_days"),
-		AnnualizationFactor: v.GetFloat64("risk_manager.volatility.annualization_factor"),
-		FastMAPeriod:        v.GetInt("risk_manager.regime.fast_ma_period"),
-		SlowMAPeriod:        v.GetInt("risk_manager.regime.slow_ma_period"),
-		RegimeVolLookback:   v.GetInt("risk_manager.regime.vol_lookback"),
-	}
-	rm, err := risk.NewRiskManager(riskCfg, logger)
-	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to initialize in-process risk manager (P1-15)")
-	}
-	logger.Info().Msg("risk manager attached to backtest engine in-process (P1-15)")
-	return rm
+	return bootstrap.BuildRiskManager(v, logger)
 }
+
+func initStore(v *viper.Viper, logger zerolog.Logger) *storage.PostgresStore {
+	return bootstrap.InitStore(v, logger)
+}
+
+// InsecureExposureLoopbackPublished 别名保留（取值唯一权威在 bootstrap）。
+const InsecureExposureLoopbackPublished = bootstrap.InsecureExposureLoopbackPublished
+
+func authExposureOK(exposure string) bool { return bootstrap.AuthExposureOK(exposure) }
+
+func decideAuthStartup(secret string, allowInsecure bool, bindHost string, insecureExposure string) bootstrap.AuthStartup {
+	return bootstrap.DecideAuthStartup(secret, allowInsecure, bindHost, insecureExposure)
+}
+
+func isLoopbackHost(host string) bool { return bootstrap.IsLoopbackHost(host) }
+
+func initAuth(v *viper.Viper, store *storage.PostgresStore, logger zerolog.Logger) *auth.Service {
+	return bootstrap.InitAuth(v, store, logger)
+}
+
+func rateLimitPerMinute(v *viper.Viper) int { return bootstrap.RateLimitPerMinute(v) }
+
+func applyGinMode(v *viper.Viper, logger zerolog.Logger) { bootstrap.ApplyGinMode(v, logger) }
+
+func buildRouter(authSvc *auth.Service, v *viper.Viper, logger zerolog.Logger) *gin.Engine {
+	return bootstrap.BuildRouter(authSvc, v, logger)
+}
+
+func startHTTPServer(router *gin.Engine, v *viper.Viper, logger zerolog.Logger) *http.Server {
+	return bootstrap.StartHTTPServer(router, v, logger, "Analysis Service")
+}
+
+func waitForShutdown() os.Signal { return bootstrap.WaitForShutdown() }
+
+func gracefulShutdown(srv *http.Server, jobService *backtest.JobService, alertManager *alert.AlertManager, store *storage.PostgresStore, logger zerolog.Logger) {
+	bootstrap.GracefulShutdown(srv, jobService, alertManager, store, logger)
+}
+
+func newRateLimiter(rate int, window time.Duration) *bootstrap.RateLimiter {
+	return bootstrap.NewRateLimiter(rate, window)
+}
+
+var rateLimitExemptPaths = bootstrap.RateLimitExemptPaths
+
+func isRateLimitExempt(path string) bool { return bootstrap.IsRateLimitExempt(path) }
+
+func initLogger() zerolog.Logger { return bootstrap.InitLogger() }
+
+// ─── analysis 独有 builder（不随 AI 拆仓迁移）─────────────────────────
 
 // buildExecutionTrader constructs the in-process MockTrader (P1-15,
 // ODR-021) from viper config. The returned LiveTrader is injected
 // into the backtest engine and exposed over HTTP.
 func buildExecutionTrader(v *viper.Viper, logger zerolog.Logger) live.LiveTrader {
-	execConfig := domain.ExecutionConfig{
-		OrderType:      domain.OrderTypeMarket,
-		SlippageModel:  "fixed",
-		CommissionRate: v.GetFloat64("backtest.commission_rate"),
-		MinCommission:  v.GetFloat64("trading.min_commission"),
-		InitialCapital: v.GetFloat64("backtest.initial_capital"),
-	}
-	trader := live.NewMockTrader(live.MockTraderConfig{
-		InitialCash:    execConfig.InitialCapital,
-		CommissionRate: execConfig.CommissionRate,
-		StampTaxRate:   v.GetFloat64("trading.stamp_tax_rate"),
-		SlippageRate:   v.GetFloat64("backtest.slippage_rate"),
-	}, logger)
-	logger.Info().Msg("execution trader attached to backtest engine in-process (P1-15)")
-	return trader
+	return bootstrap.BuildExecutionTrader(v, logger)
 }
 
 // buildAlertSystem constructs the AlertManager + PeriodicAlertLoop
@@ -194,166 +146,6 @@ func buildAlertSystem(v *viper.Viper, executionTrader live.LiveTrader, riskManag
 		Int("recorder_capacity", recorder.Len()).
 		Msg("AlertManager + PeriodicAlertLoop attached in-process (P2 alert)")
 	return alertManager, alertLoop
-}
-
-// initStore constructs the PostgreSQL store from viper config.
-//
-// The DSN is resolved by storage.BuildDSN (AUD-39), which is shared with
-// cmd/data and rejects two misconfigurations that used to slip through
-// silently: a `${...}` placeholder left in database.url (this repo has no env
-// expander, so it would be handed to the driver as the literal password), and
-// an empty password.
-func initStore(v *viper.Viper, logger zerolog.Logger) *storage.PostgresStore {
-	dbURL, err := storage.BuildDSN(storage.DatabaseConfig{
-		URL:      v.GetString("database.url"),
-		Host:     v.GetString("database.host"),
-		Port:     v.GetInt("database.port"),
-		User:     v.GetString("database.user"),
-		Password: v.GetString("database.password"),
-		Name:     v.GetString("database.database"),
-		SSLMode:  v.GetString("database.sslmode"),
-	})
-	if err != nil {
-		logger.Fatal().Err(err).Msg("invalid database configuration")
-	}
-	store, err := storage.NewPostgresStore(context.Background(), dbURL)
-	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to initialize postgres store")
-	}
-	return store
-}
-
-// InsecureExposureLoopbackPublished 是 auth.allow_insecure_exposure
-// （env: AUTH_INSECURE_EXPOSURE）唯一承认的取值。
-//
-// 它存在的理由：`server.host` 描述的是**进程绑定的网卡**，不是**这个实例
-// 真实的对外可达性**。在容器里这两者会脱钩 —— 容器必须绑 0.0.0.0 才能让
-// 发布端口把流量转进来，但「谁能连上」完全由 `ports:` 的映射决定。
-// 于是「容器内绑定 0.0.0.0 + 只发布到 127.0.0.1」这一组合，对外可达性
-// 等价于 loopback，却会被原来的 isLoopbackHost 判成「暴露到局域网」而拒绝。
-//
-// 所以这里**不是删掉那道门，而是换一个判据**：operator 明确声明
-// 「本实例的对外可达性由发布层限定为 loopback」。声明本身不做安全保证 ——
-// 保证由两处机器校验给出，声明只是让「有人主动承诺过」这件事在配置里可见：
-//
-//  1. 静态：tools/check_deploy_consistency.py 的检查 3c —— 只要
-//     AUTH_INSECURE 为真，**每一个** app 服务的**每一条** ports 映射都必须带
-//     127.0.0.1: 前缀；反之只要有非回环映射，就必须给 JWT_SECRET。
-//  2. 运行时：tools/local-stack.sh 读宿主机真实 netstat，断言 8080/8081/
-//     8082/8085 只监听回环（与 AUD-13 对 PG/Redis 的做法同源）。
-//
-// 取值写错（拼错、空、写一半）一律按「没声明」处理 → 拒绝启动，fail closed。
-const InsecureExposureLoopbackPublished = "loopback-published"
-
-// AuthStartupExposureOK 报告 exposure 声明是否被承认。
-func authExposureOK(exposure string) bool {
-	return strings.TrimSpace(exposure) == InsecureExposureLoopbackPublished
-}
-
-// authStartup 是启动期对鉴权配置的裁决结果。做成纯值是为了可测 ——
-// 真正的 os.Exit 只在 initAuth 里发生一次，测试测 decideAuthStartup 即可。
-type authStartup struct {
-	secret   []byte // 空 = open-access
-	insecure bool   // 明确处于「无鉴权」模式
-	refuse   bool   // 拒绝启动
-	reason   string // 拒绝原因（必须给出可操作的修复指引）
-}
-
-// decideAuthStartup 裁决启动期的鉴权配置（P0-4）。
-//
-// 契约：**没有密钥就拒绝启动**。此前密钥为空会静默进入 open-access —
-// 任何能访问网络的人都能触发回测、创建订单。修成 fail-closed 后，
-// 唯一豁免是「显式声明不安全的本地模式」，且必须是下面二者之一：
-//
-//	A. auth.allow_insecure=true（env: AUTH_INSECURE）且 server.host 是 loopback
-//	B. auth.allow_insecure=true 且 auth.insecure_exposure=loopback-published
-//	   —— 用于容器：绑定是 0.0.0.0，但发布层限定为 127.0.0.1
-//	   （见 InsecureExposureLoopbackPublished 的说明与两处机器校验）
-//
-// 非 loopback 监听且没有 B 的声明时照样拒绝 —— 0.0.0.0 上的 open-access
-// 等于把下单接口开给整个局域网。
-func decideAuthStartup(secret string, allowInsecure bool, bindHost string, insecureExposure string) authStartup {
-	if s := strings.TrimSpace(secret); s != "" {
-		return authStartup{secret: []byte(s)}
-	}
-	if !allowInsecure {
-		return authStartup{
-			refuse: true,
-			reason: "auth: JWT secret missing — refusing to start in open-access mode. " +
-				"Set JWT_SECRET (or auth.jwt_secret) to a strong random value. " +
-				"Local dev only: set AUTH_INSECURE=true AND server.host=127.0.0.1",
-		}
-	}
-	if isLoopbackHost(bindHost) {
-		return authStartup{insecure: true}
-	}
-	if authExposureOK(insecureExposure) {
-		// 容器形态：绑定 0.0.0.0，对外可达性由发布层限定。
-		// 这里只做「声明是否合法」，真实暴露面由静态护栏 + 运行时 netstat 断言保证。
-		return authStartup{insecure: true}
-	}
-	return authStartup{
-		refuse: true,
-		reason: fmt.Sprintf("auth: AUTH_INSECURE=true but server.host=%q is not loopback — "+
-			"open-access would be reachable from other hosts. "+
-			"Set server.host=127.0.0.1, or configure JWT_SECRET instead. "+
-			"Containers (which must bind 0.0.0.0) must instead publish on loopback and declare "+
-			"AUTH_INSECURE_EXPOSURE=%s", bindHost, InsecureExposureLoopbackPublished),
-	}
-}
-
-// isLoopbackHost 报告 host 是否只监听本机。空 host 视为非 loopback —
-// gin 绑 ":port" 等价于 0.0.0.0，fail closed 更安全。
-func isLoopbackHost(host string) bool {
-	h := strings.TrimSpace(host)
-	if h == "" {
-		return false
-	}
-	if h == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(strings.Trim(h, "[]"))
-	return ip != nil && ip.IsLoopback()
-}
-
-// initAuth constructs the JWT + RBAC auth service (P1-2, ADR-017 §2)
-// and enforces the P0-4 startup gate: no secret, no start (unless the
-// operator explicitly opts into loopback-only open access).
-//
-// 密钥来源（按优先级）：JWT_SECRET env → AUTH_JWT_SECRET env →
-// auth.jwt_secret 配置项。YAML 是入库的，生产一律走 env。
-func initAuth(v *viper.Viper, store *storage.PostgresStore, logger zerolog.Logger) *auth.Service {
-	d := decideAuthStartup(
-		v.GetString("auth.jwt_secret"),
-		v.GetBool("auth.allow_insecure"),
-		v.GetString("server.host"),
-		v.GetString("auth.insecure_exposure"),
-	)
-	if d.refuse {
-		logger.Fatal().Msg(d.reason)
-	}
-
-	authSvc := auth.NewService(store.DB(), auth.Config{
-		JWTSecret:       d.secret,
-		AccessTokenTTL:  v.GetDuration("auth.access_token_ttl"),
-		RefreshTokenTTL: v.GetDuration("auth.refresh_token_ttl"),
-		Issuer:          v.GetString("auth.issuer"),
-	})
-	if authSvc.Enabled() {
-		logger.Info().
-			Int("access_ttl_sec", int(authSvc.AccessTTL().Seconds())).
-			Msg("auth: JWT enabled (P1-2)")
-	} else {
-		ev := logger.Warn()
-		if !isLoopbackHost(v.GetString("server.host")) && authExposureOK(v.GetString("auth.insecure_exposure")) {
-			// 容器形态。这条日志是给「出事之后翻日志」的人看的：它把
-			// 「谁在保证暴露面」写清楚，免得误以为这条豁免是白来的。
-			ev = ev.Str("exposure", InsecureExposureLoopbackPublished).
-				Str("guaranteed_by", "tools/check_deploy_consistency.py (static) + tools/local-stack.sh (netstat)")
-		}
-		ev.Msg("auth: INSECURE open-access mode — NO authentication, loopback only, do not use outside local dev")
-	}
-	return authSvc
 }
 
 // dataServices bundles the data-layer services that depend on the
@@ -445,32 +237,6 @@ func buildDataServices(
 	}
 }
 
-// buildCopilot constructs the Copilot service (S7-P1-2, ODR-043) with
-// LLM client, code checker, and build executor injected at the
-// composition root. Returns the service and a BacktestRunner adapter
-// that delegates to the backtest engine.
-func buildCopilot(v *viper.Viper, engine *backtest.Engine, logger zerolog.Logger) (*strategy.CopilotService, strategy.BacktestRunner) {
-	// S7-P1-2 (ODR-043): wire the LLM client, code checker, and build
-	// executor at the composition root. Previously NewCopilotService()
-	// called ai.NewClient() internally and run() called
-	// staticcheck.CheckOrError() / sandboxrunner.New() inline — all of
-	// which created strategy → ai / strategy → internal/sandbox reverse
-	// dependencies. The DI pattern moves those imports to main.go (the
-	// composition root) where they belong.
-	copilotService := strategy.NewCopilotService().
-		WithLLMClient(ai.NewClient()).
-		WithCodeChecker(staticCheckAdapter{}).
-		WithBuildExecutor(newSandboxRunnerAdapter(logger)).
-		WithLogger(logger.With().Str("component", "copilot").Logger()).
-		WithWorkingDir(v.GetString("copilot.working_dir"))
-	logger.Info().
-		Bool("ai_configured", copilotService.IsConfigured()).
-		Str("working_dir", copilotService.WorkingDir()).
-		Msg("Copilot service initialized")
-	copilotRunner := &strategyEngineAdapter{engine: engine}
-	return copilotService, copilotRunner
-}
-
 // initStrategyAndPlugins constructs the StrategyDB and PluginLoader,
 // seeds built-in strategies, and auto-loads plugins from the configured
 // directory if plugins.directory is set.
@@ -499,333 +265,4 @@ func initStrategyAndPlugins(v *viper.Viper, store *storage.PostgresStore, logger
 		}
 	}
 	return strategyDB, pluginLoader
-}
-
-// buildToolsRegistry constructs the Tools Registry (S7-P3-3, ODR-043)
-// and registers all builtin tool groups. The registry is then exposed
-// over /api/tools/* by ToolsHandler, enabling external agent services
-// (e.g. Hermes Agent) to discover and invoke platform capabilities
-// without reading SPEC.md.
-//
-// S7-P3-4 (Hermes Phase 1.7 + Phase 2.2-2.3): the registry now hosts 19 tools
-// across 10 groups:
-//   - backtest.run          (S7-P3-3, L3 gate)
-//   - factor.compute        (S7-P3-3, L2 gate)
-//   - factor.evaluate       (S7-P3-3)
-//   - data.ohlcv / .stocks / .fundamentals  (S7-P3-3)
-//   - strategy.list / .get                 (S7-P3-3)
-//   - validate_factor        (Hermes Phase 1.1, L1 gate)
-//   - compute_factor_ic      (Hermes Phase 1.2, L2 gate)
-//   - walk_forward_validate  (Hermes Phase 1.3, L4 gate)
-//   - list_factors / save_factor           (Hermes Phase 1.4, gene pool)
-//   - list_strategies / save_strategy     (Hermes Phase 1.5, gene pool)
-//   - summarize_backtest     (Hermes Phase 1.6)
-//   - get_strategy_lineage    (Hermes Phase 2.2, gene pool lineage)
-//   - get_market_regime       (Hermes Phase 2.3, market regime detection)
-//   - research.profile        (EQD-P2-1, bridge B2, EquityDeep research archive)
-//
-// Wiring notes:
-//   - BacktestTool reuses the same contracts.BacktestRunner (copilotRunner)
-//     already wired into the AI pipeline — zero duplication.
-//   - FactorTool uses an HTTP client pointed at this same service's
-//     /api/factor/* endpoints (the analysis-service proxies to itself;
-//     the factor endpoints are registered in registerFactorRoutes).
-//   - DataFetchTool uses the shared httpClient (observability + X-Request-ID)
-//     pointed at the data-service URL from viper config.
-//   - StrategyRegistryTool reads from the package-level strategy.DefaultRegistry,
-//     so no wiring is needed.
-//   - WalkForwardValidateTool takes a builtin.WalkForwardRunner, satisfied
-//     by walkForwardEngineAdapter (defined in main.go) wrapping ds.WFEngine.
-//   - Gene Pool tools (list_factors / save_factor / list_strategies /
-//     save_strategy) take narrow interfaces satisfied by *gene_pool.FactorPool
-//     and *gene_pool.StrategyPool constructed from store.DB().
-//   - GetStrategyLineageTool (Phase 2.2) reuses the same StrategyPoolClient.
-//   - GetMarketRegimeTool (Phase 2.3) takes a builtin.RegimeDetectorClient
-//     (satisfied by *risk.RiskManager) and reuses the dataClient constructed
-//     below for OHLCV fetching.
-//   - ResearchProfileTool (EQD-P2-1) takes a builtin.ResearchProfileClient
-//     (satisfied by *storage.PostgresStore) and reads the contract C2 vault
-//     mirror root from equitydeep.vault_path (env EQUITYDEEP_VAULT_PATH).
-//     An empty path is valid: it disables the mirror fallback, leaving the
-//     tool answering from the research.* projection alone.
-//   - ValidateFactor / ComputeFactorIC / SummarizeBacktest have no DI.
-func buildToolsRegistry(
-	v *viper.Viper,
-	runner contracts.BacktestRunner,
-	wfRunner builtin.WalkForwardRunner,
-	factorPool builtin.FactorPoolClient,
-	strategyPool builtin.StrategyPoolClient,
-	regimeDetector builtin.RegimeDetectorClient,
-	researchProfile builtin.ResearchProfileClient,
-	hypothesisStore *storage.PostgresStore,
-	logger zerolog.Logger,
-) *tools.Registry {
-	reg := tools.NewRegistry()
-
-	// ── Group 1: Backtest (S7-P3-3) ──────────────────────────────────
-	if err := reg.Register(builtin.NewBacktestTool(runner)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register backtest.run tool")
-	}
-
-	// ── Group 2: Factor — HTTP + expression-based (S7-P3-3 + Hermes 1.1/1.2) ─
-	analysisURL := fmt.Sprintf("http://localhost:%d", v.GetInt("server.port"))
-	if v.GetInt("server.port") == 0 {
-		analysisURL = "http://localhost:8085"
-	}
-	factorClient := client.NewFactorClient(analysisURL)
-	if err := reg.Register(builtin.NewFactorComputeTool(factorClient)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register factor.compute tool")
-	}
-	if err := reg.Register(builtin.NewFactorEvaluateTool(factorClient)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register factor.evaluate tool")
-	}
-	// Hermes Phase 1.1: L1 syntax gate — no DI, creates fresh parser per Execute.
-	if err := reg.Register(builtin.NewValidateFactorTool()); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register validate_factor tool")
-	}
-	// Hermes Phase 1.2: L2 quick IC gate — reuses the same factor HTTP client.
-	if err := reg.Register(builtin.NewComputeFactorICTool(factorClient)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register compute_factor_ic tool")
-	}
-
-	// ── Group 3: Data fetch (S7-P3-3) ───────────────────────────────
-	dataServiceURL := v.GetString("data_service.url")
-	if dataServiceURL == "" {
-		dataServiceURL = "http://localhost:8081"
-	}
-	dataClient := builtin.NewDataSourceClient(dataServiceURL, httpClient)
-	if err := reg.Register(builtin.NewDataOHLCVTool(dataClient)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register data.ohlcv tool")
-	}
-	if err := reg.Register(builtin.NewDataStocksTool(dataClient)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register data.stocks tool")
-	}
-	if err := reg.Register(builtin.NewDataFundamentalsTool(dataClient)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register data.fundamentals tool")
-	}
-
-	// ── Group 4: Strategy registry (S7-P3-3) ─────────────────────────
-	if err := reg.Register(builtin.NewStrategyListTool()); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register strategy.list tool")
-	}
-	if err := reg.Register(builtin.NewStrategyGetTool()); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register strategy.get tool")
-	}
-
-	// ── Group 5: Walk-forward validation (Hermes Phase 1.3, L4 gate) ─
-	if err := reg.Register(builtin.NewWalkForwardValidateTool(wfRunner)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register walk_forward_validate tool")
-	}
-
-	// ── Group 6: Gene Pool — factor + strategy CRUD (Hermes Phase 1.4/1.5) ─
-	if err := reg.Register(builtin.NewListFactorsTool(factorPool)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register list_factors tool")
-	}
-	if err := reg.Register(builtin.NewSaveFactorTool(factorPool)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register save_factor tool")
-	}
-	if err := reg.Register(builtin.NewListStrategiesTool(strategyPool)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register list_strategies tool")
-	}
-	if err := reg.Register(builtin.NewSaveStrategyTool(strategyPool)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register save_strategy tool")
-	}
-
-	// ── Group 7: Summarization (Hermes Phase 1.6) ───────────────────
-	if err := reg.Register(builtin.NewSummarizeBacktestTool()); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register summarize_backtest tool")
-	}
-
-	// ── Group 8: Lineage (Hermes Phase 2.2, gene pool lineage) ─────
-	if err := reg.Register(builtin.NewGetStrategyLineageTool(strategyPool)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register get_strategy_lineage tool")
-	}
-
-	// ── Group 9: Market regime (Hermes Phase 2.3) ──────────────────
-	// Reuses the dataClient from Group 3 for OHLCV fetching.
-	if err := reg.Register(builtin.NewGetMarketRegimeTool(regimeDetector, dataClient)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register get_market_regime tool")
-	}
-
-	// ── Group 10: Research profile (EQD-P2-1, bridge B2) ───────────
-	// Reads the EquityDeep research archive, preferring the research.*
-	// projection and falling back to the contract C2 mirror under
-	// equitydeep.vault_path (env EQUITYDEEP_VAULT_PATH). The vault is
-	// mounted read-only; an empty path simply disables the fallback.
-	if err := reg.Register(builtin.NewResearchProfileTool(researchProfile, v.GetString("equitydeep.vault_path"))); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register research.profile tool")
-	}
-
-	// ── Group 11: Factor hypothesis (P2-3) ─────────────────────────
-	// 「这个因子凭什么有效」—— 采用一个因子之前先看它的机制来自哪里。
-	//
-	// 显式判空而不是直接传 hypothesisStore：*PostgresStore 的 nil 塞进
-	// 接口会变成非 nil 的接口值，工具会拿着空指针去查库（P1-1b 的老坑）。
-	// 没连库时工具仍可用 —— 它回退到 domain 里的内置假设表。
-	var hs builtin.FactorHypothesisStore
-	if hypothesisStore != nil {
-		hs = hypothesisStore
-	}
-	if err := reg.Register(builtin.NewFactorHypothesisTool(hs)); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register factor.hypothesis tool")
-	}
-
-	// ── Group 12: Strategy health (P2-6) ───────────────────────────
-	// 「这个策略是不是开始不行了」—— 滚动指标 + 概念漂移检测。
-	// 接上之前 pkg/ai/drift 与 pkg/strategy/monitor 是两个零调用方的孤儿包，
-	// 实现完整却没人消费。无状态：每次调用新建 monitor 喂完整段序列。
-	if err := reg.Register(builtin.NewStrategyHealthTool()); err != nil {
-		logger.Fatal().Err(err).Msg("failed to register monitor.strategy_health tool")
-	}
-
-	logger.Info().
-		Int("tool_count", len(reg.List())).
-		Msg("Tools Registry initialized (S7-P3-3 + Hermes Phase 1.7 + Phase 2.2-2.3 + EQD-P2-1): 19 tools exposed at /api/tools/* — backtest/factor/data/strategy/gene-pool/walk-forward/summarize/lineage/regime/research")
-	return reg
-}
-
-// rateLimitPerMinute returns the gateway rate limit (requests per
-// ClientIP per minute window) from rate_limit.per_minute, defaulting
-// to 100. Env-overridable via RATE_LIMIT_PER_MINUTE through viper
-// AutomaticEnv, mirroring the AI_RATE_LIMIT_PER_MIN pattern (ODR-013):
-// e2e/load scenarios crank it up, incident response drops it down.
-func rateLimitPerMinute(v *viper.Viper) int {
-	if n := v.GetInt("rate_limit.per_minute"); n > 0 {
-		return n
-	}
-	return 100
-}
-
-// applyGinMode sets gin's process-wide run mode from server.gin_mode.
-//
-// AUD-29 (ODR-065): must run exactly once, before any router is built.
-// It used to happen inside buildRouter, keyed off logging.format — see
-// internal/httpserver/ginmode.go for why that was the wrong key and the
-// wrong place.
-func applyGinMode(v *viper.Viper, logger zerolog.Logger) {
-	raw := v.GetString(httpserver.ConfigKeyGinMode)
-	applied, recognized := httpserver.ApplyGinMode(raw)
-	if !recognized {
-		logger.Warn().
-			Str(httpserver.ConfigKeyGinMode, raw).
-			Str("applied", applied).
-			Msg("unrecognized gin mode; falling back to release")
-	}
-}
-
-// buildRouter creates the gin router with recovery, CORS, rate-limiting,
-// request logging, and auth middleware (when enabled).
-//
-// gin's run mode is deliberately NOT set here. It is a process-wide global
-// applied once at startup by applyGinMode (AUD-29); tests call buildRouter
-// directly, so mutating the global here would race with parallel tests.
-func buildRouter(authSvc *auth.Service, v *viper.Viper, logger zerolog.Logger) *gin.Engine {
-	router := gin.New()
-	router.Use(gin.Recovery())
-	// P0-4: CORS 按白名单回显，白名单来自 server.cors.allowed_origins。
-	// 未配置 = 不回显任何 ACAO（fail closed），不再是硬编码的 `*`。
-	router.Use(httpserver.CORS(httpserver.AllowedOrigins(v)))
-	router.Use(newRateLimiter(rateLimitPerMinute(v), time.Minute).middleware())
-	router.Use(requestLogger(logger))
-	// P1-2: JWT auth middleware (no-op when auth is disabled) + audit
-	// log middleware. Both run before route registration so the
-	// handlers can rely on the context values being set.
-	if authSvc.Enabled() {
-		router.Use(authSvc.Middleware())
-		router.Use(authSvc.AuditMiddleware())
-	}
-	return router
-}
-
-// startHTTPServer creates and starts the HTTP server in a goroutine.
-// Returns the *http.Server so the caller can perform graceful shutdown.
-func startHTTPServer(router *gin.Engine, v *viper.Viper, logger zerolog.Logger) *http.Server {
-	host := v.GetString("server.host")
-	port := v.GetInt("server.port")
-	addr := fmt.Sprintf("%s:%d", host, port)
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      router,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
-	go func() {
-		logger.Info().
-			Str("address", addr).
-			Msg("Analysis Service starting")
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal().Err(err).Msg("Server failed")
-		}
-	}()
-	return srv
-}
-
-// waitForShutdown blocks until a SIGINT or SIGTERM is received.
-func waitForShutdown() os.Signal {
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	return <-quit
-}
-
-// gracefulShutdown performs the ordered shutdown sequence
-// (Sprint 6 P0-8, ODR-013):
-//  1. JobService.Shutdown — reject new jobs, cancel in-flight contexts
-//     (must happen BEFORE srv.Shutdown so running backtests see ctx
-//     cancelled and write "failed" status themselves).
-//  2. AlertManager.Close — stop the webhook delivery goroutine.
-//  3. srv.Shutdown — stop accepting new HTTP requests, wait for
-//     in-flight handlers to return.
-//  4. JobService.CleanupStaleRunning — safety net for any rows that
-//     goroutines didn't get to update.
-//  5. store.Close — release the DB connection.
-//
-// The total budget is a 30s parent context; phases 1-3 share it.
-// Phase 4 gets a fresh 5s ctx so a stuck DB doesn't hold shutdown open.
-func gracefulShutdown(srv *http.Server, jobService *backtest.JobService, alertManager *alert.AlertManager, store *storage.PostgresStore, logger zerolog.Logger) {
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	if err := jobService.Shutdown(shutdownCtx); err != nil {
-		logger.Warn().Err(err).Msg("JobService.Shutdown did not drain cleanly; will run CleanupStaleRunning")
-	}
-
-	// P2 alert (ODR-025): close the AlertManager. This stops the
-	// in-process Webhook delivery goroutine (if any) and the recorder
-	// channel. The PeriodicAlertLoop's Start() goroutine is bound to
-	// context.Background() so it does not observe this ctx cancel
-	// directly; instead, we close the manager and rely on the next
-	// tick's Evaluate failing fast due to closed channels.
-	alertManager.Close()
-	logger.Info().Msg("AlertManager closed (P2 alert)")
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error().Err(err).Msg("HTTP server forced to shutdown")
-	} else {
-		logger.Info().Msg("HTTP server stopped accepting new requests")
-	}
-
-	// Phase 3: sweep any rows still stuck in 'running'. We do this
-	// with a fresh, short ctx so a stuck DB doesn't hold the whole
-	// shutdown open past the budget.
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cleanupCancel()
-	transitioned, cleanupErr := jobService.CleanupStaleRunning(cleanupCtx)
-	if cleanupErr != nil {
-		logger.Error().Err(cleanupErr).Msg("CleanupStaleRunning failed; some jobs may still appear as 'running' in DB")
-	} else if transitioned > 0 {
-		logger.Info().Int("transitioned", transitioned).Msg("Stale 'running' jobs transitioned to 'failed'")
-	} else {
-		logger.Info().Msg("No stale 'running' jobs found; DB state is clean")
-	}
-
-	// Phase 4: close remaining resources. The PluginLoader's Watch
-	// loop is context-driven and exits on its own; we don't need to
-	// explicitly stop it. The store gets an explicit Close so the
-	// underlying *sql.DB is released and FDs don't leak after exit.
-	if store != nil {
-		store.Close()
-		logger.Info().Msg("Postgres store closed")
-	}
-	logger.Info().Msg("Server exited")
 }

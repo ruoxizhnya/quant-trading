@@ -1,0 +1,103 @@
+# ai-service 配置（AI 拆仓阶段 1，ADR-027 §5 第 8 步的前置切片）。
+#
+# 只承载 AI 实验员侧（cmd/ai）：Copilot / pipeline / explore / tools。
+# 引擎装配（risk_manager / backtest / trading / database）与
+# analysis-service.yaml **逐值一致** —— 同一个实验在两个进程跑出
+# 不同结果是不可接受的；改一处必须同步另一处（两处都读同名键）。
+#
+# 宿主机直跑视角（数据库/缓存在 localhost），与 analysis-service.yaml
+# 同一口径；容器内由 docker-compose 的 env 覆盖。
+
+server:
+  host: "0.0.0.0"
+  port: 8086
+  gin_mode: "release"
+  cors:
+    allowed_origins: []
+
+# P0-4 鉴权（与 analysis 同一套不变量：无密钥拒启动，豁免须显式声明）。
+# 密钥只从 env 注入：JWT_SECRET / AUTH_INSECURE / AUTH_INSECURE_EXPOSURE。
+auth:
+  jwt_secret: ""
+  allow_insecure: false
+  insecure_exposure: ""
+  issuer: "quant-trading"
+  access_token_ttl: 15m
+  refresh_token_ttl: 168h      # 7d
+
+rate_limit:
+  per_minute: 100
+
+database:
+  url: ""
+  host: "localhost"
+  port: 5432
+  user: "postgres"
+  password: ""
+  database: "quant_trading"
+  sslmode: "disable"
+
+# 容器视角（compose 服务名）—— 与 analysis-service.yaml 同口径。
+data_service:
+  url: "http://data-service:8081"
+
+# ai-service 自己的地址视图：
+#   factor_api_url —— factor.compute / factor.evaluate / compute_factor_ic
+#   三个工具经 HTTP 打 analysis 的 /api/factor/*（只在那里注册）。
+ai_service:
+  factor_api_url: "http://analysis-service:8085"
+
+# 与 analysis-service.yaml 逐值一致（回测行为对等的来源）。
+risk_manager:
+  target_volatility: 0.15
+  max_position_weight: 0.10
+  min_position_weight: 0.01
+  stoploss:
+    atr_period: 14
+    base_multiplier: 2.5
+    bull_multiplier: 2.0
+    bear_multiplier: 3.5
+    sideways_multiplier: 2.5
+  take_profit:
+    atr_multiplier: 3.0
+  volatility:
+    lookback_days: 20
+    annualization_factor: 16.0
+  regime:
+    fast_ma_period: 10
+    slow_ma_period: 20
+    vol_lookback: 60
+
+backtest:
+  initial_capital: 1000000.0
+  commission_rate: 0.0003
+  slippage_rate: 0.0001
+  risk_free_rate: 0.03
+
+# 引擎读顶层 trading 键（v.UnmarshalKey("trading", ...)）—— 与
+# analysis-service.yaml **逐值一致**（详见那边 AUD-37 / AUD-06 注记；
+# 改这里必须同步那边，反之亦然）。
+trading:
+  # 印花税（仅卖出）：0.05%。2023-08-28 起从 0.1% 减半。
+  stamp_tax_rate: 0.0005
+  stamp_tax_rate_before: 0.001
+  min_commission: 5.0            # 最低佣金 5元
+  transfer_fee_rate: 0.00001     # 过户费 0.001%
+  price_limit:
+    normal: 0.10                 # 主板股票涨跌幅限制 ±10%
+    st: 0.10                     # 主板 ST 涨跌幅限制 ±10%（2026-07-06 起）
+    st_before: 0.05              # 主板 ST 涨跌幅限制 ±5%（2026-07-06 之前）
+    new: 0.20                    # 新股涨跌幅限制 ±20%
+  new_stock_days: 60             # 新股判断阈值（已知不准，见 TASKS AUD-07）
+  # ai-service 不暴露下单端点，emergency_token 与 execution 无关；键保留
+  # 只为与 analysis 的引擎装配假设完全一致。
+  emergency_token: ""
+
+copilot:
+  # LLM 生成代码的编译沙箱目录，必须含能解析 pkg/domain 的 go.mod。
+  # 空 = 拒绝构建（fail closed, status="sandbox_rejected"）。
+  working_dir: ""
+
+logging:
+  level: "info"
+  format: "json"

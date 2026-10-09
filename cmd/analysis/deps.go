@@ -11,7 +11,6 @@ package main
 
 import (
 	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
@@ -38,13 +37,6 @@ type ServerDeps struct {
 
 	// StrategyDB — strategy CRUD + DB-backed list (GET /strategies).
 	StrategyDB *strategy.StrategyDB
-
-	// CopilotService — LLM-driven strategy generation (POST /api/copilot/*).
-	CopilotService *strategy.CopilotService
-
-	// CopilotRunner — executes backtests for the AI pipeline
-	// (POST /api/pipeline/*). Same adapter instance wired into CopilotService.
-	CopilotRunner strategy.BacktestRunner
 
 	// FactorAttributor — factor attribution analysis (GET /api/factors/*).
 	FactorAttributor *data.FactorAttributor
@@ -75,12 +67,6 @@ type ServerDeps struct {
 	// Viper — config reader, used by registerRoutes to load the
 	// default suitability profile and large-trade reporter config.
 	Viper *viper.Viper
-
-	// ToolsRegistry — S7-P3-3 (ODR-043): the Tools Registry exposes
-	// backtest/factor/data/strategy capabilities as discoverable Tools
-	// over /api/tools/*. Enables external agent services to call this
-	// platform without reading SPEC.md or hand-crafting HTTP requests.
-	ToolsRegistry *tools.Registry
 
 	// Store — L0-3 (ADR-022 §5): the Postgres store backs the read-only
 	// Evidence API (GET /api/evidence/:content_hash), which resolves a

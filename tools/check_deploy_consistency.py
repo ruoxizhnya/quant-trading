@@ -81,6 +81,9 @@ K8S_DIR = ROOT / "deploy" / "k8s"
 # 检查 3a 正向断言。
 ALLOWED_MISSING_IN_K8S = {
     "strategy-service": "standby per ADR-012，k8s 里不部署",
+    # AI 拆仓阶段 1：k8s 侧暂不部署 ai-service（本地 compose 先行验证；
+    # k8s 清单随阶段 2 搬仓一并补 —— 到时本条移除）。
+    "ai-service": "AI 拆仓阶段 1，k8s 清单待阶段 2 补",
 }
 
 # 两边都可能不配的最小集合（比如只在本地跑的辅助容器）
@@ -229,7 +232,7 @@ APP_DB_ENV_KEYS = [
 # 5b 真正拿来比值的「身份」字段：连过去之后必须对得上的东西。
 # 刻意**不含** DATABASE_HOST / REDIS_URL 的 host —— 它们按环境各写一份是对的。
 IDENTITY_ENV_KEYS = ["DATABASE_USER", "DATABASE_DATABASE", "DATABASE_PORT"]
-APP_ENV_SERVICES = ["analysis-service", "data-service"]
+APP_ENV_SERVICES = ["analysis-service", "data-service", "ai-service"]
 
 # 在部署配置里**不许出现**的 env 名 —— 每一条都是「曾经存在过的死键」。
 BANNED_ENV_NAMES = {

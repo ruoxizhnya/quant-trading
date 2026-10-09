@@ -9,7 +9,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/tools"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/spf13/viper"
@@ -32,8 +31,6 @@ func TestServerDeps_HasExpectedFields(t *testing.T) {
 		"WFEngine",
 		"BatchEngine",
 		"StrategyDB",
-		"CopilotService",
-		"CopilotRunner",
 		"FactorAttributor",
 		"PluginLoader",
 		"AuthSvc",
@@ -43,7 +40,6 @@ func TestServerDeps_HasExpectedFields(t *testing.T) {
 		"Metrics",
 		"Logger",
 		"Viper",
-		"ToolsRegistry",
 		"Store",
 	}
 
@@ -90,7 +86,6 @@ func TestServerDeps_FieldsAreTyped(t *testing.T) {
 		"WFEngine":         "*walkforward.WalkForwardEngine",
 		"BatchEngine":      "*batch.BatchEngine",
 		"StrategyDB":       "*strategy.StrategyDB",
-		"CopilotService":   "*strategy.CopilotService",
 		"FactorAttributor": "*data.FactorAttributor",
 		"PluginLoader":     "*strategy.PluginLoader",
 		"AuthSvc":          "*auth.Service",
@@ -131,7 +126,6 @@ func newMinimalDeps() *ServerDeps {
 			// the /metrics handler still works (returns an empty scrape).
 			return observability.NewMetrics()
 		}(),
-		ToolsRegistry: tools.NewRegistry(),
 		Store:         &storage.PostgresStore{},
 	}
 }

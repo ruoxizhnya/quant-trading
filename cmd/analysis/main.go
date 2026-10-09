@@ -1,22 +1,14 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog"
-	"github.com/ruoxizhnya/quant-trading/internal/sandbox/runner"
-	"github.com/ruoxizhnya/quant-trading/internal/sandbox/staticcheck"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/gene_pool"
-	"github.com/ruoxizhnya/quant-trading/pkg/ai/pipeline"
+	"github.com/ruoxizhnya/quant-trading/internal/bootstrap"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/compliance"
-	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
 	_ "github.com/ruoxizhnya/quant-trading/pkg/strategy/plugins"
 	"github.com/spf13/viper"
@@ -27,152 +19,9 @@ import (
 // per-request X-Request-ID from the inbound request context to
 // downstream calls AND records an observation in
 // http_client_requests_total{service="data",status=...}.
-var httpClient = &http.Client{
-	Timeout: 30 * time.Second,
-	Transport: &observability.HTTPTransport{
-		Service: "data",
-	},
-}
-
-type strategyEngineAdapter struct {
-	engine *backtest.Engine
-}
-
-// staticCheckAdapter implements strategy.CodeChecker by delegating to
-// internal/sandbox/staticcheck. S7-P1-2 (ODR-043): defined HERE in the
-// composition root (cmd/analysis) so pkg/strategy doesn't import
-// internal/sandbox/staticcheck — breaking the reverse dependency.
-type staticCheckAdapter struct{}
-
-func (staticCheckAdapter) CheckOrError(code string) error {
-	return staticcheck.CheckOrError(code)
-}
-
-// sandboxRunnerAdapter implements strategy.BuildExecutor by delegating
-// to internal/sandbox/runner. S7-P1-2 (ODR-043): defined HERE in the
-// composition root so pkg/strategy doesn't import internal/sandbox/runner.
 //
-// The runner is constructed once with the same 30s timeout + 1GiB
-// memory cap that the old inline code used (Sprint 6 P1-11 / ODR-020)
-// and reused across build attempts — Runner is stateless beyond its
-// config, so reuse is safe.
-type sandboxRunnerAdapter struct {
-	r *runner.Runner
-}
-
-// envAllowUnenforcedSandboxLimits is the escape hatch for running the
-// copilot build sandbox on a platform that cannot enforce resource
-// limits (currently Windows, which has no setrlimit(2)).
-//
-// Without it the runner FAILS CLOSED: a build that asked for the caps
-// below is refused outright rather than run unbounded. That is the
-// point — a silently uncapped child is worse than no child, because
-// nothing downstream knows the protection is missing.
-//
-// This must never be set in a deployed environment. On POSIX it is
-// unnecessary: the limits are enforced inside the child.
-const envAllowUnenforcedSandboxLimits = "SANDBOX_ALLOW_UNENFORCED_LIMITS"
-
-func newSandboxRunnerAdapter(logger zerolog.Logger) *sandboxRunnerAdapter {
-	opts := []runner.Option{
-		runner.WithTimeout(30 * time.Second),
-		runner.WithLimits(runner.Limits{
-			MemoryBytes: 1 << 30, // 1 GiB
-			CPUSeconds:  25,
-			OpenFiles:   256,
-		}),
-	}
-
-	if os.Getenv(envAllowUnenforcedSandboxLimits) != "" {
-		logger.Warn().
-			Str("env", envAllowUnenforcedSandboxLimits).
-			Msg("sandbox resource limits will NOT be enforced on this platform; " +
-				"unset this variable outside local development")
-		opts = append(opts,
-			runner.WithAllowUnenforcedLimits(),
-			runner.WithOnUnenforcedLimits(func(argv []string, unenforced runner.Limits) {
-				logger.Warn().
-					Strs("argv", argv).
-					Str("unenforced", unenforced.Describe()).
-					Msg("sandbox build ran with some resource limits NOT enforced")
-			}),
-		)
-	}
-
-	return &sandboxRunnerAdapter{r: runner.New(opts...)}
-}
-
-func (a *sandboxRunnerAdapter) Run(ctx context.Context, name string, args []string, workingDir string) (*bytes.Buffer, *bytes.Buffer, error) {
-	return a.r.Run(ctx, name, args, runner.Options{Dir: workingDir})
-}
-
-func (a *sandboxRunnerAdapter) IsTimeout(err error) bool {
-	return errors.Is(err, runner.ErrTimeout)
-}
-
-func (a *strategyEngineAdapter) RunBacktest(
-	ctx context.Context,
-	strategyName string,
-	stockPool []string,
-	startDate, endDate string,
-) (*domain.BacktestResult, error) {
-	req := backtest.BacktestRequest{
-		Strategy:  strategyName,
-		StockPool: stockPool,
-		StartDate: startDate,
-		EndDate:   endDate,
-	}
-	resp, err := a.engine.RunBacktest(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	return &domain.BacktestResult{
-		TotalReturn:    resp.TotalReturn,
-		AnnualReturn:   resp.AnnualReturn,
-		SharpeRatio:    resp.SharpeRatio,
-		SortinoRatio:   resp.SortinoRatio,
-		MaxDrawdown:    resp.MaxDrawdown,
-		WinRate:        resp.WinRate,
-		TotalTrades:    resp.TotalTrades,
-		WinTrades:      resp.WinTrades,
-		LoseTrades:     resp.LoseTrades,
-		AvgHoldingDays: resp.AvgHoldingDays,
-		CalmarRatio:    resp.CalmarRatio,
-	}, nil
-}
-
-// walkForwardEngineAdapter wraps *backtest.WalkForwardEngine (=
-// *walkforward.WalkForwardEngine) to satisfy builtin.WalkForwardRunner.
-//
-// The concrete engine's RunWalkForward takes a WalkForwardRequest struct,
-// while the narrow Tool interface takes individual params. This adapter
-// bridges the two, assembling the struct at the composition root so the
-// Tool layer stays decoupled from the engine's request DTO.
-//
-// S7-P3-4 (Hermes Phase 1.7): defined HERE in the composition root
-// (cmd/analysis) following the strategyEngineAdapter pattern — the
-// builtin package defines the interface, the adapter implements it
-// structurally without importing builtin.
-type walkForwardEngineAdapter struct {
-	engine *backtest.WalkForwardEngine
-}
-
-func (a *walkForwardEngineAdapter) RunWalkForward(
-	ctx context.Context,
-	strategyName string,
-	stockPool []string,
-	startDate, endDate string,
-	params domain.WalkForwardParams,
-) (*domain.WalkForwardReport, error) {
-	req := backtest.WalkForwardRequest{
-		Strategy:          strategyName,
-		StockPool:         stockPool,
-		StartDate:         startDate,
-		EndDate:           endDate,
-		WalkForwardParams: params,
-	}
-	return a.engine.RunWalkForward(ctx, req)
-}
+// AI 拆仓阶段 1：client 本体上收 internal/bootstrap（cmd/ai 共享同一份）。
+var httpClient = bootstrap.HTTPClient
 
 // main is the composition root for the analysis service. It wires
 // together all services via the builder functions in setup.go and
@@ -214,24 +63,13 @@ func main() {
 	}
 
 	ds := buildDataServices(store, engine, httpProvider, logger, newEngine)
-	copilotService, copilotRunner := buildCopilot(v, engine, logger)
 	strategyDB, pluginLoader := initStrategyAndPlugins(v, store, logger)
 
-	// S7-P3-3 (ODR-043): build the Tools Registry after copilotRunner
-	// is available (BacktestTool delegates to it) and after strategies
-	// are seeded (StrategyRegistryTool reads from the global registry).
-	//
-	// S7-P3-4 (Hermes Phase 1.7): the registry now also wires:
-	//   - WalkForwardValidateTool (via walkForwardEngineAdapter wrapping ds.WFEngine)
-	//   - ListFactors/SaveFactor tools (via gene_pool.NewFactorPool(store.DB()))
-	//   - ListStrategies/SaveStrategy tools (via gene_pool.NewStrategyPool(store.DB()))
-	//   - ValidateFactor / ComputeFactorIC / SummarizeBacktest tools (no DI)
-	//   - ResearchProfileTool (EQD-P2-1) via *storage.PostgresStore (research.*
-	//     projection) + equitydeep.vault_path (contract C2 mirror fallback)
-	factorPool := gene_pool.NewFactorPool(store.DB())
-	strategyPool := gene_pool.NewStrategyPool(store.DB())
-	wfRunner := &walkForwardEngineAdapter{engine: ds.WFEngine}
-	toolsRegistry := buildToolsRegistry(v, copilotRunner, wfRunner, factorPool, strategyPool, riskManager, store, store, logger)
+	// AI 拆仓阶段 1（ADR-027 §5 第 8 步前置切片）：Copilot / pipeline /
+	// explore / tools 四族 handler 随 ai-service 迁出，本服务对这四族
+	// 路由改 HTTP 反代（见 handlers_ai_proxy.go），前端零改动。装配侧
+	// 相应移除 buildCopilot / buildToolsRegistry / 各 adapter 与
+	// gene_pool pools —— 它们现在住在 cmd/ai。
 
 	deps := &ServerDeps{
 		Engine:           engine,
@@ -239,8 +77,6 @@ func main() {
 		WFEngine:         ds.WFEngine,
 		BatchEngine:      ds.BatchEngine,
 		StrategyDB:       strategyDB,
-		CopilotService:   copilotService,
-		CopilotRunner:    copilotRunner,
 		FactorAttributor: ds.FactorAttributor,
 		PluginLoader:     pluginLoader,
 		AuthSvc:          authSvc,
@@ -250,7 +86,6 @@ func main() {
 		Metrics:          m,
 		Logger:           logger,
 		Viper:            v,
-		ToolsRegistry:    toolsRegistry,
 		Store:            store,
 	}
 
@@ -286,23 +121,6 @@ func main() {
 	stopShadowKernel(shadowKernel, logger)
 
 	gracefulShutdown(srv, ds.JobService, alertManager, store, logger)
-}
-
-func initLogger() zerolog.Logger {
-	return zerolog.New(os.Stdout).With().Timestamp().Logger()
-}
-
-func requestLogger(logger zerolog.Logger) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		start := time.Now()
-		c.Next()
-		logger.Info().
-			Str("method", c.Request.Method).
-			Str("path", c.Request.URL.Path).
-			Int("status", c.Writer.Status()).
-			Dur("latency", time.Since(start)).
-			Msg("request")
-	}
 }
 
 func registerRoutes(router *gin.Engine, deps *ServerDeps) {
@@ -360,26 +178,15 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 	registerWalkForwardRoutes(router, deps.WFEngine, deps.Logger)
 	registerBatchRoutes(router, deps.BatchEngine, deps.Logger)
 	registerStrategyRoutes(router, deps.StrategyDB)
-	registerCopilotRoutes(router, deps.CopilotService, deps.CopilotRunner)
 	registerDatasourceRoutes(router, deps.Engine)
 	registerFactorRoutes(router, deps.FactorAttributor, deps.Logger)
 	registerPluginRoutes(router, deps.PluginLoader)
-	// S7-P0-1 (ODR-043-1): inject copilotRunner so the AI pipeline can
-	// execute the backtest stage end-to-end instead of silently skipping
-	// it. copilotRunner is the same *strategyEngineAdapter already wired
-	// into /api/copilot above.
-	// P1-1b：把实验日志落点接进 pipeline。
-	// 显式判空而不是直接传 deps.Store —— *PostgresStore 的 nil 塞进接口会
-	// 变成一个非 nil 的接口值，pipeline 会拿着空指针去写日志（这个坑在
-	// P0-5 的 aiClient 上踩过一次）。
-	var expSink pipeline.ExperimentSink
-	if deps.Store != nil {
-		expSink = deps.Store
-	}
-	registerPipelineRoutes(router, deps.CopilotRunner, expSink)
-	// P1-2：探索的 HTTP 入口。与上面共用同一个 sink，所以每一轮探索的
-	// 每一次尝试都会落进 experiments 表。
-	registerExploreRoutes(router, deps.CopilotRunner, expSink, deps.Engine)
+	// AI 拆仓阶段 1（ADR-027 §5 第 8 步前置切片）：copilot / pipeline /
+	// explore / tools 四族路由改反代到 ai-service。原进程内注册（registerCopilotRoutes
+	// / registerPipelineRoutes / registerExploreRoutes / NewToolsHandler）
+	// 已随 handler 文件迁往 cmd/ai。前端与 openapi 契约不变 —— 路径、
+	// 宿主、端口全部维持原样。
+	registerAIProxyRoutes(router, deps.Viper, deps.Logger)
 	registerAuthRoutes(router, deps.AuthSvc, deps.Logger)
 
 	// P1-15 (Sprint 6, ODR-021): risk + execution endpoints
@@ -417,19 +224,6 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 		AccountWhitelist:       map[string]bool{},
 	}
 	NewComplianceHandler(deps.Logger, defaultProfile, reporterCfg).RegisterRoutes(router)
-
-	// S7-P3-3 (ODR-043): Tools Registry endpoints. Exposes backtest /
-	// factor / data / strategy capabilities as discoverable Tools over
-	// /api/tools/* so external agent services can call without reading
-	// SPEC.md.
-	//
-	// AUD-02 (ODR-065 H5): WithToolsAuth applies per-tool RBAC on
-	// POST /api/tools/:name, keyed off the tool's audited side-effect
-	// class (pkg/ai/tools/sideeffect.go). save_factor / save_strategy
-	// mutate the gene pool and now require trader-or-admin; everything
-	// unclassified requires admin (fail-closed).
-	NewToolsHandler(deps.ToolsRegistry, deps.Logger,
-		WithToolsAuth(deps.AuthSvc)).RegisterRoutes(router)
 
 	// L0-3 (ADR-022 §5): read-only Evidence API. Resolves a citation's
 	// content_hash to its unique archived source response in `ingest.raw`

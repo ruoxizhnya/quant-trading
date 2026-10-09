@@ -38,7 +38,7 @@ func rateLimitTestRouter(rate int) *gin.Engine {
 	// ClientIP 直接读 RemoteAddr，不吃 X-Forwarded-For：httptest 的请求
 	// 默认没有 XFF，但 gin 默认信任所有代理，显式关掉省得以后有人加了头就飘。
 	_ = r.SetTrustedProxies(nil)
-	r.Use(newRateLimiter(rate, time.Minute).middleware())
+	r.Use(newRateLimiter(rate, time.Minute).Middleware())
 
 	ok := func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) }
 	for _, p := range []string{
