@@ -182,18 +182,31 @@ func (m *Mutator) mutateChangeField(formula string) (string, MutationType, error
 	return result, MutationChangeField, nil
 }
 
+// wrapCandidates 是 mutateWrapFunction 可包裹的算子名（一元逐元素算子）。
+//
+// ─── 为什么提成包级变量（K3b）─────────────────────────────────────
+// 原先是函数内的局部 slice，护栏无从验证它 —— 若注册表改名/删名，这里
+// 会静默产出「过不了 DSL 闸门」的表达式（K3b 的危害）。提成包级变量后，
+// 测试能断言「名单 ⊆ expression.AvailableOperators()」，改名即红。
+// 内容与提取前**逐字相同**，行为不变。
+var wrapCandidates = []string{"abs", "log", "sqrt", "sign"}
+
 // mutateWrapFunction wraps the formula in a function.
 func (m *Mutator) mutateWrapFunction(formula string) (string, MutationType, error) {
-	functions := []string{"abs", "log", "sqrt", "sign"}
+	functions := wrapCandidates
 	fn := functions[m.rng.Intn(len(functions))]
 
 	result := fmt.Sprintf("%s(%s)", fn, formula)
 	return result, MutationWrapFunction, nil
 }
 
+// unwrapCandidates 是 mutateUnwrapFunction 能剥掉的外层算子名
+// （一元逐元素 + 横截面排名类）。提成包级变量的理由同 wrapCandidates（K3b）。
+var unwrapCandidates = []string{"abs", "log", "sqrt", "sign", "cs_rank", "cs_zscore"}
+
 // mutateUnwrapFunction removes an outer function call.
 func (m *Mutator) mutateUnwrapFunction(formula string) (string, MutationType, error) {
-	functions := []string{"abs", "log", "sqrt", "sign", "cs_rank", "cs_zscore"}
+	functions := unwrapCandidates
 
 	for _, fn := range functions {
 		prefix := fn + "("
