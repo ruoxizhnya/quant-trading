@@ -235,7 +235,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 >
 > **登记未做**：① 完整 `SeriesSpec` + `Provider.GetSeries`（ADR-028 §5/§5.1）——那是**大工程**（要动 5 个 Provider 实现），本切片只做了可用性这一层；② `pkg/ai/agents` 提示词里的**示例表达式**（`research.go` 的算子清单已派生，示例仍是硬编码，同 K3b 登记项）；③ prompts/*.txt 已清理（`6455566`：factor_research.txt 删、strategy_generate.txt 知识合并进 generate.go 后删）。
 
-| OBS-11 | per-day HTTP 反模式 `getSignalsFromStrategyService` 待删（策略服务只传定义不传信号） | 中（随 K1/K2） |
+| OBS-11 ✅ 完成（2026-10-09，`d2ccdc6`） | per-day HTTP 反模式 `getSignalsFromStrategyService` 待删（策略服务只传定义不传信号）—— **已两端同拆**：① 引擎侧删 `getSignalsFromStrategyService` + getSignals 的 fallback 分支 + `strategyServiceURL` 字段/配置读取（唯一消费者），未注册策略改 **fail-loud**（报错点名策略名 + 可用清单 + OBS-11 标注）；② 服务端删 `POST /:name/signals` 端点（ADR-012 后恒回 503 的死哨兵）+ SignalRequest/Response/Detail 类型；③ 清理 `strategy_service.url` 配置段 + compose `STRATEGY_SERVICE_URL` env。**决定性事实**：ADR-012 后该路径是**必然失败**的死路径（本地注册表 miss → HTTP → 恒 503）——比「建了没接」更糟，删除零风险。测试：未注册 fail-loud（错误无 HTTP/503 痕迹）+ 已注册仍走本地路径（反证腿）。httpClient 字段保留（detect_regime/position/stop-loss 等其它服务调用仍在用——**是否同属反模式属 risk-service 议题，不在 OBS-11 范围**） | 中（随 K1/K2） |
 | OBS-12 | Copilot 对外 API 契约与前端脱节（四层缺陷叠加） | 中 |
 | OBS-09 | 三份 ADR 引用成环且全 Proposed（027→028→029→027） | 低（治理） |
 | OBS-10 | 服务数 5→7 与 ADR-019（Service 合并，仍 Accepted）方向相反，需显式 supersede | 低（治理） |
