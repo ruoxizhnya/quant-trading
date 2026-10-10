@@ -33,17 +33,27 @@ func main() {
 	m := initMetrics(logger)
 	v := loadConfig(logger)
 
-	engine, httpProvider := buildBacktestEngine(v, logger)
-	riskManager := buildRiskManager(v, logger)
-	engine.SetRiskManager(riskManager)
+	// store 在 Boot 前构造：eventstore 模块复用它的 pool（一个进程一个池）。
+	store := initStore(v, logger)
 
-	executionTrader := buildExecutionTrader(v, logger)
-	engine.SetLiveTrader(executionTrader)
+	// ─── 内核接管装配（K1 切片 3）─────────────────────────────────────
+	// engine / riskManager / executionTrader / dataAdapter 的构造与注入
+	// 顺序由 BootOrder 决定（eventstore→clock→data-engine→portfolio→
+	// risk-engine→exec-engine→strategy-runtime→indicators→exec-algo→msgbus，
+	// 见 pkg/kernel/interfaces.go 的冻结契约）；接管前的硬编码顺序
+	// （buildBacktestEngine → buildRiskManager → buildExecutionTrader →
+	// initStore → Set* 散装注入）就此退役。失败 fail-fast：内核是承重
+	// 组件，装配不起来就不该对外提供服务。
+	ak, err := assembleKernel(v, store, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("kernel assembly failed")
+	}
+	engine := ak.Wiring.Engine
+	httpProvider := ak.Wiring.Provider
+	riskManager := ak.Wiring.RiskManager
+	executionTrader := ak.Wiring.ExecutionTrader
 
 	alertManager, alertLoop := buildAlertSystem(v, executionTrader, riskManager, logger)
-
-	store := initStore(v, logger)
-	engine.SetStore(store)
 
 	authSvc := initAuth(v, store, logger)
 
@@ -62,7 +72,9 @@ func main() {
 		return eng, nil
 	}
 
-	ds := buildDataServices(store, engine, httpProvider, logger, newEngine)
+	// DataAdapter 由 data-engine 模块构造（Boot 第 3 位）—— 传进来复用，
+	// 不在此重建（否则同一进程两条 adapter 实例 = 双真相）。
+	ds := buildDataServices(store, engine, ak.Wiring.Adapter, logger, newEngine)
 	strategyDB, pluginLoader := initStrategyAndPlugins(v, store, logger)
 
 	// AI 拆仓阶段 1（ADR-027 §5 第 8 步前置切片）：Copilot / pipeline /
@@ -93,14 +105,7 @@ func main() {
 	// exactly once, here, before the router exists.
 	applyGinMode(v, logger)
 
-	// ─── 内核影子启动（K1 切片 2，渐进接管第一步）─────────────────────
-	// 位置理由（裁决）：放在现有装配块（ServerDeps 构造）之后、HTTP 服务
-	// 起来之前 —— ① 此刻 store 及其连接池已就绪（影子内核复用 store.DB()）；
-	// ② 现有装配块（initStore…deps）保持视觉与语义连续、**一行不改**；
-	// ③ 仍在 startHTTPServer 之前，kernel.boot 属启动期事件。
-	// 影子期失败不阻断服务（见 kernel_shadow.go 的失败策略）；现有装配的
-	// 每一行都不受这段新增代码影响。K2+ 才把原装配搬进内核 Boot 序列。
-	shadowKernel := startShadowKernel(store, logger)
+	// 内核已在上方 Boot（接管装配）——影子启动随切片 3 删除。
 
 	router := buildRouter(authSvc, v, logger)
 	registerRoutes(router, deps)
@@ -112,13 +117,13 @@ func main() {
 	sig := waitForShutdown()
 	logger.Info().Str("signal", sig.String()).Msg("Shutdown signal received; beginning graceful drain")
 
-	// ─── 内核影子关停（K1 切片 2，渐进接管第一步）─────────────────────
+	// ─── 内核关停（K1 切片 3；时序裁决继承切片 2）─────────────────────
 	// 必须早于 gracefulShutdown：后者 phase 4 会 store.Close() 关掉连接池，
 	// 而 kernel.shutdown 要落 audit.message_log —— 落库时 pool 必须还活着。
 	// 内核内部顺序：先发 kernel.shutdown（msgbus/eventstore 仍运行），再按
 	// BootOrder 逆序停（msgbus 最先停、eventstore 最后停）。见 kernel.go 的
 	// 「时序裁决」注释与其单测 TestShutdownPublishesBeforeStoppingMsgBus。
-	stopShadowKernel(shadowKernel, logger)
+	shutdownKernel(ak.Kernel, logger)
 
 	gracefulShutdown(srv, ds.JobService, alertManager, store, logger)
 }

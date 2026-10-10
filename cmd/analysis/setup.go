@@ -43,14 +43,6 @@ func loadConfig(logger zerolog.Logger) *viper.Viper {
 	return bootstrap.LoadConfig(logger, "config/analysis-service.yaml")
 }
 
-func buildBacktestEngine(v *viper.Viper, logger zerolog.Logger) (*backtest.Engine, marketdata.Provider) {
-	return bootstrap.BuildBacktestEngine(v, logger)
-}
-
-func buildRiskManager(v *viper.Viper, logger zerolog.Logger) *risk.RiskManager {
-	return bootstrap.BuildRiskManager(v, logger)
-}
-
 func initStore(v *viper.Viper, logger zerolog.Logger) *storage.PostgresStore {
 	return bootstrap.InitStore(v, logger)
 }
@@ -99,13 +91,6 @@ func isRateLimitExempt(path string) bool { return bootstrap.IsRateLimitExempt(pa
 func initLogger() zerolog.Logger { return bootstrap.InitLogger() }
 
 // ─── analysis 独有 builder（不随 AI 拆仓迁移）─────────────────────────
-
-// buildExecutionTrader constructs the in-process MockTrader (P1-15,
-// ODR-021) from viper config. The returned LiveTrader is injected
-// into the backtest engine and exposed over HTTP.
-func buildExecutionTrader(v *viper.Viper, logger zerolog.Logger) live.LiveTrader {
-	return bootstrap.BuildExecutionTrader(v, logger)
-}
 
 // buildAlertSystem constructs the AlertManager + PeriodicAlertLoop
 // (P2 alert, ODR-025) from viper config under alert.*.
@@ -169,12 +154,12 @@ type dataServices struct {
 func buildDataServices(
 	store *storage.PostgresStore,
 	engine *backtest.Engine,
-	httpProvider marketdata.Provider,
+	dataAdapter *marketdata.DataAdapter,
 	logger zerolog.Logger,
 	newEngine func() (*backtest.Engine, error),
 ) *dataServices {
-	pgProvider := marketdata.NewPostgresProvider(store, logger)
-	dataAdapter := marketdata.NewDataAdapter(nil, pgProvider, httpProvider, logger)
+	// K1 切片 3：DataAdapter 由 data-engine 模块构造（Boot 第 3 位）并经
+	// 参数传入 —— 本函数不再自建（同一进程两条 adapter = 双真相）。
 	engine.SetDataAdapter(dataAdapter)
 
 	jobService := backtest.NewJobService(store, engine)

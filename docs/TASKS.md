@@ -34,11 +34,12 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：`go build ./...` 通过；每模块合规测试通过；**独立可运行判据自证**（任取一模块，其四类契约能让不了解其他模块的 agent 说清「实现什么接口 / 写哪张表 / 发收什么消息 / 过什么测试」）；破坏验证——删某模块一个接口方法 → 其合规测试变红。
 - **⑥ 边界**：只做 11 个模块 × 四类契约定义，不做任何实现。
 
-### K1 · 内核骨架（P1）🔶 切片 1+2 完成，接管 setup.go 待做（前置：K0）
+### K1 · 内核骨架（P1）✅ 完成（2026-10-10，三切片）（前置：K0）
 
 > **切片 1 ✅（`b33afd7`）**：clock / msgbus / eventstore 三模块实现（63 测试含签名变更）。
 > **切片 2 ✅（2026-10-08）**：`StandardKernel` 真实现（Boot 按 BootOrder / 失败逆序回滚 / Shutdown 逆序幂等 + 关停消息先发再停 / Module 检索）+ 适配包装 `pkg/kernel/adapters.go`（Clock/MsgBus/EventStore 三真模块）+ **`main.go` 影子启动**（3 真模块 + 7 占位，**现有装配一行未改**）+ 真环境验证（服务起 + `/health` 200 + `audit.message_log` 实测 kernel.boot/shutdown 落库）。
 > **待做（高风险，单独切片）**：把现有组件（backtest.Engine / risk / live / alert / store …）包装成 Module，让 Kernel 真正接管 `setup.go` 的装配顺序；接管后影子启动的「失败不阻断」改为 fail-fast。
+> **切片 3 ✅（2026-10-10）**：接管完成。四个业务模块包装（`pkg/kernel/modules_analysis.go`）：data-engine(3) ← provider+DataAdapter；risk-engine(5) ← RiskManager；exec-engine(6) ← MockTrader；strategy-runtime(7) ← Engine 构造 + 全部 Set* 注入（第 7 位是顺序裁决：此刻 3/5/6 产物全就位）。装配迁移到 `cmd/analysis/kernel_wiring.go`（`assembleKernel`，Boot 失败 `logger.Fatal` 拒绝启动——fail-fast）；影子启动文件删除；三个构造 shim 随调用者消失而删（死代码零残留）。**偏差登记**：① portfolio(4)/indicators(8)/exec-algo(9) 三槽位现无对应可接线组件（portfolio 状态活在 MockTrader/engine 内；K3 算子是 per-run 实例化；K4 算法是 per-run 挂点）⇒ Noop 占位 + 理由注释（BootOrder 宪法级冻结，槽位必须占住保 Shutdown 逆序完整）；② JobService/WF/Batch/FactorAttributor/StrategyDB/auth/alert 不在蓝图 10 模块矩阵（无槽位），仍由 cmd 层构造——加槽位 = 改宪法，须走变更评审。**验收证据**：模块层正证（按 BootOrder 序 Init 产物链完整）+ 两条破坏腿（缺 data-engine / 缺 exec-engine 各 fail-fast 点名）；结构护栏 `wiring_guard_test.go`（main 必须经 assembleKernel+fail-fast；不得直接调三个 builder/Set*；影子不得复活）破坏验证红点名「被抢回装配代码，BootOrder 失去顺序控制权」；`kernel_wiring.go` 槽位完整性护栏。全量回归 67 包全绿。
 > 关键裁决（已写入代码注释）：适配包装放 `pkg/kernel` 而非 cmd 层；**Shutdown 先发 kernel.shutdown 再逆序停**（否则关停事件落不了库）；影子关停放 `gracefulShutdown` **之前**（pool 要先活着才能落库）；服务级内核用 LiveClock（VirtualClock 是 per-回测-run 的）。
 
 - **① 目标**：kernel + clock + msgbus（命名注册表 + 同步分发）+ eventstore 落地，`cmd/analysis/setup.go` 的 831 行硬编码装配被 `Kernel.Boot/Shutdown` 取代，`audit.message_log` 落库（D4）。
