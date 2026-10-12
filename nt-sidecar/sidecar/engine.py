@@ -1,4 +1,4 @@
-"""NautilusTrader driver + result mapping (K13).
+"""NautilusTrader driver + result mapping (K13 / K13-R1).
 
 Drives ``BacktestNode`` (the high-level, catalog-driven path) for one RunSpec and
 maps the result to the minimal field set the task asks for. Metric *alignment*
@@ -6,10 +6,27 @@ with the Go kernel's canonical ResultSpec — max drawdown, trade-level
 accounting, the closed-system daily-return convention — is explicitly **not**
 done here; that is K15. Fields this module cannot read directly off NT are
 omitted rather than approximated, so nothing in the response is invented.
+
+``total_return``口径（K13-R1 A，(b) 一步到位）
+----------------------------------------------
+``total_return`` **必须**与 Go 内核同口径：市值口径净值收益
+``(期末总权益 − 期初本金) / 期初本金``，其中总权益 = 现金 + 持仓市值
+（Go 侧权威：``pkg/backtest/metrics/performance.go`` 的
+``(endValue-startValue)/startValue`` + ``pkg/backtest/tracker/tracker.go`` 的
+``totalValue = cash + positionsValue``）。
+
+**不得**再用 NT 的 ``stats_pnls[ccy]['PnL% (total)']/100``：那是「已实现+买入手
+续的现金流」口径，不含持仓浮盈——价 10→20（持仓翻倍）时它仍报 −10%，与净值口径
+**符号都可能相反**（K13 自审判别实验）。该原始值改名 ``nt_balance_pnl_pct`` 只作
+NT 原始统计暴露在 ``nt_stats``，不再冒充 ``total_return``。
+
+期末市值净值取自 ``BacktestNode.get_engine_portfolio(run_config_id).equity(venue)``
+（NT 2.0.0rc6 实测：``{Currency: Money}``，``Money.as_double()`` 取数）。
 """
 
 from __future__ import annotations
 
+import logging
 import math
 from decimal import Decimal
 from typing import Any
@@ -25,7 +42,14 @@ from nautilus_trader.config import (
     LoggerConfig,
 )
 from nautilus_trader.execution import MakerTakerFeeModel
-from nautilus_trader.model import AccountType, BarType, Currency, NautilusDataType, OmsType
+from nautilus_trader.model import (
+    AccountType,
+    BarType,
+    Currency,
+    NautilusDataType,
+    OmsType,
+    Venue,
+)
 
 from .catalog import bar_type_str, open_catalog, resolve_instruments
 from .errors import SidecarError
@@ -38,10 +62,13 @@ DEFAULT_VENUE = "SIM"
 _STATUS_COMPLETED = "completed"
 _STATUS_FAILED = "failed"
 
-#: Statistic keys read straight off ``BacktestResult`` (nt 2.0.0rc6).
-_RETURN_TOTAL_KEY = "PnL% (total)"
+#: NT's cash-flow PnL% (excludes open-position mark-to-market). Kept for
+#: provenance only — never mapped to ``total_return`` (see module docstring).
+_BALANCE_PNL_PCT_KEY = "PnL% (total)"
 _SHARPE_KEY = "Sharpe Ratio (252 days)"
 _SORTINO_KEY = "Sortino Ratio (252 days)"
+
+log = logging.getLogger("nt-sidecar")
 
 
 def run_backtest(
@@ -107,7 +134,17 @@ def run_backtest(
         results = node.run()
         if not results:
             raise SidecarError("nautilus returned no backtest result")
-        return _map_result(run_spec, run_config.id, results[0])
+        # The portfolio must be read *before* dispose() (the finally block): rc6
+        # drops engine state on completion, so ``dispose_on_completion=False`` is
+        # required for this read to work (set above).
+        portfolio = _safe_portfolio(node, run_config.id)
+        return _map_result(
+            run_spec,
+            run_config.id,
+            results[0],
+            portfolio=portfolio,
+            venue=venue,
+        )
     except SidecarError:
         raise
     except Exception as exc:  # noqa: BLE001 — surface any NT failure as a failed run
@@ -119,10 +156,55 @@ def run_backtest(
             pass
 
 
-def _map_result(run_spec: RunSpec, run_config_id: str, result: Any) -> dict[str, Any]:
+def _safe_portfolio(node: Any, run_config_id: str) -> Any | None:
+    """Best-effort read of the engine portfolio; ``None`` on any failure."""
+    try:
+        return node.get_engine_portfolio(run_config_id)
+    except Exception as exc:  # noqa: BLE001 — never let this mask the run outcome
+        log.warning("could not read engine portfolio: %s", exc)
+        return None
+
+
+def _end_equity(portfolio: Any, venue: str) -> float | None:
+    """Mark-to-market account equity at the end of the run.
+
+    ``Portfolio.equity(venue)`` returns ``{Currency: Money}`` (NT 2.0.0rc6),
+    i.e. cash + open-position market value — the same notion the Go kernel puts
+    in ``PortfolioValue.TotalValue`` (tracker.go:948).
+    """
+    if portfolio is None:
+        return None
+    try:
+        equity = portfolio.equity(venue=Venue(venue))
+    except Exception as exc:  # noqa: BLE001 — best effort, never fabricate a number
+        log.warning("could not read portfolio equity for venue %s: %s", venue, exc)
+        return None
+    if not equity:
+        return None
+    try:
+        return float(sum(money.as_double() for money in equity.values()))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not sum portfolio equity: %s", exc)
+        return None
+
+
+def _map_result(
+    run_spec: RunSpec,
+    run_config_id: str,
+    result: Any,
+    *,
+    portfolio: Any = None,
+    venue: str = DEFAULT_VENUE,
+) -> dict[str, Any]:
     returns = dict(result.stats_returns or {})
     pnls = dict(result.stats_pnls or {})
-    total_return_pct = _first_pnl(pnls, _RETURN_TOTAL_KEY)
+    balance_pnl_pct = _first_pnl(pnls, _BALANCE_PNL_PCT_KEY)
+
+    # K13-R1 A · 市值口径净值收益（与 Go 内核同口径，见模块 docstring）。
+    end_equity = _end_equity(portfolio, venue)
+    total_return: float | None = None
+    if end_equity is not None and run_spec.initial_capital > 0:
+        total_return = (end_equity - run_spec.initial_capital) / run_spec.initial_capital
 
     payload: dict[str, Any] = {
         "id": result.run_config_id or run_config_id,
@@ -131,8 +213,9 @@ def _map_result(run_spec: RunSpec, run_config_id: str, result: Any) -> dict[str,
         "start_date": run_spec.start_date,
         "end_date": run_spec.end_date,
         "initial_capital": run_spec.initial_capital,
-        # NT reports percentages; ResultSpec carries a fraction.
-        "total_return": None if total_return_pct is None else total_return_pct / 100.0,
+        # Fraction, market-value net return (K13-R1 A, (b)). ``None`` when the
+        # equity could not be read — never the cash-flow PnL% masquerading as it.
+        "total_return": total_return,
         "sharpe_ratio": _finite(returns.get(_SHARPE_KEY)),
         "sortino_ratio": _finite(returns.get(_SORTINO_KEY)),
         "total_orders": int(result.total_orders),
@@ -144,6 +227,9 @@ def _map_result(run_spec: RunSpec, run_config_id: str, result: Any) -> dict[str,
             "general": _sanitise(dict(result.stats_general or {})),
             "returns": _sanitise(returns),
             "pnls": _sanitise(pnls),
+            # The cash-flow PnL% kept as raw provenance only (fraction form).
+            "nt_balance_pnl_pct": None if balance_pnl_pct is None else balance_pnl_pct / 100.0,
+            "nt_end_equity": end_equity,
         },
     }
     return payload

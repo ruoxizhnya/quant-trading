@@ -12,6 +12,7 @@ caller can never believe a parameter took effect when it did not.
 from __future__ import annotations
 
 import datetime as _dt
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -86,10 +87,7 @@ class RunSpec:
                 f"(rejected, not ignored): got {sorted(params)}"
             )
 
-        capital = payload.get("initial_capital")
-        capital = float(capital) if capital else DEFAULT_INITIAL_CAPITAL
-        if capital <= 0:
-            raise RunSpecError("run spec: 'initial_capital' must be positive")
+        capital = _parse_capital(payload)
 
         risk_free = payload.get("risk_free_rate") or 0.0
 
@@ -104,6 +102,35 @@ class RunSpec:
             risk_free_rate=float(risk_free),
             engine_params=dict(params),
         )
+
+
+def _parse_capital(payload: dict[str, Any]) -> float:
+    """Parse and fail-closed-validate ``initial_capital`` (K13-R1 C).
+
+    ``None``/absent means "not specified" → the documented default. Anything
+    else must be a **finite positive** number:
+
+    * ``inf`` / ``nan`` pass a naive ``> 0`` check downstream (``inf > 0`` is
+      true) and then blow up inside the engine's ``int()`` → a 500 that should
+      have been a 400. Rejected here instead.
+    * an explicit ``0`` is a *reject-not-ignore* failure, not a silent "use the
+      default" — matching the Go side's fail-closed idiom. (Previously ``0`` was
+      truthy-falsy short-circuited into the default, which hid a caller bug.)
+    """
+    raw = payload.get("initial_capital")
+    if raw is None:
+        return DEFAULT_INITIAL_CAPITAL
+    try:
+        capital = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise RunSpecError(
+            f"run spec: 'initial_capital' must be a number, got {raw!r}"
+        ) from exc
+    if not math.isfinite(capital) or capital <= 0:
+        raise RunSpecError(
+            f"run spec: 'initial_capital' must be a finite positive number, got {raw!r}"
+        )
+    return capital
 
 
 def _require_str(payload: dict[str, Any], key: str) -> str:

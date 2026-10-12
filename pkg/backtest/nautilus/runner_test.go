@@ -1,4 +1,6 @@
 // K13 · NautilusRunner unit tests — the Go half of the RunSpec link.
+// K13-R1 adds the transport-hardening cases: wire null vs zero, empty 2xx body,
+// 503 "kernel busy" + Retry-After, and deadline phase attribution.
 //
 // These run against a stub sidecar (httptest) so they need neither
 // NautilusTrader nor Python. The "no silent fallback" property is asserted in
@@ -8,6 +10,8 @@
 //破坏验证（开发期实测）：把 RunBacktest 里 resp.StatusCode 的检查改成
 // 「忽略非 2xx，返回一个 completed 的空 response」，TestRunner_Non2xxSurfacesUnavailable
 // 与 TestRunner_StatusFailedSurfacesUnavailable 立刻红（已还原）。
+//   - K13-R1：把 runResponse 的 *float64 改回 float64 →
+//     TestRunResponse_DistinguishesNullFromZero 红（null 重新被吞成 0）。
 
 package nautilus
 
@@ -165,6 +169,7 @@ func TestRunner_Non2xxSurfacesUnavailable(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, apperrors.ErrCodeUnavailable, appErrorCode(t, err))
 	assert.Contains(t, err.Error(), "feed exhausted", "the sidecar's reason must be carried through")
+	assert.Contains(t, err.Error(), KernelName, "the error must name the kernel that did not run")
 }
 
 func TestRunner_StatusFailedSurfacesUnavailable(t *testing.T) {
@@ -180,6 +185,7 @@ func TestRunner_StatusFailedSurfacesUnavailable(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, apperrors.ErrCodeUnavailable, appErrorCode(t, err))
 	assert.Contains(t, err.Error(), "999999.SZ")
+	assert.Contains(t, err.Error(), KernelName)
 }
 
 func TestRunner_UnreachableSidecarSurfacesUnavailable(t *testing.T) {
@@ -256,4 +262,129 @@ func TestSidecarErrorPrefersJSONErrorField(t *testing.T) {
 	assert.Equal(t, "boom", sidecarError([]byte(`{"error":"boom"}`)))
 	assert.Equal(t, "(empty response body)", sidecarError(nil))
 	assert.True(t, strings.Contains(sidecarError([]byte("raw text")), "raw text"))
+}
+
+// ── K13-R1 · transport hardening ─────────────────────────────────────────────
+
+// newStubSidecarHeaders is newStubSidecar with extra response headers (e.g.
+// Retry-After on a 503).
+func newStubSidecarHeaders(t *testing.T, status int, body string, headers map[string]string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		for k, v := range headers {
+			w.Header().Set(k, v)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// D · the wire layer must keep "not reported" (null) distinct from a real zero.
+func TestRunResponse_DistinguishesNullFromZero(t *testing.T) {
+	var out runResponse
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"status":"completed","total_return":null,"sharpe_ratio":0}`), &out))
+
+	assert.Nil(t, out.TotalReturn, "a wire null must stay absent, not become 0")
+	require.NotNil(t, out.SharpeRatio, "a real 0 must stay present")
+	assert.InDelta(t, 0.0, *out.SharpeRatio, 1e-12)
+}
+
+// D · toResponse is the single explicit fold: absent → 0 for the frozen DTO.
+func TestRunner_AbsentMetricFoldsToZeroInDTO(t *testing.T) {
+	srv, _ := newStubSidecar(t, http.StatusOK,
+		`{"id":"nt-run-1","status":"completed","total_return":null,"sharpe_ratio":null}`)
+	runner := NewRunner(srv.URL, srv.Client())
+
+	resp, err := runner.RunBacktest(context.Background(), sampleRequest())
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.InDelta(t, 0.0, resp.TotalReturn, 1e-12)
+	assert.InDelta(t, 0.0, resp.SharpeRatio, 1e-12)
+}
+
+// A 2xx with an empty body carries no result — refuse it, name the kernel.
+func TestRunner_Empty2xxBodySurfacesUnavailableNamingKernel(t *testing.T) {
+	srv, _ := newStubSidecar(t, http.StatusNoContent, "")
+	runner := NewRunner(srv.URL, srv.Client())
+
+	resp, err := runner.RunBacktest(context.Background(), sampleRequest())
+
+	assert.Nil(t, resp, "an empty 2xx body must not be mapped to a zeroed success")
+	require.Error(t, err)
+	assert.Equal(t, apperrors.ErrCodeUnavailable, appErrorCode(t, err))
+	assert.Contains(t, err.Error(), KernelName)
+	assert.Contains(t, err.Error(), "empty body")
+}
+
+// 503 is explicitly classified as "kernel busy" with the Retry-After hint.
+func TestRunner_KernelBusy503ParsesRetryAfter(t *testing.T) {
+	srv := newStubSidecarHeaders(t, http.StatusServiceUnavailable,
+		`{"status":"failed","error":"run lock held"}`,
+		map[string]string{"Retry-After": "7"})
+	runner := NewRunner(srv.URL, srv.Client())
+
+	resp, err := runner.RunBacktest(context.Background(), sampleRequest())
+
+	assert.Nil(t, resp)
+	require.Error(t, err)
+	assert.Equal(t, apperrors.ErrCodeUnavailable, appErrorCode(t, err))
+	assert.Contains(t, err.Error(), "busy")
+	assert.Contains(t, err.Error(), "Retry-After=7s")
+	assert.Contains(t, err.Error(), KernelName)
+	assert.Contains(t, err.Error(), "run lock held")
+}
+
+func TestRunner_KernelBusy503KeepsHTTPDateRetryAfter(t *testing.T) {
+	srv := newStubSidecarHeaders(t, http.StatusServiceUnavailable, "",
+		map[string]string{"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"})
+	runner := NewRunner(srv.URL, srv.Client())
+
+	_, err := runner.RunBacktest(context.Background(), sampleRequest())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Retry-After=Wed, 21 Oct 2026 07:28:00 GMT")
+}
+
+// The deadline error must attribute the timeout to a phase and name the kernel.
+func TestRunner_DeadlineNamesPhaseAndKernel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(500 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	runner := NewRunner(srv.URL, srv.Client())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	_, err := runner.RunBacktest(ctx, sampleRequest())
+	require.Error(t, err)
+	assert.Equal(t, apperrors.ErrCodeTimeout, appErrorCode(t, err))
+	assert.Contains(t, err.Error(), KernelName)
+	assert.Contains(t, err.Error(), "Call+Queue")
+}
+
+// phaseTimings renders the five phases grouped into the three observable buckets.
+func TestPhaseTimingsString(t *testing.T) {
+	missing := phaseTimings{callQueueMS: 12.5, transferProcessMS: 0.4}
+	assert.Equal(t, "Call+Queue=12.5ms | Exec=n/a | Transfer+Process=0.4ms", missing.String())
+
+	withExec := phaseTimings{callQueueMS: 1, execMS: 8.25, haveExec: true, transferProcessMS: 2}
+	assert.Equal(t, "Call+Queue=1.0ms | Exec=8.2ms | Transfer+Process=2.0ms", withExec.String())
+}
+
+// The success path parses the sidecar-reported timing (Exec phase).
+func TestRunner_ParsesSidecarTiming(t *testing.T) {
+	srv, _ := newStubSidecar(t, http.StatusOK,
+		`{"id":"nt-run-1","status":"completed","timing":{"queue_ms":1.5,"exec_ms":42.0,"total_ms":44.0}}`)
+	runner := NewRunner(srv.URL, srv.Client())
+
+	resp, err := runner.RunBacktest(context.Background(), sampleRequest())
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "nt-run-1", resp.ID)
 }

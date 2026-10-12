@@ -10,6 +10,12 @@ benefit yet.
 Security posture (ADR-031 D5): the process refuses to bind anything other than a
 loopback address, has no database access, and is reachable only by the Go
 service on the same host.
+
+K13-R1 hardening: early-exit paths (404 / 413 / invalid Content-Length) either
+consume the request body or force the connection closed, so a keep-alive client
+can never have its next request desynced by leftover body bytes. A successful
+run also reports ``timing`` (queue_ms / exec_ms / total_ms) for the client's
+deadline phase attribution.
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ import json
 import logging
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -77,6 +84,12 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 — stdlib naming
         if self.path.split("?", 1)[0] != RUN_PATH:
+            # K13-R1 B: don't answer before consuming the request body, or the
+            # leftover bytes desync a keep-alive connection (they get parsed as
+            # the next request line). Drain it; if we can't (oversized/invalid
+            # Content-Length), force the connection closed instead.
+            if not self._drain_body():
+                self.close_connection = True
             self._send_json(404, {"status": "failed", "error": f"no route for POST {self.path}"})
             return
         self._handle_run()
@@ -101,13 +114,20 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         server: _Server = self.server  # type: ignore[assignment]
+        # K13-R1 增项 · deadline 五段拆：report the two server-side phases the
+        # client cannot observe — queue (time waiting on the serialising run
+        # lock) and exec (the engine run itself). The client pairs these with
+        # its own Call+Queue / Transfer+Process measurements.
+        started = time.perf_counter()
         try:
             with _run_lock:
+                acquired = time.perf_counter()
                 result = run_backtest(
                     run_spec,
                     catalog_path=str(server.catalog_path),
                     venue=server.venue,
                 )
+                finished = time.perf_counter()
         except SidecarError as exc:
             log.warning("run rejected: %s", exc)
             self._send_json(500, {"status": "failed", "error": str(exc)})
@@ -117,6 +137,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(500, {"status": "failed", "error": f"internal sidecar error: {exc}"})
             return
 
+        result["timing"] = {
+            "queue_ms": round((acquired - started) * 1000.0, 3),
+            "exec_ms": round((finished - acquired) * 1000.0, 3),
+            "total_ms": round((finished - started) * 1000.0, 3),
+        }
         self._send_json(200, result)
 
     # ── helpers ───────────────────────────────────────────────────────────────
@@ -125,15 +150,40 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
+            # K13-R1 B: we cannot know how many bytes to skip, so close the
+            # connection rather than let the unread body desync the next request.
+            self.close_connection = True
             self._send_json(400, {"status": "failed", "error": "invalid Content-Length"})
             return None
         if length <= 0:
             self._send_json(400, {"status": "failed", "error": "empty request body"})
             return None
         if length > MAX_BODY_BYTES:
+            # Not draining an oversized body on purpose; close the connection so
+            # the residual bytes are not parsed as the next request line.
+            self.close_connection = True
             self._send_json(413, {"status": "failed", "error": "request body too large"})
             return None
         return self.rfile.read(length)
+
+    def _drain_body(self) -> bool:
+        """Read and discard the request body (K13-R1 B).
+
+        Returns ``False`` when the body cannot be safely drained — an
+        unparseable or oversized ``Content-Length``. The caller must then set
+        ``self.close_connection = True`` so the residual bytes are not parsed as
+        the next request on a kept-alive connection.
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return False
+        if length <= 0:
+            return True
+        if length > MAX_BODY_BYTES:
+            return False
+        self.rfile.read(length)
+        return True
 
     def _send_json(self, status: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, allow_nan=False).encode("utf-8")

@@ -1,0 +1,10 @@
+# Build context for nt-sidecar/Dockerfile. Keep the image lean and secret-free.
+#
+# The local virtualenv is hundreds of MB and never belongs in a layer; the
+# catalog is a per-host data snapshot mounted at runtime, not baked in.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+catalog/
+tests/

@@ -1,0 +1,36 @@
+# K13-R1 · NT sidecar — OPTIONAL standalone sample (off the main path).
+#
+# docker-compose.yml 的四个服务**一个字没动**。按 ADR-031 D5，侧车只监听回环、
+# 不直连 DB，正常姿势是与 Go 服务**同机部署**（见 nt-sidecar/README.md）。
+# 本文件只是给「单独起一个侧车容器、手工 curl 验链路」提供一个可复现样例：
+#
+#   # 1) 先在宿主机导出 catalog（离线 ETL，唯一读 DB 的一步）：
+#   cd nt-sidecar && python tools/export_bars.py --symbols 600000.SH --out ./catalog
+#   # 2) 起侧车容器（把 catalog 只读挂进去）：
+#   docker compose -f docker-compose.nt.yaml up --build
+#   # 3) 另开终端验链路：
+#   curl -s -X POST http://127.0.0.1:9100/v1/backtest \
+#     -H 'Content-Type: application/json' \
+#     -d '{"strategy":"buy_and_hold","stock_pool":["600000.SH"],
+#          "start_date":"2024-01-02","end_date":"2024-06-28"}'
+#
+# ⚠️ 回环约束（D5）与后果：容器内绑定 127.0.0.1，普通 bridge 网络下**跨容器不可达**
+# （发布到宿主的 9100 也会因 DNAT 落在 eth0 而非 lo 而收不到）。因此本样例用
+# `network_mode: host` 让容器共享宿主机网络命名空间 —— 这样 Go 服务经
+# `NT_SIDECAR_URL=http://127.0.0.1:9100` 就能打到侧车，且 127.0.0.1 语义不被破坏。
+# host 网络在 Linux 上开箱可用；Docker Desktop(Windows/macOS) 支持有限，Windows 下
+# 请直接在宿主机 `python -m sidecar`（同样满足 D5）。
+# ❌ 绝不要把 --host 改成 0.0.0.0 —— 服务会拒绝启动（build_server 的 loopback 守卫）。
+services:
+  nt-sidecar:
+    build:
+      context: ./nt-sidecar
+      dockerfile: Dockerfile
+    image: quant-trading/nt-sidecar:2.0.0rc6
+    container_name: nt-sidecar
+    # Shares the host netns so the in-container 127.0.0.1 bind is the host
+    # loopback the Go service uses (ADR-031 D5 preserved).
+    network_mode: host
+    volumes:
+      - ./nt-sidecar/catalog:/catalog:ro
+    restart: unless-stopped
