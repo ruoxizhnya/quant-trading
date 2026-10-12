@@ -167,7 +167,7 @@ type SignalProvider interface {
 | 2 | 侧车通道选型（HTTP vs gRPC vs Redis Streams） | K13 | ✅ 已关闭（见 §8.1） |
 | 3 | Parquet 导出复权口径与 `ohlcv_daily_qfq` 映射 | K13 | ✅ 已关闭（见 §8.2） |
 | 4 | NT 版本锁定 / 升级跟随策略 | 阶段 2 前 | PoC 已钉 `2.0.0rc6`；升级跟随策略未决 |
-| 5 | ST/新股限制、集合竞价是否进适配器最小规则集 | K14 按双跑需要裁决 | 未决 |
+| 5 | ST/新股限制、集合竞价是否进适配器最小规则集 | K14 按双跑需要裁决 | ✅ 已关闭（见 §8.4） |
 | 6 | 侧车部署形态（compose 服务 vs 独立进程）与监控口径 | 决策门后（K16） | 未决 |
 
 ### 8.1 裁决：侧车通道 = HTTP/1.1 + JSON（回环）
@@ -200,4 +200,23 @@ type SignalProvider interface {
 ### 8.3 K13 附带记录：NT 无内置 buy-and-hold
 
 调研报告与源码核对结论：NT **不提供内置 buy-and-hold 策略**（其示例策略在 `examples` cargo feature 之后，非稳定 API）。K13 因此自带一个最小 demo 策略（首根 bar 买入、持有到窗口结束，无信号/指标/风控逻辑）作为链路验证载体——这不改变「本任务无策略逻辑」的定位，真实策略行为在 K14 的权重回放适配器落地。
+
+### 8.4 裁决：适配器最小规则集（K14）
+
+适配器（`nt-sidecar/sidecar/weight_replay.py` + `ashare.py`）落地的最小集，逐项裁决如下。
+**入集** = 与 Go 内核口径逐字对齐，K15 双跑必须一致；**不入集** = 刻意不做，理由入档（不是遗忘）。
+
+| 规则 | 入最小集 | 口径来源 / 理由 |
+|---|---|---|
+| 主板涨跌停 ±10%（四舍五入到分） | ✅ | `pkg/backtest/pricelimit.go` `LimitPrices`/`roundToCent`（half-away-from-zero）。直接影响「触及涨停不追买 / 触及跌停不追卖」与成交价 |
+| T+1（今仓不可当日卖出） | ✅ | 卖单量 ≤ 昨仓可卖量（`ashare.sellable_quantity`）。A 股结算语义，K15 不可回避 |
+| 费率（印花税**卖出单边** / 过户费 / 最低佣金） | ✅ | `pkg/portfolio/portfolio.go` `ComputeFees` 逐字对拍（容差 0，见 `tests/fixtures/ashare_fees_parity.json`） |
+| 每日成交占比 ≤ D_max（外生参数） | ✅ | 参与率硬约束：成交股数 ≤ `floor(D_max × bar volume)`。RunSpec 新增可选 `d_max`（默认 0.10） |
+| 整手（买入 100 股整数倍） | ✅ | `ashare.round_down_to_lot` |
+| **ST / \*ST 价格限制** | ❌ | 需「板块 + 名称 + 日期分段」三重判定（`resolvePriceLimit` 完整口径，含 2026-07-06 ST 幅度变更）；引入即多一个不受控变量，K15 归因断掉。真需要另立任务 |
+| **ChiNext/STAR ±20% / BSE ±30%** | ❌ | 同上（需 `marketdata.Board.DailyPriceLimit` 板级口径）。最小集只做主板 ±10% 一档 |
+| **新股上市初期价格限制** | ❌ | 依赖上市日，样本窗口内无新股；且 Go 侧该分支本身有已知不精确（`PriceLimitInput.TradeDays` 注释） |
+| **集合竞价** | ❌ | catalog 只有日线（`1-DAY-LAST-EXTERNAL`），无分时/竞价数据；「日频目标权重」表达上限之外的撮合机制不建模（设计文档 §3 代价声明） |
+
+**K15 观察项（新增）**：Go 回测撮合路径（`pkg/backtest/execution` → `pkg/execution` CostModel）**只计佣金**（`max(notional×CommissionRate, MinCommission)`），不建模印花税/过户费——这是代码注释里写明的「两侧共同已知口径边界」。而 K14 适配器的 NT fee model 计**全三项**。K15 对齐时该差异必须**显式归因**（是口径边界而非执行机制差异），不得被容差掩盖。
 

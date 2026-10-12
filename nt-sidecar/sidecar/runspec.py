@@ -26,6 +26,11 @@ SERVED_KERNEL = "nautilus"
 
 DEFAULT_INITIAL_CAPITAL = 1_000_000.0
 
+#: Default per-day participation cap (K14): traded shares ≤ D_max × bar volume.
+#: Kept as a plain literal here so this module stays importable without the
+#: (heavy) NautilusTrader stack; mirrored by ``weight_replay.DEFAULT_D_MAX``.
+DEFAULT_D_MAX = 0.10
+
 
 @dataclass(frozen=True)
 class RunSpec:
@@ -39,6 +44,7 @@ class RunSpec:
     index_code: str = ""
     initial_capital: float = DEFAULT_INITIAL_CAPITAL
     risk_free_rate: float = 0.0
+    d_max: float = DEFAULT_D_MAX
     engine_params: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -88,6 +94,7 @@ class RunSpec:
             )
 
         capital = _parse_capital(payload)
+        d_max = _parse_d_max(payload)
 
         risk_free = payload.get("risk_free_rate") or 0.0
 
@@ -100,6 +107,7 @@ class RunSpec:
             index_code=str(payload.get("index_code") or ""),
             initial_capital=capital,
             risk_free_rate=float(risk_free),
+            d_max=d_max,
             engine_params=dict(params),
         )
 
@@ -131,6 +139,27 @@ def _parse_capital(payload: dict[str, Any]) -> float:
             f"run spec: 'initial_capital' must be a finite positive number, got {raw!r}"
         )
     return capital
+
+
+def _parse_d_max(payload: dict[str, Any]) -> float:
+    """Parse the optional per-day participation cap (K14).
+
+    Absent/``None`` → the documented default. Anything else must be a finite
+    number in ``(0, 1]`` (a fraction of the bar's volume); a value outside that
+    range is a caller bug and is rejected, not clamped.
+    """
+    raw = payload.get("d_max")
+    if raw is None:
+        return DEFAULT_D_MAX
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise RunSpecError(f"run spec: 'd_max' must be a number, got {raw!r}") from exc
+    if not math.isfinite(value) or not 0.0 < value <= 1.0:
+        raise RunSpecError(
+            f"run spec: 'd_max' must be a finite fraction in (0, 1], got {raw!r}"
+        )
+    return value
 
 
 def _require_str(payload: dict[str, Any], key: str) -> str:

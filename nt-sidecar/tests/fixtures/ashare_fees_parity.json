@@ -1,0 +1,82 @@
+[
+  {
+    "trade_value": 1000,
+    "is_sell": false,
+    "commission": 5,
+    "transfer_fee": 0.01,
+    "stamp_tax": 0,
+    "total": 5.01
+  },
+  {
+    "trade_value": 1000,
+    "is_sell": true,
+    "commission": 5,
+    "transfer_fee": 0.01,
+    "stamp_tax": 0.5,
+    "total": 5.51
+  },
+  {
+    "trade_value": 5000,
+    "is_sell": false,
+    "commission": 5,
+    "transfer_fee": 0.05,
+    "stamp_tax": 0,
+    "total": 5.05
+  },
+  {
+    "trade_value": 5000,
+    "is_sell": true,
+    "commission": 5,
+    "transfer_fee": 0.05,
+    "stamp_tax": 2.5,
+    "total": 7.55
+  },
+  {
+    "trade_value": 16000,
+    "is_sell": false,
+    "commission": 5,
+    "transfer_fee": 0.16,
+    "stamp_tax": 0,
+    "total": 5.16
+  },
+  {
+    "trade_value": 16666.6666666667,
+    "is_sell": false,
+    "commission": 5.00000000000001,
+    "transfer_fee": 0.16666666666666702,
+    "stamp_tax": 0,
+    "total": 5.166666666666677
+  },
+  {
+    "trade_value": 100000,
+    "is_sell": false,
+    "commission": 29.999999999999996,
+    "transfer_fee": 1,
+    "stamp_tax": 0,
+    "total": 30.999999999999996
+  },
+  {
+    "trade_value": 100000,
+    "is_sell": true,
+    "commission": 29.999999999999996,
+    "transfer_fee": 1,
+    "stamp_tax": 50,
+    "total": 81
+  },
+  {
+    "trade_value": 999999.99,
+    "is_sell": true,
+    "commission": 299.99999699999995,
+    "transfer_fee": 9.9999999,
+    "stamp_tax": 499.999995,
+    "total": 809.9999918999999
+  },
+  {
+    "trade_value": 0,
+    "is_sell": false,
+    "commission": 0,
+    "transfer_fee": 0,
+    "stamp_tax": 0,
+    "total": 0
+  }
+]

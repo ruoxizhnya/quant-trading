@@ -51,10 +51,15 @@ from nautilus_trader.model import (
     Venue,
 )
 
+from . import ashare
 from .catalog import bar_type_str, open_catalog, resolve_instruments
 from .errors import SidecarError
 from .runspec import RunSpec
-from .strategies import DEFAULT_TRADE_SIZE, build_demo_strategy
+from .strategies import (
+    DEFAULT_TRADE_SIZE,
+    WEIGHT_REPLAY,
+    build_strategy,
+)
 
 #: Simulated venue name. A-share symbols are stamped onto it as ``{symbol}.SIM``.
 DEFAULT_VENUE = "SIM"
@@ -69,6 +74,20 @@ _SHARPE_KEY = "Sharpe Ratio (252 days)"
 _SORTINO_KEY = "Sortino Ratio (252 days)"
 
 log = logging.getLogger("nt-sidecar")
+
+
+def _fee_model_for(strategy: str):
+    """Pick the venue fee model for a strategy (K14).
+
+    The K14 weight-replay adapter charges the **A-share schedule** (stamp tax /
+    transfer fee / minimum commission, :mod:`sidecar.ashare`). The K13
+    buy-and-hold demo keeps the explicit **zero-fee** model — its published
+    evidence numbers (total_return −0.1347 / Sharpe 1.4267) are zero-fee and
+    must not move.
+    """
+    if strategy == WEIGHT_REPLAY:
+        return ashare.make_fee_model()
+    return MakerTakerFeeModel(maker_rate=Decimal("0"), taker_rate=Decimal("0"))
 
 
 def run_backtest(
@@ -86,15 +105,15 @@ def run_backtest(
     end_ns = _date_to_ns(run_spec.end_date)
 
     # K13 runs with an explicit zero-fee model: NautilusTrader requires an
-    # explicit fee model on every venue. Mapping the A-share fee schedule
-    # (stamp tax / transfer fee / minimum commission) is K14's job.
+    # explicit fee model on every venue. K14's weight-replay adapter charges the
+    # A-share schedule instead (see ``_fee_model_for``).
     venue_config = BacktestVenueConfig(
         name=venue,
         oms_type=OmsType.NETTING,
         account_type=AccountType.CASH,
         starting_balances=[f"{int(run_spec.initial_capital)} CNY"],
         base_currency=Currency.from_str("CNY"),
-        fee_model=MakerTakerFeeModel(maker_rate=Decimal("0"), taker_rate=Decimal("0")),
+        fee_model=_fee_model_for(run_spec.strategy),
     )
 
     data_configs = [
@@ -123,12 +142,16 @@ def run_backtest(
         for symbol, instrument in instruments.items():
             node.add_strategy(
                 run_config.id,
-                build_demo_strategy(
+                build_strategy(
                     run_spec.strategy,
                     instrument_id=instrument.id,
                     # subscribe_bars takes a BarType, not its string form.
                     bar_type=BarType.from_str(bar_type_str(symbol, venue)),
                     trade_size=trade_size,
+                    start_date=run_spec.start_date,
+                    end_date=run_spec.end_date,
+                    initial_capital=run_spec.initial_capital,
+                    d_max=run_spec.d_max,
                 ),
             )
         results = node.run()
