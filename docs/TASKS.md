@@ -275,6 +275,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 > **接口选型澄清**：派工卡写「实现 `contracts.BacktestRunner`」，但 K10 注册表实际承载的是 **`contracts.EngineRunner`**（`RunBacktest(ctx, BacktestRequest) → *BacktestResponse`，见 `registry.go`「接口选型说明」）；`BacktestRunner` 是 AI 管线五参端口，与内核路由无关。本任务按注册表要求实现 `EngineRunner`。
 >
 > **边界遵守**：只新增 `nt-sidecar/` + `pkg/backtest/nautilus/` + 两个 handler 层测试文件，并改 `cmd/analysis/setup.go` 装配点 + 命名文档；未碰 `pkg/execalgo` / `engine.go` 日循环 / `pkg/live` / `pkg/data`。一个 commit（Python + Go 同 commit）。
+> **自审跟进**：K13 交付后按评审清单**自审**，发现 1 条 🔴（`total_return` 口径与 Go 市值口径不一致，判别实验可复现符号相反）+ 1 条 🟠（HTTP/1.1 早退分支不读 body → keep-alive 连接错位）+ 2 条 🟡（`initial_capital` 校验缺口 / `null` 吞成 0），已立 **K13-R1** 工单（紧随本节）。
 
 - **① 目标**：独立 Python 进程（NT 侧车）经回环提供「RunSpec 执行」服务跑通最小链路（NT 内置 demo 策略即可），Go 侧 `NautilusRunner` 注册进 K10 注册表，证明「外部引擎经契约可插拔」在真实 NT 上成立。
 - **② 上下文**：调研报告 §3.4/§5.3（唯一干净形态 = 独立 Python 服务；无 Go 绑定、无 gRPC 控制 API、cgo 不可行）；设计文档 §4；NT 现状 v2.0.0rc6（pip wheel，Python 3.12–3.14）；`ohlcv_daily_qfq`（390 万行日线）；ADR-031 D5 安全约束。
@@ -286,6 +287,21 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：ADR-031 D5 全部安全约束（不直连 DB、回环 only、不对外暴露）；不做权重回放适配器（K14）；不做结果指标映射对齐（K15，本任务返回最小字段集即可）；不进生产 compose 主路径（可加 docker-compose.nt.yml 独立样例）。
 - **⑤ 验收**：Go 集成测试：`kernel=nautilus` 跑通 demo 回测并落库（正证据）；侧车未启动 → `kernel=nautilus` 显式 failed 且**无 go 内核产物**（反证腿，复用 K10 fail-closed 断言）；`nt-sidecar/` 有可复现启动文档（一条命令起服务）。**破坏验证**：客户端错误吞掉改静默回退 → K10 fail-closed 测试红。
 - **⑥ 边界**：侧车骨架 + 数据馈送 + Go 客户端注册，一个 commit（Python 与 Go 同 commit 属同一任务交付）。
+
+### K13-R1 · 侧车结果口径与传输健壮性收口（2026-10-12 自审立单）
+
+> 来源：K13 交付（`c48a2c7`）后的**自审**——按代码评审清单逐项过 + 每条问题做最小复现。K13 的契约链路与失败语义（正/反证/破坏三腿）经实测成立，**本工单不推翻 K13**，只收口 1 条 🔴 口径错误 + 1 条 🟠 传输健壮性缺陷 + 2 条 🟡 校验/映射缺口。**🔴 必须在 K15 双跑对齐之前清掉**：否则对齐基线与 UI 呈现都建立在一个已知错误的字段上。
+
+- **① 目标**：修掉自审发现的 A/B/C/D 四条，使侧车返回的结果与 Go 内核**同口径可比**，传输在误配下不再产生误导性错误。
+- **② 上下文**：`nt-sidecar/sidecar/engine.py`（`_map_result`）、`nt-sidecar/sidecar/server.py`（`do_POST` / `_read_body`）、`nt-sidecar/sidecar/runspec.py`（`from_json`）、`pkg/backtest/nautilus/runner.go`（`runResponse` / `toResponse`）。Go 侧口径权威：`pkg/backtest/metrics/performance.go:453-455`（`totalReturn = (endValue-startValue)/startValue`）+ `pkg/backtest/tracker/tracker.go:948`（`totalValue = cash + positionsValue` → **市值口径**）。
+- **③ 要求**（按优先级，逐条给修法）：
+  1. **🔴 A · `total_return` 口径错误（数据错误）**。现状把 NT `stats_pnls[ccy]['PnL% (total)'] / 100` 当总收益率映射。**判别实验（已跑通、决定性）**：合成日线价格 10.00 → 20.00（持仓翻倍），该值仍为 **−0.10**，恰等于「买入现金流出占本金比」，而 Go 的 `TotalReturn` 是**含持仓市值**的净值口径（tracker.go:948）——两者**符号都可能相反**。该字段经 `SaveSyncResult` **落库**并进 API / UI。修法二选一（**不得保留现有映射**）：**(a) 最小正确**：K13 不冒充该字段——侧车不返回 `total_return`，把余额口径值改名 `nt_balance_pnl_pct` 只作原始统计暴露在 `nt_stats`，`total_return` 留给 K15 用市值口径净值序列计算；**(b) 一步到位**：本工单即按市值口径算（NT 侧取 mark-to-market 净值：`node.generate_account_report` + 持仓市值，或 NT `Portfolio` 的未实现盈亏）。
+  2. **🟠 B · 早退分支不读 body → HTTP/1.1 keep-alive 连接错位**。`server.py` 的 404（路径不匹配）/ 413（超大 body）/ 非法 `Content-Length` 三条路径在**未消费请求体**时就返回，而 `protocol_version = "HTTP/1.1"` 维持长连接 → 残留字节被当作下一个请求行解析。**最小复现（已跑通）**：同一连接 `POST /nt/v1/backtest`（带 body）→ 404；紧接着 `GET /healthz` → 实际返回 **400 乱码页**（对照腿：已读 body 的 400 路径下第二个请求正常 200）。**触发条件真实**：`NT_SIDECAR_URL` 若带路径前缀（如 `http://127.0.0.1:9100/nt`），Go 客户端连接池被污染后，后续调用会返回与真实原因无关的次级错误。修法：这三条路径置 `self.close_connection = True`（或读完/丢弃 body 后再回）。
+  3. **🟡 C · `initial_capital` 校验缺口**。`inf` / `nan` 通过校验（`> 0` 为真）后在引擎内 `int()` 抛 `OverflowError` / `ValueError` → **500（应 400）**；显式 `0` 被 `or` 短路**静默替换**为默认 1,000,000（与「拒绝而非忽略」的 fail-closed 原则不符）。修法：校验 `math.isfinite(capital) and capital > 0`；「0 = 未指定」写成注释或改 `is None` 判定。
+  4. **🟡 D · `null` 被吞成 0**。侧车对非有限指标输出 `null`，Go 端 `runResponse` 用 `float64` 解码 → `null` 变 `0.0`，「未上报」与「真的是 0」不可区分。修法：`runResponse` 的浮点字段改 `*float64`（或 `json.Number`），`toResponse` 显式处理「未上报」。
+- **④ 约束与非目标**：不改契约与失败语义（正/反证/破坏三腿必须继续绿）；不扩到 K14 的权重回放范围；不引入新依赖；**不把 🔴 洗成「K15 再说」**——K15 负责做**全**指标对齐，但**不能**让一个已落库字段继续使用已知错误的映射。
+- **⑤ 验收**：① A 项：以「价 10→20」判别语境固化断言，证明 `total_return` 不再等于现金流出率（走 (a) 则断言侧车不返回该字段）；② B 项：上述最小复现脚本作为回归腿固化进 `nt-sidecar/tests/`，断言**第二个请求必须 200**；③ C 项：`inf` / `nan` / `0` 三条表驱动断言（400 或显式文档化默认）；④ D 项：非有限指标经 Go 端不再变 0；⑤ K13 三腿 + 全量 `go test ./...` + Python 套件继续全绿。**破坏验证**：把 B 的修复还原 → 回归腿红。
+- **⑥ 边界**：只碰 `nt-sidecar/` 与 `pkg/backtest/nautilus/`；一个 commit。
 
 ### K14 · 信号—权重回放适配器（阶段 2，前置：K13）
 
@@ -448,6 +464,29 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：不改 P2-1 已落地代码、DDL 与 openapi；不扩界接新数据源。
 - **⑤ 验收**：TASKS.md 内 P2-1 两处（表行 + 小节标题）均 ✅；收口记录事实与代码、真库、docs 仓指南逐条对照一致（不许出现「文档说已落地、代码未落地」的错位）。
 - **⑥ 边界**：core 仓 `docs/TASKS.md` 一个 docs commit（指南实测结论已在 docs 仓 `34255d9`，不重复）。
+
+### P2-1-R2 · 宏观数据层提交后自审收尾（7 项，2026-10-12 作者自审立单）
+
+> 来源：2026-10-12 作者对 P2-1（`02058b9`）的**提交后自审**。判定：**实现可用，代码侧无 🔴 阻塞缺陷**；发现 **4 🟠 + 3 🟡**。另有 **3 处事实错误在 docs 仓当场修正（`dd35ab9`）**，不进本工单范围。
+>
+> **已当场修正的 3 处（docs 仓 `dd35ab9`，逐个 curl 官方页核实）**：指南 §P2-1 实测清单表里 ① `TSF_INC` 数值列 `sf_inc` → **`inc_month`**（实测 `sf_month` 返回 `month/inc_month/inc_cumval/stk_endval`，代码一直是对的，**是文档写错**）；② `sf_month` 积分 600 → **2000**（doc_id=310）；③ `shibor_lpr` 积分 600 → **120**（doc_id=151「用户积累120积分可以调取，正式权限需要5000积分」）。其余五格复核与官方页一致。教训已写进该 commit：**实测清单的价值在于每个数字都有出处，凭印象补的格子比留空更危险**。
+
+- **① 目标**：清掉 P2-1 自审遗留 7 项（4 🟠 + 3 🟡），让宏观层从「现在能用」到「上游变故不静默、未来加指标不踩坑」。
+- **② 上下文**：
+  - **R1（🟠 探测放大）**：`pkg/data/macro.go:320` `ProbeMacro` 遍历 `macroFetchWindows` 的**全部**窗口逐个发请求。当前 `HealthCheck` 探 `CPI_YOY`（1 段）没触发；若换成 `USDCNY_CLOSE` 就是 **8 次请求/次探测**（2019–2026 分段），未来任何带 `SinceYear` 的日频指标同理。**探测的语义是连通性，不该按数据量放大**——这会白吃 `fx_daily`（2000 积分档）配额。
+  - **R2（🟠 0 行静默，与自述纪律自相矛盾）**：`normalizeMacroSeries` 静默跳过「日期解析失败」与「数值为 nil」的行；`FetchMacroIndicator` 在 `len(all)==0` 时直接 `return nil, nil`（成功）。若上游改日期格式或整列变 nil ⇒ **全批跳过、0 行入库、对外仍是成功**。这与同文件头自述纪律「绝不 log 后 continue——那会让『上游挂了』伪装成『导入了 0 行』」**直接矛盾**（normalize 的 continue 正是同类），也是 P2-8「静默丢数据」同款 hazard。当前实测正常，**未触发**。
+  - **R3（🟠 分组不变量未约束）**：`FetchMacroIndicators` 分组后用 `specs[0].Fields` 发一次请求、响应喂给组内所有 spec；但 `sameWindows` 只比**窗口**、不比 `Fields`/`DateLayout`。同接口两 spec 的 `Fields` 一旦不同（例：未来给 `cn_pmi` 加 `PMI_PROD` 只取 `pmi010100`）⇒ 另一 spec 的列不在响应里，报「响应形状不符契约」——**错误信息误导**（真因是指标目录配置不自洽，不是上游变形状）。当前 `M2`/`M2_YOY`、`LPR_1Y`/`LPR_5Y` 恰好 Fields 一致，**未触发**。
+  - **R4（🟠 无上限查询）**：`pkg/storage/macro.go:116` `ListMacroSeries` 无 `LIMIT`，`handlers_macro.go` 也无分页。当前单指标最大 2410 行（`USDCNY_CLOSE`），日频每年 +250 行；且是**无分页**形态，客户端无法增量取。
+  - **R5–R7（🟡）**：① 查询路径用裸 `fmt.Errorf` 未走 `apperrors`（同文件 Save 路径走了，风格不一致）；② `sameWindows` 内部重复取 `time.Now()`，与调用方的 now 在跨年边界瞬间可能不一致；③ `idx_macro_series_lookup (indicator,freq,obs_date)` 与唯一键 `(indicator,freq,obs_date,source)` 前缀重叠，对当前查询形态基本冗余（写放大 + 存储），但**是否删需先 EXPLAIN，不凭猜**。
+- **③ 要求**：
+  1. **R1**：`ProbeMacro` 只取窗口序列的**第一个**发一次请求；补测试钉住「`USDCNY_CLOSE` 探测只发 1 次请求」（破坏腿：改回遍历全部 → 红）。
+  2. **R2**：`normalizeMacroSeries` 返回 `skipped` 计数（或带跳过原因）；`FetchMacro*` 在「响应有行但入库 0 行」时 **fail-loud**（报错，或至少 Warn 带计数 + 指标名）。破坏腿：造一份全 nil 值的响应 → 应红/应告警 → 还原绿。
+  3. **R3**：把 `Fields`/`DateLayout` 一致性纳入分组校验（扩展 `sameWindows`，或加目录自检测试断言「同 `APIName` 的 spec 必须 `Fields`/`DateLayout`/`Params` 一致」）；不一致时**报错点名**（说清是指标目录配置不自洽），而非退化为「形状不符契约」。
+  4. **R4**：`ListMacroSeries` 加 `Limit`（默认 + 上限，如默认 1000 / 上限 5000）；`handlers_macro.go` 与 `docs/openapi.yaml` 同步参数与超限语义。
+  5. **R5–R7**：查询路径错误改 `apperrors` 包装；`sameWindows` 的 `now` 改为入参；先 `EXPLAIN` 确认唯一索引能否覆盖该查询，再决定 `idx_macro_series_lookup` 去留（**不凭猜删索引**）。
+- **④ 约束与非目标**：不改 `quant.macro_series` 的唯一键与 `source`/`as_of` 溯源列语义（破坏腿①②③的护栏不破）；不新增 `ServerDeps` 字段（`deps_test.go` 钉住总数）；不接新数据源（**大宗 / 境外宏观仍属后续**）；不动 P2-2 四表与行情链路；不碰 `pkg/kernel`/`pkg/backtest` 撮合/`contracts`（K10/K17 并行区域）。
+- **⑤ 验收**：全量 `go test ./...` 绿；R1 测试钉住探测请求数且破坏腿红→还原绿；R2 破坏腿（全 nil 响应）红→还原绿；R3 目录自检测试能捕获人为造的不一致 spec；R4 加 LIMIT 后 `EXPLAIN` 仍走索引、openapi 与 handler 参数一致。
+- **⑥ 边界**：core 仓一个 atomic commit（`fix(data): P2-1-R2 宏观层自审收尾 …`）；不跨仓（docs 仓纠错已在 `dd35ab9`）；与 P2-1-R1（台账关闭）**互不依赖**，可并行。
 
 ### ✅ P2-2-R1 · 产业链数据底座审查收尾（三件套，2026-10-12 深度审查立单）
 
