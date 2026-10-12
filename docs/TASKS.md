@@ -327,6 +327,20 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：e2e——指定 TWAP 拆 7 片的大单 → 撮合收到 7 笔子单、`Σ=父单`、时间片均匀、大单总冲击成本低于同量整单（D5 正证据）；默认路径回归腿全绿（无 `exec_algo` 的既有回测/paper 测试零改动全过）；**破坏验证**：① 指定 `exec_algo` 后强制整单 → 拆单断言红；② `OnFill` 不回填 → 进度/超额 fail-loud 断言红；③ 子单号改时间戳派生 → 幂等断言红。
 - **⑥ 边界**：只做下单主路径接线（回测 + paper 两条），一个 commit。
 
+### K18 · exec-algo 外部仓位变动取消活跃父单（独立，K17 审查发现，2026-10-12 登记）
+
+- **① 目标**：exec-algo 父单执行窗口内发生**外部仓位变动**（止损/止盈平仓、退市强平、拆股改仓）时，取消该 symbol 活跃父单的剩余未报送子单，使「止损后应空仓」的策略语义不被拆单续买破坏。
+- **② 上下文**：K17（commit `6205c64`）审查发现的已知边界：`pkg/backtest/exec_algo.go` 的 `processExecAlgoChildren` 与 `pkg/live/paper_exec_algo.go` 的 `dispatchExecAlgoChildren` 按计划独立报送子单，**不感知**日循环里后置的 `processStopLosses` / `forceCloseDelisted` / `processCorporateActions` 对仓位的改动——第 k 天止损平仓后，第 k+1..n 天的子单仍照报（把刚被风控平掉的仓位重新买回）。整单路径无此问题（当日一次成交，无跨日残留委托）；真实 TWAP 的业界解法是 cancel-on-stop 钩子。现有可复用基础设施：`execalgo.Dispatcher.Unfinished()`（会话结束裁决输入）+ 两条路径的撤销裁决（K17 注释），缺的只是「窗口中途取消」入口。
+- **③ 要求**：
+  1. `execalgo.Dispatcher` 增加**窗口中途取消** API（如 `Cancel(parentID, reason)`）：剩余**未报送**子单丢弃（不再产出）、**已报送已成交**部分保留（不回滚）；被取消父单不再进 `Unfinished()` 的会话结束 CANCELLED 告警（或带 cancel-reason 显式区分「窗口中取消」与「会话结束撤销」）；
+  2. 回测侧：`processStopLosses` / `forceCloseDelisted` / `processCorporateActions` 实际改仓（有成交落账）后，对受影响 symbol 的活跃父单触发取消（改动点在 engine.go 日循环与 processStopLosses 的成交分支）；
+  3. paper 侧同一语义、同一裁决、同一 cancel-reason 日志；
+  4. 取消后 `TargetPosition`（ActualQty / PendingQty）与实际持仓一致（对齐 AUD-55 的「引擎外改仓」教训）；
+  5. 不改 `ExecAlgorithm` / `LiveTrader` 冻结签名。
+- **④ 约束与非目标**：默认路径（无 `exec_algo`）行为与数值零变化（回归腿钉住）；不做部分成交回滚；已报送未成交子单的 broker 侧撤单不做（回测/paper 中子单即时全额成交，无此状态）；不接真实券商算法单（D1）。
+- **⑤ 验收**：e2e——TWAP 7 片窗口中段注入止损触发 → 后续子单不再报送、最终持仓与「整单 + 止损」对照路径一致；日志带 cancel-reason、会话结束不再对已取消父单报 CANCELLED；paper 侧同构断言；**破坏验证**：去掉取消钩子 → 「止损后不再续买」断言红。
+- **⑥ 边界**：只做「外部仓位变动 → 取消活跃父单」钩子（回测 + paper 两条），一个 commit；不动 K17 的拆单/成本/会话结束裁决逻辑。
+
 ---
 
 ## 三、最高优先级独立工单
