@@ -508,7 +508,7 @@ func TestAdapterNamesMatchBootOrder(t *testing.T) {
 
 // ─── 11. ctx 生命周期语义钉住（K12 / K1-P2-1）──────────────────────
 
-// ctxCaptureModule 把 Init/Start 收到的 ctx 留下来供断言（只为测试）。
+// ctxCaptureModule 把 Init/Start/Stop 收到的 ctx 留下来供断言（只为测试）。
 type ctxCaptureModule struct {
 	name string
 	rec  *recorder
@@ -529,14 +529,21 @@ func (m *ctxCaptureModule) Start(ctx context.Context) error {
 	return nil
 }
 
-func (m *ctxCaptureModule) Stop(context.Context) error {
+func (m *ctxCaptureModule) Stop(ctx context.Context) error {
 	m.rec.add("stop:" + m.name)
+	m.got["stop"] = ctx
 	return nil
 }
 
 // TestLifecycleCtxIsCallScoped 钉住 K12/K1-P2-1 的契约裁决（interfaces.go
-// 的 Module 注释）：内核把调用方的 ctx **原样**传给 Init/Start，不做寿命
-// 延长——ctx 仅限本次调用，装配层 cancel 时它必须随之失效。
+// 的 Module 注释）：内核把调用方的 ctx **原样**传给 Init/Start/Stop，不做
+// 寿命延长——ctx 仅限本次调用，装配层 cancel 时它必须随之失效。
+//
+// 断言强度与契约对齐（K12 审查修复）：
+//   - identity 断言（收到的 == 调用方原 ctx）钉「原样转发」——派生包装
+//     （context.WithValue / WithTimeout 之类）也会红，不给悄悄换语义留缝；
+//   - Stop 腿走 Shutdown 路径，补齐契约三方法的覆盖面——此前只钉 Init/Start，
+//     interfaces.go「语义由本测试钉住」的声明在 Stop 上是空的。
 //
 // 为什么钉这个方向而不是反方向：契约告诉模块「别留存 ctx」，配套的可观测
 // 事实就是「你拿到的确实是短命 ctx」。若日后有人把内核改成传长寿 ctx
@@ -568,10 +575,15 @@ func TestLifecycleCtxIsCallScoped(t *testing.T) {
 	}
 
 	// 反证腿：cancel 之前 ctx 必须还活着（若断言恒成立，测试没有信息量）。
+	// identity 断言：收到的必须是调用方原 ctx——派生包装不算「原样转发」。
 	for _, phase := range []string{"init", "start"} {
 		got := capture.got[phase]
 		if got == nil {
 			t.Fatalf("%s 未收到 ctx —— 捕获器没被调用，下面的断言什么也没证明", phase)
+		}
+		if got != ctx {
+			t.Errorf("%s 收到的不是调用方原 ctx（是派生包装）—— 契约主张「原样转发」"+
+				"（Module 注释，K12/K1-P2-1）", phase)
 		}
 		select {
 		case <-got.Done():
@@ -589,5 +601,30 @@ func TestLifecycleCtxIsCallScoped(t *testing.T) {
 			t.Errorf("%s 收到的 ctx 在装配层 cancel 后仍存活 —— 契约是「ctx 仅限调用期间」"+
 				"（Module 注释，K12/K1-P2-1）：内核必须转发调用方原 ctx，模块留存它会被抢先 Cancel", phase)
 		}
+	}
+
+	// Stop 腿（Shutdown 路径）：契约覆盖 Init/Start/Stop 三者，Stop 的 ctx
+	// 同样必须是调用方原 ctx、随 Shutdown 的 cancel 失效。
+	ctxS, cancelS := context.WithCancel(context.Background())
+	if err := k.Shutdown(ctxS); err != nil {
+		t.Fatalf("Shutdown 失败: %v", err)
+	}
+	gotStop := capture.got["stop"]
+	if gotStop == nil {
+		t.Fatal("stop 未收到 ctx —— 捕获器 Stop 没被调用，下面的断言什么也没证明")
+	}
+	if gotStop != ctxS {
+		t.Errorf("Stop 收到的不是调用方原 ctx（是派生包装）—— 契约主张「原样转发」（Module 注释，K12/K1-P2-1）")
+	}
+	select {
+	case <-gotStop.Done():
+		t.Errorf("Stop 收到的 ctx 在 cancel 之前就已失效")
+	default:
+	}
+	cancelS()
+	select {
+	case <-gotStop.Done():
+	default:
+		t.Errorf("Stop 收到的 ctx 在装配层 cancel 后仍存活 —— 契约是「ctx 仅限调用期间」（Module 注释，K12/K1-P2-1）")
 	}
 }

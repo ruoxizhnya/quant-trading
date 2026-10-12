@@ -28,6 +28,15 @@ package repoguard
 // prose cannot trip it (that failure mode is why e2e/guard documents
 // scanInside(FuncName) instead of scanning source text).
 //
+// 已知盲区（披露，暂不闭合，K12 审查修复）：本扫描只认生命周期方法体里
+// **直接写出**的 Module() 调用，不追同包 helper 的调用链——`Init -> m.setup()
+// -> k.Module()` 会逃逸（setup 不在生命周期名表里，不在扫描面内）。接受
+// 它的理由：禁令正文由 pkg/kernel/interfaces.go 的契约注释承载，且当前
+// 没有任何模块持有内核引用；要闭合得做包内调用可达性分析，留到真有模块
+// 拿到内核句柄时再做。对照腿「生命周期方法没有回调 → 放行」里的
+// `m.connect()` 正是这个盲区的入口形态，那里放行是正确的（体内确无直接
+// 回调），不是漏判。
+//
 // Anti-blindness: TestModuleLifecycleCallbackGuardSeesTheTree asserts the
 // walker reaches real lifecycle methods (pkg/kernel has plenty), and
 // TestModuleLifecycleCallbackGuardJudgesSnippets feeds the scanner the exact
@@ -143,6 +152,8 @@ func (m *T) Stop(ctx context.Context) error {
 			want: true,
 		},
 		{
+			// m.connect() 体内若有 Module() 回调，会经 helper 逃逸本护栏——
+			// 那是文件头披露的已知盲区；本腿只钉「体内无直接回调 → 放行」。
 			name: "对照腿：生命周期方法没有回调 → 放行",
 			src: `package p
 func (m *T) Start(ctx context.Context) error {
