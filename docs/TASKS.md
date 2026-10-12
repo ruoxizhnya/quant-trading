@@ -194,7 +194,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 > **决策**：[ADR-031](https://github.com/ruoxizhnya/quant-trading-docs/blob/main/docs/adr/adr-031-kernel-pluggable-nt-ready.md)（buy vs build：内核降级为可替换执行器，NT 侧车「信号—权重回放适配器」，Go 策略资产零重写）。
 > **需求与设计**：[design/kernel/kernel-pluggable-nt-ready.md](design/kernel/kernel-pluggable-nt-ready.md)（四契约 RunSpec/SignalSpec/ResultSpec/EngineRunner、适配器规则、FR-1~FR-7）。
-> **依赖主线**：阶段 1 = {K8, K9} 并行 → K10；K11 / K12 独立可并行（K12 是阶段 3 前置）。阶段 2 = K13 → K14 → K15（前置 K8–K10）。阶段 3 = K16（前置 K15 + **NT 决策门通过**，见 §五）。K17 独立（K4 遗留收口，不在 NT 阶段链上）✅ 已完成（2026-10-12，`6205c64`；审查遗留 K17-R1 / K18 待做）。
+> **依赖主线**：阶段 1 = {K8, K9} 并行 → K10；K11 / K12 独立可并行（K12 是阶段 3 前置）。阶段 2 = K13 → K14 → K15（前置 K8–K10）。阶段 3 = K16（前置 K15 + **NT 决策门通过**，见 §五）。K17 独立（K4 遗留收口，不在 NT 阶段链上）✅ 已完成（2026-10-12，`6205c64`；审查遗留 K17-R1 / K17-R2 待做，K18 已完成 `7a3576e`）。
 > **总原则**：阶段 1 全程「默认行为逐字节不变」——不带新字段的存量请求走 Go 内核，数值、语义、API 形状零变化（回归腿钉住）。
 
 ### K8 · SignalSpec：`SignalProvider` 接口化 + K7 信号通路收口（阶段 1）✅ 完成（2026-10-12，`3c09ed4`）
@@ -326,7 +326,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 > **收口记录 ✅（2026-10-12，`6205c64`）**：`pkg/execalgo`（TWAP/VWAP，此前全仓零生产引用）接进两条下单主路径，11 文件 +1851/−4，一个 atomic commit。落点：`pkg/execalgo/dispatch.go`（多父单派发器 Dispatcher：Attach/OnBar/OnFill/Unfinished + `ResolveExecWindow`）+ `pkg/backtest/exec_algo.go` + `pkg/live/paper_exec_algo.go`；契约侧 `domain.Order/Signal`、`strategy.Signal` 增可选 `exec_algo`/`exec_slices`/`exec_profile`（omitempty，零值=整单直下）。关键裁决：父单号 `EA-日期-symbol-方向` 纯函数（禁时间戳）；窗口 = n 个自然日、步长恰 1 日；会话结束未报完子单**显式裁决=撤销**（强撮=以最后 bar 虚构成交）两路径一致；超额 fail-loud 在 Dispatcher 层补（算法 planState 只钳制）；`ExecAlgorithm`/`LiveTrader` 冻结签名未动。**正证据**：回测 e2e TWAP 7 片 → 撮合层 7 笔子单、Σ=10000=同策略整单量、7 个不同交易日、总冲击 189.1 vs 整单 500.0（**占比 0.3783 ≈ 1/√7**，D5 正证据）；paper e2e 同构（占比 0.3783）；VWAP 按 profile 加权；混合运行中无算法信号仍 1 笔整单。**破坏验证**：① 强制整单 → 「7 笔子单」红；② OnFill 不回填 → 会话结束 CANCELLED 警告红；③ 子单号时间戳派生 → K4 幂等测试红（均改坏→红→还原→绿）。默认路径既有全量测试零改动全过（execalgo/backtest/live/domain/strategy/portfolio）。
 >
-> **审查与遗留**：对照代码评审清单自审通过（API 真实性/并发/确定性/vet+gofmt）；🟠 发现「窗口内外部仓位变动（止损/强平/拆股）不取消活跃父单 → 拆单续买」已按六字段立为 **K18**（`7e5a963`）——K17 边界内不做，属拆单固有语义（业界解法 cancel-on-stop）。🟡 两处（OnBar 出错丢弃已取子单 / PaperSession 重复 Run 撞父单号）为不可达路径与误用场景，fail-loud 可见，挂技术债不修。本机无 gcc，`-race` 未跑（环境限制）。
+> **审查与遗留**：对照代码评审清单自审通过（API 真实性/并发/确定性/vet+gofmt）；🟠 发现「窗口内外部仓位变动（止损/强平/拆股）不取消活跃父单 → 拆单续买」已按六字段立为 **K18**（`7e5a963`）——K17 边界内不做，属拆单固有语义（业界解法 cancel-on-stop）。🟡 三件（OnBar 出错丢弃已取子单 / PaperSession 重复 Run 撞父单号 / paper 侧 attach 未贯通 ctx）已按六字段立为 **K17-R2**（随 K17-R1 落库后执行）。本机无 gcc，`-race` 未跑（环境限制）。
 
 - **① 目标**：把 K4 交付的 `pkg/execalgo`（TWAP/VWAP/Schedule 拆单）接进下单主路径（回测撮合 + paper），使 D5「模拟真实大单」真正闭环；**未指定执行算法的订单行为逐字节不变**。
 - **② 上下文**：K4「未做」条（本文件 K4 区块，原写「归 K5」但 K5 切片未含，2026-10-12 代码核实 `pkg/execalgo` 全仓零生产引用，仅自身测试）；`pkg/execalgo/`（`ExecAlgorithm`：`OnBar`/`OnFill`/`Schedule()`/`DueChildOrders()` 取走即清空；TWAP `Σ子单量=父单`、子单号 `(父单号,片序号)` 纯函数幂等；VWAP profile 退化 → 等分 + `Degraded` 标记）；下单路径：`pkg/backtest` 撮合（`BacktestExecutionService`）与 `pkg/live`（`MockTrader`/`SimulatedBroker`/`OrderManager`、`PaperSession` 日循环）；K5 共享成本核 `pkg/execution.CostModel`（fixed/variable/impact/none）。
@@ -573,6 +573,25 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：默认路径（无 `exec_algo`）行为逐字节不变；不改 `ExecAlgorithm` / `Dispatcher` 冻结签名与 `AttachSpec` 语义；不动 K18（外部仓位变动取消活跃父单）范围；不新增 ResultSpec 字段（需呈现先走既有 `invalid_reasons` / 诊断路径）。
 - **⑤ 验收**：四类挂载失败各有测试（含破坏腿）；两侧口径一致性测试；运行诊断计数在结果可见的断言；默认路径既有 e2e 三条零改动全过；`go build ./...` + 全量 `go test ./...` 绿。
 - **⑥ 边界**：只改挂载失败的处置与可见性 + 测试，core 仓一个 atomic commit。
+
+### K17-R2 · exec-algo 接线鲁棒性收尾（作者自审 🟡 三件，2026-10-12 登记）
+
+> 来源：K17 作者自审（对照代码评审清单）登记为「挂技术债不修」的三件 🟡，按本工单可执行化。三件均不阻塞 D5 实验；**执行时点：K17-R1 落库后**——R1/R3 与其改同一批文件（dispatch.go / paper_exec_algo.go），先做会撞车。K18 已落库（`7a3576e`），不与本工单冲突。
+
+- **① 目标**：把 exec-algo 接线的三处 🟡 鲁棒性缺口收掉——错误路径不丢已取子单、会话不可重入、ctx 全链贯通。
+- **② 上下文**（2026-10-12 于 K18 落库后复核，三项均仍成立）：
+  - R1（🟡）`pkg/execalgo/dispatch.go` `OnBar`（现 `:281`）：遍历父单中途遇错即 `return out, err`——**已取走（计入 submitted）的子单被调用方丢弃**（调用方 `continue`），父单进度与报送事实从此不一致。该错误路径当前不可达（algo.OnBar 仅在未 Schedule 时报错，Attach 后不可能），但结构上是「错误吞掉已发生的状态变更」；
+  - R2（🟡）`pkg/live/paper_session.go`：`PaperSession` 语义为一次性回放，但 `Run` 无重入护栏——第二次 `Run` 撞父单号（`Dispatcher.Attach` duplicate → warn+skip），表现为「信号静默消失」而非显式拒绝（与 K17-R1 同族的静默失真面）；
+  - R3（🟡）`pkg/live/paper_exec_algo.go` `attachExecAlgo`（现 `:105`）内部用 `context.Background()`——`Run` 的 ctx 没贯通到 Schedule（回测侧 `attachExecAlgoSignal` 已带 ctx，两侧不一致）。
+- **③ 要求**：
+  1. R1：`OnBar` 遍历**完全部**父单后再返回（错误累积或取首错，**已取子单照常返回**给调用方处置）；或等价方案（错误时已取子单仍交还调用方），取舍写进注释；
+  2. R2：`Run` 增加重入护栏（`used` 标记或等价判据），第二次调用返回 error 显式拒绝（fail-loud，非 warn+skip）；
+  3. R3：`attachExecAlgo` 增 ctx 参数，`Run` 传入；
+  4. 三件各补测试；**破坏验证**：R1 注入会报错的算法 stub → 「已取子单仍可达」断言红；R2 二次 Run → 现状 warn+skip 红、改后显式 error；R3 ctx 取消传播断言。
+- **④ 约束与非目标**：默认路径与 K17 已冻结语义（父单号 / 窗口 / 撤销裁决 / K18 的 Cancel）零变化；不改 `ExecAlgorithm` 冻结签名；不做错误重试/补偿；不动 K17-R1（挂载失败口径）范围。
+- **⑤ 验收**：三件测试绿 + 破坏腿红→还原；全量 `go test ./...` 绿；`go vet` + gofmt 干净。
+- **⑥ 边界**：只做三件鲁棒性收尾，core 仓一个 atomic commit；⚠️ R1/R3 与 K17-R1 改同一批文件，**必须在其落库后执行**。
+
 ---
 
 ## 七、AI / core 边界归属（2026-10-09 若曦拍板，DDD 判定）
