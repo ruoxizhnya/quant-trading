@@ -86,9 +86,13 @@ func normalizeWS(s string) string {
 }
 
 // TestSupplyChainSchemaDDLSyncedWithMigrate 钉住「migrate() 实际执行的语句
-// ≡ 包级 SupplyChainSchemaDDL」：migrate() 数组尾部（Migration 049 追加段）
+// ≡ 包级 SupplyChainSchemaDDL」：migrate() 数组里 Migration 049 追加的那一段
 // 与包级变量逐条相等。防的是有人在 migrate() 里内联一份漂移的拷贝，而两处
 // 都自称正确、谁都发现不了（K8 破坏腿③同款 hazard）。本测试不需要真库。
+//
+// 段定位用 findMigrationSegment 按内容找（P2-1 之前是「取数组尾部」的
+// 写法——那个假设「自己是最后一个 migration」，任何后续 migration 追加
+// 都会把它打红，P2-1 追加 Migration 050 时实测命中，故改为按内容定位）。
 //
 // 破坏腿：改 postgres.go 的 SupplyChainSchemaDDL 而不改 migrate() 的追加
 // 内容（或反之）→ 本测试红。
@@ -96,18 +100,44 @@ func TestSupplyChainSchemaDDLSyncedWithMigrate(t *testing.T) {
 	t.Parallel()
 
 	stmts := migrationStatements()
-	tail := stmts[len(stmts)-len(SupplyChainSchemaDDL):]
+	seg, start := findMigrationSegment(t, stmts, SupplyChainSchemaDDL)
 
 	require.Len(t, SupplyChainSchemaDDL, 9,
 		"Migration 049 应为 9 条（schema + 4 表 + 4 索引）——"+
 			"条数变了先确认是不是有意增删")
 	for i := range SupplyChainSchemaDDL {
-		got := normalizeWS(tail[i])
+		got := normalizeWS(seg[i])
 		want := normalizeWS(SupplyChainSchemaDDL[i])
 		require.Equal(t, want, got,
 			"migrate() 第 %d 条（Migration 049 段）与 SupplyChainSchemaDDL 不一致："+
-				"改任一处必须同步另一处", len(stmts)-len(SupplyChainSchemaDDL)+i+1)
+				"改任一处必须同步另一处", start+i+1)
 	}
+}
+
+// findMigrationSegment 在 migrate() 语句数组里按**内容**定位一段 migration
+// （归一化空白后逐条相等的连续子序列），返回该段与起始下标（0 基）。
+// 按内容找而不是取尾部：migrationStatements() 是append 增长的，任何后续
+// migration 都会让「尾部」假设失效（P2-1 追加 050 时的实测教训）。
+func findMigrationSegment(t *testing.T, stmts []string, segment []string) ([]string, int) {
+	t.Helper()
+	if len(segment) == 0 {
+		t.Fatal("segment 为空")
+	}
+	for start := 0; start+len(segment) <= len(stmts); start++ {
+		ok := true
+		for i := range segment {
+			if normalizeWS(stmts[start+i]) != normalizeWS(segment[i]) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return stmts[start : start+len(segment)], start
+		}
+	}
+	t.Fatalf("migrate() 里找不到与包级 DDL 变量一致的段（%d 条）——"+
+		"该 migration 没被追加进 migrationStatements()？", len(segment))
+	return nil, -1
 }
 
 // sqlStatement 从镜像 .sql 文件抽出「归一化空白后的语句序列」：剥掉 -- 注释

@@ -34,6 +34,9 @@ type TushareStore interface {
 	// 是因为它有独立命名的接口契约（pkg/data/supply_chain.go），CSV 导入器
 	// 也按同一接口编程。
 	SupplyChainStore
+	// MacroStore（P2-1）：宏观指标序列写入面（pkg/data/macro.go）。
+	// 同 SupplyChainStore，内嵌以独立命名契约钉住 Save 签名。
+	MacroStore
 	// SaveRawIngest archives a class-A raw source response (ADR-022 §2,
 	// ingest.raw). Declared here so the archive contract is enforced at
 	// compile time rather than discovered at runtime.

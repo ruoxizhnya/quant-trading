@@ -65,6 +65,8 @@ tags:
     description: L0 evidence service — resolves a citation's content_hash to its archived source response
   - name: Industry
     description: Industry-chain static data layer (P2-2) — SW industry tree, supply-chain edges, industry vitality, ETF constituents
+  - name: Macro
+    description: Domestic macro indicator layer (P2-1) — CPI/PPI/PMI/M2/社融/LPR/汇率 observations from Tushare (0 new keys)
 
 paths:
   # ============================================================
@@ -2755,6 +2757,95 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  # ============================================================
+  # Macro (P2-1 国内宏观指标层)
+  # ============================================================
+  /api/macro/series:
+    get:
+      tags: [Macro]
+      summary: List domestic macro indicator observations
+      description: |
+        Read-only door over `quant.macro_series` (P2-1). Domestic macro
+        indicators imported from Tushare (reusing `TUSHARE_TOKEN`, 0 new
+        keys): `cn_cpi` → CPI_YOY, `cn_ppi` → PPI_YOY, `cn_pmi` → PMI,
+        `cn_m` → M2 / M2_YOY, `sf_month` → TSF_INC, `shibor_lpr` → LPR_1Y /
+        LPR_5Y, `fx_daily` → USDCNY_CLOSE. This layer is national-level;
+        the industry-level vitality series (P2-2) lives under
+        `/api/industry/vitality`.
+
+        Every row carries `source` + `as_of` provenance columns. The unique
+        key (indicator, freq, obs_date, source) makes re-imports idempotent
+        and keeps different sources side by side. `obs_date` is PIT: monthly
+        indicators use the first day of the month; `fx_daily`'s `trade_date`
+        is stored as returned (GMT, per Tushare docs — no timezone shift).
+
+        `indicator` is required. `freq` (M/D) and the inclusive
+        `start_date` / `end_date` bounds are optional. Empty results return
+        `200` with an empty array — "no rows" is an answer, not an error.
+      operationId: listMacroSeries
+      parameters:
+        - name: indicator
+          in: query
+          required: true
+          description: |
+            Indicator code. Catalog (see `pkg/data/macro.go`
+            `macroIndicatorSpecs`): `CPI_YOY`, `PPI_YOY`, `PMI`, `M2`,
+            `M2_YOY`, `TSF_INC`, `LPR_1Y`, `LPR_5Y`, `USDCNY_CLOSE`.
+          schema:
+            type: string
+            example: CPI_YOY
+        - name: freq
+          in: query
+          required: false
+          description: Frequency filter (M = monthly, D = daily). Omit to accept both.
+          schema:
+            type: string
+            enum: [M, D]
+            example: M
+        - name: start_date
+          in: query
+          required: false
+          description: Inclusive lower bound (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: '2020-01-01'
+        - name: end_date
+          in: query
+          required: false
+          description: Inclusive upper bound (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: '2026-08-31'
+      responses:
+        '200':
+          description: Matching observations, ordered by obs_date
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    example: 80
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MacroSeries'
+        '400':
+          description: Missing `indicator`, malformed date, or `start_date` after `end_date`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Macro data layer unavailable (store not wired / no database)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   # ============================================================
   # Security
@@ -3069,6 +3160,55 @@ components:
           format: date
           description: Report period (PIT key component)
           example: '2200-01-01'
+        source:
+          type: string
+          description: Provenance — source identifier
+          example: tushare
+        as_of:
+          type: string
+          format: date-time
+          description: Provenance — observation moment of this row (RFC3339)
+          example: '2026-10-12T00:00:00Z'
+
+    MacroSeries:
+      type: object
+      description: |
+        One domestic macro indicator observation (`quant.macro_series`, P2-1).
+        Imported from Tushare (0 new keys). The unique key
+        (indicator, freq, obs_date, source) includes `source`, so different
+        sources keep separate rows and re-imports refresh in place.
+        National-level — see `IndustryVitality` for the industry-level series.
+      required: [indicator, freq, obs_date, value, source, as_of]
+      properties:
+        indicator:
+          type: string
+          description: |
+            Indicator code (catalog: pkg/data/macro.go macroIndicatorSpecs):
+            CPI_YOY, PPI_YOY, PMI, M2, M2_YOY, TSF_INC, LPR_1Y, LPR_5Y,
+            USDCNY_CLOSE.
+          example: CPI_YOY
+        freq:
+          type: string
+          description: Frequency (M = monthly, D = daily)
+          enum: [M, D]
+          example: M
+        obs_date:
+          type: string
+          format: date
+          description: |
+            Observation date (PIT key component). Monthly indicators use the
+            first day of the month; `fx_daily` rows carry the Tushare
+            `trade_date` as returned (GMT — no timezone shift).
+          example: '2026-08-01'
+        value:
+          type: number
+          format: double
+          description: Observation value (unit column carries the scale)
+          example: 0.8
+        unit:
+          type: string
+          description: Unit of measurement (%, 亿元, 点, 汇率; may be empty)
+          example: '%'
         source:
           type: string
           description: Provenance — source identifier

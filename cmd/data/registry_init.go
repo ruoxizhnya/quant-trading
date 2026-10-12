@@ -127,6 +127,19 @@ func buildDataSourceRegistry(tushareClient *data.TushareClient, logger zerolog.L
 		}
 	}
 
+	// 8. Tushare macro (P2-1) — domestic macro indicators
+	// (CPI/PPI/PMI/M2/TSF/LPR/USDCNY). Reuses the same TushareClient
+	// (TUSHARE_TOKEN, 0 new keys) but registers under its own name so it
+	// carries its own kill switch: DATA_DISABLE_TUSHARE_MACRO stops macro
+	// imports without touching the market-data chain. A nil client
+	// (token not configured) registers it as disabled (Enabled()==false),
+	// same degraded-mode posture as the other adapters.
+	if !envDisabled("DATA_DISABLE_TUSHARE_MACRO") {
+		if err := reg.Register(source.NewTushareMacroAdapter(tushareClient)); err != nil {
+			logger.Warn().Err(err).Msg("failed to register tushare_macro adapter")
+		}
+	}
+
 	// Configure explicit fallback chains. The default chain built by
 	// Registry.Register appends adapters in registration order, but
 	// for the most important data types we want a precise priority.
@@ -206,6 +219,12 @@ func configureFallbackChains(reg *source.Registry) {
 	reg.SetChain(source.DataTypeGlobalOHLCV, []string{
 		"yahoo_finance",
 		"alpha_vantage",
+	})
+	// Macro (P2-1): tushare_macro is the only first-class source today
+	// (FRED / World Bank / Alpha Vantage are explicitly out of scope for
+	// the first version — they would each add a new key).
+	reg.SetChain(source.DataTypeMacro, []string{
+		"tushare_macro",
 	})
 }
 

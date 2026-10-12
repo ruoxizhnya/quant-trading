@@ -56,6 +56,11 @@ const (
 	DataTypeNews        = "news"
 	DataTypeHotSearch   = "hot_search"
 	DataTypeGlobalOHLCV = "global_ohlcv"
+	// DataTypeMacro is the domestic macro indicator series layer (P2-1):
+	// CPI / PPI / PMI / M2 / TSF / LPR / FX, persisted in
+	// quant.macro_series. Served by the tushare_macro adapter
+	// (TUSHARE_TOKEN, 0 new keys).
+	DataTypeMacro = "macro_series"
 )
 
 // ErrUnsupported indicates the adapter cannot serve the requested data type.
