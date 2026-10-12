@@ -343,6 +343,24 @@ func TestImportIndustryVitalityCSV_HappyPath(t *testing.T) {
 	require.Equal(t, "2026-10-12", store.vitality[0].AsOf.UTC().Format("2006-01-02"), "as_of 取自 CSV 列")
 }
 
+// TestImportIndustryVitalityCSV_InlineBOMHeader BOM 剥离的 inline 覆盖腿（P2-2-R2-R1）：
+// 表头串直接以 "\ufeff" 开头构造，不依赖 testdata 真文件——与
+// TestImportIndustryVitalityCSV_RealSeedFile（真文件腿）互为独立覆盖。
+// 真文件未来有意去 BOM 并删掉其断言时，BOM 剥离仍被本用例钉住：删掉
+// strings.TrimPrefix(h, "\ufeff") 后本用例独立变红（缺列 industry_code）。
+func TestImportIndustryVitalityCSV_InlineBOMHeader(t *testing.T) {
+	store := &recordingSupplyChainStore{}
+	csv := "\ufeffindustry_code,metric,obs_date,value,source\n" +
+		"801080.SI,gross_margin,2026-06-30,13.42,seed-csv\n"
+
+	n, err := ImportIndustryVitalityCSV(context.Background(), store, strings.NewReader(csv))
+	require.NoError(t, err, "表头粘 BOM 必须可导入（剥 BOM 后首列名才能匹配 industry_code）")
+	require.Equal(t, 1, n)
+	require.Len(t, store.vitality, 1)
+	require.Equal(t, "801080.SI", store.vitality[0].IndustryCode)
+	require.Equal(t, "gross_margin", store.vitality[0].Metric)
+}
+
 // TestImportIndustryVitalityCSV_RealSeedFile 直接读 testdata/industry_vitality_seed.csv
 // 真文件（P2-2-R1）——seed 文件从此有消费方。该文件带 UTF-8 BOM（首三字节
 // ef bb bf），表头不剥 BOM 则首列名带 U+FEFF，匹配不到 industry_code 直接报
