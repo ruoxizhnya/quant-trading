@@ -508,7 +508,23 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 > **✅ 收口记录（2026-10-12，R1+R2 commit `3ceb69d`，R3 登记随 docs commit）**：
 > - **R1（🟠 seed CSV BOM）**：`ImportIndustryVitalityCSV` 表头归一化改为 `strings.TrimPrefix(h, "\ufeff")` 后再 `TrimSpace`；新增 `TestImportIndustryVitalityCSV_RealSeedFile` 直读 `testdata/industry_vitality_seed.csv` 真文件（断言钉住「文件带 BOM」为该腿存在理由），seed 文件从此有消费方。破坏腿留证：去掉 TrimPrefix → 红（`缺列 "industry_code"`，实际表头首列带 U+FEFF）→ 还原绿；全量 `go test ./...` **68 包 0 FAIL**（含真库）。
 > - **R2（🟡 台账）**：§五 P2-2 行已打 ✅ + 补 P2-2 简短收口记录（同 `3ceb69d`）。
-> - **R3（🟡 真实喂数实测，2026-10-12，真库 `quant_trading` + 真 `TUSHARE_TOKEN` 逐接口真拉）**：`index_classify` **OK — 359 节点**（全量申万行业树，source=tushare）；`index_member`（801010.SI 一级行业）**OK — 归一化 184 条边 → 唯一键折叠 160 行**（同股多期 in/out_date 记录按 (upstream,downstream,relation) 收敛）；`fund_portfolio`（510300.SH）**不可用 — tushare 40203「您没有接口(fund_portfolio)访问权限」**（token 权限/积分档位不足，对齐「stock_fundamentals 等空表属设计行为」口径，登记不阻塞）；seed CSV 导入 **OK — 5 行**（走生产导入面，BOM 修复真文件自证）。四表行数：`quant.sw_industry_tree` **359** / `quant.supply_chain_edge` **160** / `quant.industry_vitality` **5** / `quant.etf_constituent` **0**（唯一空表，40203 权限结论在案）。喂数后复跑全量：**67 ok / 1 FAIL**，唯一红为并行在途文件 `cmd/analysis/handlers_backtest_nautilus_test.go:77`（K13 线 `gin.SetMode` 违反守卫，非本任务文件、与喂数无关）——如实登记不洗绿，归属 K13 线自行处理。遗留：`fund_portfolio` 待 token 权限升档后按 R3 步骤补拉 ETF 成分，届时 `etf_constituent` 转 > 0（数据源升级事项，不属本收尾范围）。
+> - **R3（🟡 真实喂数实测，2026-10-12，真库 `quant_trading` + 真 `TUSHARE_TOKEN` 逐接口真拉）**：`index_classify` **OK — 359 节点**（全量申万行业树，source=tushare）；`index_member`（801010.SI 一级行业）**OK — 归一化 184 条边 → 唯一键折叠 160 行**（同股多期 in/out_date 记录按 (upstream,downstream,relation) 收敛；折叠的 PIT 语义损失——历史/当前成员混同——由审查立单 **P2-2-R2** 清账）；`fund_portfolio`（510300.SH）**不可用 — tushare 40203「您没有接口(fund_portfolio)访问权限」**（token 权限/积分档位不足，对齐「stock_fundamentals 等空表属设计行为」口径，登记不阻塞）；seed CSV 导入 **OK — 5 行**（走生产导入面，BOM 修复真文件自证）。四表行数：`quant.sw_industry_tree` **359** / `quant.supply_chain_edge` **160** / `quant.industry_vitality` **5** / `quant.etf_constituent` **0**（唯一空表，40203 权限结论在案）。喂数后复跑全量：**67 ok / 1 FAIL**，唯一红为并行在途文件 `cmd/analysis/handlers_backtest_nautilus_test.go:77`（K13 线 `gin.SetMode` 违反守卫，非本任务文件、与喂数无关）——如实登记不洗绿，归属 K13 线自行处理。遗留：`fund_portfolio` 待 token 权限升档后按 R3 步骤补拉 ETF 成分，届时 `etf_constituent` 转 > 0（数据源升级事项，不属本收尾范围）。
+
+### P2-2-R2 · P2-2-R1 收尾审查发现（两件，2026-10-12 自审立单）
+
+> 来源：2026-10-12 对 P2-2-R1 两 commit（`3ceb69d`/`8deda87`）的代码审查（结构化审查 + 双验证者独立交叉验证 2/2 确认）。审查取证（实测）：raw tushare `index_member(801010.SI)` 184 行 / 160 唯一 con_code，其中 **56 个（35%）全部成分段 out_date 非空（已出表历史成员）**、104 个当前在表；`quant.sw_industry_tree` level 分布 **28/104/227 = 359**（SW 三级全在，收口记录「全量树」措辞复核成立）。
+
+- **① 目标**：清掉 P2-2-R1 审查发现两件——R1（🟡）BOM 剥离覆盖单点、R2（🟠）`industry_member` 成分边 PIT 语义缺失。
+- **② 上下文**：
+  - **R1（🟡）覆盖单点**：`strings.TrimPrefix(h, "\ufeff")`（`pkg/data/supply_chain.go` 表头循环）的唯一测试覆盖是 `TestImportIndustryVitalityCSV_RealSeedFile`（`pkg/data/supply_chain_test.go` L346-L362），其存在理由依赖 `testdata/industry_vitality_seed.csv` 自带 BOM，且断言提示「有意去 BOM 时同步删本断言」——按提示删后 BOM 剥离零覆盖（全测试文件无 inline BOM 表头用例）。真文件腿是回归腿，不是唯一腿。
+  - **R2（🟠）PIT 语义**：`normalizeSWIndustryMembers`（`pkg/data/supply_chain.go` L266-L295）向 tushare 请求了 `in_date/out_date` 却全部丢弃；`domain.SupplyChainEdge`（`pkg/domain/supply_chain.go` L36-L49）无有效期字段（`AsOf` 是导入时刻溯源，不是成分有效期）；`pkg/storage/supply_chain.go` 唯一键 `ON CONFLICT (upstream, downstream, relation)` 把多期记录折叠成一行。净效果：**已出表历史成员与当前成员同形态落库**——R3 真喂数的 160 行里 56 个是历史成员，K60 产业链/传导按当前成分消费将引入陈旧成员。此为 P2-2 既有设计（`8c922c9`），非 P2-2-R1 引入，但 R3 使其成为真库真实风险。
+- **③ 要求**：
+  1. **R1**：`supply_chain_test.go` 补一条 inline BOM 表头用例（表头串以 `"\ufeffindustry_code,metric,…"` 构造，断言导入成功），与真文件腿互为独立覆盖；真文件腿的 BOM 存在理由断言保留不动；
+  2. **R2 先裁决口径（二选一，裁决理由写收口记录）**：① **只导当前成员**——`normalizeSWIndustryMembers` 仅保留 out_date 为空的段（当前在表），历史段不入边表，契约注释 + 设计文档明示「`industry_member` = 当前成分快照，非 PIT」；② **保留全历史**——给成分关系补有效期（新 relation 值或边表有效期列；涉及 DDL 与唯一键变更，须按「DDL 内联 postgres.go + 一致性测试」口径**单独变更评审后**再动手）；
+  3. 裁决后落地 + 真库重导验证（`801010.SI` 行数与所选口径一致：① 应为 104、② 应保留 184 条段记录）+ 破坏腿一条（改坏→红→还原）。
+- **④ 约束与非目标**：不动 `sw_industry_tree` / `industry_vitality` / `etf_constituent` 三表；不做 K60 消费方改造（消费侧过滤另案）；不改 P2-2-R1 已收口记录的事实部分（只可加交叉引用）；R2 口径②的 DDL 变更不许混进 R1 的 commit。
+- **⑤ 验收**：R1——inline BOM 用例绿 + 破坏腿（删 TrimPrefix → 不依赖真文件的独立红）；R2——口径注释/文档与实现一致、真库重导行数符合所选口径、全量 `go test ./...` 绿。
+- **⑥ 边界**：R1 一个独立 commit（`test(data): …`）；R2 按裁决结果另起 commit（若选口径②，先过变更评审）。数据线工单，与内核线零交集。
 
 ---
 
