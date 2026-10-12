@@ -7,11 +7,13 @@ package data
 // 破坏验证②的 Red 腿指回这里的 TestFetch*Propagates* 三兄弟。
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -339,6 +341,24 @@ func TestImportIndustryVitalityCSV_HappyPath(t *testing.T) {
 	require.InDelta(t, 13.42, store.vitality[0].Value, 1e-12)
 	require.Equal(t, "seed-csv", store.vitality[0].Source, "source 取自 CSV 列（人工维护标识）")
 	require.Equal(t, "2026-10-12", store.vitality[0].AsOf.UTC().Format("2006-01-02"), "as_of 取自 CSV 列")
+}
+
+// TestImportIndustryVitalityCSV_RealSeedFile 直接读 testdata/industry_vitality_seed.csv
+// 真文件（P2-2-R1）——seed 文件从此有消费方。该文件带 UTF-8 BOM（首三字节
+// ef bb bf），表头不剥 BOM 则首列名带 U+FEFF，匹配不到 industry_code 直接报
+// 「缺列」——本测试就是那条 🟠 缺陷的回归腿。
+func TestImportIndustryVitalityCSV_RealSeedFile(t *testing.T) {
+	data, err := os.ReadFile("../../testdata/industry_vitality_seed.csv")
+	require.NoError(t, err, "seed 文件必须存在且可读")
+	require.True(t, bytes.HasPrefix(data, []byte("\xef\xbb\xbf")),
+		"seed 文件带 UTF-8 BOM 是本测试腿的存在理由（有意去 BOM 时同步删本断言）")
+
+	store := &recordingSupplyChainStore{}
+	n, err := ImportIndustryVitalityCSV(context.Background(), store, bytes.NewReader(data))
+	require.NoError(t, err, "带 BOM 的 seed 文件必须可直接导入")
+	require.NotZero(t, n, "seed 文件应至少一行数据")
+	require.Len(t, store.vitality, n)
+	require.Equal(t, "seed-csv", store.vitality[0].Source, "source 取自 CSV 列（人工维护标识）")
 }
 
 func TestImportIndustryVitalityCSV_AsOfDefaultsToImportTime(t *testing.T) {

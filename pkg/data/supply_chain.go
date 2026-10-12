@@ -410,6 +410,10 @@ func ImportIndustryVitalityCSV(ctx context.Context, store SupplyChainStore, r io
 	}
 	col := make(map[string]int, len(header))
 	for i, h := range header {
+		// UTF-8 BOM（Windows 编辑器另存的普遍场景）粘在首列名上，U+FEFF 不是
+		// TrimSpace 可去字符——先剥 BOM 再 TrimSpace，否则真文件首列名带
+		// U+FEFF 匹配不到 industry_code，直接报「缺列」（P2-2-R1）。
+		h = strings.TrimPrefix(h, "\ufeff")
 		col[strings.TrimSpace(h)] = i
 	}
 	for _, req := range vitalitySeedRequired {
