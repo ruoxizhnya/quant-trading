@@ -431,13 +431,13 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 |---|---|---|
 | **AUD-61** | ⬜ e2e UI 套件与前端结构严重脱节（干净环境实测 127 passed / 34 failed / 2 skipped；34 条全归因、与代码改动无关） | ① 按页面分批重对齐选择器与期望值（工作量大）；② 先 `test.fixme` + 显式登记恢复「全绿」可信度再消债。⚠️ 不得把「34 条红」洗成「已验证通过」，也不得放宽断言消红 |
 | **P2-8** | ✅ 已裁决关闭（2026-10-09，若曦授权「按你的建议走」）：**不落 hfq 表** | **裁决：不落 hfq，回测一律用 qfq。**取证与理由：① hfq 价 = qfq 价 × k（k = 每股累积复权因子，**因股而异**），**单位不是「元」** ⇒ 固定资金下股数计算错误 ⇒ 改写票池成分与权重；② **资金无法按同一基准缩放**——不同股票 k 不同，组合层面不存在统一基准，这是几何事实不是实现问题；③ **hfq 与 qfq 的收益率序列逐点相同**（已验证）⇒ hfq 不提供 qfq 没有的 alpha 信息；④ 实测 `splits` 0 行、`dividends` 0 行、`ohlcv_daily_qfq` **无复权因子列** ⇒ 本地无法自行推导 hfq，只能靠数据源且无法自校验。⇒ hfq 唯一增量价值是「长期走势的直观展示（复权净值曲线）」，而**回测必须用 qfq**（价格真实 ⇒ 股数/权重正确）。落 hfq 是纯风险无收益：存储翻倍（390 万行 ×2）+ 引入「拿 hfq 跑固定资金回测」的误用风险（错误结论极难察觉，与 OBS-01 同源）。**若将来确需 hfq（如 UI 展示复权净值）**：由数据源直接提供 hfq 序列或复权因子列，本地不自行推导；落库必须在 schema 注释与文档标注「单位非元，禁止用于资金/股数计算」，且引擎侧要有护栏拒绝 hfq 作为回测价格源 |
-| **P2-1** | 🔶 实现已落地（2026-10-12，`02058b9`：Migration 050 + tushare 宏观 adapter + 只读 API；**真库 `quant.macro_series` 6168 行实测**）；台账未关 | 台账关闭工单见表格下方 **P2-1-R1** 小节 |
+| **P2-1** | ✅ 已完成（2026-10-12，`02058b9`：Migration 050 + tushare 宏观 adapter + 只读 API；**真库 `quant.macro_series` 6168 行实测**） | 收口记录见表格下方 **P2-1 · 宏观数据源** 小节；台账关闭见 **P2-1-R1**；代码侧自审收尾见 **P2-1-R2** |
 | **P2-2** | ✅ 已完成（2026-10-12，`8c922c9`/`3bc0995`/`fd10a7f`，四任务深度审查判定达标；审查收尾三件由 P2-2-R1 清账） | 收口记录见表格下方 **P2-2 收口记录**；收尾执行见 **P2-2-R1** 小节 |
 | **NT 决策门** | ⛔ 阻塞（前置：K15 完成 + NT v2.0.0 正式版发布） | 阶段 2 对齐数据在手后裁决**三选一**：① 推进阶段 3（K16 双内核生产化）/ ② 长期双内核停在 PoC / ③ 回退（废弃侧车，落「借鉴设计增强 Go 内核」方案）。届时 **VeighNa 并列评估**（A 股覆盖更好的 Python 候选）；**K4「`impact` 是否设为默认滑点模型」一并在此裁决**（依据双跑对比数据，见 K4「待裁决」条）。裁决结果写入 ADR-031 |
 
 > **✅ P2-2 收口记录（2026-10-12）**：交付落点 `8c922c9`/`3bc0995`/`fd10a7f` —— Migration 049 产业链四表（`quant.sw_industry_tree` / `supply_chain_edge` / `industry_vitality` / `etf_constituent`，内联 DDL + 溯源列 + DDL 一致性测试）、`pkg/data` 三 tushare 接口导入（`index_classify` 全量行业树 / `index_member` 行业成分入边表 / `fund_portfolio` ETF 持仓）+ seed CSV 导入（错误向上传播不吞、幂等 ON CONFLICT DO UPDATE）、`/api/industry/*` 只读查询 + openapi 同步。验收要点：四任务深度审查判定达标（无 🔴）、core 提交态全量 `go test ./...` 67 包 0 FAIL（含真库）、ETL 错误传播与同批重导不重复插行均有测试腿。遗留（审查收尾三件 🟠 seed BOM / 🟡 台账 / 🟡 真实喂数）→ **P2-2-R1** 工单（seed BOM 修复与台账关闭随该工单首 commit 清账；真实喂数验证与逐接口额度登记写进该工单收口记录）。
 
-### P2-1 · 宏观数据源（六字段工单，2026-10-12 补全）
+### ✅ P2-1 · 宏观数据源（六字段工单，2026-10-12 补全，实现 `02058b9`）
 
 - **① 目标**：补上**国内宏观**数据（汇率 / 利率 / 物价 / 货币）的数据源接入——新增宏观 DataType + Tushare 宏观 adapter 落库，带溯源列、幂等重导、提供只读查询。跨境那一半已完成（`global_ohlcv: yahoo_finance primary + alpha_vantage secondary`），不在本任务。
 - **② 上下文**：quant-trading-docs 仓 `docs/guides/data-dependencies.md` §P2-1（结论「**宏观是真空白**」——`pkg/data/source/adapter.go` 的 DataType 常量里只有行情/资金流/财务/板块/公告/新闻，没有任何宏观类型，**要新增 DataType + adapter 不是填 key**；候选源：Tushare 宏观接口复用 `TUSHARE_TOKEN` 0 新 key 但吃积分 / FRED 1 免费 key / Alpha Vantage 免费档 25 req/day 只够探测 / World Bank 0 key；**待核实**：除 `cn_cpi`（doc_id=228）外各宏观接口名称与积分未逐条核对）；adapter 注册与 kill switch 模式 `cmd/data/registry_init.go`（缺依赖注册 disabled 降级、不阻断启动）；现有 call/normalize/save 模式 `pkg/data/tushare.go`；P2-2 刚落地的同族先例（postgres 内联 DDL + 溯源列 + DDL 一致性测试 + 只读 handler 样板）——`quant.macro_series` 与 `quant.industry_vitality` 并列不重复（后者是行业景气，本任务是国家层宏观）。
@@ -451,7 +451,12 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：`go build ./...` + 全量 `go test ./...` 绿（本地无 -race，CI 覆盖）；真库 migrate 后 `\d quant.macro_series` 与 EnsureSchema 一致；导入幂等测试（同批重导行数不变）；查询 API httptest 契约测试（正常 / 空结果 / 非法参数 400）；`TUSHARE_TOKEN` 可用时真拉 ≥1 条宏观指标入库取证（无 token 则 fixture 全绿 + commit message 登记「真拉未实测」）。**破坏验证**（改坏→红→还原，留证 commit message）：① 删 source 的 NOT NULL → 溯源约束测试红；② 导入器改吞错（log 后 continue 返 nil）→ 错误传播测试红；③ 撤唯一键 → 幂等测试红（重导行数翻倍）。
 - **⑥ 边界**：静态宏观数据层 + 导入 + 只读查询，core 仓一个 atomic commit（`feat(data): P2-1 宏观数据源 …`）；指南 §待核实 回写在 quant-trading-docs 仓单独 commit（跨仓各自一 commit）。
 
-### P2-1-R1 · P2-1 台账关闭（2026-10-12 审查立单）
+> **✅ 收口记录（2026-10-12，P2-1-R1 台账关闭）**：交付落点 `02058b9` —— Migration 050 建 `quant.macro_series`（唯一键 indicator+freq+obs_date+source + source/as_of 溯源列 + DDL 三方一致性测试）、`pkg/data/macro.go` 指标目录 / normalize / 导入面（同接口多 indicator 共用一次请求）、Tushare 宏观 adapter（registry disabled 降级 + `DATA_DISABLE_TUSHARE_MACRO` kill switch）、只读 `GET /api/macro/series` + openapi 同步（复用 deps.Store，未新增 ServerDeps 字段）。
+> 实测结论：9 个 indicator（7 个 tushare 接口）真 token 逐个 POST 全部 code:0，**三处推翻文档假设**（`cn_pmi` 响应字段实测大写 / `shibor_lpr` 实测限流与官方标称冲突 / `fx_daily` 实测 2410 行不截断），清单见 quant-trading-docs 仓 `34255d9`（数值纠错 `dd35ab9`）。
+> 真库取证：`quant.macro_series` **6168 行**（8 指标；`LPR_5Y` 受 `shibor_lpr` 流控未补齐，重跑一次分组导入即可，见 `02058b9` commit「已知限制」）。
+> 遗留：**大宗 / 境外宏观未接**（后续工单，不在 P2-1 范围）；代码侧自审收尾（7 项）见 **P2-1-R2**。
+
+### ✅ P2-1-R1 · P2-1 台账关闭（2026-10-12 审查立单，同日关闭）
 
 > 来源：2026-10-12 对 K10/K17/P2-1 三任务深度审查。P2-1 **实现质量高**（DDL 三方一致测试 / 真库 catalog 测试 / 批量事务语义 / 错误传播 / 未知指标拒绝 / 探测不落库 / 共享一次请求，全绿；docs 仓 `34255d9` 逐个 POST 实测 9 个接口并推翻文档三处假设——正是工单「不许凭接口文档臆断」的落实），**唯一缺口是台账未关**。
 
@@ -464,6 +469,8 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：不改 P2-1 已落地代码、DDL 与 openapi；不扩界接新数据源。
 - **⑤ 验收**：TASKS.md 内 P2-1 两处（表行 + 小节标题）均 ✅；收口记录事实与代码、真库、docs 仓指南逐条对照一致（不许出现「文档说已落地、代码未落地」的错位）。
 - **⑥ 边界**：core 仓 `docs/TASKS.md` 一个 docs commit（指南实测结论已在 docs 仓 `34255d9`，不重复）。
+
+> **✅ 关闭记录（2026-10-12）**：§五 行与小节收口记录已更新（本 commit）；收口记录与代码、真库（6168 行复测）、docs 仓指南逐条对照通过。
 
 ### P2-1-R2 · 宏观数据层提交后自审收尾（7 项，2026-10-12 作者自审立单）
 
