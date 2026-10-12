@@ -837,7 +837,7 @@ SELECT create_hypertable('factor_cache', 'date');
 
 ### 模块化内核新表（2026-10-08，目标形态）
 
-> 以下 9 张表为模块化内核的目标 schema（**尚未实施**，见 [design/kernel/target-architecture-modular-kernel.md](design/kernel/target-architecture-modular-kernel.md) §5 模块矩阵）。归属 `quant.*`（派生）与 `audit.*`（审计），遵循单一事实源、禁止双写。
+> 以下表为模块化内核的目标 schema，遵循单一事实源、禁止双写。**尚未实施**者见表（`quant.strategy_state` 结构可由 `EnsureSchema` 幂等兜底建，但未并入 `migrate()`、生产零调用，待另案）；`quant.external_signals` **已随 K8 实施**（2026-10-12，见下节），不再列入本表。
 
 | 表 | 归属模块 | 用途 |
 |---|---|---|
@@ -847,9 +847,18 @@ SELECT create_hypertable('factor_cache', 'date');
 | `quant.orders` | exec-engine | 订单生命周期 |
 | `quant.fills` | exec-engine | 成交回报 |
 | `quant.recon_report` | exec-engine | 对账差异报告 |
-| `quant.strategy_state` | strategy-runtime | L2/L3 流式策略状态（`SaveState`） |
-| `quant.external_signals` | strategy-runtime | 外部模型信号注入（L3b，K7，`as_of` 防前视 + `content_hash` 可追溯） |
+| `quant.strategy_state` | strategy-runtime | L2/L3 流式策略状态（`SaveState`）——**尚未实施**（另案） |
 | `audit.message_log` | eventstore | 模块间消息（先记录后分发，BusTap 语义） |
+
+### 外部模型信号注入（K8，已实施 — 2026-10-12）
+
+> 引擎取信号改经 `SignalProvider` 接口（`pkg/strategy/signal_provider.go`）；外部模型（进程外，任意 Python/ML 框架）不直接下单，产出信号经 HTTP 写入门注入 `quant.external_signals`，由 `SignalStrategy` 按 `as_of` 拉取消费。契约级防前视：`Signals(ctx, scope, asOf)` 只返回 `as_of <= asOf` 的信号——未来信号物理不可见是接口语义（`RejectFutureSignals` fail-loud，`DayOf` 日粒度为唯一判定口径），写入门对未来的 `as_of` 直接 400。
+
+| Method | Path | 说明 |
+|---|---|---|
+| POST | `/api/signals` | 批量写入 `ExternalSignal`（RBAC `trader`/`admin`）；逐条 `ValidateExternalSignal` + 未来 as_of 拒绝，全批校验先于落库；`content_hash`（model_id/symbol/direction/strength/as_of 的 sha256）幂等去重，重复注入安全 |
+
+`quant.external_signals` 表（Migration 048，`storage.ExternalSignalsSchemaDDL`，镜像 `docs/migrations/048`）：`content_hash` UNIQUE 既是幂等键也是证据坐标的 source 位；`factors` 为诊断快照（JSONB，不入哈希）。消费侧 `SignalStrategy.ListFor` 按 (model_id, symbol) + `as_of <= upTo` 拉取。
 
 ### 产业链静态数据层（P2-2，已实施 — quant schema 四表）
 

@@ -19,6 +19,7 @@ verified-by: 文档拆仓（UI/AI/跨领域文档迁出后重建本入口，2026
 ## 本仓文档
 
 - [SPEC.md](SPEC.md) — 技术规格（API / 契约）
+- [ARCHITECTURE.md](ARCHITECTURE.md) — 架构总览（服务拓扑 / 数据归属 / DB schema 唯一真相口径 / 缓存）
 - [TASKS.md](TASKS.md) — 活跃任务台账（随代码演进）
 - [live-trading.md](live-trading.md) — 实盘 / paper 定位
 

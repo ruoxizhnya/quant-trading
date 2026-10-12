@@ -740,14 +740,15 @@ AGENTS.md 是活文档。以下情况主动更新：
 | **[PRODUCT.md](docs/PRODUCT.md)** | **顶层产品定义** — 一间单人自托管实验室（三角色：实验室主任 / AI 实验员 / 验证器）、三层模型（AI 编排 L3 / 能力 L2 / 数据 L1）、数据归属与不重复存储、证据服务、校准目标 | **任何任务开始前**；判断"这属于哪一层"时 |
 | [VISION.md](docs/VISION.md) | 设计原则（Accuracy First, Hot-Swap 等）、领域模型 | 开始新功能、质疑方法时 |
 | [SPEC.md](docs/SPEC.md) | 技术规格、API 定义、数据模型、Strategy 接口 | 实现端点、编写策略时 |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 服务拓扑、DB schema（**内联 DDL 37 张**，见下方口径）、缓存设计 | 理解系统布局、调试时 |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 服务拓扑、DB schema（**内联 DDL 为唯一真相**，张数以 grep 源码为准，见下方口径）、缓存设计 | 理解系统布局、调试时 |
 | **[ADR-023](docs/adr/adr-023-ai-experimenter-lab.md)** | **架构决策：AI 实验员 + 人类监督者实验室** — 三层模型、EquityDeep 降为数据底座、验证器链（5 确定性 + 1 因果）、拒绝多 agent 投票、**校准优于准确率** | 判断某个组件该放哪一层时 |
 | **[ADR-024](docs/adr/adr-024-expression-as-execution-target.md)** | **执行载体：表达式而非代码** — 意图类型 → 确定性默认表达式；LLM 生成的 Go 代码只是 artifact；不做 `plugin.Open` | 碰策略生成 / 执行链路时 |
 | [archive/RESEARCH-equitydeep-legacy.md](docs/archive/RESEARCH-equitydeep-legacy.md) | **EquityDeep 详案（历史快照）** — Product 设计 + Tech Implementation（契约 C1/C2 + 三桥 B1/B2/B3 + 改造清单 C-1~C-9）；⚠️ 按 [ADR-022](docs/archive/superseded-adr/adr-022-unified-research-platform.md) 写的，**该 ADR 从未实施**（已被 ADR-023 取代），只作设计来历追溯 | 追溯 EquityDeep 设计来历时 |
 
-> **表数口径（2026-09-21 校准，AUD-14）**: 现行为 **内联 DDL 37 张**
+> **表数口径（2026-09-21 校准，AUD-14）**: 唯一执行路径是**内联 DDL**
 > （`pkg/storage/postgres.go` 的 `migrate()` 数组，grep `CREATE TABLE IF NOT EXISTS`
-> 实测）—— 这是**唯一的执行路径**，也是唯一该被引用的数字。
+> 实测）—— 唯一该被引用的数字就是**当下那一次 grep 的结果**，不是本行
+> （也不是任何文档里）写死的数。
 >
 > `migrations/` 与 `docs/migrations/` 里的 `.sql` **不被执行**
 > （`migration_manager.go` 已于 2026-09-18 删除，零调用方；见
@@ -757,8 +758,8 @@ AGENTS.md 是活文档。以下情况主动更新：
 >
 > ⚠️ **本行出现过的历史数字都是各自时点的快照，别照抄**：
 > `6 张` → `32 张 (14+18)` → `38 张 (20+18)`（ODR-056）→ 审查报告里的
-> `内联 22 张`（ODR-065 时点）→ 现在是 **37 张**（C5 补 11 张 + 后续再补 4 张）。
-> **数表就 grep 源码**，不要引用文档里的数。
+> `内联 22 张`（ODR-065 时点）→ `37 张`（AUD-14 时点）→ 此后 K8（external_signals）
+> 与 P2-2（产业链四表）又各有追加。**数表就 grep 源码**，不要引用文档里的数。
 >
 > `pkg/storage/bulk_insert_ddl_test.go` 有防漂移断言：ETL 的 `TableMapper`
 > 目标表必须出现在内联 DDL 里（零 DB 依赖，静态读源码）。
@@ -916,7 +917,7 @@ Please continue from where we left off.
 | 使用本模板 | [AGENTS_TEMPLATE.md](docs/AGENTS_TEMPLATE.md) |
 
 ---
-_Last updated: 2026-09-21_
+_Last updated: 2026-10-12_
 _Source: 基于 AGENTS Template v2.0 迁移，融合 quant-trading + Claudeer 最佳实践_
 _Migration ODR: odr-005-agents-md-v3-migration (pending creation)_
 _Unified Platform Update: 顶层产品重定义 ([PRODUCT.md](docs/PRODUCT.md)) + ~~统一研究平台~~ ([ADR-022](docs/archive/superseded-adr/adr-022-unified-research-platform.md), 取代 [ADR-021](docs/archive/superseded-adr/adr-021-equitydeep-research-layer.md)) + 重构记录 ([ODR-048](docs/archive/odr/odr-048-top-level-product-redefinition.md)) — 2026-09-15_
@@ -924,3 +925,4 @@ _ADR-022 Consistency Update: 下游引用收口 (AGENTS/TASKS/ROADMAP/SPEC — [
 _ADR-022 Architecture Reflection: AGENTS.md v3.2 → v3.3 — 补齐四层架构 (L0-L3) 视角、双工作面状态、数据归属分区 (A-E)、Evidence API 入口、目录/schema/容器规划标注、Rule 1 触发表 — 2026-09-15_
 _ADR-023/024 Reflection: AGENTS.md v3.3 → v3.4 (AUD-14) — §1 顶层定位改三角色实验室、§2 分层改三层模型 (L1-L3) + 执行载体、§3 目录树校准 (tool.go / docs/archive/odr / 21 工具 / migrations 不执行)、§11 表数口径改「内联 DDL 37 张（唯一执行路径）」、全文 ADR-022 引用收口到 ADR-023/024 — 2026-09-21_
 _Phase 4 Update: AI-Native Evolution architecture documented in ADR-015, archive/tasks-phase-2.md (IMPLEMENTATION_PLAN.md 已归档至 archive/)_
+_ARCHITECTURE.md 建文件纳入（2026-10-12）：docs/ARCHITECTURE.md 建成（§11 导航与 Rule 1 加表/端口触发器的落地目标，原为死链）；§11 表数口径改为「唯一可靠数字 = 当下 grep 结果」（37 张快照退役，历史数字仅作警示）；docs/README.md 文档入口同步登记。_

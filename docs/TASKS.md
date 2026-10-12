@@ -197,7 +197,9 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 > **依赖主线**：阶段 1 = {K8, K9} 并行 → K10；K11 / K12 独立可并行（K12 是阶段 3 前置）。阶段 2 = K13 → K14 → K15（前置 K8–K10）。阶段 3 = K16（前置 K15 + **NT 决策门通过**，见 §五）。K17 独立（K4 遗留收口，不在 NT 阶段链上，任意时点可做）。
 > **总原则**：阶段 1 全程「默认行为逐字节不变」——不带新字段的存量请求走 Go 内核，数值、语义、API 形状零变化（回归腿钉住）。
 
-### K8 · SignalSpec：`SignalProvider` 接口化 + K7 信号通路收口（阶段 1）
+### K8 · SignalSpec：`SignalProvider` 接口化 + K7 信号通路收口（阶段 1）✅ 完成（2026-10-12，`3c09ed4`）
+
+> **收口记录 ✅（2026-10-12）**：六条全落地，破坏腿均实测红后还原。① `SignalProvider` 契约（`Signals(ctx, scope, asOf) ([]Signal, error)`）+ `LocalSignalProvider` 本地实现：批式 `GenerateSignals` 与流式 `OnBar`/`Signals()` 双路径统一收口到接口，默认行为逐字节不变（错误消息/错误码/op 名原样保留，既有双模式等价、信号对账、注入 e2e 测试全过）。② 契约级防前视：`RejectFutureSignals` fail-loud（`DayOf` 日粒度），「未来信号物理不可见」从事后校验升格为接口语义；`dayOf` 导出为 `DayOf`，「未来」判定唯一口径。③ 引擎改经接口取信号（`getSignalsFromLocalStrategy` 退役，逻辑移入 `LocalSignalProvider`；新增 `EngineOption.WithSignalProvider`）。④ K7 遗留①：`quant.external_signals` DDL 并入 `migrate()`（Migration 048，DDL 文本 `storage.ExternalSignalsSchemaDDL`）+ `docs/migrations/048` 镜像 + 一致性测试守 `migrate() ≡ EnsureSchema`。⑤ K7 遗留②：`POST /api/signals` HTTP 写入门（批量 `ExternalSignal`；逐条 `ValidateExternalSignal` + 未来 as_of 拒绝、全批校验先于落库；`content_hash` 幂等去重；RBAC `requireTrader`）+ openapi.yaml 同步。⑥ e2e 正证据：`POST /api/signals` 写入 → `SignalStrategy` 消费 → 引擎下单闭环一条通过。破坏腿：`LocalSignalProvider` 人为返回未来信号 → 契约拒绝测试红；删接口方法 → 编译期合规测试红；migrate DDL 与 `SignalSchemaDDL` 不一致 → 一致性测试红（均已还原）。远程 `SignalProvider` 实现（HTTP/Redis 消费）按非目标留阶段 2。
 
 - **① 目标**：引擎取信号改为经 `SignalProvider` 接口（本地实现行为逐字节不变），且外部信号通路（信号表进 `migrate()` + HTTP 写入入口）收口，成为可插拔信号供给的默认远程形态。
 - **② 上下文**：设计文档 §2.2（接口草案）；K7 交付物 `pkg/strategy/external_signal.go`（`ExternalSignal`/`SignalContentHash`/`ValidateExternalSignal`/`SignalStore`）、`pkg/strategy/signal_store.go`（`PGSignalStore` + `EnsureSchema`）、`pkg/strategy/signal_strategy.go`（`SignalStrategy`，as_of 消费 + `rejectFutureSignals`）；引擎调用点 `pkg/backtest/engine.go`（`getSignalsFromLocalStrategy`，批式 `GenerateSignals` 与流式 `OnBar`/`Signals()` 双路径）；K7「⚠️ 已知边界」①②。ADR-031 D1/D2。
