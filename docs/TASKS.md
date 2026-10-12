@@ -85,7 +85,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 > **正证据**：TWAP `1000/7 → [143×6,142]` 且 `Σ=1000`、`SubmitAt` 相邻间隔全等；VWAP `profile[1,2,3,4] → 占比 0.1/0.2/0.3/0.4`；**大单滑点 0.0632 > 小单 0.0200（10:1 单量，比值 3.1623 = √10）**。
 > **审查加固（验收方做）**：子单 ID 幂等用例原本会被「时间戳派生 ID」骗过 —— Windows `time.Now()` 毫秒级粒度下背靠背两次调用取同一值 ⇒ **假绿（实测 PASS）**；已在 TWAP/VWAP 幂等用例中插 20ms 延迟，重放同一破坏**变红**（灵敏度平台无关）。
 > **待裁决（只登记）**：是否把 `"impact"` 设为**默认**滑点模型（会改变所有回测数值）——⚠️ 2026-10-12 并入 §五「NT 决策门」一并裁决（与内核切换三选一同时拍板，避免两轮全量重跑）。
-> **未做（后续）**：把 exec-algo 接进下单主路径（引擎/实盘按算法拆单 → **归 K17**，2026-10-12 修正：原写「归 K5」但 K5 切片未含、代码核实 `pkg/execalgo` 零生产引用，补 K17 认领）；真实券商算法单（D1 不做）；VWAP 的成交量预测（现只用给定 profile，沿用 K4 登记不做）。
+> **未做（后续）**：~~把 exec-algo 接进下单主路径~~（**✅ 已由 K17 落地，2026-10-12，`6205c64`**——原写「归 K5」但 K5 切片未含、代码核实 `pkg/execalgo` 零生产引用，补 K17 认领）；真实券商算法单（D1 不做）；VWAP 的成交量预测（现只用给定 profile，沿用 K4 登记不做）。
 
 - **① 目标**：exec-algo 模块落地 TWAP/VWAP 执行算法（与策略同构 trait），撮合引擎加市场冲击模型（D5：模拟真实大单）。
 - **② 上下文**：蓝图 UC4（执行算法拆单）；nautilus `crates/trading/src/algorithm/`（TWAP 同构）；K1 的 exec-engine 挂点。
@@ -314,7 +314,11 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：CI 全绿含对齐回归腿；部署文档按文档起侧车 + 跑通一条 `kernel=nautilus` 回测；监控面板/告警演示（人为停侧车 → failed 显式、零回退；人为注入对账差异 → 告警触发点名）。
 - **⑥ 边界**：生产化收尾，一个 commit。
 
-### K17 · exec-algo 接进下单主路径（独立，K4 遗留收口，2026-10-12 补登记）
+### K17 · exec-algo 接进下单主路径（独立，K4 遗留收口）✅ 完成（2026-10-12）
+
+> **收口记录 ✅（2026-10-12，`6205c64`）**：`pkg/execalgo`（TWAP/VWAP，此前全仓零生产引用）接进两条下单主路径，11 文件 +1851/−4，一个 atomic commit。落点：`pkg/execalgo/dispatch.go`（多父单派发器 Dispatcher：Attach/OnBar/OnFill/Unfinished + `ResolveExecWindow`）+ `pkg/backtest/exec_algo.go` + `pkg/live/paper_exec_algo.go`；契约侧 `domain.Order/Signal`、`strategy.Signal` 增可选 `exec_algo`/`exec_slices`/`exec_profile`（omitempty，零值=整单直下）。关键裁决：父单号 `EA-日期-symbol-方向` 纯函数（禁时间戳）；窗口 = n 个自然日、步长恰 1 日；会话结束未报完子单**显式裁决=撤销**（强撮=以最后 bar 虚构成交）两路径一致；超额 fail-loud 在 Dispatcher 层补（算法 planState 只钳制）；`ExecAlgorithm`/`LiveTrader` 冻结签名未动。**正证据**：回测 e2e TWAP 7 片 → 撮合层 7 笔子单、Σ=10000=同策略整单量、7 个不同交易日、总冲击 189.1 vs 整单 500.0（**占比 0.3783 ≈ 1/√7**，D5 正证据）；paper e2e 同构（占比 0.3783）；VWAP 按 profile 加权；混合运行中无算法信号仍 1 笔整单。**破坏验证**：① 强制整单 → 「7 笔子单」红；② OnFill 不回填 → 会话结束 CANCELLED 警告红；③ 子单号时间戳派生 → K4 幂等测试红（均改坏→红→还原→绿）。默认路径既有全量测试零改动全过（execalgo/backtest/live/domain/strategy/portfolio）。
+>
+> **审查与遗留**：对照代码评审清单自审通过（API 真实性/并发/确定性/vet+gofmt）；🟠 发现「窗口内外部仓位变动（止损/强平/拆股）不取消活跃父单 → 拆单续买」已按六字段立为 **K18**（`7e5a963`）——K17 边界内不做，属拆单固有语义（业界解法 cancel-on-stop）。🟡 两处（OnBar 出错丢弃已取子单 / PaperSession 重复 Run 撞父单号）为不可达路径与误用场景，fail-loud 可见，挂技术债不修。本机无 gcc，`-race` 未跑（环境限制）。
 
 - **① 目标**：把 K4 交付的 `pkg/execalgo`（TWAP/VWAP/Schedule 拆单）接进下单主路径（回测撮合 + paper），使 D5「模拟真实大单」真正闭环；**未指定执行算法的订单行为逐字节不变**。
 - **② 上下文**：K4「未做」条（本文件 K4 区块，原写「归 K5」但 K5 切片未含，2026-10-12 代码核实 `pkg/execalgo` 全仓零生产引用，仅自身测试）；`pkg/execalgo/`（`ExecAlgorithm`：`OnBar`/`OnFill`/`Schedule()`/`DueChildOrders()` 取走即清空；TWAP `Σ子单量=父单`、子单号 `(父单号,片序号)` 纯函数幂等；VWAP profile 退化 → 等分 + `Degraded` 标记）；下单路径：`pkg/backtest` 撮合（`BacktestExecutionService`）与 `pkg/live`（`MockTrader`/`SimulatedBroker`/`OrderManager`、`PaperSession` 日循环）；K5 共享成本核 `pkg/execution.CostModel`（fixed/variable/impact/none）。
