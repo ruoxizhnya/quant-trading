@@ -243,6 +243,57 @@ func TestSupplyChainSchema_RealDBCatalogMatchesDDL(t *testing.T) {
 	}
 }
 
+// ─── 真库：批量写入的事务语义 ───────────────────────────────────────────
+
+// TestSupplyChainStore_SaveBatchAllOrNothing 证明 batchExec 的「一个事务，
+// 全落或全不落」不是注释空话。两个子用例覆盖**两种失败时点**：
+//
+//	编码期失败：level 超 int4 范围——pgx 客户端按目标列类型（OID 23）做
+//	  二进制范围检查，错误根本到不了 DB（实测错误文本含 "unable to encode"）；
+//	DB 执行期失败：obs_date 超 PG DATE 上限（5874897）——日期走 dateOnly()
+//	  字符串参数，pgx 按 text 编码放过，PG 服务端执行时报越界。这才是事务
+//	  回滚语义的真正考场。
+//
+// 两个时点都必须 0 落库：半批脏写比整批失败更难查。
+//
+// 来历：P2-2 自审发现①——原实现声明了该语义却无测试证明（未证明的声明
+// 等于没有，§8.5.3-2 同款 hazard）。破坏腿：把 batchExec 的 tx.SendBatch
+// 换成 pool.SendBatch（绕开事务）→ DB 执行期用例红（合法行 autocommit
+// 落库，count=1）；编码期用例仍绿（失败从不在 DB 发生，事务与否无关——
+// 这正是两个子用例都要留的原因）。
+func TestSupplyChainStore_SaveBatchAllOrNothing(t *testing.T) {
+	store := scNewStore(t)
+	source := scSource()
+	t.Cleanup(func() { scCleanup(t, store, source) })
+	ctx := context.Background()
+
+	t.Run("编码期失败同样零落库", func(t *testing.T) {
+		rows := []*domain.SWIndustryNode{
+			{Code: source + "-enc-ok", Level: 1, Name: "合法行", Source: source, AsOf: scAsOf(1)},
+			{Code: source + "-enc-bad", Level: math.MaxInt64, Name: "int4 越界行", Source: source, AsOf: scAsOf(1)},
+		}
+		err := store.SaveIndustryTreeBatch(ctx, rows)
+		require.Error(t, err, "int4 越界必须整批报错")
+		require.Contains(t, err.Error(), "sw_industry_tree", "错误应点名表名，便于定位")
+		require.Equal(t, 0, scCount(t, store, "quant.sw_industry_tree", source+"-enc%"),
+			"编码期失败也必须零落库")
+	})
+
+	t.Run("DB执行期失败触发事务回滚", func(t *testing.T) {
+		rows := []*domain.IndustryVitality{
+			{IndustryCode: source + "-ind", Metric: "gross_margin", ObsDate: scAsOf(0), Value: 13.42, Unit: "%", Source: source, AsOf: scAsOf(1)},
+			// 5875000 年 > PG DATE 上限 5874897：字符串参数穿过 pgx 编码检查，
+			// PG 服务端执行时报越界——失败点在事务内部。
+			{IndustryCode: source + "-ind", Metric: "gross_margin", ObsDate: time.Date(5875000, 1, 1, 0, 0, 0, 0, time.UTC), Value: 1, Unit: "%", Source: source, AsOf: scAsOf(1)},
+		}
+		err := store.SaveIndustryVitalityBatch(ctx, rows)
+		require.Error(t, err, "DB 端越界必须整批报错（不许部分成功）")
+		require.Contains(t, err.Error(), "industry_vitality", "错误应点名表名，便于定位")
+		require.Equal(t, 0, scCount(t, store, "quant.industry_vitality", source),
+			"事务回滚被破坏：合法行竟然落库了（半批脏写）")
+	})
+}
+
 // ─── 真库：Save/List roundtrip + 幂等（验收⑤） ─────────────────────────
 
 // TestSupplyChainStore_RoundtripFiltersAndIdempotency 一枪四表：Save 两遍

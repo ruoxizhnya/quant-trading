@@ -371,6 +371,12 @@ func TestImportIndustryVitalityCSV_RejectsBadRows(t *testing.T) {
 	}{
 		{"obs_date 格式错", "industry_code,metric,obs_date,value,source\n801080.SI,gm,2026/06/30,1.0,seed\n", "obs_date"},
 		{"value 非数值", "industry_code,metric,obs_date,value,source\n801080.SI,gm,2026-06-30,abc,seed\n", "value"},
+		// ParseFloat 对 "NaN"/"Inf"/"Infinity" 返回 err=nil（已实测）——CSV 层
+		// 必须显式拦，否则文案「不是有限数值」名不副实，且错误归属会漂到
+		// storage 层（审查发现②的复现用例）。
+		{"value 为 NaN", "industry_code,metric,obs_date,value,source\n801080.SI,gm,2026-06-30,NaN,seed\n", "value"},
+		{"value 为 Inf", "industry_code,metric,obs_date,value,source\n801080.SI,gm,2026-06-30,Inf,seed\n", "value"},
+		{"value 为 Infinity", "industry_code,metric,obs_date,value,source\n801080.SI,gm,2026-06-30,Infinity,seed\n", "value"},
 		{"source 为空", "industry_code,metric,obs_date,value,source\n801080.SI,gm,2026-06-30,1.0,\n", "source"},
 		{"industry_code 为空", "industry_code,metric,obs_date,value,source\n,gm,2026-06-30,1.0,seed\n", "industry_code"},
 		{"as_of 格式错", "industry_code,metric,obs_date,value,source,as_of\n801080.SI,gm,2026-06-30,1.0,seed,not-a-time\n", "as_of"},

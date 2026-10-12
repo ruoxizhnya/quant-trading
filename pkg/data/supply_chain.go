@@ -25,6 +25,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -477,6 +478,14 @@ func vitalityRowFromCSV(rec []string, col map[string]int, lineNo int, importedAt
 			f, err := strconv.ParseFloat(v, 64)
 			if err != nil {
 				return nil, apperrors.Wrap(fmt.Errorf("第 %d 行 value=%q: %v", lineNo, v, err),
+					apperrors.ErrCodeDataQuality, "seed CSV value 不是有限数值", "data.ImportIndustryVitalityCSV")
+			}
+			// ParseFloat 接受 "NaN"/"Inf"/"Infinity"（err=nil）——CSV 层显式拦
+			// 非有限值，让文案即真相。否则 NaN 会穿过本层到 storage 才被拦，
+			// 错误归属误导排障（审查发现：P2-2 自审问题②）。与 storage 的
+			// IsNaN/IsInf 校验同口径——纵深防御，两边都要有。
+			if math.IsNaN(f) || math.IsInf(f, 0) {
+				return nil, apperrors.Wrap(fmt.Errorf("第 %d 行 value=%q（非有限值）", lineNo, v),
 					apperrors.ErrCodeDataQuality, "seed CSV value 不是有限数值", "data.ImportIndustryVitalityCSV")
 			}
 			row.Value = f
