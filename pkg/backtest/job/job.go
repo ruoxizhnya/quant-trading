@@ -349,8 +349,29 @@ func (s *JobService) StartJob(parentCtx context.Context, jobID string) {
 		if len(record.Params) > 0 {
 			_ = json.Unmarshal(record.Params, &jobParams)
 		}
-		kernel, _ := jobParams["kernel"].(string)
-		engineParams, _ := jobParams["engine_params"].(map[string]any)
+		// fail-closed（审查修复 2026-10-12）：保留键存在但**类型不对**
+		// （params 侧门可达 —— 调用方在 params 里塞 "kernel"/"engine_params"）
+		// 不得静默降级：kernel 非字符串会被当成空值跑默认 go（变相回退，
+		// FR-1.3 违例）；engine_params 非对象会被静默丢弃（「以为参数生效了」
+		// 的 K9 反模式）。两种都判畸形 RunSpec → failed + error_msg 点名。
+		kernel := ""
+		if v, ok := jobParams["kernel"]; ok {
+			ks, isStr := v.(string)
+			if !isStr {
+				s.failMalformedReservedKey(jobCtx, jobID, "kernel", v)
+				return
+			}
+			kernel = ks
+		}
+		var engineParams map[string]any
+		if v, ok := jobParams["engine_params"]; ok {
+			m, isMap := v.(map[string]any)
+			if !isMap {
+				s.failMalformedReservedKey(jobCtx, jobID, "engine_params", v)
+				return
+			}
+			engineParams = m
+		}
 
 		backtestReq := contracts.BacktestRequest{
 			Strategy:     record.StrategyID,
@@ -699,6 +720,21 @@ func recordToJob(r *JobRecord) *Job {
 		StartedAt:   r.StartedAt,
 		CompletedAt: r.CompletedAt,
 	}
+}
+
+// failMalformedReservedKey 把保留键类型畸形的作业判为 failed
+// （fail-closed：不猜默认内核、不丢参数），并清理取消注册表。
+func (s *JobService) failMalformedReservedKey(ctx context.Context, jobID, key string, val any) {
+	msg := fmt.Sprintf("kernel routing failed: reserved params key %q has unexpected type %T — malformed RunSpec is rejected, not coerced (fail-closed)", key, val)
+	s.logger.Error().
+		Str("job_id", jobID).
+		Str("key", key).
+		Str("value_type", fmt.Sprintf("%T", val)).
+		Msg("Malformed reserved params key — marking job as failed (no coercion, no fallback)")
+	if dbErr := s.store.UpdateJobFailed(ctx, jobID, msg); dbErr != nil {
+		s.logger.Error().Err(dbErr).Str("job_id", jobID).Msg("Failed to mark malformed-key job as failed")
+	}
+	s.cancelFuncs.Delete(jobID)
 }
 
 // derefIntOr 解引用 int 指针（nil 用 fallback 表示）—— OBS-01：票池规模是 *int，

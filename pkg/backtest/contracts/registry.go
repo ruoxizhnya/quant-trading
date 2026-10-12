@@ -40,6 +40,9 @@ var ErrKernelNotRegistered = errors.New("kernel not registered")
 // 并发模型：Register 只在装配期（单线程）调用；Resolve 可被 HTTP
 // handler 与 job worker 并发调用 —— 内部 RWMutex 保证安全。零值可用
 // （空注册表，Resolve 一律 fail-closed）。
+//
+// 内核名区分大小写、精确匹配（"Nautilus" ≠ "nautilus"）—— K13 注册
+// NT runner 时沿用小写惯例（对齐 DefaultKernel）。
 type EngineRegistry struct {
 	mu      sync.RWMutex
 	runners map[string]EngineRunner
@@ -69,16 +72,21 @@ func (r *EngineRegistry) Register(name string, runner EngineRunner) {
 		panic(fmt.Sprintf("contracts: EngineRegistry.Register(%q): runner must not be nil", name))
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.runners == nil {
 		r.runners = make(map[string]EngineRunner)
 	}
 	if _, dup := r.runners[name]; dup {
+		// 先解锁再 panic（审查修复 2026-10-12）：panic 若被 recover
+		//（测试的 assert.Panics、将来的 Must 包装器），defer Unlock
+		// 不会执行，注册表会带着永久写锁变成死锁陷阱。Must 语义的
+		// 正确形状是「panic 后残留状态仍可用」，这里把锁归位。
+		r.mu.Unlock()
 		panic(fmt.Sprintf(
 			"contracts: EngineRegistry.Register(%q): duplicate kernel registration — registration is assembly-time only (no hot-plug)",
 			name))
 	}
 	r.runners[name] = runner
+	r.mu.Unlock()
 }
 
 // Resolve 按内核名取执行器。未注册（含空名）→ 错误，且**绝不回退**。

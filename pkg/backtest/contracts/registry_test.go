@@ -15,6 +15,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/stretchr/testify/assert"
@@ -151,6 +152,31 @@ func TestEngineRegistry_ConcurrentResolve(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// 审查修复回归腿（2026-10-12）：重复注册的 panic 被 recover 后
+// （assert.Panics 正是这么做的），注册表必须仍然可用 —— 不得带着
+// 永久写锁变成死锁陷阱。
+func TestEngineRegistry_UsableAfterRecoveredDuplicatePanic(t *testing.T) {
+	reg := contracts.NewEngineRegistry()
+	reg.Register(contracts.DefaultKernel, &registryFakeRunner{marker: "go"})
+	assert.Panics(t, func() {
+		reg.Register(contracts.DefaultKernel, &registryFakeRunner{marker: "dup"})
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runner, err := reg.Resolve(contracts.DefaultKernel)
+		if err != nil || runner == nil {
+			t.Errorf("recover 后注册表不可用: err=%v runner=%v", err, runner)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Resolve 死锁 —— 重复注册 panic 的 recover 残留了写锁")
+	}
 }
 
 // 编译期即保证的形状断言（文档化用）：Registry 不依赖任何具体引擎类型。

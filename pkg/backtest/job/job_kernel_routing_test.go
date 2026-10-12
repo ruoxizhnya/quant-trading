@@ -165,6 +165,41 @@ func TestJobService_NoKernelUsesDefaultGoRunner(t *testing.T) {
 	assert.False(t, hasKernel, "不带 kernel 的存量 job params 不得多出键（逐字节不变）")
 }
 
+// 审查修复回归腿（2026-10-12）：params 侧门的畸形保留键必须 fail-closed
+// —— kernel 非字符串不得静默跑默认 go（变相回退，FR-1.3 违例），
+// engine_params 非对象不得静默丢弃（「以为参数生效了」的 K9 反模式）。
+func TestJobService_MalformedReservedKeysFailClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		params  map[string]any
+		wantKey string
+	}{
+		{"kernel not a string", map[string]any{"kernel": 123}, "kernel"},
+		{"engine_params not an object", map[string]any{"engine_params": "nt-opts"}, "engine_params"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, store, goRunner, fakeRunner := newRoutingJobService(t)
+			job, err := svc.CreateJob(context.Background(), CreateJobRequest{
+				StrategyID: "momentum",
+				Universe:   "600000.SH",
+				StartDate:  "2024-01-02",
+				EndDate:    "2024-02-02",
+				Params:     tc.params,
+			})
+			require.NoError(t, err)
+
+			got := waitJobSettled(t, store, job.ID)
+			assert.Equal(t, "failed", got["status"], "畸形保留键必须 fail-closed")
+			errMsg, _ := got["error_msg"].(string)
+			assert.Contains(t, errMsg, tc.wantKey, "error_msg 必须点名问题键")
+			assert.Contains(t, errMsg, "unexpected type", "error_msg 必须说明是类型畸形拒绝")
+			assert.Equal(t, 0, goRunner.callCount(), "不得静默跑 go")
+			assert.Equal(t, 0, fakeRunner.callCount(), "不得静默跑任何 runner")
+			assert.Empty(t, got["result"], "库内不得留下产物")
+		})
+	}
+}
+
 // 支撑腿：注册表是硬依赖 —— nil registry 构造即 panic（装配错误
 // fail-fast，而不是所有 job 执行期才崩）。
 func TestJobService_NilRegistryPanics(t *testing.T) {
