@@ -480,12 +480,12 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 
 	result, err := e.runBacktestInternal(ctx, state)
 	if err != nil {
-		state.SetStatus("failed")
+		state.SetStatus(StatusFailed)
 		state.SetError(err)
 		state.Freeze()
 		return &BacktestResponse{
 			ID:        backtestID,
-			Status:    "failed",
+			Status:    StatusFailed,
 			Error:     err.Error(),
 			StartedAt: state.StartedAt.Format(time.RFC3339),
 		}, err
@@ -500,9 +500,9 @@ func (e *Engine) RunBacktest(ctx context.Context, req BacktestRequest) (*Backtes
 	// 有效 → "completed"（正常路径行为一字不变）。读路径
 	// （GetBacktestResult / 两个 GET 端点）据此才能不再把同一份结果说成
 	// completed —— 那正是 OBS-01 读路径的另一半。
-	stateStatus := "completed"
+	stateStatus := StatusCompleted
 	if len(result.InvalidReasons) > 0 {
-		stateStatus = "invalid"
+		stateStatus = StatusInvalid
 	}
 	state.SetStatus(stateStatus)
 	state.Freeze()
@@ -602,7 +602,7 @@ func (e *Engine) newBacktestState(backtestID string, req BacktestRequest, stockP
 func (e *Engine) buildBacktestResponse(backtestID string, req BacktestRequest, state *BacktestState, result *domain.BacktestResult, initialCapital float64) *BacktestResponse {
 	resp := &BacktestResponse{
 		ID:              backtestID,
-		Status:          "completed",
+		Status:          StatusCompleted,
 		Strategy:        req.Strategy,
 		StrategyGitHash: lookupStrategyGitHash(req.Strategy),
 		StartDate:       req.StartDate,
@@ -632,11 +632,64 @@ func (e *Engine) buildBacktestResponse(backtestID string, req BacktestRequest, s
 	// 原因 Code。调用方（报告层 / 自动化层 / API）据此走失败或无效路径，
 	// 而不是把它当成一次成功观测。Error 保持只给真实错误（不装无效）。
 	if len(result.InvalidReasons) > 0 {
-		resp.Status = "invalid"
+		resp.Status = StatusInvalid
 		resp.InvalidReasons = result.InvalidReasons
 	}
 
 	return resp
+}
+
+// ResponseFromState reconstructs the canonical BacktestResponse（ResultSpec）
+// for a backtest whose state is still resident in the in-memory StateStore.
+//
+// K9 —— 为什么这是**唯一一处** state→response 透传点：
+// GET /:id/report、lookupBacktestResponse（GET /:id/export/:format）与多策略
+// 对比（reporting.NewCompareResolver）原先各自内联一份逐字段重建，且都把
+// 闸门写成 `status == "completed"`、把 Status 硬编码成 "completed"。写路径
+// （buildBacktestResponse）学会说 "invalid" 之后，读路径仍会把同一份结果说成
+// completed（或把无效运行挡在门外、UI 读不到原因）。上提到 Engine 上是
+// 因为 reporting 包 import 不了 cmd/analysis —— 收敛后状态与 InvalidReasons
+// 的透传只有一处实现，读路径不可能再各自漂移。
+//
+// 返回 (resp, true) 表示内存里有可读结果（"completed" 或 "invalid"）；
+// (zero, false) 表示内存里没有 / 状态不可读，调用方应退回 DB job 路径。
+// "invalid" 必须放行 —— 否则「为什么无效」对 UI 不可见（与
+// GetBacktestResult 的闸门是同一裁决）。
+func (e *Engine) ResponseFromState(backtestID string) (BacktestResponse, bool) {
+	status, err := e.GetBacktestStatus(backtestID)
+	if err != nil || (status != StatusCompleted && status != StatusInvalid) {
+		return BacktestResponse{}, false
+	}
+	result, err := e.GetBacktestResult(backtestID)
+	if err != nil || result == nil {
+		return BacktestResponse{}, false
+	}
+	params, _ := e.GetBacktestParams(backtestID)
+	return BacktestResponse{
+		ID:              backtestID,
+		Status:          status,
+		Strategy:        params.StrategyName,
+		StartDate:       result.StartDate.Format("2006-01-02"),
+		EndDate:         result.EndDate.Format("2006-01-02"),
+		TotalReturn:     result.TotalReturn,
+		AnnualReturn:    result.AnnualReturn,
+		SharpeRatio:     result.SharpeRatio,
+		SortinoRatio:    result.SortinoRatio,
+		MaxDrawdown:     result.MaxDrawdown,
+		MaxDrawdownDate: result.MaxDrawdownDate.Format("2006-01-02"),
+		WinRate:         result.WinRate,
+		TotalTrades:     result.TotalTrades,
+		WinTrades:       result.WinTrades,
+		LoseTrades:      result.LoseTrades,
+		AvgHoldingDays:  result.AvgHoldingDays,
+		CalmarRatio:     result.CalmarRatio,
+		StockPool:       params.StockPool,
+		InitialCapital:  params.InitialCapital,
+		PortfolioValues: result.PortfolioValues,
+		Trades:          result.Trades,
+		InvalidReasons:  result.InvalidReasons,
+		UniverseMaxSize: result.UniverseMaxSize,
+	}, true
 }
 
 // lookupStrategyGitHash returns the short git hash of the currently-loaded

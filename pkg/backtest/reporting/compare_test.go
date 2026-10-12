@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 )
 
 func sampleResponse(id string, strategy string, totalReturn float64) backtest.BacktestResponse {
@@ -254,5 +256,121 @@ func TestCompareReports_EmptyEntriesYieldsEmptyBest(t *testing.T) {
 	}
 	if report.Best.TotalReturn != "" {
 		t.Errorf("Best.TotalReturn should be empty when no entries resolved, got %q", report.Best.TotalReturn)
+	}
+}
+
+// --- K9：compare 含 invalid 的混合集（OBS-01 / ResultSpec status 三值） ---
+
+// newMemoryCompareEngine 构造带 NoopStateStore 的内存引擎（不触库、不跑回测），
+// 走 NewCompareResolver 的真实 engine 路径 —— 破坏腿必须打在闸门上：
+// 把 Engine.ResponseFromState 的闸门改回只认 "completed"，下面的 reasons
+// 断言立刻红（invalid 会被当「解析不到」丢进 Missing，Invalid 列表变空）。
+func newMemoryCompareEngine(t *testing.T) *backtest.Engine {
+	t.Helper()
+	eng, err := backtest.NewEngineWithOptions(
+		backtest.Config{},
+		marketdata.NewInMemoryProvider(),
+		backtest.WithStateStore(backtest.NewNoopStateStore()),
+		backtest.WithLogger(zerolog.Nop()),
+	)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	return eng
+}
+
+// putCompareState 把一个终态直接塞进引擎的 state store。
+func putCompareState(eng *backtest.Engine, id, status string, totalReturn float64, reasons []string) {
+	day := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
+	eng.StateStore().Put(id, &backtest.BacktestState{
+		ID:     id,
+		Status: status,
+		Params: domain.BacktestParams{StrategyName: "momentum-" + id, StartDate: day, EndDate: day},
+		Result: &domain.BacktestResult{
+			StartDate:      day,
+			EndDate:        day,
+			TotalReturn:    totalReturn,
+			InvalidReasons: reasons,
+		},
+	})
+}
+
+// 核心腿：completed ×2 + invalid ×1 的混合集 ——
+//   1. invalid 不混入成功集（Entries）；
+//   2. compare 能呈现 reasons（Invalid 列表带上 InvalidReasons）；
+//   3. Best* 只在成功集里选（invalid 的指标再高也不当冠军）；
+//   4. Resolved 计数不把 invalid 蒸发掉。
+func TestCompareReports_MixedInvalidSet(t *testing.T) {
+	eng := newMemoryCompareEngine(t)
+	reasons := []string{"empty_universe", "zero_trades"}
+	putCompareState(eng, "bt-ok-1", "completed", 0.10, nil)
+	putCompareState(eng, "bt-ok-2", "completed", 0.20, nil)
+	// invalid 的 TotalReturn 故意全场最大 —— 只要它混进成功集，Best 断言就红。
+	putCompareState(eng, "bt-bad", "invalid", 9.99, reasons)
+
+	resolver := NewCompareResolver(eng, nil, zerolog.Nop())
+	report, err := CompareReports(context.Background(), []string{"bt-ok-1", "bt-bad", "bt-ok-2"}, resolver)
+	if err != nil {
+		t.Fatalf("mixed set should not error: %v", err)
+	}
+
+	if report.Resolved != 3 || len(report.Reports) != 3 {
+		t.Errorf("invalid 不该在解析计数里蒸发: Resolved=%d Reports=%d, want 3/3", report.Resolved, len(report.Reports))
+	}
+	if len(report.Missing) != 0 {
+		t.Errorf("invalid 不是 missing: %+v", report.Missing)
+	}
+
+	// 1. 不混入成功集。
+	if len(report.Entries) != 2 {
+		t.Fatalf("Entries = %d, want 2（invalid 不混入成功集）", len(report.Entries))
+	}
+	for _, e := range report.Entries {
+		if e.ID == "bt-bad" {
+			t.Errorf("invalid 运行混入了成功集: %+v", e)
+		}
+	}
+
+	// 2. compare 能呈现 reasons —— 破坏腿判据：闸门改回只认 completed ⇒ 这里红。
+	if len(report.Invalid) != 1 {
+		t.Fatalf("Invalid = %+v, want 1 条（compare 必须呈现 invalid 运行）", report.Invalid)
+	}
+	inv := report.Invalid[0]
+	if inv.ID != "bt-bad" || inv.Strategy != "momentum-bt-bad" {
+		t.Errorf("Invalid 条目身份错: %+v", inv)
+	}
+	if len(inv.InvalidReasons) != 2 || inv.InvalidReasons[0] != "empty_universe" || inv.InvalidReasons[1] != "zero_trades" {
+		t.Errorf("InvalidReasons = %v, want %v（reasons 必须透传到 compare）", inv.InvalidReasons, reasons)
+	}
+
+	// 3. Best 只在成功集里选。
+	if report.Best.TotalReturn != "bt-ok-2" {
+		t.Errorf("Best.TotalReturn = %q, want %q（invalid 的 9.99 不得夺冠）", report.Best.TotalReturn, "bt-ok-2")
+	}
+}
+
+// failed（没跑完）fail-closed 归 Missing 并带上真实错误 —— 不进成功集也不装 invalid。
+func TestCompareReports_FailedRunGoesToMissing(t *testing.T) {
+	resolver := func(_ context.Context, id string) (backtest.BacktestResponse, error) {
+		if id == "bt-fail" {
+			return backtest.BacktestResponse{ID: id, Status: backtest.StatusFailed, Error: "provider down"}, nil
+		}
+		return sampleResponse(id, "x", 0.1), nil
+	}
+	report, err := CompareReports(context.Background(), []string{"bt-ok", "bt-fail"}, resolver)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(report.Entries) != 1 || report.Entries[0].ID != "bt-ok" {
+		t.Errorf("Entries = %+v, want 只含 bt-ok", report.Entries)
+	}
+	if len(report.Invalid) != 0 {
+		t.Errorf("failed 不是 invalid: %+v", report.Invalid)
+	}
+	if len(report.Missing) != 1 || report.Missing[0].ID != "bt-fail" {
+		t.Fatalf("Missing = %+v, want bt-fail", report.Missing)
+	}
+	if !strings.Contains(report.Missing[0].Reason, "provider down") {
+		t.Errorf("Missing reason 应带上真实错误, got %q", report.Missing[0].Reason)
 	}
 }

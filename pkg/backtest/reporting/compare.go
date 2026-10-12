@@ -23,17 +23,30 @@ import (
 // comparison" view instead of an all-or-nothing error.
 //
 // Output layout:
-//   - Reports:  every successfully-resolved backtest.BacktestResponse, in the
-//               same order as the input IDs (filtering out misses).
-//   - Missing:  IDs that could not be resolved (with reason).
-//   - Summary:  one row per report with the metrics the comparison
-//               table actually renders (TotalReturn, Sharpe,
+//   - Reports:  every successfully-resolved backtest.BacktestResponse (both
+//               `completed` and `invalid`), in the same order as the input
+//               IDs (filtering out misses).
+//   - Entries:  the SUCCESS SET — only `completed` runs, flattened for the
+//               comparison table. `invalid` runs never land here (OBS-01:
+//               无效运行不得混入成功集，否则 Best* 会把无效观测评成冠军).
+//   - Invalid:  runs that finished but were ruled invalid (ResultSpec
+//               status 三值之 `invalid`) — carries the invalid_reasons so
+//               the UI can show WHY. This is the K9 fix: compare used to
+//               hardcode Status:"completed" and lose the reasons entirely.
+//   - Missing:  IDs that could not be resolved (with reason), plus any
+//               response whose status is outside the frozen tri-state
+//               (fail-closed: 说不清的不进成功集).
+//   - Summary:  one row per completed report with the metrics the
+//               comparison table actually renders (TotalReturn, Sharpe,
 //               MaxDrawdown, WinRate, ...). Pre-flattened so the
 //               frontend doesn't have to re-walk the object graph.
-//   - Best*:    per-metric winners — the "best Sharpe", "best
-//               Calmar", "lowest drawdown" rows in the comparison
+//   - Best*:    per-metric winners over Entries only — the "best Sharpe",
+//               "best Calmar", "lowest drawdown" rows in the comparison
 //               table. Empty string when the metric is missing from
-//               every report.
+//               every completed report.
+//
+// status / invalid_reasons 的读取与 API 读路径同源：engine 路径走
+// Engine.ResponseFromState（唯一 state→response 透传点），不再内联重建。
 //
 // CompareReports is intentionally read-only — it never touches
 // state stores or the DB beyond JobStore.GetBacktestJob.
@@ -80,8 +93,17 @@ type CompareReport struct {
 	Resolved    int                         `json:"resolved"`
 	Reports     []backtest.BacktestResponse `json:"reports"`
 	Entries     []CompareEntry              `json:"entries"`
+	Invalid     []CompareInvalidEntry       `json:"invalid"`
 	Missing     []CompareMissingEntry       `json:"missing"`
 	Best        CompareBest                 `json:"best"`
+}
+
+// CompareInvalidEntry 是「跑完但无效」（ResultSpec status=invalid，OBS-01）
+// 的运行在对比视图里的呈现 —— 不进成功集（Entries），但原因必须可见。
+type CompareInvalidEntry struct {
+	ID             string   `json:"id"`
+	Strategy       string   `json:"strategy"`
+	InvalidReasons []string `json:"invalid_reasons"`
 }
 
 // CompareMissingEntry explains why a single ID could not be resolved.
@@ -120,35 +142,14 @@ func NewCompareResolver(engine *backtest.Engine, jobService *backtest.JobService
 			return backtest.BacktestResponse{}, fmt.Errorf("no resolver configured")
 		}
 		if engine != nil {
-			status, err := engine.GetBacktestStatus(id)
-			if err == nil && status == "completed" {
-				result, err := engine.GetBacktestResult(id)
-				if err == nil && result != nil {
-					params, _ := engine.GetBacktestParams(id)
-					return backtest.BacktestResponse{
-						ID:              id,
-						Status:          "completed",
-						Strategy:        params.StrategyName,
-						StartDate:       result.StartDate.Format("2006-01-02"),
-						EndDate:         result.EndDate.Format("2006-01-02"),
-						TotalReturn:     result.TotalReturn,
-						AnnualReturn:    result.AnnualReturn,
-						SharpeRatio:     result.SharpeRatio,
-						SortinoRatio:    result.SortinoRatio,
-						MaxDrawdown:     result.MaxDrawdown,
-						MaxDrawdownDate: result.MaxDrawdownDate.Format("2006-01-02"),
-						WinRate:         result.WinRate,
-						TotalTrades:     result.TotalTrades,
-						WinTrades:       result.WinTrades,
-						LoseTrades:      result.LoseTrades,
-						AvgHoldingDays:  result.AvgHoldingDays,
-						CalmarRatio:     result.CalmarRatio,
-						StockPool:       params.StockPool,
-						InitialCapital:  params.InitialCapital,
-						PortfolioValues: result.PortfolioValues,
-						Trades:          result.Trades,
-					}, nil
-				}
+			// K9 同源口径：status / invalid_reasons 走 Engine.ResponseFromState
+			// —— 与 API 读路径（GET /:id/report 等）共用同一个 state→response
+			// 透传点。这里曾经内联重建并把 Status 硬编码成 "completed"、闸门
+			// 只认 "completed"（行 130 的第三处硬编码）—— 那正是 compare 读
+			// 不到 invalid 原因的病根。"invalid" 由 ResponseFromState 放行，
+			// 分流（不混入成功集）在 CompareReports 统一做。
+			if resp, ok := engine.ResponseFromState(id); ok {
+				return resp, nil
 			}
 		}
 		if jobService != nil {
@@ -207,6 +208,7 @@ func CompareReports(ctx context.Context, ids []string, resolve CompareResultReso
 		Requested:   len(deduped),
 		Reports:     make([]backtest.BacktestResponse, 0, len(deduped)),
 		Entries:     make([]CompareEntry, 0, len(deduped)),
+		Invalid:     []CompareInvalidEntry{},
 		Missing:     []CompareMissingEntry{},
 	}
 
@@ -222,8 +224,28 @@ func CompareReports(ctx context.Context, ids []string, resolve CompareResultReso
 			})
 			continue
 		}
-		report.Reports = append(report.Reports, resp)
-		report.Entries = append(report.Entries, flattenEntry(resp))
+		// status 三值分流（ResultSpec 冻结）：只有 completed 进成功集；
+		// invalid 进 Invalid 并带 reasons 呈现（不混入成功集，否则 Best*
+		// 会把无效观测评成冠军）；三值之外（含 failed）fail-closed 归
+		// Missing —— 说不清的绝不进 Entries。
+		switch resp.Status {
+		case backtest.StatusCompleted:
+			report.Reports = append(report.Reports, resp)
+			report.Entries = append(report.Entries, flattenEntry(resp))
+		case backtest.StatusInvalid:
+			report.Reports = append(report.Reports, resp)
+			report.Invalid = append(report.Invalid, CompareInvalidEntry{
+				ID:             resp.ID,
+				Strategy:       resp.Strategy,
+				InvalidReasons: resp.InvalidReasons,
+			})
+		default:
+			reason := fmt.Sprintf("unexpected status %q", resp.Status)
+			if resp.Error != "" {
+				reason += ": " + resp.Error
+			}
+			report.Missing = append(report.Missing, CompareMissingEntry{ID: id, Reason: reason})
+		}
 	}
 
 	// Second pass: pick per-metric winners. We work off Entries
@@ -238,7 +260,9 @@ func CompareReports(ctx context.Context, ids []string, resolve CompareResultReso
 	sort.SliceStable(report.Entries, func(i, j int) bool {
 		return report.Entries[i].TotalReturn > report.Entries[j].TotalReturn
 	})
-	report.Resolved = len(report.Entries)
+	// Resolved = 成功解析的个数（completed + invalid）。Entries 只是成功集，
+	// 拿它当 Resolved 会把「跑完但无效」的运行在计数里蒸发掉。
+	report.Resolved = len(report.Reports)
 
 	return report, nil
 }

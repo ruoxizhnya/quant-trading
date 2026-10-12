@@ -151,6 +151,10 @@ type PriceLimitConfig struct {
 }
 
 // BacktestRequest represents the API request to start a backtest.
+//
+// K9（RunSpec 冻结）：新增 Kernel / EngineParams 两个内核路由字段。
+// 两者都带 omitempty —— 不带新字段的存量请求序列化结果逐字节不变
+//（钉在 TestRunSpec_LegacyRequestSerializationUnchanged）。
 type BacktestRequest struct {
 	Strategy       string   `json:"strategy" binding:"required"`
 	StockPool      []string `json:"stock_pool"`
@@ -159,6 +163,20 @@ type BacktestRequest struct {
 	EndDate        string   `json:"end_date" binding:"required"`
 	InitialCapital float64  `json:"initial_capital"`
 	RiskFreeRate   float64  `json:"risk_free_rate"`
+
+	// Kernel 是内核路由键（如 "go" / "nautilus"，FR-1.1）。空值 = 默认
+	// DefaultKernel（"go"），语义由 EffectiveKernel() 给出 —— 默认值**不**回填
+	// 进字段本身，否则存量请求的序列化会多出 `"kernel":"go"`、破坏不变。
+	//
+	// K9 只冻结字段与默认语义并**透传**（验收「kernel 透传」）；按 kernel
+	// 查注册表路由执行器、未知内核 fail-closed 报错是 K10（EngineRunner 路由）。
+	Kernel string `json:"kernel,omitempty"`
+
+	// EngineParams 是引擎特有参数块（FR-4.2）。**未知名拒绝而非忽略**：
+	// 任何目标内核不识别的键都必须让请求 400，静默吞掉会让调用方以为参数
+	// 生效了（"以为在测 NT 其实在测 Go" 的参数版）。校验入口
+	// ValidateRunSpec()，已知名按内核登记在 engineParamsByKernel。
+	EngineParams map[string]any `json:"engine_params,omitempty"`
 }
 
 // BacktestResponse represents the API response for a backtest run.
@@ -206,6 +224,25 @@ type BacktestResponse struct {
 	// 为「空票池」—— 见 domain.BacktestResult.UniverseMaxSize 的注记。
 	UniverseMaxSize *int `json:"universe_max_size,omitempty"`
 }
+
+// ResultSpec 冻结（K9）：BacktestResponse.Status 的三值语义集。
+//
+//   - StatusCompleted —— 跑完且有效（CheckValidity 无 reasons）。
+//   - StatusInvalid   —— 跑完但结果无效（OBS-01）。InvalidReasons 必填
+//     （稳定 Code），Error 必空 —— 无效是结果属性不是错误。
+//   - StatusFailed    —— 没跑完。Error 必填，InvalidReasons 必空。
+//
+// `status` 字段本身是调用方的**唯一判据** —— 不得用 id 是否存在、
+// HTTP 200 之类间接信号推断成功。
+//
+// 字段集 + 三值 + 指标口径的完整冻结文本在 docs/SPEC.md「ResultSpec 冻结」，
+// 护栏在 resultspec_test.go。新增第四种取值 = 契约变更：先破坏护栏，
+// 再走变更评审（ADR-031）。
+const (
+	StatusCompleted = "completed"
+	StatusInvalid   = "invalid"
+	StatusFailed    = "failed"
+)
 
 // --- Constants (moved from constants.go) ---
 //

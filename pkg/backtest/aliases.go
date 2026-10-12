@@ -50,6 +50,15 @@ const (
 	InvalidGarbageMetric = contracts.InvalidGarbageMetric
 )
 
+// ResultSpec status 三值语义（K9），re-export 自 contracts（单一实现）。
+// 生产者（RunBacktest / ResponseFromState）与消费者（compare / API 读路径）
+// 统一引用这三个名字，禁止再散布字面量。
+const (
+	StatusCompleted = contracts.StatusCompleted
+	StatusInvalid   = contracts.StatusInvalid
+	StatusFailed    = contracts.StatusFailed
+)
+
 // CheckValidity (OBS-01) 是 contracts.CheckValidity 的薄包装 —— Go 没有函数
 // 别名，包内调用点（engine.go）与包内测试统一走这个名字。
 func CheckValidity(res *domain.BacktestResult) []InvalidReason {

@@ -61,6 +61,12 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 
 			var req backtest.BacktestRequest
 			if json.Unmarshal(bodyBytes, &req) == nil && req.Strategy != "" {
+				// K9（RunSpec fail-closed）：engine_params 未知名拒绝而非忽略，
+				// 校验口径在 contracts.ValidateRunSpec（唯一实现）。
+				if err := req.ValidateRunSpec(); err != nil {
+					httpserver.Fail(c, http.StatusBadRequest, err.Error())
+					return
+				}
 				ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Minute)
 				defer cancel()
 				result, err := engine.RunBacktest(ctx, req)
@@ -272,54 +278,12 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 // buildResponseFromState reconstructs the API response for a backtest whose
 // state is still resident in the engine's in-memory StateStore.
 //
-// OBS-01（切片 2）—— 为什么把它收敛成**唯一一处**：
-// GET /:id/report 与 lookupBacktestResponse（GET /:id/export/:format 用）
-// 原先各自内联了一份逐字段重建，且都把闸门写成 `status == "completed"`、
-// 把 Status 硬编码成 "completed"。这正是 OBS-01 读路径的病根：写路径
-// （引擎 buildBacktestResponse）学会说 "invalid" 之后，两条读路径仍会把
-// 同一份结果说成 "completed"（或把无效运行直接挡在门外、UI 读不到原因）。
-// 收敛到一个函数后，状态与 InvalidReasons 的透传只有一处实现，两条读路径
-// 不可能再各自漂移。
-//
-// 返回 (resp, true) 表示内存里有可读结果（"completed" 或 "invalid"）；
-// (zero, false) 表示内存里没有 / 状态不可读，调用方应退回 DB job 路径。
-// "invalid" 必须放行 —— 否则「为什么无效」在 UI 上不可见（与
-// Engine.GetBacktestResult 的闸门是同一裁决）。
+// K9：state→response 的唯一透传点已上提至 Engine.ResponseFromState ——
+// 多策略对比（pkg/backtest/reporting）需要同源实现，而 reporting import
+// 不了 cmd/analysis。这里保留同名薄包装，调用方与测试的引用不变；语义
+// （闸门放行 "invalid"、透传 InvalidReasons）见 Engine.ResponseFromState。
 func buildResponseFromState(engine *backtest.Engine, backtestID string) (backtest.BacktestResponse, bool) {
-	status, err := engine.GetBacktestStatus(backtestID)
-	if err != nil || (status != "completed" && status != "invalid") {
-		return backtest.BacktestResponse{}, false
-	}
-	result, err := engine.GetBacktestResult(backtestID)
-	if err != nil || result == nil {
-		return backtest.BacktestResponse{}, false
-	}
-	params, _ := engine.GetBacktestParams(backtestID)
-	return backtest.BacktestResponse{
-		ID:              backtestID,
-		Status:          status,
-		Strategy:        params.StrategyName,
-		StartDate:       result.StartDate.Format("2006-01-02"),
-		EndDate:         result.EndDate.Format("2006-01-02"),
-		TotalReturn:     result.TotalReturn,
-		AnnualReturn:    result.AnnualReturn,
-		SharpeRatio:     result.SharpeRatio,
-		SortinoRatio:    result.SortinoRatio,
-		MaxDrawdown:     result.MaxDrawdown,
-		MaxDrawdownDate: result.MaxDrawdownDate.Format("2006-01-02"),
-		WinRate:         result.WinRate,
-		TotalTrades:     result.TotalTrades,
-		WinTrades:       result.WinTrades,
-		LoseTrades:      result.LoseTrades,
-		AvgHoldingDays:  result.AvgHoldingDays,
-		CalmarRatio:     result.CalmarRatio,
-		StockPool:       params.StockPool,
-		InitialCapital:  params.InitialCapital,
-		PortfolioValues: result.PortfolioValues,
-		Trades:          result.Trades,
-		InvalidReasons:  result.InvalidReasons,
-		UniverseMaxSize: result.UniverseMaxSize,
-	}, true
+	return engine.ResponseFromState(backtestID)
 }
 
 // lookupBacktestResponse fetches a backtest result by ID, falling back from

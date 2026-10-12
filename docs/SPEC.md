@@ -1544,16 +1544,76 @@ When a LiveTrader is attached, the engine can run in "paper trading" mode where 
 - **Hybrid Mode**: Backtest with live execution for validation
 5. **Finalization**: Calculate metrics, generate report
 
-### Backtest Report Metrics
-- Total return (annualized)
-- Sharpe ratio
-- Max drawdown
-- Calmar ratio
-- Win rate
-- Profit factor
-- Number of trades
-- Average holding period
-- Turnover
+### ResultSpec 冻结（K9，2026-10-12）：BacktestResponse canonical schema
+
+回测结果的 **canonical schema**，四契约（ADR-031）里 ResultSpec 的落地形态，实现于
+`pkg/backtest/contracts.BacktestResponse`。**字段集、指标口径、status 三值语义三者都是契约**：
+任何变更必须先破坏护栏测试 `pkg/backtest/contracts/resultspec_test.go` 再走契约变更评审。
+护栏含文档互锁 —— 改字段不改本节会直接红（本节前身列着根本不存在的 Profit factor /
+Turnover，就是文档与实现静默漂移的标本）。
+
+#### status 三值语义
+
+`status` 字段本身是调用方的**唯一判据** —— 禁止用 `id` 是否存在、HTTP 200 之类间接信号推断成功。
+
+| 值 | 含义 | 不变量 |
+|---|---|---|
+| `completed` | 跑完且有效（`contracts.CheckValidity` 无 reasons） | `invalid_reasons` 空、`error` 空 |
+| `invalid` | 跑完但结果无效（OBS-01） | `invalid_reasons` **必填**、`error` 必空 |
+| `failed` | 没跑完 | `error` **必填**、`invalid_reasons` 空 |
+
+- `invalid_reasons` 的取值是稳定 Code：`empty_universe` / `zero_trades` /
+  `zero_start_date` / `garbage_metric`（`contracts.CheckValidity`）。无效是**结果属性**
+  不是错误，所以不进 `error` —— `error` 只装真实错误（取不到日历、参数非法等）。
+- `invalid` 的指标字段照常给出（如实呈现），但调用方**不得**把它当成功观测。
+- 读路径同源：state → response 的唯一透传点是 `Engine.ResponseFromState`
+  （`cmd/analysis.buildResponseFromState` 是其薄包装）。API 读路径与多策略对比
+  （compare）都从它取 status / reasons，不允许第三处硬编码。
+
+#### 字段集（27 项，冻结）
+
+| JSON key | 类型 | 语义 |
+|---|---|---|
+| `id` | string | 回测 ID（UUID），恒在 |
+| `status` | string | 三值之一（见上），恒在 |
+| `strategy` | string | 策略名 |
+| `strategy_git_hash` | string | 产出该结果的策略插件 git hash，可空 |
+| `start_date` / `end_date` | string | 请求区间，`YYYY-MM-DD` |
+| `total_return` | float | 区间总收益 = (V_end − V_start) / V_start |
+| `annual_return` | float | 年化收益，见指标口径 |
+| `sharpe_ratio` | float | 见指标口径 |
+| `sortino_ratio` | float | 见指标口径 |
+| `max_drawdown` | float | 峰谷最大回撤，**负值** |
+| `max_drawdown_date` | string | 回撤最深日，`YYYY-MM-DD` |
+| `win_rate` | float | 盈利平仓交易占比，0–1 |
+| `total_trades` | int | 平仓交易总数 |
+| `win_trades` / `lose_trades` | int | 盈利 / 亏损平仓数 |
+| `avg_holding_days` | float | 平均持有天数 |
+| `calmar_ratio` | float | = annual_return / \|max_drawdown\| |
+| `started_at` / `completed_at` | string | RFC3339 |
+| `error` | string | 仅 `failed` 有；真实错误 |
+| `portfolio_values` | []PortfolioValue | 逐日净值序列 |
+| `trades` | []Trade | 成交明细 |
+| `stock_pool` | []string | 本轮票池 |
+| `initial_capital` | float | 初始资金 |
+| `invalid_reasons` | []string | 仅 `invalid` 有；稳定 Code 列表 |
+| `universe_max_size` | int? | 票池规模峰值；`null` = 未评估（≠ 0） |
+
+#### 指标口径（封闭系统日收益，冻结；实现 `pkg/backtest/metrics`）
+
+- **日收益** r_t = (V_t − V_{t−1}) / V_{t−1}，V 为 `portfolio_values` 当日 TotalValue。
+  **不做外部资金流修正** —— 回测是封闭系统，现金变动 100% 来自买卖。历史教训：
+  申赎式 TWR 修正在每个交易日注入 ±成交额/总资产 的脉冲并污染 Sharpe 全链路（废止，
+  见 `metrics.CalculateReturns` 注释）。
+- **sharpe_ratio** = (mean(r) − rf/252) / std_sample(r) × √252。
+- **sortino_ratio** = (mean(r) − rf/252) / downside_std × √252，下行只取 r < 0 的样本。
+- **max_drawdown** = 峰谷法最大回撤，负值；`max_drawdown_date` 为最深日。
+- **annual_return** = (1 + total_return)^(1/years) − 1，years 按净值序列**实际**首尾
+  日历时间（365.25 天/年）。与 Sharpe 的 252 交易日年化并存且有意不同：前者按日历
+  时间复利，后者按交易日波动。
+- **calmar_ratio** = annual_return / |max_drawdown|（分母 0 → 0）。
+- **win_rate / total_trades / win_trades / lose_trades / avg_holding_days**：按 symbol
+  分组的平仓配对统计（加仓按均价合并，反手算一平一开）。
 
 ---
 

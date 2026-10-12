@@ -10,8 +10,10 @@ package main
 // 状态即可命中 in-memory 读路径，无需跑真实回测（真库只读是别处的约束，
 // 这里干脆不碰库）。
 //
-// 这条腿钉住的正是缺陷本体：把 buildResponseFromState 里的 `Status: status`
-// 改回 `Status: "completed"`（或把闸门收回只认 "completed"），这里立刻红。
+// 这条腿钉住的正是缺陷本体：把 Engine.ResponseFromState（K9 后的唯一
+// state→response 透传点，buildResponseFromState 是其薄包装）里的
+// `Status: status` 改回 `Status: "completed"`（或把闸门收回只认
+// "completed"），这里立刻红。
 
 import (
 	"encoding/json"

@@ -210,7 +210,9 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：`go build ./...` + 全量 `go test ./...` 全绿（行为零变化正证据：K2 双模式等价、K5 信号对账、K7 注入 e2e 既有测试全过）；真库 `migrate()` 后 `\d quant.external_signals` 存在且与 `EnsureSchema` 结果一致；`POST /api/signals` 写入 → `SignalStrategy` 消费下单 e2e 一条通过；**破坏验证**：① `LocalSignalProvider` 人为返回 `as_of > asOf` 的信号 → 契约拒绝测试变红；② 删接口一个方法 → 编译期合规测试变红；③ migrate 的 DDL 与 `SignalSchemaDDL` 不一致 → 一致性测试红。
 - **⑥ 边界**：只做 SignalProvider 接口 + 本地实现 + 引擎接线 + 信号表 migrate + HTTP 写入门，一个 commit。
 
-### K9 · RunSpec/ResultSpec 冻结 + status 全链路收口（阶段 1）
+### K9 · RunSpec/ResultSpec 冻结 + status 全链路收口（阶段 1）✅ 完成（2026-10-12）
+
+> **收口记录 ✅（2026-10-12）**：四条全落地，破坏腿均实测红后还原。① RunSpec：`BacktestRequest` 增 `kernel`（默认 `"go"`，`EffectiveKernel()` 默认不回填字段）+ `engine_params`（`ValidateRunSpec` 未知名点名拒绝「rejected, not ignored」，POST 旧格式同闸门 400）；存量请求序列化逐字节不变（golden 断言）。② ResultSpec 冻结：`docs/SPEC.md`「ResultSpec 冻结」节（27 字段表 + 指标口径封闭系统日收益 + status 三值语义含不变量/判据唯一/同源声明）+ 三层护栏（字段集反射比对 / 三值常量冻结 / SPEC.md 文档互锁），字段集破坏腿实测红。③ 同源口径：state→response 唯一透传点上提为 `Engine.ResponseFromState`（`cmd/analysis.buildResponseFromState` 保名薄包装），compare engine 路径改同源读 status/reasons；`CompareReport` 增 `invalid` 列表带 `invalid_reasons`，invalid 不混入 Entries（混合集断言：invalid TotalReturn 故意设最大仍不评 Best）、Resolved 不蒸发、failed fail-closed 归 Missing 带真实错误；闸门改回只认 completed → 混合集断言红（已验）。④ UI（quant-trading-ui 仓，另 commit）：`result.status` 三值判据、invalid 显式警示 + reasons 列表、failed 显式呈现，废除 `result.id` 存在判成功；vitest 5 腿 + Playwright 1 条全绿，判据改回 `result.id` → vitest 红（已验）。metrics 口径与 `omitempty` 语义未动，EngineRunner 路由留 K10。
 
 - **① 目标**：RunSpec 增加内核路由字段（未知引擎参数 fail-closed 拒绝）；ResultSpec canonical schema 冻结为契约；`status` 三值语义（`completed`/`invalid`/`failed`）在 API、compare、UI 全链路一致呈现。
 - **② 上下文**：设计文档 §2.3/FR-3/FR-4；`pkg/backtest/contracts/contracts.go`（`BacktestRequest`/`BacktestResponse`）；`pkg/backtest/contracts/validity.go`（`CheckValidity`，OBS-01 切片 1）；`buildResponseFromState`（OBS-01 切片 2 的唯一透传点）；OBS-01 遗留①（`pkg/backtest/reporting/compare.go` 第三处硬编码 Status，其闸门只认 completed ⇒ 读不到 reasons）②（UI 不读 `BacktestResult.status`，渲染判据是 `result.id` 存在——UI 代码在 **quant-trading-ui 仓** `src/`，跨仓改）。
