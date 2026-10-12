@@ -71,13 +71,15 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 	return s.pool.Ping(ctx)
 }
 
-// migrate creates tables and hypertables.
+// migrationStatements 返回 migrate() 按序执行的全部建表 DDL：基础数组 +
+// Migration 048/049 追加的包级变量（ExternalSignalsSchemaDDL /
+// SupplyChainSchemaDDL）。
 //
 // ─── 这里是 DDL 的唯一真相（P1-4）─────────────────────────────────────
 //
-// 每次启动按顺序跑一遍下面这个数组，每条都必须是幂等的（CREATE ...
-// IF NOT EXISTS / ALTER ... ADD COLUMN IF NOT EXISTS / DO 块守卫）。
-// 没有版本表、没有 down、没有执行记录 —— 这是有意的取舍，理由见下。
+// 每次启动按顺序跑一遍这个数组，每条都必须是幂等的（CREATE ... IF NOT
+// EXISTS / ALTER ... ADD COLUMN IF NOT EXISTS / DO 块守卫）。没有版本表、
+// 没有 down、没有执行记录 —— 这是有意的取舍，理由见下。
 //
 // 目录里那些 .sql 的历史：
 //   - `migrations/`：3 个 golang-migrate 格式的子目录 + 10 个裸编号 .sql
@@ -94,7 +96,12 @@ func (s *PostgresStore) Ping(ctx context.Context) error {
 // 因此约定：**加表 / 加列就在这个数组末尾追加一条，并写上
 // `// Migration 0NN:` 注释**（编号续最大的那个）。散落的 .sql 留作历史
 // 记录，只读、不维护、不进导航。
-func (s *PostgresStore) migrate(ctx context.Context) error {
+//
+// 抽成独立函数（数组仍是字面量、零行为变化）是为了让一致性测试能在**无库**
+// 环境下比对「migrate() 实际执行的语句 ≡ 包级 DDL 变量」：改基础数组尾部的
+// 追加内容、或改包级变量任一处而不同步另一处 → 测试红。防的是两条建表路径
+// 漂移——而两处都自称正确时，谁都发现不了（K8 破坏腿③同款 hazard）。
+func migrationStatements() []string {
 	migrations := []string{
 		`CREATE TABLE IF NOT EXISTS stocks (
 			symbol VARCHAR(20) PRIMARY KEY,
@@ -835,7 +842,23 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	// 两侧改一处不改另一处 → 测试红）。
 	migrations = append(migrations, ExternalSignalsSchemaDDL...)
 
-	for _, m := range migrations {
+	// Migration 049: docs/migrations/049_add_supply_chain_tables.sql
+	// 产业链静态数据层四表（P2-2，TASKS.md §五 遗留待裁决）：
+	// quant.sw_industry_tree / supply_chain_edge / industry_vitality /
+	// etf_constituent，统一带 source/as_of 溯源列与幂等唯一约束。
+	// DDL 文本在包级 SupplyChainSchemaDDL——与 docs/migrations/049 镜像副本
+	// 归一化空白后逐条相等，由 pkg/storage 的一致性测试钉住（破坏腿：
+	// 改本追加内容或改 SupplyChainSchemaDDL 任一处 → 测试红）。
+	migrations = append(migrations, SupplyChainSchemaDDL...)
+
+	return migrations
+}
+
+// migrate 按序执行 migrationStatements() 的每条 DDL（全部幂等），随后建
+// TimescaleDB hypertable 与索引。加表 / 加列的唯一路径就是
+// migrationStatements() 数组（含追加的包级变量），散落的 .sql 不执行。
+func (s *PostgresStore) migrate(ctx context.Context) error {
+	for _, m := range migrationStatements() {
 		if _, err := s.pool.Exec(ctx, m); err != nil {
 			return fmt.Errorf("migration failed: %w", err)
 		}
@@ -930,4 +953,100 @@ var ExternalSignalsSchemaDDL = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_external_signals_lookup
 		ON quant.external_signals (model_id, symbol, as_of)`,
+}
+
+// SupplyChainSchemaDDL 是产业链静态数据层四张表（quant schema）的建表 DDL——
+// migrate() 的 Migration 049 执行的就是这组语句（P2-2，TASKS.md §五遗留待裁决）。
+//
+// 四张表统一带 source（来源标识）+ as_of（观察时点）溯源列，取代手抄快照；
+// 每张表有幂等唯一约束（同键重导刷新行而不插新行）：
+//   - sw_industry_tree   申万行业树（唯一键 code）
+//   - supply_chain_edge  组件/零部件→整机/上下游映射（唯一键 upstream+downstream+relation）
+//   - industry_vitality  行业景气指标（唯一键 industry_code+metric+obs_date+source）
+//   - etf_constituent    ETF 成分（唯一键 etf_code+symbol+obs_date）
+//
+// 与 docs/migrations/049_add_supply_chain_tables.sql 是同源镜像（文档副本，
+// 不执行）：两侧「归一化空白后逐条相等」由 pkg/storage 的一致性测试钉住
+// （破坏腿：改任一处不改另一处 → 测试红）。顺序同 ExternalSignalsSchemaDDL：
+// schema 先于表，表先于索引。
+var SupplyChainSchemaDDL = []string{
+	// quant schema 幂等：048 已建则本条为 no-op，顺延即可。
+	`CREATE SCHEMA IF NOT EXISTS quant`,
+
+	// 申万行业树。parent_code 为父行业 code，一级行业取空串（哨兵，
+	// 不用 NULL——避免 IS NULL / = '' 两套比较口径）；is_leaf 由导入方
+	// 按父子关系推导（无子节点即为叶子），不依赖上游 API 字段。
+	`CREATE TABLE IF NOT EXISTS quant.sw_industry_tree (
+		id          BIGSERIAL PRIMARY KEY,
+		code        TEXT NOT NULL,
+		parent_code TEXT NOT NULL DEFAULT '',
+		level       INTEGER NOT NULL DEFAULT 1,
+		name        TEXT NOT NULL,
+		is_leaf     BOOLEAN NOT NULL DEFAULT FALSE,
+		source      TEXT NOT NULL,
+		as_of       TIMESTAMPTZ NOT NULL,
+		created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+		updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+		CONSTRAINT uq_sw_industry_tree_code UNIQUE (code)
+	)`,
+
+	// 组件/零部件→整机/上下游映射。upstream/downstream 可以是 symbol 或
+	// 行业 code，relation 说明语义（industry_member=申万行业成分，
+	// symbol→行业 code；组件→整机等用各自取值）。weight 语义随 relation
+	// 而定（成分关系恒 0——index_member 不含权重）。
+	`CREATE TABLE IF NOT EXISTS quant.supply_chain_edge (
+		id         BIGSERIAL PRIMARY KEY,
+		upstream   TEXT NOT NULL,
+		downstream TEXT NOT NULL,
+		relation   TEXT NOT NULL,
+		weight     DOUBLE PRECISION NOT NULL DEFAULT 0,
+		source     TEXT NOT NULL,
+		as_of      TIMESTAMPTZ NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		CONSTRAINT uq_supply_chain_edge_triple UNIQUE (upstream, downstream, relation)
+	)`,
+
+	// 行业景气指标。obs_date 为指标观察日（DATE，PIT——不同观察日各自
+	// 成行）；唯一键含 source：不同来源的同指标各行其行，不互相覆盖。
+	`CREATE TABLE IF NOT EXISTS quant.industry_vitality (
+		id            BIGSERIAL PRIMARY KEY,
+		industry_code TEXT NOT NULL,
+		metric        TEXT NOT NULL,
+		obs_date      DATE NOT NULL,
+		value         DOUBLE PRECISION NOT NULL,
+		unit          TEXT NOT NULL DEFAULT '',
+		source        TEXT NOT NULL,
+		as_of         TIMESTAMPTZ NOT NULL,
+		created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+		updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+		CONSTRAINT uq_industry_vitality_key UNIQUE (industry_code, metric, obs_date, source)
+	)`,
+
+	// ETF 成分。obs_date 为报告期（DATE，PIT——ETF 调仓后新旧报告期各自
+	// 成行）；weight 为占净值比例（百分数，与 tushare fund_portfolio 的
+	// stk_mkv_ratio 同口径）。
+	`CREATE TABLE IF NOT EXISTS quant.etf_constituent (
+		id        BIGSERIAL PRIMARY KEY,
+		etf_code  TEXT NOT NULL,
+		symbol    TEXT NOT NULL,
+		weight    DOUBLE PRECISION NOT NULL DEFAULT 0,
+		obs_date  DATE NOT NULL,
+		source    TEXT NOT NULL,
+		as_of     TIMESTAMPTZ NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		CONSTRAINT uq_etf_constituent_key UNIQUE (etf_code, symbol, obs_date)
+	)`,
+
+	// 查询索引（对齐只读 API 的查询形态：按父+层级、按下游+关系、按行业+
+	// 指标+日期、按 ETF+报告期）。
+	`CREATE INDEX IF NOT EXISTS idx_sw_industry_tree_parent
+		ON quant.sw_industry_tree (parent_code, level)`,
+	`CREATE INDEX IF NOT EXISTS idx_supply_chain_edge_downstream
+		ON quant.supply_chain_edge (downstream, relation)`,
+	`CREATE INDEX IF NOT EXISTS idx_industry_vitality_lookup
+		ON quant.industry_vitality (industry_code, metric, obs_date)`,
+	`CREATE INDEX IF NOT EXISTS idx_etf_constituent_lookup
+		ON quant.etf_constituent (etf_code, obs_date)`,
 }

@@ -1,0 +1,6 @@
+﻿industry_code,metric,obs_date,value,unit,source,as_of
+801080.SI,gross_margin,2026-06-30,13.42,%,seed-csv,2026-10-12T00:00:00Z
+801080.SI,inventory_turnover_days,2026-06-30,68.5,天,seed-csv,2026-10-12T00:00:00Z
+801080.SI,revenue_yoy,2026-06-30,-2.31,%,seed-csv,2026-10-12T00:00:00Z
+801010.SI,gross_margin,2026-06-30,21.07,%,seed-csv,2026-10-12T00:00:00Z
+801010.SI,revenue_yoy,2026-06-30,4.85,%,seed-csv,2026-10-12T00:00:00Z

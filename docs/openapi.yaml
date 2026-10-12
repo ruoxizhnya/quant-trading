@@ -63,6 +63,8 @@ tags:
     description: Proxied data-service endpoints (OHLCV, screen, calendar)
   - name: Evidence
     description: L0 evidence service — resolves a citation's content_hash to its archived source response
+  - name: Industry
+    description: Industry-chain static data layer (P2-2) — SW industry tree, supply-chain edges, industry vitality, ETF constituents
 
 paths:
   # ============================================================
@@ -2497,6 +2499,262 @@ paths:
         '503':
           description: Signal store unavailable (not wired / no database)
 
+  # ============================================================
+  # Industry (P2-2 产业链静态数据层)
+  # ============================================================
+  /api/industry/tree:
+    get:
+      tags: [Industry]
+      summary: List the SW (申万) industry tree
+      description: |
+        Read-only door over `quant.sw_industry_tree` (P2-2). Every row carries
+        `source` + `as_of` provenance columns — this layer replaces hand-kept
+        snapshots. `is_leaf` is derived from parent-child relations at import
+        time (no upstream API field).
+
+        Filters are optional and composable: `level` restricts the hierarchy
+        tier (1/2/3), `parent_code` selects children of one node (empty string
+        = first-tier industries). Empty results return `200` with an empty
+        array — "no rows" is an answer, not an error.
+      operationId: listIndustryTree
+      parameters:
+        - name: level
+          in: query
+          required: false
+          description: Hierarchy tier (1/2/3). Must be an integer >= 1.
+          schema:
+            type: integer
+            minimum: 1
+            example: 1
+        - name: parent_code
+          in: query
+          required: false
+          description: Parent industry code; empty string selects first-tier industries.
+          schema:
+            type: string
+            example: 801010
+      responses:
+        '200':
+          description: Matching industry tree nodes, ordered by code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    example: 3
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SWIndustryNode'
+        '400':
+          description: Invalid `level` (not an integer >= 1)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Industry data layer unavailable (store not wired / no database)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/industry/edges:
+    get:
+      tags: [Industry]
+      summary: List supply-chain / industry-membership edges
+      description: |
+        Read-only door over `quant.supply_chain_edge` (P2-2). An edge maps two
+        endpoints — each either a symbol (`600519.SH`) or an industry code
+        (`801080.SI`) — with `relation` giving the semantics
+        (`industry_member` = SW industry membership from tushare `index_member`;
+        component→product relations use their own values).
+
+        At least one filter is required: the edge table is a graph whose size
+        grows with the mapping, so unfiltered full scans are rejected with 400
+        (the store enforces the same rule for non-HTTP callers).
+      operationId: listSupplyChainEdges
+      parameters:
+        - name: upstream
+          in: query
+          required: false
+          description: Upstream endpoint (symbol or industry code)
+          schema:
+            type: string
+            example: 600519.SH
+        - name: downstream
+          in: query
+          required: false
+          description: Downstream endpoint (symbol or industry code)
+          schema:
+            type: string
+            example: 801080.SI
+        - name: relation
+          in: query
+          required: false
+          description: Relation type
+          schema:
+            type: string
+            example: industry_member
+      responses:
+        '200':
+          description: Matching edges, ordered by (upstream, downstream)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    example: 2
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SupplyChainEdge'
+        '400':
+          description: No filter supplied (unfiltered scans are rejected)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Industry data layer unavailable (store not wired / no database)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/industry/vitality:
+    get:
+      tags: [Industry]
+      summary: List industry vitality (景气) indicator observations
+      description: |
+        Read-only door over `quant.industry_vitality` (P2-2). Point-in-time
+        observations: `obs_date` is part of the unique key together with
+        `source`, so different sources keep separate rows and corrections do
+        not overwrite history. First version is seeded by CSV (no tushare API);
+        `source` identifies the maintainer.
+
+        `industry_code` is required. `start_date` / `end_date` are inclusive
+        `YYYY-MM-DD` bounds; `start_date` after `end_date` is a 400.
+      operationId: listIndustryVitality
+      parameters:
+        - name: industry_code
+          in: query
+          required: true
+          description: Industry code (e.g. SW industry code)
+          schema:
+            type: string
+            example: 801080.SI
+        - name: metric
+          in: query
+          required: false
+          description: Metric name (e.g. gross_margin, revenue_yoy)
+          schema:
+            type: string
+            example: gross_margin
+        - name: start_date
+          in: query
+          required: false
+          description: Inclusive lower bound (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: '2200-01-01'
+        - name: end_date
+          in: query
+          required: false
+          description: Inclusive upper bound (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: '2200-01-31'
+      responses:
+        '200':
+          description: Matching observations, ordered by (obs_date, metric)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    example: 3
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IndustryVitality'
+        '400':
+          description: Missing `industry_code`, malformed date, or `start_date` after `end_date`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Industry data layer unavailable (store not wired / no database)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/industry/etf/{etf_code}/constituents:
+    get:
+      tags: [Industry]
+      summary: List ETF constituents (holdings)
+      description: |
+        Read-only door over `quant.etf_constituent` (P2-2), populated from
+        tushare `fund_portfolio`. Point-in-time: `obs_date` (report period) is
+        part of the unique key, so a rebalanced ETF keeps its old report
+        periods. Without `obs_date` the latest report period is returned
+        (weight DESC); pass an explicit `obs_date` to read a historical
+        snapshot.
+      operationId: listETFConstituents
+      parameters:
+        - name: etf_code
+          in: path
+          required: true
+          description: ETF fund code
+          schema:
+            type: string
+            example: 510300.SH
+        - name: obs_date
+          in: query
+          required: false
+          description: Report period (YYYY-MM-DD). Omit for the latest period.
+          schema:
+            type: string
+            format: date
+            example: '2200-01-01'
+      responses:
+        '200':
+          description: Matching constituent holdings, ordered by weight DESC
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    example: 2
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ETFConstituent'
+        '400':
+          description: Malformed `obs_date`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Industry data layer unavailable (store not wired / no database)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   # ============================================================
   # Security
@@ -2668,6 +2926,158 @@ components:
           description: Optional diagnostic factor snapshot (excluded from content_hash)
           example:
             momentum_z: 1.7
+
+    SWIndustryNode:
+      type: object
+      description: |
+        One node of the SW (申万) industry tree (`quant.sw_industry_tree`, P2-2).
+        `source` + `as_of` are the provenance columns that replace hand-kept
+        snapshots; `code` is the unique (idempotency) key.
+      required: [code, level, name, source, as_of]
+      properties:
+        code:
+          type: string
+          description: SW industry code (unique key)
+          example: 801080.SI
+        parent_code:
+          type: string
+          description: Parent industry code; empty string for first-tier industries
+          example: 801010
+        level:
+          type: integer
+          description: Hierarchy tier (1/2/3)
+          example: 2
+        name:
+          type: string
+          description: Industry name
+          example: 食品饮料
+        is_leaf:
+          type: boolean
+          description: True when no node has this code as parent (derived at import)
+          example: false
+        source:
+          type: string
+          description: Provenance — source identifier (e.g. tushare)
+          example: tushare
+        as_of:
+          type: string
+          format: date-time
+          description: Provenance — observation moment of this row (RFC3339)
+          example: '2026-10-12T00:00:00Z'
+
+    SupplyChainEdge:
+      type: object
+      description: |
+        One upstream/downstream or industry-membership mapping
+        (`quant.supply_chain_edge`, P2-2). Endpoints are either a symbol or an
+        industry code; `relation` carries the semantics. Unique key
+        (upstream, downstream, relation) — re-importing refreshes the row.
+      required: [upstream, downstream, relation, source, as_of]
+      properties:
+        upstream:
+          type: string
+          description: Upstream endpoint (symbol or industry code)
+          example: 600519.SH
+        downstream:
+          type: string
+          description: Downstream endpoint (symbol or industry code)
+          example: 801080.SI
+        relation:
+          type: string
+          description: Relation type (industry_member = SW industry membership)
+          example: industry_member
+        weight:
+          type: number
+          format: double
+          description: Relation-defined weight (membership edges carry 0 — index_member has no weight)
+          example: 0
+        source:
+          type: string
+          description: Provenance — source identifier
+          example: tushare
+        as_of:
+          type: string
+          format: date-time
+          description: Provenance — observation moment of this row (RFC3339)
+          example: '2026-10-12T00:00:00Z'
+
+    IndustryVitality:
+      type: object
+      description: |
+        One industry vitality (景气) indicator observation
+        (`quant.industry_vitality`, P2-2). Point-in-time: the unique key
+        (industry_code, metric, obs_date, source) includes `source`, so
+        different sources keep separate rows.
+      required: [industry_code, metric, obs_date, value, source, as_of]
+      properties:
+        industry_code:
+          type: string
+          description: Industry code
+          example: 801080.SI
+        metric:
+          type: string
+          description: Metric name
+          example: gross_margin
+        obs_date:
+          type: string
+          format: date
+          description: Observation date of the metric (PIT key component)
+          example: '2200-01-01'
+        value:
+          type: number
+          format: double
+          description: Metric value
+          example: 13.42
+        unit:
+          type: string
+          description: Unit of measurement (may be empty)
+          example: '%'
+        source:
+          type: string
+          description: Provenance — source / maintainer identifier
+          example: seed-csv
+        as_of:
+          type: string
+          format: date-time
+          description: Provenance — observation moment of this row (RFC3339)
+          example: '2026-10-12T00:00:00Z'
+
+    ETFConstituent:
+      type: object
+      description: |
+        One ETF constituent holding (`quant.etf_constituent`, P2-2), from
+        tushare `fund_portfolio`. Point-in-time: the unique key
+        (etf_code, symbol, obs_date) includes the report period, so a
+        rebalanced ETF keeps its old periods.
+      required: [etf_code, symbol, obs_date, source, as_of]
+      properties:
+        etf_code:
+          type: string
+          description: ETF fund code
+          example: 510300.SH
+        symbol:
+          type: string
+          description: Constituent symbol
+          example: 600519.SH
+        weight:
+          type: number
+          format: double
+          description: Share of net value in percent (tushare stk_mkv_ratio scale)
+          example: 5.23
+        obs_date:
+          type: string
+          format: date
+          description: Report period (PIT key component)
+          example: '2200-01-01'
+        source:
+          type: string
+          description: Provenance — source identifier
+          example: tushare
+        as_of:
+          type: string
+          format: date-time
+          description: Provenance — observation moment of this row (RFC3339)
+          example: '2026-10-12T00:00:00Z'
 
     RawIngest:
       type: object

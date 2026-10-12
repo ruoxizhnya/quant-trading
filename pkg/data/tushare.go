@@ -30,6 +30,10 @@ type TushareStore interface {
 	GetIndexConstituents(ctx context.Context, indexCode string) ([]domain.IndexConstituent, error)
 	SaveDividendBatch(ctx context.Context, records []*domain.Dividend) error
 	SaveSplitBatch(ctx context.Context, records []*domain.Split) error
+	// SupplyChainStore（P2-2）：产业链静态数据层四表写入面。内嵌而非平铺，
+	// 是因为它有独立命名的接口契约（pkg/data/supply_chain.go），CSV 导入器
+	// 也按同一接口编程。
+	SupplyChainStore
 	// SaveRawIngest archives a class-A raw source response (ADR-022 §2,
 	// ingest.raw). Declared here so the archive contract is enforced at
 	// compile time rather than discovered at runtime.

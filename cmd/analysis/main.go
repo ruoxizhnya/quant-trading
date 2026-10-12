@@ -237,6 +237,13 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 	// coordinate — work faces read through it instead of storing copies.
 	NewEvidenceHandler(deps.Store, deps.Logger).RegisterRoutes(router)
 
+	// P2-2 (TASKS.md §五 leftover ruling): industry-chain static data layer
+	// read API (SW industry tree / supply-chain edges / industry vitality /
+	// ETF constituents). Same read-only posture as Evidence — no RBAC.
+	// deps.Store 零值（nil pool，未接库）时路由照常注册、请求时 503，
+	// registerRoutes 不因零值 panic（deps_test.newMinimalDeps 约束）。
+	NewIndustryHandler(deps.Store, deps.Logger).RegisterRoutes(router)
+
 	// K8（TASKS K8 ③.4）：外部模型信号 HTTP 写入门 POST /api/signals。
 	// 信号表归属 strategy-runtime（pkg/strategy.PGSignalStore），store 缺失
 	// （未接库/零值）时传 nil —— 路由照常注册、请求时 503，registerRoutes
