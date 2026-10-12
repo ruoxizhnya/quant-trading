@@ -823,7 +823,13 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		// 摘牌之后还留在账上的持仓，趁这天处理掉。退市当天的价格通常还在
 		// （退市整理期），取不到就退回最后一次已知价 —— 与回测末尾的强平
 		// 同一套兜底逻辑，但发生在真正摘牌的时候而不是最后一天。
-		e.forceCloseDelisted(state, pricesCache, date, logger)
+		//
+		// K18：摘牌强平是「引擎外改仓」——对每个真被平掉的 symbol 取消其
+		// 活跃 exec-algo 父单（剩余未报送子单丢弃），否则后续天的子单会把
+		// 已平的仓位买回。
+		for _, sym := range e.forceCloseDelisted(state, pricesCache, date, logger) {
+			cancelExecAlgoParentsForSymbol(algoDispatch, sym, cancelReasonDelisted, logger)
+		}
 
 		// P1-12：把「回测的今天」交给 tracker，必须在生成信号之前。
 		// 策略据此判断今天是不是调仓日 —— 没有它，策略只能退回墙钟，
@@ -861,9 +867,13 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		// SubmitAt = 信号当日，当日到点即发）。无活跃父单时零开销返回。
 		e.processExecAlgoChildren(ctx, state, algoDispatch, marketDataCache, date, logger)
 
-		e.processStopLosses(state, pricesCache, marketDataCache, date, logger)
+		// K18：止损/止盈走 processStopLosses 的成交分支内联取消（见该函数）；
+		// 拆股改仓在这里按其返回的受影响 symbol 取消活跃父单。
+		e.processStopLosses(state, algoDispatch, pricesCache, marketDataCache, date, logger)
 
-		e.processCorporateActions(state, ca, date, logger)
+		for _, sym := range e.processCorporateActions(state, ca, date, logger) {
+			cancelExecAlgoParentsForSymbol(algoDispatch, sym, cancelReasonSplit, logger)
+		}
 
 		state.Tracker.RecordDailyValue(date, pricesCache)
 		state.Tracker.AdvanceDay(date)

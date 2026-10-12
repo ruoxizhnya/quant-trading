@@ -37,6 +37,19 @@ package live
 // 侧相同（pkg/backtest/exec_algo.go finalizeExecAlgo 注释）：没有更多
 // bar 时「强制撮完」等于虚构本未发生的成交；「撤销」停在部分成交，是
 // 保守且可解释的终态。两条路径同一裁决。
+//
+// ─── 窗口内外部仓位变动（K18）──────────────────────────────────────
+//
+// 与回测侧同语义、同裁决、同 cancel-reason 日志：父单执行窗口内发生
+// 「引擎外改仓」时，剩余未报送子单必须中止，否则会把已平的仓位买回。
+//
+// 与回测的差异在**触发方式**：回测日循环有显式的引擎外改仓事件
+// （processStopLosses / forceCloseDelisted / processCorporateActions），
+// 逐个事件点触发取消；paper 回放（PaperSession.Run）不含这些处理，外部
+// 改仓表现为「trader 实际持仓与本会话算法父单的累计成交量不再一致」，
+// 故 paper 侧改为**每交易日报送子单前对账一次**（见
+// reconcileExternalPositionChanges），检出被外部削减的敞口即取消。
+// 两条路径的取消动作（Dispatcher.Cancel / CancelSymbol）与日志格式一致。
 import (
 	"context"
 	"fmt"
@@ -45,6 +58,16 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/execalgo"
 )
+
+// paperCancelReasonExternalPositionChange 是 paper 侧窗口中途取消的
+// cancel-reason（与回测侧 pkg/backtest/exec_algo.go 的 cancelReason* 同属
+// 「窗口中段取消」语义，日志格式一致）。
+const paperCancelReasonExternalPositionChange = "external_position_change"
+
+// paperReconcileTolerance 是对账浮点容差。子单成交量为整数手、父单进度
+// 与之逐位一致，本无需容差；留极小阈值只为防未来成本核引入的末位噪声
+// 被误判成「外部减仓」。
+const paperReconcileTolerance = 1e-6
 
 // execAlgoParentID 派生父单号：纯函数 (日期, symbol, 方向)——与回测侧
 // pkg/backtest/exec_algo.go 的同名函数同规则（禁时间戳派生，K17 验收 4）。
@@ -90,9 +113,16 @@ func (s *PaperSession) attachExecAlgo(sig domain.Signal, d time.Time) error {
 //
 // 调用时机：每个交易日信号循环之后（新挂父单的首片 SubmitAt = 信号当日，
 // 当日到点即发，与回测侧 processExecAlgoChildren 同序）。
+//
+// K18：报送前先对账一次「外部仓位变动」，把已失效父单的剩余子单在**当日
+// 报送之前**就中止（否则当天的片又会把已平的仓位买回）。
 func (s *PaperSession) dispatchExecAlgoChildren(ctx context.Context, d time.Time) []PaperFill {
 	if s.execAlgo.Len() == 0 {
 		return nil
+	}
+	s.reconcileExternalPositionChanges(ctx)
+	if s.execAlgo.Len() == 0 {
+		return nil // 对账后全部父单已取消：本日无子单
 	}
 	var fills []PaperFill
 	for _, sym := range s.execAlgo.Symbols() {
@@ -114,6 +144,65 @@ func (s *PaperSession) dispatchExecAlgoChildren(ctx context.Context, d time.Time
 		}
 	}
 	return fills
+}
+
+// reconcileExternalPositionChanges 是 paper 侧的「外部仓位变动 → 取消活跃
+// 父单」钩子（K18）。
+//
+// 判据（按 symbol 对账 trader 实际持仓 vs 父单累计成交量）：某父单按其
+// 建仓方向应「还持有」至少 Filled 的敞口（多头为 +Filled、空头为
+// -Filled）。若 trader 实际持仓的**同向敞口已被外部削减到该值以下**
+// （如策略中途的平仓信号、EmergencyFlatten 强平、人工干预），即视为
+// 外部改仓，取消该 symbol 的活跃父单 —— 不再续报，语义与回测侧「止损后
+// 不再续买」一致。
+//
+// 说明：paper 回放的日循环不含止损/拆股/退市处理，故这里用**对账**而非
+// 事件钩子；对账每交易日一次、仅在存在活跃父单时执行，默认路径零开销。
+// trader 查持仓失败时记 Warn 并跳过本轮（不取消）—— 宁可等下一日再对账，
+// 也不在无法确证时误取消。
+func (s *PaperSession) reconcileExternalPositionChanges(ctx context.Context) {
+	if s.execAlgo.Len() == 0 {
+		return
+	}
+	positions, err := s.trader.GetPositions(ctx)
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("paper session: exec-algo reconcile skipped this day — GetPositions failed")
+		return
+	}
+	held := make(map[string]float64, len(positions))
+	for _, p := range positions {
+		held[p.Symbol] = p.Quantity
+	}
+	for _, p := range s.execAlgo.ActiveParents() {
+		h := held[p.Symbol]
+		switch p.Side {
+		case domain.DirectionLong:
+			if h < p.Filled-paperReconcileTolerance {
+				s.cancelExecAlgoParentsForSymbol(p.Symbol, paperCancelReasonExternalPositionChange)
+			}
+		case domain.DirectionShort:
+			if h > -p.Filled+paperReconcileTolerance {
+				s.cancelExecAlgoParentsForSymbol(p.Symbol, paperCancelReasonExternalPositionChange)
+			}
+		}
+	}
+}
+
+// cancelExecAlgoParentsForSymbol 取消某 symbol 活跃父单的剩余未报送子单，
+// 与回测侧 pkg/backtest/exec_algo.go 的同名函数同语义、同裁决、同日志格式
+// （K18）。已报送已成交部分保留、不回滚。
+func (s *PaperSession) cancelExecAlgoParentsForSymbol(symbol, reason string) {
+	if s.execAlgo.Len() == 0 {
+		return
+	}
+	for _, p := range s.execAlgo.CancelSymbol(symbol, reason) {
+		s.logger.Warn().
+			Str("parent_id", p.ParentID).Str("symbol", p.Symbol).
+			Str("cancel_reason", reason).
+			Float64("filled_qty", p.Filled).Float64("parent_qty", p.Total).
+			Float64("cancelled_qty", p.Total-p.Filled).
+			Msg("exec-algo: parent order cancelled mid-window — remaining child slices dropped (external position change; already-filled slices kept)")
+	}
 }
 
 // submitExecAlgoChild 报送一笔到点子单，产出 PaperFill 并回填父单进度。

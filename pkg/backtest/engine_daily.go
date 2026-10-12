@@ -730,6 +730,7 @@ func (e *Engine) updateTargetPositionAfterTrade(
 
 func (e *Engine) processStopLosses(
 	state *BacktestState,
+	d *execalgo.Dispatcher,
 	pricesCache map[string]float64,
 	marketDataCache map[string][]domain.OHLCV,
 	date time.Time,
@@ -779,15 +780,28 @@ func (e *Engine) processStopLosses(
 		// 不经过 `executeSignalTrade` / `updateTargetPositionAfterTrade`。
 		// 不在这里对齐，`TargetPosition` 那份账就会停在旧持仓上。
 		e.reconcileTargetPosition(state, event.Symbol, date, logger)
+
+		// K18：止损/止盈平仓是「引擎外改仓」——该 symbol 若有活跃 exec-algo
+		// 父单，其剩余未报送子单必须中止，否则第 k+1.. 天的子单会把刚被风控
+		// 平掉的仓位重新买回。取消只针对未报送片，已成交部分保留（不回滚），
+		// 故与上面的 reconcile 无冲突（reconcile 读的是已落账的真实持仓）。
+		reason := cancelReasonStopLoss
+		if event.Type == "take_profit" {
+			reason = cancelReasonTakeProfit
+		}
+		cancelExecAlgoParentsForSymbol(d, event.Symbol, reason, logger)
 	}
 }
 
+// processCorporateActions 处理当日除权除息与拆股，返回**实际改仓**（拆股
+// 落账）的 symbol 列表 —— 调用方（日循环）据此取消这些 symbol 的活跃
+// exec-algo 父单（K18）。分红不改股数，不进该列表。
 func (e *Engine) processCorporateActions(
 	state *BacktestState,
 	ca *corporateActions,
 	date time.Time,
 	logger zerolog.Logger,
-) {
+) []string {
 	truncatedDate := date.Truncate(24 * time.Hour)
 	if divs, ok := ca.dividendsByDate[truncatedDate]; ok {
 		for _, d := range divs {
@@ -796,6 +810,7 @@ func (e *Engine) processCorporateActions(
 			}
 		}
 	}
+	var splitSymbols []string
 	if splits, ok := ca.splitsByDate[truncatedDate]; ok {
 		for _, s := range splits {
 			if err := state.Tracker.ProcessSplit(s.Symbol, *s); err != nil {
@@ -804,8 +819,12 @@ func (e *Engine) processCorporateActions(
 			}
 			// 拆股改的是**股数** —— 与止损平仓同属「引擎外改持仓」（AUD-55）。
 			e.reconcileTargetPosition(state, s.Symbol, truncatedDate, logger)
+			// K18：拆股后父单按拆股前的股数计划续报会失真（数量口径变了），
+			// 故对拆股落账的 symbol 取消活跃父单剩余片。
+			splitSymbols = append(splitSymbols, s.Symbol)
 		}
 	}
+	return splitSymbols
 }
 
 func (e *Engine) forceCloseAllPositions(
@@ -871,17 +890,21 @@ func (e *Engine) forceCloseAllPositions(
 //
 // 摘牌当天仍算在市（ListingWindow.IsListed 用 After 判断），所以真正触发
 // 的是摘牌后的第一个交易日，那时通常已无行情，走 CurrentPrice 兜底。
+//
+// 返回**实际强平落账**的 symbol 列表 —— 调用方（日循环）据此取消这些
+// symbol 的活跃 exec-algo 父单（K18：摘牌强平是「引擎外改仓」）。
 func (e *Engine) forceCloseDelisted(
 	state *BacktestState,
 	pricesCache map[string]float64,
 	date time.Time,
 	logger zerolog.Logger,
-) {
+) []string {
 	listing := e.ListingWindows()
 	if len(listing) == 0 {
-		return // 没有上市日历，无从判断谁退市了
+		return nil // 没有上市日历，无从判断谁退市了
 	}
 
+	var closedSymbols []string
 	positions := state.Tracker.GetAllPositions()
 	// 定序：先平哪只影响当天的现金与成交序列（P1-14）。
 	for _, symbol := range sortedKeys(positions) {
@@ -921,11 +944,14 @@ func (e *Engine) forceCloseDelisted(
 				Float64("price", trade.Price).
 				Time("date", date).
 				Msg("Force closed delisted position")
+			// 只有真落账（有成交）才计入「外部改仓」——见下方取消钩子。
+			closedSymbols = append(closedSymbols, symbol)
 		}
 		// 摘牌强平同样是「引擎外改持仓」（AUD-55）：票已经从 universe 里消失，
 		// 不会再有信号，但那份 `TargetPosition` 账得跟着清掉。
 		e.reconcileTargetPosition(state, symbol, date, logger)
 	}
+	return closedSymbols
 }
 
 // abs returns the absolute value of x. Local copy — tracker/ and metrics/

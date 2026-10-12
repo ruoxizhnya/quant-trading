@@ -43,6 +43,15 @@ package backtest
 //
 // 默认路径数值零变化；真实券商算法单不做（D1）；VWAP 成交量预测不做；
 // 不改 ExecAlgorithm 冻结签名；不动 NT 侧车。
+//
+// ─── K18：窗口内外部仓位变动 → 取消活跃父单 ────────────────────────
+//
+// K17 审查发现的边界（TASKS.md K18）：父单执行窗口内发生引擎外改仓
+// （止损/止盈平仓、退市强平、拆股改仓）时，剩余未报送子单必须中止，
+// 否则会把刚被风控平掉的仓位重新买回。接线点：engine.go 日循环（退市
+// 强平 / 拆股改仓后）+ processStopLosses 的成交分支，统一走本文件的
+// cancelExecAlgoParentsForSymbol。paper 侧同一语义见
+// pkg/live/paper_exec_algo.go。
 import (
 	"context"
 	"fmt"
@@ -246,5 +255,46 @@ func finalizeExecAlgo(d *execalgo.Dispatcher, logger zerolog.Logger) {
 			Float64("filled_qty", p.Filled).Float64("parent_qty", p.Total).
 			Float64("cancelled_qty", p.Total-p.Filled).
 			Msg("exec-algo: parent order unfinished at session end — remaining child slices CANCELLED (adjudication: cancel, not force-fill; see pkg/backtest/exec_algo.go)")
+	}
+}
+
+// ─── K18：外部仓位变动 → 取消活跃父单 ──────────────────────────────
+//
+// 拆单父单跨多个交易日执行。若执行窗口**中途**发生「引擎外改仓」（止损/
+// 止盈平仓、退市强平、拆股改仓），剩余未报送子单必须一并中止——否则第 k
+// 天被风控平掉的仓位会被第 k+1.. 天的子单**重新买回**，策略「止损后应
+// 空仓」的语义被拆单破坏。整单路径无此问题（当日一次成交，无跨日残留
+// 委托）；真实算法单的业界解法即 cancel-on-stop。
+//
+// 与 finalizeExecAlgo 的**会话结束撤销**是两种判据：本组常量用于**窗口
+// 中段**取消，reason 进 cancel-reason 日志；被取消父单不再进 Unfinished()，
+// 故保留会话结束告警的语义单义（不会一次取消被记两遍）。
+const (
+	cancelReasonStopLoss   = "stop_loss"
+	cancelReasonTakeProfit = "take_profit"
+	cancelReasonDelisted   = "delisted"
+	cancelReasonSplit      = "corporate_action_split"
+)
+
+// cancelExecAlgoParentsForSymbol 在「引擎外改仓」实际落账后，取消该 symbol
+// 活跃父单的剩余未报送子单（K18）。已报送已成交部分保留、不回滚。
+//
+// 只丢弃未报送片；对**已全部成交**或本无语算法单的 symbol 是空操作
+// （CancelSymbol 保守返回空切片）——默认路径数值零变化。
+func cancelExecAlgoParentsForSymbol(
+	d *execalgo.Dispatcher,
+	symbol, reason string,
+	logger zerolog.Logger,
+) {
+	if d == nil || d.Len() == 0 {
+		return
+	}
+	for _, p := range d.CancelSymbol(symbol, reason) {
+		logger.Warn().
+			Str("parent_id", p.ParentID).Str("symbol", p.Symbol).
+			Str("cancel_reason", reason).
+			Float64("filled_qty", p.Filled).Float64("parent_qty", p.Total).
+			Float64("cancelled_qty", p.Total-p.Filled).
+			Msg("exec-algo: parent order cancelled mid-window — remaining child slices dropped (external position change; already-filled slices kept)")
 	}
 }

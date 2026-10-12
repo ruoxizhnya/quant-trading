@@ -33,6 +33,19 @@
 //     这是 K17「超额 fail-loud」要求的落点；
 //   - 会话结束仍未报完的父单经 Unfinished() 显式交还调用方裁决。两条
 //     路径都裁「撤销」而非「强制撮完」，理由写在各自接线文件。
+//
+// ─── 窗口中途取消（K18）──────────────────────────────────────────
+//
+// 与上面的「会话结束撤销」是**两种不同事件**：父单执行窗口内若发生
+// **外部仓位变动**（止损/止盈平仓、退市强平、拆股改仓），拆单不能再
+// 按原计划续报——否则第 k 天被风控平掉的仓位会被第 k+1.. 天的剩余
+// 子单重新买回（策略「止损后应空仓」的语义被拆单破坏）。调用方在外
+// 部改仓落账后调 Cancel / CancelSymbol：剩余**未报送**子单从此不再
+// 产出，**已报送已成交**部分保留（progress 账不回滚）。
+//
+// 被取消父单**不再进 Unfinished()** —— 故不会在会话结束被记第二遍
+// 「CANCELLED」告警；取消这一事件本身由调用方带 cancel-reason 记日志
+// （区分「窗口中段取消」与「会话结束撤销」两种判据）。
 package execalgo
 
 import (
@@ -66,12 +79,18 @@ type AttachSpec struct {
 	EndAt      time.Time        // 执行窗口终点
 }
 
-// ParentProgress 是父单的执行进度快照（Unfinished 的返回元素）。
+// ParentProgress 是父单的执行进度快照（Unfinished / CancelSymbol /
+// ActiveParents 的返回元素）。
 type ParentProgress struct {
-	ParentID string  `json:"parent_id"`
-	Symbol   string  `json:"symbol"`
-	Filled   float64 `json:"filled"` // Σ 已成交量
-	Total    float64 `json:"total"`  // 父单量
+	ParentID string           `json:"parent_id"`
+	Symbol   string           `json:"symbol"`
+	Side     domain.Direction `json:"side"`   // 父单方向（对账「外部改仓」时判敞口符号）
+	Filled   float64          `json:"filled"` // Σ 已成交量
+	Total    float64          `json:"total"`  // 父单量
+	// Reason 仅在窗口中途取消（Cancel/CancelSymbol）时非空：取消原因，
+	// 进日志区分「窗口中段取消」与「会话结束撤销」。Unfinished/ActiveParents
+	// 返回的元素该字段为空。
+	Reason string `json:"reason,omitempty"`
 }
 
 // DueChild 是到点、待报送的子单：K4 的 ChildOrder + 继承自父单的下单类型。
@@ -103,6 +122,12 @@ type parentRun struct {
 	plan      []ChildOrder
 	filled    float64 // Σ 已成交量（本层独立记账，超额 fail-loud 判据）
 	submitted float64 // Σ 已报送子单量（OnBar 取走即计）
+
+	// K18：窗口中段取消（外部仓位变动）。cancelled 后本父单不再参与
+	// OnBar（剩余未报送子单丢弃）、不再进 Unfinished（避免会话结束重复
+	// 告警）；filled 保留不回滚（已报送已成交部分不可撤销）。
+	cancelled    bool
+	cancelReason string
 }
 
 // dueSource 是「取走即清空」能力。K4 的 TWAP / VWAP 都有
@@ -245,6 +270,10 @@ func (d *Dispatcher) OnBar(ctx context.Context, bar domain.OHLCV) ([]DueChild, e
 	var out []DueChild
 	for _, pid := range d.sortedParentIDsLocked() {
 		run := d.parents[pid]
+		if run.cancelled {
+			// K18：窗口中段取消 —— 剩余未报送子单不再产出。
+			continue
+		}
 		if run.spec.Symbol != bar.Symbol {
 			continue
 		}
@@ -295,34 +324,118 @@ func (d *Dispatcher) Progress(parentID string) (filled, total float64, ok bool) 
 	return run.filled, run.spec.Qty, true
 }
 
+// Cancel 中止一个父单的执行窗口（K18：窗口中途取消）。
+//
+// 语义：
+//   - 剩余**未报送**子单从此不再产出（OnBar 跳过本父单）；
+//   - **已报送已成交**部分保留——filled 账不回滚（tracker 侧成交不动）；
+//   - 本父单**不再进** Unfinished()，故不会触发会话结束的 CANCELLED 告警；
+//     取消事件由调用方带 reason 记日志（与「会话结束撤销」显式区分）。
+//
+// 幂等且保守：父单不存在、已被取消、或已全部成交（无可丢弃的剩余片）
+// 时均返回 (零值, false)，不产生副作用——调用方据此只对「真被取消」的
+// 父单记日志，不会为已完成父单打误导性的取消记录。
+func (d *Dispatcher) Cancel(parentID, reason string) (ParentProgress, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	run, ok := d.parents[parentID]
+	if !ok || !cancellable(run) {
+		return ParentProgress{}, false
+	}
+	run.cancelled = true
+	run.cancelReason = reason
+	return progressOf(parentID, run), true
+}
+
+// CancelSymbol 中止某 symbol 上**全部**可取消父单（外部仓位变动按标的作用，
+// 一次改仓可能同时命中同 symbol 的多方向父单）。返回被取消父单的进度快照
+// （含 cancel-reason，按父单号升序——确定性），供调用方逐条记日志。
+//
+// 无活跃父单（或全部已成交）时返回空切片：默认路径零行为变化。
+func (d *Dispatcher) CancelSymbol(symbol, reason string) []ParentProgress {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]ParentProgress, 0)
+	for _, pid := range d.sortedParentIDsLocked() {
+		run := d.parents[pid]
+		if run.spec.Symbol != symbol || !cancellable(run) {
+			continue
+		}
+		run.cancelled = true
+		run.cancelReason = reason
+		out = append(out, progressOf(pid, run))
+	}
+	return out
+}
+
+// ActiveParents 返回全部**活跃**（未取消）父单的进度快照，按父单号升序。
+//
+// 用途：paper 侧「外部仓位变动」对账——把父单累计成交量与 trader 实际
+// 持仓比对，检出被外部削减的敞口（见 pkg/live/paper_exec_algo.go）。
+func (d *Dispatcher) ActiveParents() []ParentProgress {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]ParentProgress, 0, len(d.parents))
+	for _, pid := range d.sortedParentIDsLocked() {
+		run := d.parents[pid]
+		if run.cancelled {
+			continue
+		}
+		out = append(out, progressOf(pid, run))
+	}
+	return out
+}
+
+// cancellable 判据（调用方持锁）：未被取消且仍有未成交剩余片——与
+// Unfinished() 的入选条件同一口径，保证「取消的父单」恰好是「否则会在
+// 会话结束报未完成的那批」，不多不少。
+func cancellable(run *parentRun) bool {
+	return !run.cancelled && run.filled < run.spec.Qty-qtySumTolerance(run.spec.Qty)
+}
+
+// progressOf 构造父单进度快照（调用方持锁）。
+func progressOf(parentID string, run *parentRun) ParentProgress {
+	return ParentProgress{
+		ParentID: parentID,
+		Symbol:   run.spec.Symbol,
+		Side:     run.spec.Side,
+		Filled:   run.filled,
+		Total:    run.spec.Qty,
+		Reason:   run.cancelReason,
+	}
+}
+
 // Unfinished 返回「未全部成交」的父单进度快照，按父单号排序（确定性）。
 // 会话结束裁决（撤销/强撮）的输入；正常结束时返回空切片。
+//
+// K18：已被窗口中段取消的父单**不在此列**——它的剩余片已在取消时就地
+// 丢弃（不进会话结束撤销），否则同一次取消会被记两遍、且判据语义混淆。
 func (d *Dispatcher) Unfinished() []ParentProgress {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var out []ParentProgress
 	for _, pid := range d.sortedParentIDsLocked() {
 		run := d.parents[pid]
-		if run.filled < run.spec.Qty-qtySumTolerance(run.spec.Qty) {
-			out = append(out, ParentProgress{
-				ParentID: pid,
-				Symbol:   run.spec.Symbol,
-				Filled:   run.filled,
-				Total:    run.spec.Qty,
-			})
+		if !cancellable(run) {
+			continue
 		}
+		out = append(out, progressOf(pid, run))
 	}
 	return out
 }
 
 // Symbols 返回有活跃父单的 symbol 集合（去重、字典序）——调用方据此
-// 只喂相关 bar，无活跃父单时零开销。
+// 只喂相关 bar，无活跃父单时零开销。K18：已取消父单不计入（其 symbol
+// 不再需要 bar）。
 func (d *Dispatcher) Symbols() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	seen := make(map[string]bool, len(d.parents))
 	var out []string
 	for _, run := range d.parents {
+		if run.cancelled {
+			continue
+		}
 		if !seen[run.spec.Symbol] {
 			seen[run.spec.Symbol] = true
 			out = append(out, run.spec.Symbol)
@@ -332,12 +445,19 @@ func (d *Dispatcher) Symbols() []string {
 	return out
 }
 
-// Len 返回活跃父单数。接线层的快路径判空：0 = 本次会话没有任何算法单，
-// 日循环里的拆单步骤立即返回（默认路径数值零变化的保证之一）。
+// Len 返回**活跃**（未取消）父单数。接线层的快路径判空：0 = 本次会话没有
+// 仍在执行的算法单，日循环里的拆单/取消步骤立即返回（默认路径数值零变化
+// 的保证之一；也是 K18 取消后「不再喂 bar」的机械判据）。
 func (d *Dispatcher) Len() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return len(d.parents)
+	n := 0
+	for _, run := range d.parents {
+		if !run.cancelled {
+			n++
+		}
+	}
+	return n
 }
 
 // Plan 返回某父单的子单计划副本（只读，测试/诊断用）。
