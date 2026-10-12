@@ -115,8 +115,8 @@ type SignalProvider interface {
 
 ## 4. NT 侧车服务（阶段 2）
 
-- **形态**：独立 Python 进程（FastAPI 或 gRPC 包装 `BacktestNode`/`BacktestRunConfig`），仅监听回环，Go 侧经 EngineRunner 客户端调用（安全约束见 ADR-031 D5）；
-- **数据馈送**：Postgres `ohlcv_daily_qfq` → Parquet 导出（`ParquetDataCatalog`，纳秒 UTC 时间戳口径）或低层 `add_data()`；复权口径映射 [TBD]；
+- **形态**：独立 Python 进程（K13 裁决：**HTTP/1.1 + JSON**，标准库 `http.server` 包装 `BacktestNode`/`BacktestRunConfig`，见 §8.1），仅监听回环，Go 侧经 EngineRunner 客户端调用（安全约束见 ADR-031 D5）；
+- **数据馈送**：Postgres `ohlcv_daily_qfq` → Parquet 导出（`ParquetDataCatalog`，纳秒 UTC 时间戳口径，**离线 ETL 脚本**；侧车服务本身不直连 DB）；复权口径映射见 §8.2；
 - **结果回流**：pandas 报告 → ResultSpec 映射 → 落库（与 Go 内核同表）；
 - **许可合规**：LGPL-3.0 服务化使用（独立进程、不链接），合规面收敛为零传染；
 - **版本**：PoC 钉 NT 版本（v2.0.0rc 系列），升级跟随策略 [TBD]。
@@ -161,11 +161,43 @@ type SignalProvider interface {
 
 ## 8. 未决问题 [TBD]
 
-| # | 问题 | 关闭时机 |
-|---|---|---|
-| 1 | 双跑对齐容差阈值（分指标） | 阶段 2 实验（K15） |
-| 2 | 侧车通道选型（HTTP vs gRPC vs Redis Streams） | K13 |
-| 3 | Parquet 导出复权口径与 `ohlcv_daily_qfq` 映射 | K13 |
-| 4 | NT 版本锁定 / 升级跟随策略 | 阶段 2 前 |
-| 5 | ST/新股限制、集合竞价是否进适配器最小规则集 | K14 按双跑需要裁决 |
-| 6 | 侧车部署形态（compose 服务 vs 独立进程）与监控口径 | 决策门后（K16） |
+| # | 问题 | 关闭时机 | 状态 |
+|---|---|---|---|
+| 1 | 双跑对齐容差阈值（分指标） | 阶段 2 实验（K15） | 未决 |
+| 2 | 侧车通道选型（HTTP vs gRPC vs Redis Streams） | K13 | ✅ 已关闭（见 §8.1） |
+| 3 | Parquet 导出复权口径与 `ohlcv_daily_qfq` 映射 | K13 | ✅ 已关闭（见 §8.2） |
+| 4 | NT 版本锁定 / 升级跟随策略 | 阶段 2 前 | PoC 已钉 `2.0.0rc6`；升级跟随策略未决 |
+| 5 | ST/新股限制、集合竞价是否进适配器最小规则集 | K14 按双跑需要裁决 | 未决 |
+| 6 | 侧车部署形态（compose 服务 vs 独立进程）与监控口径 | 决策门后（K16） | 未决 |
+
+### 8.1 裁决：侧车通道 = HTTP/1.1 + JSON（回环）
+
+| 候选 | 性能 | 生态/成熟度 | 学习成本 | 运维成本 | 团队匹配 | 结论 |
+|---|---|---|---|---|---|---|
+| **HTTP/1.1 + JSON** | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | 低 | 低 | 高（Go `net/http` + Python 标准库，零新依赖） | ✅ **选定** |
+| gRPC | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 中高（protobuf + 双端 codegen） | 中 | 中 | 现阶段无收益：仅需一个同步请求/响应端点 |
+| Redis Streams | ⭐⭐⭐ | ⭐⭐⭐ | 中 | 中高（多一个 broker + 运维面） | 低 | 否决：K13 无异步扇出需求，且与 D5「不额外暴露」相悖 |
+
+- **决策**：侧车以 **HTTP/1.1 + JSON** 提供单一同步端点 `POST /v1/backtest`，Python 侧用标准库 `http.server` 实现（运行时依赖只剩 NT 及其数据栈）。请求/响应 DTO 逐字段镜像 Go 的 `contracts.BacktestRequest`，Go 客户端映射是一次直拷。
+- **理由**：通道是**内部实现细节**（两端都是我们自己的代码），价值在「契约能不能通」而非「协议多先进」。gRPC 要引 protobuf 工具链 + 两端 codegen，换来的流式/强类型能力在 K13 用不上；纯 JSON 可直接 curl 复现正/反证腿，排障成本最低。
+- **代价**：无 schema 强制（改用文档 + 双端校验兜底）、无 HTTP/2 多路复用、无流式进度。
+- **切换触发条件**：K14/K15 若出现「多 run 编排 / 流式进度 / 需要强类型双向契约」，再评估 gRPC —— 换协议只动 Go `NautilusRunner` 客户端与 Python 服务两端，属内部改动，不破外围契约。
+
+### 8.2 裁决：Parquet 复权口径 = `ohlcv_daily_qfq` 原样消费 + UTC 午夜纳秒
+
+| 项 | 映射 |
+|---|---|
+| 复权口径 | **不做二次复权**：`ohlcv_daily_qfq` 已是前复权序列，原样写入 catalog（Go 内核读的也是同一序列） |
+| symbol → instrument | `{symbol}.{venue}`（venue 默认 `SIM`），`Equity`、`CNY`、tick `0.01` |
+| bar_type | `{symbol}.{venue}-1-DAY-LAST-EXTERNAL` |
+| 时间戳 | `trade_date` → **UTC 午夜纳秒**，`ts_event = ts_init` |
+| volume | 表内原值取整（tushare 手数口径）直传 |
+
+- **决策**：**原样消费前复权序列**，NT 侧不叠加任何 dividend/split 调整。
+- **理由**：K15 的双跑对齐要求两内核价源同口径。前复权是以最新日为基准重构的历史序列，若 NT 侧再做调整，价差将无法归因到「执行机制差异」这一受控变量上。
+- **代价 / 观察项**：catalog 是**物化快照**，基表重灌后需重导；若 K15 出现系统性价差，须复核两侧取数时点是否一致（同一基表快照）——**列为 K15 观察项**。
+
+### 8.3 K13 附带记录：NT 无内置 buy-and-hold
+
+调研报告与源码核对结论：NT **不提供内置 buy-and-hold 策略**（其示例策略在 `examples` cargo feature 之后，非稳定 API）。K13 因此自带一个最小 demo 策略（首根 bar 买入、持有到窗口结束，无信号/指标/风控逻辑）作为链路验证载体——这不改变「本任务无策略逻辑」的定位，真实策略行为在 K14 的权重回放适配器落地。
+

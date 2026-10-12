@@ -1,0 +1,20 @@
+# NautilusTrader sidecar (K13) — pinned runtime.
+#
+# Python 3.12–3.14 (NT 2.0.0rc6 declares `Requires-Python: >=3.12,<3.15`).
+#
+# Install:  pip install -r requirements.txt
+# The exact prerelease pin below is sufficient — `--pre` is only needed when
+# asking for a floating version.
+nautilus_trader==2.0.0rc6
+
+# NT ships a wheel that declares no runtime dependencies of its own, but the
+# analysis/statistics path (BacktestNode.run -> stats, generate_fills_report)
+# imports pandas/numpy at runtime, and the ParquetDataCatalog needs pyarrow.
+pyarrow==26.0.0
+numpy==2.5.4
+pandas==3.0.6
+
+# EXPORT TOOL ONLY (tools/export_bars.py, offline ETL).
+# The sidecar *service* never imports this: ADR-031 D5 forbids the sidecar from
+# talking to the database. Only the offline export script reads Postgres.
+psycopg[binary]==3.3.6

@@ -1,0 +1,7 @@
+# NT sidecar (K13) — local artifacts. Narrow, directory-local ignores so the
+# monorepo root .gitignore stays untouched.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+catalog/

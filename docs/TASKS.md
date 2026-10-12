@@ -266,7 +266,15 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：四条各有一条正测试或护栏 + 各一条破坏腿（改坏→红→还原）；全量 `go test ./...` 绿。
 - **⑥ 边界**：只做 K1-P2-1~4 四条，一个 commit。
 
-### K13 · NT 侧车骨架：RunSpec API + 数据馈送（阶段 2，前置：K8–K10）
+### K13 · NT 侧车骨架：RunSpec API + 数据馈送（阶段 2，前置：K8–K10）✅ 完成（2026-10-12）
+
+> **收口记录 ✅（2026-10-12）**：四条全落地。① `nt-sidecar/` 独立 Python 项目——`requirements.txt` 钉死 `nautilus_trader==2.0.0rc6`（cp313 Windows wheel 实测可装）+ 服务入口 `python -m sidecar` + README（一条命令启动）；**通道选型裁决 = HTTP/1.1 + JSON**（设计文档 §8.1，标准库 `http.server`，仅监听 127.0.0.1，绑定非回环地址直接拒绝）。② 数据馈送 `tools/export_bars.py`（离线 ETL：`ohlcv_daily_qfq` → Parquet catalog，纳秒 UTC；**侧车服务不直连 DB**，守 ADR-031 D5）；**复权口径裁决 = 前复权原样消费 + UTC 午夜纳秒**（设计文档 §8.2）。③ Go 侧 `pkg/backtest/nautilus.NautilusRunner` 实现注册表要求的 `contracts.EngineRunner`，装配期注册名 `"nautilus"`（`cmd/analysis/setup.go`；地址取 `$NT_SIDECAR_URL`，缺省 `127.0.0.1:9100`）；超时/传输错/非 2xx/`status=failed` 一律透传为 error，**所有失败路径返回 nil response**（不吞错、零静默回退）。④ 链路用最小 buy-and-hold demo 验证（NT **无**内置 buy-and-hold，见 §8.3）。
+
+> **证据**：真装 NT `2.0.0rc6` + 真库导出 2024 年 `600000.SH`/`000001.SZ` 日线（各 242 根）→ 真侧车：`curl POST /v1/backtest` 返回 `status=completed`（484 iterations / 2 orders / total_return −0.1347 / Sharpe 1.4267）；Go E2E（`NT_SIDECAR_URL` 环境门，默认 skip）经真 handler → NautilusRunner → 侧车 → 真 `PostgresStore` **落库并清理**（同数值，确定性复现）。**反证腿**：侧车未启动 → 503 UNAVAILABLE + 库内零行 + go 内核零调用（`TestBacktestPost_NautilusSidecarDownFailClosed`）。**破坏腿**：把 runner 失败分支改成「空 completed + nil error」→ nautilus 包 2 条红、handler 反证腿红（"200" not ≥ "500"），已还原。Python 侧 8/8 绿。
+>
+> **接口选型澄清**：派工卡写「实现 `contracts.BacktestRunner`」，但 K10 注册表实际承载的是 **`contracts.EngineRunner`**（`RunBacktest(ctx, BacktestRequest) → *BacktestResponse`，见 `registry.go`「接口选型说明」）；`BacktestRunner` 是 AI 管线五参端口，与内核路由无关。本任务按注册表要求实现 `EngineRunner`。
+>
+> **边界遵守**：只新增 `nt-sidecar/` + `pkg/backtest/nautilus/` + 两个 handler 层测试文件，并改 `cmd/analysis/setup.go` 装配点 + 命名文档；未碰 `pkg/execalgo` / `engine.go` 日循环 / `pkg/live` / `pkg/data`。一个 commit（Python + Go 同 commit）。
 
 - **① 目标**：独立 Python 进程（NT 侧车）经回环提供「RunSpec 执行」服务跑通最小链路（NT 内置 demo 策略即可），Go 侧 `NautilusRunner` 注册进 K10 注册表，证明「外部引擎经契约可插拔」在真实 NT 上成立。
 - **② 上下文**：调研报告 §3.4/§5.3（唯一干净形态 = 独立 Python 服务；无 Go 绑定、无 gRPC 控制 API、cgo 不可行）；设计文档 §4；NT 现状 v2.0.0rc6（pip wheel，Python 3.12–3.14）；`ohlcv_daily_qfq`（390 万行日线）；ADR-031 D5 安全约束。

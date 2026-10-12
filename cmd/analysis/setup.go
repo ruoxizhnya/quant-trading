@@ -21,6 +21,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/nautilus"
 	"github.com/ruoxizhnya/quant-trading/pkg/bootstrap"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
 	"github.com/ruoxizhnya/quant-trading/pkg/live"
@@ -176,6 +177,17 @@ func buildDataServices(
 	// 不来自注册表预设。运行期不改（无热插拔）。
 	engineRegistry := contracts.NewEngineRegistry()
 	engineRegistry.Register(contracts.DefaultKernel, engine)
+
+	// K13：注册 NT 侧车内核（名 "nautilus"）。侧车是独立 Python 进程，只经
+	// 回环、只经 EngineRunner 契约交互（ADR-031 D5）——进程隔离，不直连
+	// 数据库，Go 侧不留任何 NT 依赖。
+	//
+	// 无条件注册：内核「已知」（FR-1.1 的 kernel 路由键里 nautilus 是合法
+	// 取值），可用性失败在执行期显式透出为 failed（runner 不吞错），而不是
+	// 在装配期假装它不存在。地址来自 $NT_SIDECAR_URL，缺省 DefaultURL
+	// （127.0.0.1:9100）；侧车没起时该内核的请求得到显式错误 + 库内零行，
+	// 绝不静默回退 go 内核（FR-1.3）。
+	engineRegistry.Register(nautilus.KernelName, nautilus.NewRunner(nautilus.URLFromEnv(), nil))
 
 	// JobService 改持注册表：kernel 是请求级路由键，执行期才经 Resolve
 	// 解析（K10）。logger 显式传入，不再从 engine 内部提取。
