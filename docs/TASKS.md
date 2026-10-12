@@ -236,7 +236,11 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：测试注册 fake runner 为 `"fake"` → 请求 `kernel=fake` 走 fake 并落库同 schema（正证据）；`kernel=nautilus`（未注册）→ 明确报错、**断言响应与库内均无 go 内核产物**（反证腿：证明没有静默回退）；不带 `kernel` → 与现状逐字节一致（回归腿）。**破坏验证**：路由改成「未知名回退 go」→ fail-closed 测试红。
 - **⑥ 边界**：注册表 + 路由 + 两条调用链接线，一个 commit。
 
-### K11 · 三条内核不变量 AST 护栏（阶段 1，原 K0-P2-1 并入）
+### K11 · 三条内核不变量 AST 护栏（阶段 1，原 K0-P2-1 并入）✅ 完成（2026-10-12）
+
+> **收口记录 ✅（2026-10-12，`06b97b2`）**：三条护栏全落地，位置随被约束代码所在包。① `pkg/live/exec_submit_risk_check_test.go` —— `ExecEngine.Submit` 必先过 `risk.CheckOrder`：调用存在 + 先于 broker 出口（`SubmitOrder` / `Broker().…`）+ 裁决不得被丢弃（裸调用、全赋 `_`）；HEAD 上唯一实现仍是 K1 契约 stub，stub 走显式登记表，`panic` 被换成任意实现即刻变红。② `pkg/msgbus/publish_record_before_dispatch_test.go` —— BusTap「先记录后分发」：`Tap.Append` 必须早于 handler 分发、且落库失败即刻 return（认不出分发调用时 fail closed，免「先后」在无分发代码上永真）。③ `pkg/strategy/onbar_no_lookahead_test.go` —— `OnBar` 函数体禁正偏移索引/切片、未来语义取数名（`Next`/`Peek`/`Future`/`BarsAfter`…，精确匹配，不误伤 `rejectFutureSignals` 这类反前视名）、遍历 bar 序列容器、给 bar 形参赋值。三者均为 `scanInside` 方法体扫描（不扫原文：三个包里这几句不变量在注释中出现几十处，字符串扫描两头都不可信），各配反瞎腿 + 合成源码正反例腿（证明判据非永真）。破坏腿：Submit 绕过风控 / 先报送后补检 → 红；Publish 反序 / 拆掉落库失败闸门 → 红；`BatchAdapter.OnBar` 注入正偏移索引 → 红（均已还原）。`go test ./internal/repoguard/ ./pkg/...` 61 ok / 0 FAIL；契约签名一行未动。
+>
+> **遗留**：`StandardExecEngine.Submit` 仍是 K1 契约 stub —— 三条判据当前没有活体对象，护栏真正保护的是「K1 填上实现时必须先过风控」；K1 落地时需删掉对应登记表条目。
 
 - **① 目标**：把三条**只在注释里**的核心不变量变成机器可验证的护栏。
 - **② 上下文**：K0 契约的三条关键语义约束目前只有注释——`ExecEngine.Submit` 必须先过 `risk.RiskEngine.CheckOrder`（`pkg/live/interfaces.go:87`）；`msgbus.Publish` 必须先经 EventStore 记录、再分发（BusTap 语义，D4）；`BarHandler.OnBar` 不得回看未来 bar（`pkg/strategy/streaming.go:52`）。项目先例：`internal/repoguard/calendar_seed_isolation_test.go` 的 AST 扫、`cmd/analysis/auth_public_paths_test.go` 的 AST 双向对齐。与 K8 的 SignalProvider 防前视契约同族（未来数据不可见）。
@@ -389,7 +393,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 > 审查通过项（记录以免重复审）：依赖方向无环且层次干净（clock/msgbus 零依赖 → eventstore → kernel；`live→risk`、`execalgo→portfolio` 别名方向均与 BootOrder 同向）；11 模块全覆盖；8 张表齐全且归属清楚；编译期守卫经双方独立破坏验证有效；零现有实现改动。
 
-### K0-P2-1 · 核心语义约束需 AST 护栏 ⬜ → 已并入 K11
+### K0-P2-1 · 核心语义约束需 AST 护栏 ✅ → 已并入 K11（随 K11 于 2026-10-12 完成）
 
 > ⚠️ **2026-10-12 墓碑注记**：本任务内容已整体移入 §二 **K11**（内核三条不变量 AST 护栏，作为新主线的独立任务保留），此处不再重复维护。后续执行与验收以 K11 六字段为准。
 
