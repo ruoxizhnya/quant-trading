@@ -64,3 +64,20 @@ func TestBacktestPost_KernelFieldDoesNotTripValidation(t *testing.T) {
 	assert.NotEqual(t, http.StatusBadRequest, w.Code, "仅带 kernel 的请求不得被拒, body=%s", w.Body.String())
 	assert.NotContains(t, w.Body.String(), "engine_params")
 }
+
+// 异步 job 格式 fail-closed 腿：CreateJobRequest 没有 kernel / engine_params 字段
+// （K10 才接入路由），json.Unmarshal 会静默吞掉它们。钉住：带这两个键进异步分支
+// 必须 400 点名拒绝，而不是受理后丢弃。
+func TestBacktestPost_AsyncJobRejectsKernelRoutingFields(t *testing.T) {
+	for _, tc := range []struct{ name, body, wantKey string }{
+		{"kernel", `{"strategy_id":"momentum","universe":"hs300","start_date":"2024-01-01","end_date":"2024-06-30","kernel":"go"}`, "kernel"},
+		{"engine_params", `{"strategy_id":"momentum","universe":"hs300","start_date":"2024-01-01","end_date":"2024-06-30","engine_params":{"nt":{"log_level":"info"}}}`, "engine_params"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := postBacktestRunSpec(t, tc.body)
+			require.Equal(t, http.StatusBadRequest, w.Code, "异步格式带内核路由字段必须 400, body=%s", w.Body.String())
+			assert.Contains(t, w.Body.String(), "rejected, not ignored", "必须是 fail-closed 拒绝措辞")
+			assert.Contains(t, w.Body.String(), tc.wantKey, "错误必须点名被拒字段")
+		})
+	}
+}

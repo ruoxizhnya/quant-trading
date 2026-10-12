@@ -36,10 +36,6 @@ import (
 //   - Missing:  IDs that could not be resolved (with reason), plus any
 //               response whose status is outside the frozen tri-state
 //               (fail-closed: 说不清的不进成功集).
-//   - Summary:  one row per completed report with the metrics the
-//               comparison table actually renders (TotalReturn, Sharpe,
-//               MaxDrawdown, WinRate, ...). Pre-flattened so the
-//               frontend doesn't have to re-walk the object graph.
 //   - Best*:    per-metric winners over Entries only — the "best Sharpe",
 //               "best Calmar", "lowest drawdown" rows in the comparison
 //               table. Empty string when the metric is missing from

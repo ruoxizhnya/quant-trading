@@ -42,6 +42,25 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 
 			var jobReq backtest.CreateJobRequest
 			if json.Unmarshal(bodyBytes, &jobReq) == nil && jobReq.StrategyID != "" && jobReq.Universe != "" {
+				// K9 fail-closed：异步 job 格式（CreateJobRequest）尚无 kernel / engine_params
+				// 字段（K10 才做 EngineRunner 路由），json.Unmarshal 会静默吞掉它们。请求带了
+				// 就点名 400 拒绝，不静默丢弃 —— 与 ValidateRunSpec 的 "rejected, not ignored"
+				// 同一原则。
+				var raw map[string]json.RawMessage
+				if json.Unmarshal(bodyBytes, &raw) == nil {
+					var rejected []string
+					for _, key := range []string{"kernel", "engine_params"} {
+						if _, ok := raw[key]; ok {
+							rejected = append(rejected, key)
+						}
+					}
+					if len(rejected) > 0 {
+						httpserver.Fail(c, http.StatusBadRequest, fmt.Sprintf(
+							"fields [%s] rejected, not ignored: kernel/engine_params are not accepted on the async job endpoint until K10 (EngineRunner routing)",
+							strings.Join(rejected, ", ")))
+						return
+					}
+				}
 				logger.Info().
 					Str("strategy", jobReq.StrategyID).
 					Str("start_date", jobReq.StartDate).
