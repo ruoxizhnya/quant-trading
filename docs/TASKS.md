@@ -404,7 +404,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | **AUD-61** | ⬜ e2e UI 套件与前端结构严重脱节（干净环境实测 127 passed / 34 failed / 2 skipped；34 条全归因、与代码改动无关） | ① 按页面分批重对齐选择器与期望值（工作量大）；② 先 `test.fixme` + 显式登记恢复「全绿」可信度再消债。⚠️ 不得把「34 条红」洗成「已验证通过」，也不得放宽断言消红 |
 | **P2-8** | ✅ 已裁决关闭（2026-10-09，若曦授权「按你的建议走」）：**不落 hfq 表** | **裁决：不落 hfq，回测一律用 qfq。**取证与理由：① hfq 价 = qfq 价 × k（k = 每股累积复权因子，**因股而异**），**单位不是「元」** ⇒ 固定资金下股数计算错误 ⇒ 改写票池成分与权重；② **资金无法按同一基准缩放**——不同股票 k 不同，组合层面不存在统一基准，这是几何事实不是实现问题；③ **hfq 与 qfq 的收益率序列逐点相同**（已验证）⇒ hfq 不提供 qfq 没有的 alpha 信息；④ 实测 `splits` 0 行、`dividends` 0 行、`ohlcv_daily_qfq` **无复权因子列** ⇒ 本地无法自行推导 hfq，只能靠数据源且无法自校验。⇒ hfq 唯一增量价值是「长期走势的直观展示（复权净值曲线）」，而**回测必须用 qfq**（价格真实 ⇒ 股数/权重正确）。落 hfq 是纯风险无收益：存储翻倍（390 万行 ×2）+ 引入「拿 hfq 跑固定资金回测」的误用风险（错误结论极难察觉，与 OBS-01 同源）。**若将来确需 hfq（如 UI 展示复权净值）**：由数据源直接提供 hfq 序列或复权因子列，本地不自行推导；落库必须在 schema 注释与文档标注「单位非元，禁止用于资金/股数计算」，且引擎侧要有护栏拒绝 hfq 作为回测价格源 |
 | **P2-1** | ⬜ 宏观数据源（跨境那一半已做完，见 quant-trading-docs 仓 `docs/guides/data-dependencies.md`） | 补宏观数据源 —— **六字段工单已补，见表格下方 `### P2-1` 小节** |
-| **P2-2** | ⬜ 产业链数据底座 | 补产业链数据底座 |
+| **P2-2** | 🔶 底座代码已完成（2026-10-12，`8c922c9`/`3bc0995`/`fd10a7f`，四任务深度审查判定达标）；审查收尾三件未清（1 🟠 + 2 🟡） | 收尾工单见表格下方 **P2-2-R1** 小节 |
 | **NT 决策门** | ⛔ 阻塞（前置：K15 完成 + NT v2.0.0 正式版发布） | 阶段 2 对齐数据在手后裁决**三选一**：① 推进阶段 3（K16 双内核生产化）/ ② 长期双内核停在 PoC / ③ 回退（废弃侧车，落「借鉴设计增强 Go 内核」方案）。届时 **VeighNa 并列评估**（A 股覆盖更好的 Python 候选）；**K4「`impact` 是否设为默认滑点模型」一并在此裁决**（依据双跑对比数据，见 K4「待裁决」条）。裁决结果写入 ADR-031 |
 
 ### P2-1 · 宏观数据源（六字段工单，2026-10-12 补全）
@@ -420,6 +420,23 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：不做跨境（已完）；不消费宏观数据产因子/策略（消费方另案）；首版不接 FRED / World Bank / Alpha Vantage（key 增量为零）；不动 P2-2 四表与行情链路；不碰内核线目录 `pkg/kernel`/`pkg/backtest` 撮合/`contracts`（K10、K17 并行区域）；mootdx/实时行情不在范围。
 - **⑤ 验收**：`go build ./...` + 全量 `go test ./...` 绿（本地无 -race，CI 覆盖）；真库 migrate 后 `\d quant.macro_series` 与 EnsureSchema 一致；导入幂等测试（同批重导行数不变）；查询 API httptest 契约测试（正常 / 空结果 / 非法参数 400）；`TUSHARE_TOKEN` 可用时真拉 ≥1 条宏观指标入库取证（无 token 则 fixture 全绿 + commit message 登记「真拉未实测」）。**破坏验证**（改坏→红→还原，留证 commit message）：① 删 source 的 NOT NULL → 溯源约束测试红；② 导入器改吞错（log 后 continue 返 nil）→ 错误传播测试红；③ 撤唯一键 → 幂等测试红（重导行数翻倍）。
 - **⑥ 边界**：静态宏观数据层 + 导入 + 只读查询，core 仓一个 atomic commit（`feat(data): P2-1 宏观数据源 …`）；指南 §待核实 回写在 quant-trading-docs 仓单独 commit（跨仓各自一 commit）。
+
+### P2-2-R1 · 产业链数据底座审查收尾（三件套，2026-10-12 深度审查立单）
+
+> 来源：2026-10-12 对 K9/K11/K12/P2-2 四任务深度审查（四任务判定**达标**，无 🔴；发现 1 🟠 + 2 🟡，全部归属 P2-2，本工单为其可执行化）。审查报告：WorkBuddy 会话工作区 `quant-review-report.md`。审查基准（实测）：core 提交态全量 `go test ./...` **67 包 0 FAIL**（含真库）；`./internal/repoguard/ ./pkg/...` **61 ok**；UI 仓 `b28d5b6` typecheck 0 错 / lint 0 error / vitest **221/221** / Playwright K9 invalid e2e **1 绿**；UI 破坏腿复现 **2 红→还原**。
+
+- **① 目标**：清掉 P2-2（`8c922c9`/`3bc0995`/`fd10a7f`）审查遗留三件事——seed CSV 可导入性缺陷（🟠）、本文件台账关闭（🟡）、真实数据入库验证（🟡）——完成后 §五 P2-2 行关闭。
+- **② 上下文**：
+  - **R1（🟠）seed CSV BOM**：`testdata/industry_vitality_seed.csv` 带 UTF-8 BOM（实测首三字节 `ef bb bf`）；`ImportIndustryVitalityCSV` 表头归一化仅 `strings.TrimSpace`，Go 1.25 下 U+FEFF 非空白字符（`TrimSpace("\ufeffindustry_code") != "industry_code"` 已实证）→ 直接导入该文件必报「缺列 industry_code」。且全仓无任何代码/脚本/测试引用该文件（grep 无命中，测试全用无 BOM 的 inline CSV）——**seed 文件可导入性零证明**（项目自己的标准：未证明的声明等于没有）。
+  - **R2（🟡）台账未关**：本文件 §五 P2-2 行仍 ⬜ 且无收口记录（K9/K11/K12/K10 均有 ✅ 收口记录）；该任务的定义就是关闭此行。
+  - **R3（🟡）底座未喂数**：真库 `quant.sw_industry_tree` / `supply_chain_edge` / `industry_vitality` / `etf_constituent` 四表 0 行（2026-10-12 实测）；tushare `index_classify` / `index_member` / `fund_portfolio` 免费额度下真实可用性未验证——`8c922c9` 所称「导入幂等（真库自灌自证）」是代码构造行自导，非真实拉取（与 stock_fundamentals 空表同风险面）。
+- **③ 要求**：
+  1. R1：`pkg/data/supply_chain.go` 表头循环加 `h = strings.TrimPrefix(h, "\ufeff")` 后再 TrimSpace（防 Windows 编辑器另存 BOM 的普遍场景）；补一条直接读 `testdata/industry_vitality_seed.csv` **真文件**的测试腿，让 seed 从此有消费方；
+  2. R2：本工单收口时同步——§五 P2-2 行打 ✅ + 补 P2-2 简短收口记录（提交号 + 验收要点 + 遗留指向本工单）；
+  3. R3：真实导入验证——依次真拉 `index_classify`（全量行业树）、`index_member`（≥1 个一级行业成分）、`fund_portfolio`（≥1 只 ETF）+ seed CSV 导入，逐接口记录额度/权限结果与四表行数；任一接口额度不可用 → 把结论登记进本工单（对齐「stock_fundamentals 等三表空属设计行为」的既有口径），不阻塞 R1/R2。
+- **④ 约束与非目标**：不改 DDL 与唯一键语义、不动 P2-2 既有存储/导入/API 行为；不做 K60 因子/传导计算、不做 P2-1 宏观、不做 UI；不碰 K9–K12 已冻结契约与 K10 注册表。
+- **⑤ 验收**：R1——真文件测试腿绿，且破坏腿（去掉 TrimPrefix → 红，还原绿）；全量 `go test ./...` 绿。R3——四表行数 > 0 或逐接口额度结论已登记。R1+R2 完成后 §五 P2-2 行 ✅。
+- **⑥ 边界**：R1（代码+测试+台账关行）core 仓一个 atomic commit（`fix(data): P2-2-R1 seed CSV BOM …`）；R3 结果登记可为后续 docs commit；逐接口真拉记录写进本工单收口记录。
 
 ---
 
