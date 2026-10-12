@@ -851,6 +851,30 @@ SELECT create_hypertable('factor_cache', 'date');
 | `quant.external_signals` | strategy-runtime | 外部模型信号注入（L3b，K7，`as_of` 防前视 + `content_hash` 可追溯） |
 | `audit.message_log` | eventstore | 模块间消息（先记录后分发，BusTap 语义） |
 
+### 产业链静态数据层（P2-2，已实施 — quant schema 四表）
+
+> ADR-023 数据层 L1「产业链图谱」的静态底座（TASKS.md §五 P2-2，2026-10-12）。取代手抄快照：四表统一带 `source`（来源标识）+ `as_of`（观察时点）溯源列，各有幂等唯一约束（同键重导刷新行，不插新行）。加表唯一执行路径为 `pkg/storage/postgres.go` 内联 `migrate()`（Migration 049，DDL 文本 `SupplyChainSchemaDDL`，镜像 `docs/migrations/049_add_supply_chain_tables.sql`）。
+
+| 表 | 唯一键（幂等） | 用途 |
+|---|---|---|
+| `quant.sw_industry_tree` | `code` | 申万行业树（`parent_code` 一级行业为空串哨兵；`is_leaf` 由父子关系导入时推导） |
+| `quant.supply_chain_edge` | `upstream+downstream+relation` | 组件→整机 / 上下游映射；`relation=industry_member` 为申万行业成分（index_member） |
+| `quant.industry_vitality` | `industry_code+metric+obs_date+source` | 行业景气指标（`obs_date` 为 DATE，PIT；唯一键含 source——不同来源各行其行） |
+| `quant.etf_constituent` | `etf_code+symbol+obs_date` | ETF 成分（`obs_date` 为报告期，PIT；`weight` 为占净值比例百分数） |
+
+**导入**（`pkg/data/supply_chain.go`，ETL 错误一律向上传播、幂等落库）：tushare `index_classify` → 行业树；`index_member` → 成分边；`fund_portfolio` → ETF 成分；行业景气指标首版为 seed CSV 导入器（无现成 API，`source` 取自 CSV 列，人工维护）。
+
+**只读查询 API**（`cmd/analysis/handlers_industry.go`，不设 RBAC；空结果为 200 + `[]`；非法参数 400 先于库访问；未接库 503）：
+
+| Method | Path | 参数 | 说明 |
+|---|---|---|---|
+| GET | `/api/industry/tree` | `level`、`parent_code`（均可选） | 行业树节点，按 code 排序 |
+| GET | `/api/industry/edges` | `upstream`/`downstream`/`relation`（至少一个） | 上下游/成分映射；无过滤全表扫描 400 |
+| GET | `/api/industry/vitality` | `industry_code`（必填）、`metric`、`start_date`、`end_date`（可选） | 景气观测，按 (obs_date, metric) 排序 |
+| GET | `/api/industry/etf/{etf_code}/constituents` | `obs_date`（可选） | ETF 成分；省略 obs_date 取最新报告期 |
+
+契约详情（请求/响应 schema）以 `docs/openapi.yaml`（`/api/industry/*`，tag `Industry`）为准。
+
 ### tushare.pro API Adapter
 - REST API with token authentication
 - Rate limiting: 200 requests/minute
