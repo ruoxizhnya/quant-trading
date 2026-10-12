@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -56,10 +57,14 @@ func newMacroTestRouter(t *testing.T) (*gin.Engine, *storage.PostgresStore) {
 	return router, store
 }
 
-// macroGet 发一次 GET 并解出 {total, data}。
+// macroGet 发一次 GET 并解出 {total, data, limit, truncated, hint}
+// （后三者是 R4 新增的 P2-1-R2 字段）。
 func macroGet(t *testing.T, router *gin.Engine, path string) (*httptest.ResponseRecorder, struct {
-	Total int               `json:"total"`
-	Data  []json.RawMessage `json:"data"`
+	Total     int               `json:"total"`
+	Data      []json.RawMessage `json:"data"`
+	Limit     int               `json:"limit"`
+	Truncated bool              `json:"truncated"`
+	Hint      string            `json:"hint"`
 }) {
 	t.Helper()
 	w := httptest.NewRecorder()
@@ -67,8 +72,11 @@ func macroGet(t *testing.T, router *gin.Engine, path string) (*httptest.Response
 	router.ServeHTTP(w, req)
 
 	var body struct {
-		Total int               `json:"total"`
-		Data  []json.RawMessage `json:"data"`
+		Total     int               `json:"total"`
+		Data      []json.RawMessage `json:"data"`
+		Limit     int               `json:"limit"`
+		Truncated bool              `json:"truncated"`
+		Hint      string            `json:"hint"`
 	}
 	if w.Code == http.StatusOK {
 		require.NoErrorf(t, json.Unmarshal(w.Body.Bytes(), &body), "200 响应体应是 JSON: %s", w.Body.String())
@@ -114,12 +122,14 @@ func TestMacroHandler_SeriesRoundtripAndFilters(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMacroSeriesBatch(ctx, rows))
 
-	// 正常查：全量三条，按 obs_date 升序。
+	// 正常查：全量三条，按 obs_date 降序（R4：最新在前）+ 回显生效 limit。
 	w, body := macroGet(t, router, "/api/macro/series?indicator="+source+"-CPI_YOY")
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, 3, body.Total)
 	require.Len(t, body.Data, 3)
-	assert.Contains(t, string(body.Data[0]), `"value":0.8`)
+	assert.Contains(t, string(body.Data[0]), `"value":0.3`, "降序：最新一行（3 月）在前")
+	assert.Equal(t, storage.MacroSeriesDefaultLimit, body.Limit, "未传 limit 时响应应回显默认值")
+	assert.False(t, body.Truncated, "3 行 < 默认 limit，不应标记截断")
 
 	// 日期区间过滤（闭区间）。
 	w, body = macroGet(t, router, "/api/macro/series?indicator="+source+"-CPI_YOY&start_date=2200-02-01&end_date=2200-02-01")
@@ -154,6 +164,49 @@ func TestMacroHandler_BadDateReturns400(t *testing.T) {
 	} {
 		w, _ := macroGet(t, router, path)
 		assert.Equal(t, http.StatusBadRequest, w.Code, "%s 应回 400", path)
+	}
+}
+
+// TestMacroHandler_LimitParam：R4 的 HTTP 契约——limit 生效（降序取最新）、
+// 达上限标记 truncated + hint、非法 limit（0/负数/非数字/超上限）一律 400。
+func TestMacroHandler_LimitParam(t *testing.T) {
+	router, store := newMacroTestRouter(t)
+	source := macroSource()
+	t.Cleanup(func() { macroCleanup(t, store, source) })
+	ctx := context.Background()
+
+	rows := make([]*domain.MacroSeries, 0, 3)
+	for i := 0; i < 3; i++ {
+		rows = append(rows, &domain.MacroSeries{
+			Indicator: source + "-CPI_YOY", Freq: "M",
+			ObsDate: time.Date(2200, time.Month(1+i), 1, 0, 0, 0, 0, time.UTC),
+			Value:   float64(i), Unit: "%", Source: source,
+			AsOf: time.Date(2200, 1, 2, 0, 0, 0, 0, time.UTC),
+		})
+	}
+	require.NoError(t, store.SaveMacroSeriesBatch(ctx, rows))
+
+	// limit=2：返回最新 2 行（降序）+ truncated + hint。
+	w, body := macroGet(t, router, "/api/macro/series?indicator="+source+"-CPI_YOY&limit=2")
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 2, body.Total)
+	assert.Equal(t, 2, body.Limit)
+	assert.True(t, body.Truncated, "len(rows)==limit 时应标记可能截断（OPTION-A：不隐式嗅探）")
+	assert.NotEmpty(t, body.Hint, "truncated 时应带日期下钻提示")
+	assert.Contains(t, string(body.Data[0]), `"value":2`, "降序：最新一行在前")
+
+	// limit=5：未达上限 → 不截断、无 hint。
+	w, body = macroGet(t, router, "/api/macro/series?indicator="+source+"-CPI_YOY&limit=5")
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 3, body.Total)
+	assert.Equal(t, 5, body.Limit)
+	assert.False(t, body.Truncated)
+	assert.Empty(t, body.Hint)
+
+	// 非法 limit → 400（0 是显式非法值——「未传」才是默认语义）。
+	for _, bad := range []string{"0", "-1", "abc", strconv.Itoa(storage.MacroSeriesMaxLimit + 1)} {
+		w, _ := macroGet(t, router, "/api/macro/series?indicator="+source+"-CPI_YOY&limit="+bad)
+		assert.Equal(t, http.StatusBadRequest, w.Code, "limit=%s 应回 400", bad)
 	}
 }
 

@@ -241,8 +241,9 @@ func TestMacroStore_RoundtripFiltersAndIdempotency(t *testing.T) {
 	got, err := store.ListMacroSeries(ctx, MacroSeriesFilter{Indicator: source + "-CPI_YOY", Freq: mcFreqMonthly})
 	require.NoError(t, err)
 	require.Len(t, got, 3)
-	require.InDelta(t, 0.9, got[0].Value, 1e-12, "同键重导应刷新取值（指标会被重述修正）")
-	require.True(t, got[0].ObsDate.Before(got[1].ObsDate), "应按 obs_date 排序")
+	require.InDelta(t, 0.9, got[2].Value, 1e-12,
+		"同键重导应刷新取值（指标会被重述修正）；R4 降序后最旧一行在末位")
+	require.True(t, got[0].ObsDate.After(got[1].ObsDate), "应按 obs_date 降序（R4：最新在前）")
 
 	// 日期区间过滤（闭区间）。
 	start, end := scAsOf(1), scAsOf(2)
@@ -269,6 +270,58 @@ func TestMacroStore_RoundtripFiltersAndIdempotency(t *testing.T) {
 	empty, err := store.ListMacroSeries(ctx, MacroSeriesFilter{Indicator: "NO_SUCH_INDICATOR"})
 	require.NoError(t, err)
 	require.Empty(t, empty, "空结果应是空切片而非 error")
+}
+
+// TestMacroStore_ListLimitAndDescOrder 钉住 R4：查询按 obs_date 降序
+// （最新在前）、受 Limit 限制（截断只丢最旧的行）；未显式传 Limit 时
+// 走默认值。破坏腿：去掉 ORDER BY DESC 或 LIMIT → 本测试红。
+func TestMacroStore_ListLimitAndDescOrder(t *testing.T) {
+	store := scNewStore(t)
+	source := scSource()
+	t.Cleanup(func() { mcCleanup(t, store, source) })
+	ctx := context.Background()
+
+	rows := make([]*domain.MacroSeries, 0, 5)
+	for i := 0; i < 5; i++ {
+		rows = append(rows, &domain.MacroSeries{
+			Indicator: source + "-CPI_YOY", Freq: mcFreqMonthly,
+			ObsDate: scAsOf(i), Value: float64(i), Unit: "%", Source: source, AsOf: scAsOf(9),
+		})
+	}
+	require.NoError(t, store.SaveMacroSeriesBatch(ctx, rows))
+
+	// limit=2：只拿最新的 2 行（scAsOf(4) / scAsOf(3)），降序。
+	got, err := store.ListMacroSeries(ctx, MacroSeriesFilter{Indicator: source + "-CPI_YOY", Limit: 2})
+	require.NoError(t, err)
+	require.Len(t, got, 2, "limit=2 应恰好返回 2 行")
+	require.Equal(t, scAsOf(4).Format("2006-01-02"), got[0].ObsDate.Format("2006-01-02"),
+		"降序：第一行是最新的（截断只丢最旧的行）")
+	require.Equal(t, scAsOf(3).Format("2006-01-02"), got[1].ObsDate.Format("2006-01-02"))
+
+	// 未显式传 Limit：默认路径不截断 5 行小集合，但同样降序。
+	all, err := store.ListMacroSeries(ctx, MacroSeriesFilter{Indicator: source + "-CPI_YOY"})
+	require.NoError(t, err)
+	require.Len(t, all, 5, "默认 limit（1000）不截断 5 行小集合")
+	require.Equal(t, scAsOf(4).Format("2006-01-02"), all[0].ObsDate.Format("2006-01-02"),
+		"默认路径也是降序")
+	require.Equal(t, scAsOf(0).Format("2006-01-02"), all[4].ObsDate.Format("2006-01-02"),
+		"降序：最旧一行在末位")
+}
+
+// TestMacroStore_ListRejectsInvalidLimit：limit 越界 fail-loud
+// （INVALID_INPUT）；0 是「未指定 → 默认」，不算错。校验先于查询
+// （不碰库也返回 400 语义）。
+func TestMacroStore_ListRejectsInvalidLimit(t *testing.T) {
+	store := scNewStore(t)
+	ctx := context.Background()
+
+	for _, limit := range []int{-1, MacroSeriesMaxLimit + 1} {
+		_, err := store.ListMacroSeries(ctx, MacroSeriesFilter{Indicator: "CPI_YOY", Limit: limit})
+		require.Errorf(t, err, "limit=%d 应被拒", limit)
+		var appErr *apperrors.AppError
+		require.Truef(t, errors.As(err, &appErr) && appErr.Code == apperrors.ErrCodeInvalidInput,
+			"limit=%d 拒绝原因应是 INVALID_INPUT，实际: %v", limit, err)
+	}
 }
 
 // TestMacroStore_RejectsInvalidRows fail-loud：空身份列 / 零 as_of /

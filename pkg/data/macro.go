@@ -11,7 +11,9 @@ package data
 // 纪律（与 supply_chain.go 的 Fetch* 同款）：
 //   - **错误一律向上传播**：call 失败、响应形状不符契约、Save 失败，全部
 //     apperrors 包装后 return nil, err。绝不 log 后 continue——那会让「上游
-//     挂了」伪装成「导入了 0 行」（破坏验证②的 Red 腿）。
+//     挂了」伪装成「导入了 0 行」（破坏验证②的 Red 腿）。P2-1-R2 起同一
+//     纪律覆盖「响应有行但全被跳过」：跳过计数随 normalize 返回，全跳过
+//     fail-loud（macroAllSkippedError），部分跳过留 Info 日志。
 //   - 幂等在存储层：ON CONFLICT DO UPDATE（见 pkg/storage/macro.go），同
 //     唯一键重导刷新行而不插新行。
 //   - 溯源列：tushare 导入的 source 恒为 "tushare"，as_of 取导入时刻。
@@ -156,6 +158,9 @@ type MacroStore interface {
 // 月频指标一次请求拿全量（各接口限量 2000-5000 行，历史累计均远低于）；
 // 日频指标按年分段（见 macroIndicatorSpec.SinceYear 注释）。任一段失败
 // 即整体报错——上游故障必须传播，不许伪装成「导入了 0 行」。
+// R2（P2-1-R2）补强：某次响应**有行但全部被跳过**（坏日期 / 值列全
+// nil）同样报错——「0 行」只有在**上游确实没返回任何行**时才是合法答案
+// （见 macroAllSkippedError）。
 func (c *TushareClient) FetchMacroIndicator(ctx context.Context, indicator string) ([]domain.MacroSeries, error) {
 	spec, ok := macroIndicatorSpecs[indicator]
 	if !ok {
@@ -163,23 +168,34 @@ func (c *TushareClient) FetchMacroIndicator(ctx context.Context, indicator strin
 			fmt.Sprintf("未知宏观指标 %q（目录：%v）", indicator, MacroIndicators()))
 	}
 
-	asOf := time.Now().UTC()
+	now := time.Now().UTC() // R6：as_of 与窗口计算共用同一时间点
+	asOf := now
+	windows, err := macroWindowsOrErr(spec, now)
+	if err != nil {
+		return nil, err
+	}
 	var all []domain.MacroSeries
-	for _, params := range macroFetchWindows(spec, time.Now().UTC()) {
+	for _, params := range windows {
 		resp, err := c.call(ctx, spec.APIName, params, spec.Fields)
 		if err != nil {
 			return nil, err
 		}
-		rows, err := normalizeMacroSeries(resp, spec, MacroSourceTushare, asOf)
+		res, err := normalizeMacroSeries(resp, spec, MacroSourceTushare, asOf)
 		if err != nil {
 			return nil, apperrors.Wrap(err, apperrors.ErrCodeDataQuality,
 				fmt.Sprintf("%s 响应形状不符合契约（缺 %s/%s 列）", spec.APIName, spec.DateField, spec.Field),
 				"data.FetchMacroIndicator")
 		}
-		all = append(all, rows...)
+		if err := macroAllSkippedError(spec.APIName, spec.Indicator, len(resp.Data.Items), res); err != nil {
+			return nil, err
+		}
+		logMacroSkipped(c, spec.Indicator, spec.APIName, res)
+		all = append(all, res.Rows...)
 	}
 
 	if len(all) == 0 {
+		// 所有响应都是真空（items==0）——上游确实没返回任何行，合法。
+		// （「有行但全被跳过」已在循环内 fail-loud。）
 		return nil, nil
 	}
 	ptrs := make([]*domain.MacroSeries, len(all))
@@ -202,8 +218,11 @@ func (c *TushareClient) FetchMacroIndicator(ctx context.Context, indicator strin
 // 限「1 次/小时」（40203），把 LPR_1Y 和 LPR_5Y 分两次拉的话，第二次必然
 // 撞限，目录里就有一个指标永远拉不到。分组后一次响应喂两个 spec，行数不变。
 //
-// 分组键是 APIName：同接口的两个 spec 的窗口序列必须一致（首版目录里
-// 确实一致——都是月频全量或都是日频全量），不一致时按单条目退化为逐条拉取。
+// 分组键是 APIName。组不变量（fields / 日期列 / 日期格式 / 固定参数 /
+// 分段窗口）必须逐项一致（R3）——用 specs[0].Fields 请求来的响应要能
+// 喂给组内每个 spec。不一致时报错点名「指标目录配置不自洽」：那是静态
+// 目录 bug，不许静默退化逐条拉（对 shibor_lpr 这类流控接口，退化本身
+// 就是故障；且错误会伪装成「响应形状不符契约」，把根因埋掉）。
 // 接口间顺序执行（不并发）：tushare 流控按 token 计，并发只会更快撞限。
 // 任一接口失败即整体报错。
 func (c *TushareClient) FetchMacroIndicators(ctx context.Context, indicators ...string) ([]domain.MacroSeries, error) {
@@ -226,36 +245,43 @@ func (c *TushareClient) FetchMacroIndicators(ctx context.Context, indicators ...
 		groups[spec.APIName] = append(groups[spec.APIName], spec)
 	}
 
-	asOf := time.Now().UTC()
+	now := time.Now().UTC() // R6：as_of 与全部分组窗口共用同一时间点
+	asOf := now
 	var all []domain.MacroSeries
 	for _, api := range order {
 		specs := groups[api]
-		if len(specs) > 1 && !sameWindows(specs) {
-			// 窗口不一致无法共用响应 → 退化为逐条拉取（结果等价，多花请求）。
-			for _, spec := range specs {
-				rows, err := c.FetchMacroIndicator(ctx, spec.Indicator)
-				if err != nil {
-					return nil, err
-				}
-				all = append(all, rows...)
+		if len(specs) > 1 {
+			// R3：共用一次响应前先验组不变量。不一致 = 目录配置不自洽
+			// （静态 bug）→ 报错点名，不退化、不伪装成上游过错。
+			if share, reason := specsCanShareResponse(specs, now); !share {
+				return nil, apperrors.New(apperrors.ErrCodeInternal, fmt.Sprintf(
+					"宏观指标目录配置不自洽：同接口 %s 的 %v 无法共用一次响应（%s）——修正 pkg/data/macro.go 的 macroIndicatorSpecs，不要改这里的错误信息",
+					api, apiIndicatorNames(specs), reason))
 			}
-			continue
 		}
 
+		windows, err := macroWindowsOrErr(specs[0], now)
+		if err != nil {
+			return nil, err
+		}
 		var batch []domain.MacroSeries
-		for _, params := range macroFetchWindows(specs[0], time.Now().UTC()) {
+		for _, params := range windows {
 			resp, err := c.call(ctx, api, params, specs[0].Fields)
 			if err != nil {
 				return nil, err
 			}
 			for _, spec := range specs {
-				rows, err := normalizeMacroSeries(resp, spec, MacroSourceTushare, asOf)
+				res, err := normalizeMacroSeries(resp, spec, MacroSourceTushare, asOf)
 				if err != nil {
 					return nil, apperrors.Wrap(err, apperrors.ErrCodeDataQuality,
 						fmt.Sprintf("%s 响应形状不符合契约（缺 %s/%s 列）", api, spec.DateField, spec.Field),
 						"data.FetchMacroIndicators")
 				}
-				batch = append(batch, rows...)
+				if err := macroAllSkippedError(api, spec.Indicator, len(resp.Data.Items), res); err != nil {
+					return nil, err
+				}
+				logMacroSkipped(c, spec.Indicator, api, res)
+				batch = append(batch, res.Rows...)
 			}
 		}
 		if len(batch) == 0 {
@@ -276,9 +302,58 @@ func (c *TushareClient) FetchMacroIndicators(ctx context.Context, indicators ...
 	return all, nil
 }
 
+// specsCanShareResponse 报告一组同接口 spec 能否共用一次响应（R3）。
+// 除窗口序列一致（sameWindows）外，组不变量必须逐项一致——用 specs[0]
+// 的 fields 请求来的响应，要能喂给组内每一个 spec：
+//   - Fields：响应列形状（列不同 → 另一 spec 会报「缺列」，错误信息误导）；
+//   - DateField / DateLayout：obs_date 的解析口径；
+//   - Params：接口级固定参数（如 fx_daily 的 ts_code，不同标的不能同拉）。
+//
+// 不一致返回 (false, 原因)。这是静态目录配置 bug（不是运行时上游变故）：
+// 调用方报错点名「目录配置不自洽」，不许静默退化逐条拉。
+func specsCanShareResponse(specs []macroIndicatorSpec, now time.Time) (bool, string) {
+	base := specs[0]
+	for _, spec := range specs[1:] {
+		switch {
+		case spec.Fields != base.Fields:
+			return false, fmt.Sprintf("%s 与 %s 的 fields 不同（%q vs %q）",
+				base.Indicator, spec.Indicator, base.Fields, spec.Fields)
+		case spec.DateField != base.DateField:
+			return false, fmt.Sprintf("%s 与 %s 的日期列不同（%q vs %q）",
+				base.Indicator, spec.Indicator, base.DateField, spec.DateField)
+		case spec.DateLayout != base.DateLayout:
+			return false, fmt.Sprintf("%s 与 %s 的日期格式不同（%q vs %q）",
+				base.Indicator, spec.Indicator, base.DateLayout, spec.DateLayout)
+		case !equalMacroParams(spec.Params, base.Params):
+			return false, fmt.Sprintf("%s 与 %s 的固定参数不同（%v vs %v）",
+				base.Indicator, spec.Indicator, base.Params, spec.Params)
+		}
+	}
+	if !sameWindows(specs, now) {
+		return false, fmt.Sprintf("%v 的分段窗口序列不一致（检查 SinceYear）",
+			apiIndicatorNames(specs))
+	}
+	return true, ""
+}
+
+// equalMacroParams 报告两组接口级固定参数是否相等（nil 与空 map 等值）。
+func equalMacroParams(a, b map[string]interface{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		bv, ok := b[k]
+		if !ok || bv != av {
+			return false
+		}
+	}
+	return true
+}
+
 // sameWindows 报告一组 spec 的分段窗口序列是否一致（能否共用一次响应）。
-func sameWindows(specs []macroIndicatorSpec) bool {
-	now := time.Now().UTC()
+// now 由调用方注入（R6）：同一次导入内 as_of 与窗口计算共用一个时间点，
+// 跨年边界瞬间不再存在「两次 time.Now 结果不同」的缝隙。
+func sameWindows(specs []macroIndicatorSpec, now time.Time) bool {
 	base := macroFetchWindows(specs[0], now)
 	for _, spec := range specs[1:] {
 		other := macroFetchWindows(spec, now)
@@ -309,20 +384,25 @@ func apiIndicatorNames(specs []macroIndicatorSpec) []string {
 }
 
 // ProbeMacro 对指标做一次「只取不落」的连通性探测（HealthCheck 用）：
-// 按目录发一次 call，成功即返回 nil。不 normalize、不落库——探测不应
+// 发首窗口一次 call，成功即返回 nil。不 normalize、不落库——探测不应
 // 产生数据副作用。
+//
+// R1（P2-1-R2）：只发**第一个**窗口。探测的语义是连通性，不按数据量
+// 放大——此前遍历全部窗口会让 USDCNY_CLOSE（2019–2026 分 8 段）每次
+// 探测发 8 次请求，白吃 fx_daily（2000 积分档）配额。同接口同鉴权下，
+// 单一窗口的成败足以判定连通性。
 func (c *TushareClient) ProbeMacro(ctx context.Context, indicator string) error {
 	spec, ok := macroIndicatorSpecs[indicator]
 	if !ok {
 		return apperrors.New(apperrors.ErrCodeInvalidInput,
 			fmt.Sprintf("未知宏观指标 %q（目录：%v）", indicator, MacroIndicators()))
 	}
-	for _, params := range macroFetchWindows(spec, time.Now().UTC()) {
-		if _, err := c.call(ctx, spec.APIName, params, spec.Fields); err != nil {
-			return err
-		}
+	windows, err := macroWindowsOrErr(spec, time.Now().UTC())
+	if err != nil {
+		return err
 	}
-	return nil
+	_, err = c.call(ctx, spec.APIName, windows[0], spec.Fields)
+	return err
 }
 
 // macroFetchWindows 构造一次导入所需的全部请求参数：
@@ -351,7 +431,31 @@ func macroFetchWindows(spec macroIndicatorSpec, now time.Time) []map[string]inte
 	return windows
 }
 
+// macroWindowsOrErr 取 spec 的请求窗口；空序列是目录配置错误（SinceYear
+// 晚于当前年份——导入与探测都会静默什么都不做），fail-loud。
+func macroWindowsOrErr(spec macroIndicatorSpec, now time.Time) ([]map[string]interface{}, error) {
+	windows := macroFetchWindows(spec, now)
+	if len(windows) == 0 {
+		return nil, apperrors.New(apperrors.ErrCodeInternal, fmt.Sprintf(
+			"宏观指标 %s 无可用请求窗口（SinceYear=%d 晚于当前年份 %d，目录配置不自洽）",
+			spec.Indicator, spec.SinceYear, now.Year()))
+	}
+	return windows, nil
+}
+
 // ── normalize（纯函数：TushareResponse → domain 行） ─────────────────────
+
+// normalizedMacroRows 是 normalizeMacroSeries 的产出：Rows 为可入库行，
+// 两个跳过计数解释「为什么少了行」——「坏日期」（上游改格式/空日期）与
+// 「数值 nil」（未发布）是两种不同变故，诊断时不能混（R2，P2-1-R2）。
+type normalizedMacroRows struct {
+	Rows            []domain.MacroSeries
+	SkippedBadDate  int // obs_date 解析失败（PIT 身份不完整）
+	SkippedNilValue int // 数值列 nil / 行缺列（未发布，不补 0）
+}
+
+// Skipped 是总跳过行数（坏日期 + 数值 nil）。
+func (n normalizedMacroRows) Skipped() int { return n.SkippedBadDate + n.SkippedNilValue }
 
 // macroColumnIndex 在响应的 Fields 头里按**名字（大小写不敏感）**找列：
 // names 靠前的优先，与列在响应里的实际顺序无关。大小写不敏感是因为
@@ -379,25 +483,29 @@ func macroColumnIndex(resp *TushareResponse, names ...string) int {
 //     缺失值折成 0 等于编数据（同 tushare.go 的 P2-10 教训）；
 //   - obs_date 解析失败的行跳过（PIT 身份不完整不进库，同
 //     normalizeETFPortfolio 先例）；
-//   - 缺日期列或数值列（整个响应没有该列）→ 报错，形状不符契约。
-func normalizeMacroSeries(resp *TushareResponse, spec macroIndicatorSpec, source string, asOf time.Time) ([]domain.MacroSeries, error) {
+//   - 缺日期列或数值列（整个响应没有该列）→ 报错，形状不符契约；
+//   - 跳过行数随返回值计数（R2）：调用方在「有行但全被跳过」时
+//     fail-loud，部分跳过留 Info 日志。
+func normalizeMacroSeries(resp *TushareResponse, spec macroIndicatorSpec, source string, asOf time.Time) (normalizedMacroRows, error) {
 	iDate := macroColumnIndex(resp, spec.DateField)
 	iVal := macroColumnIndex(resp, spec.Field)
 	if iDate < 0 || iVal < 0 {
-		return nil, fmt.Errorf("%s 响应缺 %s/%s 列（实际 fields=%v）",
+		return normalizedMacroRows{}, fmt.Errorf("%s 响应缺 %s/%s 列（实际 fields=%v）",
 			spec.APIName, spec.DateField, spec.Field, resp.Data.Fields)
 	}
 
-	var rows []domain.MacroSeries
+	var out normalizedMacroRows
 	for _, item := range resp.Data.Items {
 		obs, ok := parseMacroObsDate(tushareCell(item, iDate), spec.DateLayout)
 		if !ok {
+			out.SkippedBadDate++
 			continue // 日期身份不完整，不进库
 		}
 		if iVal >= len(item) || item[iVal] == nil {
+			out.SkippedNilValue++
 			continue // 数值未发布，不进库（不补 0）
 		}
-		rows = append(rows, domain.MacroSeries{
+		out.Rows = append(out.Rows, domain.MacroSeries{
 			Indicator: spec.Indicator,
 			Freq:      spec.Freq,
 			ObsDate:   obs,
@@ -407,7 +515,34 @@ func normalizeMacroSeries(resp *TushareResponse, spec macroIndicatorSpec, source
 			AsOf:      asOf,
 		})
 	}
-	return rows, nil
+	return out, nil
+}
+
+// macroAllSkippedError 是 R2 的 fail-loud 闸门：一次响应**有行**却一行
+// 都没能入库（全坏日期 / 值列全 nil）时拒绝静默成功——这是上游变故的
+// 典型形态（改格式、列整体变空），不是「导入 0 行」的合法场景。真空
+// 响应（items==0）不在此列：那是上游确实没有数据。
+func macroAllSkippedError(api, indicator string, items int, res normalizedMacroRows) error {
+	if items == 0 || len(res.Rows) > 0 {
+		return nil
+	}
+	return apperrors.New(apperrors.ErrCodeDataQuality, fmt.Sprintf(
+		"宏观指标 %s：%s 响应返回 %d 行但全部被跳过（坏日期 %d / 数值 nil %d）——上游形状/格式变故，拒绝以「导入 0 行」伪装成功",
+		indicator, api, items, res.SkippedBadDate, res.SkippedNilValue))
+}
+
+// logMacroSkipped 在 normalize 跳过了行时记一条 Info 日志（R2）：部分
+// 跳过本身可能是合法状态（尾行未发布），但跳过率异常是上游变故的前兆，
+// 必须留痕以便审计。
+func logMacroSkipped(c *TushareClient, indicator, api string, res normalizedMacroRows) {
+	if res.Skipped() == 0 {
+		return
+	}
+	c.logger.Info().Str("indicator", indicator).Str("api", api).
+		Int("rows", len(res.Rows)).
+		Int("skipped_bad_date", res.SkippedBadDate).
+		Int("skipped_nil_value", res.SkippedNilValue).
+		Msg("macro rows skipped during normalize")
 }
 
 // parseMacroObsDate 解析宏观观测日期：月频 "200601" → 当月首日；

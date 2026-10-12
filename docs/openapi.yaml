@@ -2779,9 +2779,15 @@ paths:
         indicators use the first day of the month; `fx_daily`'s `trade_date`
         is stored as returned (GMT, per Tushare docs — no timezone shift).
 
-        `indicator` is required. `freq` (M/D) and the inclusive
-        `start_date` / `end_date` bounds are optional. Empty results return
-        `200` with an empty array — "no rows" is an answer, not an error.
+        `indicator` is required. `freq` (M/D), the inclusive `start_date` /
+        `end_date` bounds, and `limit` (row cap: default 1000, max 5000) are
+        optional. Results are ordered by `obs_date` **descending** (newest
+        first) and capped at `limit` — truncation drops the oldest rows,
+        never the newest. When the returned row count reaches `limit` the
+        response carries `truncated: true` plus a `hint` describing how to
+        drill into older windows via `start_date` / `end_date`. Empty results
+        return `200` with an empty array — "no rows" is an answer, not an
+        error.
       operationId: listMacroSeries
       parameters:
         - name: indicator
@@ -2818,9 +2824,26 @@ paths:
             type: string
             format: date
             example: '2026-08-31'
+        - name: limit
+          in: query
+          required: false
+          description: |
+            Maximum rows to return (1..5000, default 1000). Values outside
+            1..5000 — including 0 — are rejected with `400`. Truncation
+            keeps the newest rows; narrow `start_date` / `end_date` to
+            reach older ones.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 1000
+            example: 1000
       responses:
         '200':
-          description: Matching observations, ordered by obs_date
+          description: |
+            Matching observations, newest first (`obs_date` descending),
+            capped at `limit`. `truncated: true` means the cap was hit and
+            older rows may exist.
           content:
             application/json:
               schema:
@@ -2828,13 +2851,29 @@ paths:
                 properties:
                   total:
                     type: integer
+                    description: Number of rows returned (capped at limit)
                     example: 80
                   data:
                     type: array
                     items:
                       $ref: '#/components/schemas/MacroSeries'
+                  limit:
+                    type: integer
+                    description: Effective row cap applied to this response
+                    example: 1000
+                  truncated:
+                    type: boolean
+                    description: |
+                      Present and `true` when `total == limit` — older rows
+                      may exist. Use `start_date` / `end_date` to drill into
+                      older windows.
+                    example: true
+                  hint:
+                    type: string
+                    description: Human-readable next step shown when `truncated` is true.
+                    example: 结果达到 limit=1000，可能被截断；用 start_date/end_date 缩小范围获取更旧的数据
         '400':
-          description: Missing `indicator`, malformed date, or `start_date` after `end_date`
+          description: Missing `indicator`, malformed date, `start_date` after `end_date`, or `limit` outside 1..5000
           content:
             application/json:
               schema:

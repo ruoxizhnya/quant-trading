@@ -6,11 +6,16 @@ package main
 // Endpoints (all GET, no RBAC — same public read posture as the Evidence
 // and Industry APIs):
 //
-//	GET /api/macro/series?indicator=CPI_YOY&freq=M&start_date=&end_date=
+//	GET /api/macro/series?indicator=CPI_YOY&freq=M&start_date=&end_date=&limit=
 //
 // Contract notes (identical posture to IndustryHandler):
 //   - Empty result is a first-class 200 with an empty array — "no rows" is
 //     an answer, not a sentinel error.
+//   - Results are newest-first (obs_date DESC) and capped at `limit`
+//     (default 1000 / max 5000; R4 of P2-1-R2). When the cap is hit the
+//     response carries truncated=true + a hint — we do NOT silently fetch
+//     one extra row to sniff whether more data exists (OPTION-A: report
+//     "may be truncated", let the caller narrow start_date/end_date).
 //   - Bad parameters fail fast with 400 before any store access (parse, then
 //     validate, then query) — a malformed date never reaches the database.
 //   - The store may be a zero-value *storage.PostgresStore (nil pool) when
@@ -23,7 +28,9 @@ package main
 // handlers_industry.go: struct + functional options + New + RegisterRoutes.
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
@@ -77,30 +84,45 @@ func (h *MacroHandler) storeReady() bool {
 	return h.store != nil && h.store.DB() != nil
 }
 
-// macroResponse is the shared envelope: total + data. Consistent with the
-// industry endpoints' {total, ...} shape.
+// macroResponse is the shared envelope: total + data + (limit/truncated/hint
+// since P2-1-R2 R4). total counts the rows actually returned (capped at
+// limit). Consistent with the industry endpoints' {total, ...} shape.
 type macroResponse struct {
-	Total int `json:"total"`
-	Data  any `json:"data"`
+	Total     int    `json:"total"`
+	Data      any    `json:"data"`
+	Limit     int    `json:"limit"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Hint      string `json:"hint,omitempty"`
 }
 
 // macroOK 写 200 响应。nil 切片归一为 []：JSON null 会让严格客户端
 // （TS 的 rows.length / rows.map）直接炸——空数组才是「空结果」的正确形状，
 // null 是「出错」的形状（同 industryOK）。
-func macroOK[T any](c *gin.Context, rows []T) {
+//
+// R4：len(rows)==limit 时标记 truncated + hint——不隐式多取 1 行嗅探
+// 「是否真的还有更多」（OPTION-A），把「达到上限」如实上报为「可能被
+// 截断」，由调用方决定是否用日期区间下钻。
+func macroOK[T any](c *gin.Context, rows []T, limit int) {
 	if rows == nil {
 		rows = []T{}
 	}
-	c.JSON(http.StatusOK, macroResponse{Total: len(rows), Data: rows})
+	resp := macroResponse{Total: len(rows), Data: rows, Limit: limit}
+	if len(rows) == limit {
+		resp.Truncated = true
+		resp.Hint = fmt.Sprintf("结果达到 limit=%d，可能被截断；用 start_date/end_date 缩小范围获取更旧的数据", limit)
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
-// handleSeries serves GET /api/macro/series?indicator=&freq=&start_date=&end_date=.
+// handleSeries serves GET /api/macro/series?indicator=&freq=&start_date=&end_date=&limit=.
 //
 // indicator is required (catalog: CPI_YOY / PPI_YOY / PMI / M2 / M2_YOY /
 // TSF_INC / LPR_1Y / LPR_5Y / USDCNY_CLOSE — see pkg/data/macro.go
 // macroIndicatorSpecs). freq is optional (M/D; omit to accept both).
 // start_date / end_date are inclusive YYYY-MM-DD bounds (parsed by
-// parseDateQuery, shared with handlers_industry.go).
+// parseDateQuery, shared with handlers_industry.go). limit is optional
+// (1..5000, default 1000) and is validated before any store access —
+// values outside the range (including 0 and non-numeric) are a 400.
 func (h *MacroHandler) handleSeries(c *gin.Context) {
 	if !h.storeReady() {
 		httpserver.Fail(c, http.StatusServiceUnavailable, "macro data layer unavailable")
@@ -117,6 +139,18 @@ func (h *MacroHandler) handleSeries(c *gin.Context) {
 		Indicator: indicator,
 		Freq:      c.Query("freq"),
 	}
+	limit := storage.MacroSeriesDefaultLimit
+	if v := c.Query("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > storage.MacroSeriesMaxLimit {
+			httpserver.Fail(c, http.StatusBadRequest, fmt.Sprintf(
+				"limit 必须是 1..%d 的整数（默认 %d）",
+				storage.MacroSeriesMaxLimit, storage.MacroSeriesDefaultLimit))
+			return
+		}
+		limit = n
+	}
+	f.Limit = limit
 	start, ok := parseDateQuery(c, "start_date")
 	if !ok {
 		return
@@ -138,5 +172,5 @@ func (h *MacroHandler) handleSeries(c *gin.Context) {
 		httpserver.Fail(c, http.StatusInternalServerError, "failed to list macro series")
 		return
 	}
-	macroOK(c, rows)
+	macroOK(c, rows, f.Limit)
 }

@@ -145,20 +145,21 @@ func TestNormalizeMacroSeries_MonthlyTakesFirstDayOfMonth(t *testing.T) {
 	resp := decodeTushareBody(t, cnCpiBody)
 	asOf := time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	rows, err := normalizeMacroSeries(resp, macroIndicatorSpecs["CPI_YOY"], MacroSourceTushare, asOf)
+	res, err := normalizeMacroSeries(resp, macroIndicatorSpecs["CPI_YOY"], MacroSourceTushare, asOf)
 	require.NoError(t, err)
-	require.Len(t, rows, 2, "数值为 null 的行跳过（不补 0——缺失值折成 0 等于编数据）")
+	require.Len(t, res.Rows, 2, "数值为 null 的行跳过（不补 0——缺失值折成 0 等于编数据）")
+	require.Equal(t, 1, res.SkippedNilValue, "R2：nil 值行的跳过计数（cnCpiBody 第三行全 null）")
 
-	require.Equal(t, "CPI_YOY", rows[0].Indicator)
-	require.Equal(t, MacroFreqMonthly, rows[0].Freq)
-	require.Equal(t, MacroSourceTushare, rows[0].Source)
-	require.Equal(t, "%", rows[0].Unit)
-	require.Equal(t, asOf, rows[0].AsOf)
+	require.Equal(t, "CPI_YOY", res.Rows[0].Indicator)
+	require.Equal(t, MacroFreqMonthly, res.Rows[0].Freq)
+	require.Equal(t, MacroSourceTushare, res.Rows[0].Source)
+	require.Equal(t, "%", res.Rows[0].Unit)
+	require.Equal(t, asOf, res.Rows[0].AsOf)
 
-	require.Equal(t, time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), rows[0].ObsDate, "月频 YYYYMM 取当月首日")
-	require.InDelta(t, 0.8, rows[0].Value, 1e-12)
-	require.Equal(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), rows[1].ObsDate)
-	require.InDelta(t, 0.5, rows[1].Value, 1e-12)
+	require.Equal(t, time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), res.Rows[0].ObsDate, "月频 YYYYMM 取当月首日")
+	require.InDelta(t, 0.8, res.Rows[0].Value, 1e-12)
+	require.Equal(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), res.Rows[1].ObsDate)
+	require.InDelta(t, 0.5, res.Rows[1].Value, 1e-12)
 }
 
 // cn_pmi 不传 fields 时响应字段名为大写（2026-10-12 实测）——normalize
@@ -172,13 +173,13 @@ func TestNormalizeMacroSeries_PMIUppercaseFieldsMatchCaseInsensitively(t *testin
 	resp := decodeTushareBody(t, cnPmiUpperBody)
 	asOf := time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	rows, err := normalizeMacroSeries(resp, macroIndicatorSpecs["PMI"], MacroSourceTushare, asOf)
+	res, err := normalizeMacroSeries(resp, macroIndicatorSpecs["PMI"], MacroSourceTushare, asOf)
 	require.NoError(t, err, "大写字段名（MONTH/PMI010000）必须能定位——实测 cn_pmi 不传 fields 时就是这个形状")
-	require.Len(t, rows, 2)
-	require.Equal(t, "PMI", rows[0].Indicator)
-	require.Equal(t, "点", rows[0].Unit)
-	require.Equal(t, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), rows[0].ObsDate)
-	require.InDelta(t, 50.1, rows[0].Value, 1e-12)
+	require.Len(t, res.Rows, 2)
+	require.Equal(t, "PMI", res.Rows[0].Indicator)
+	require.Equal(t, "点", res.Rows[0].Unit)
+	require.Equal(t, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), res.Rows[0].ObsDate)
+	require.InDelta(t, 50.1, res.Rows[0].Value, 1e-12)
 }
 
 // shibor_lpr 日频样例（官方文档口径）。
@@ -191,12 +192,12 @@ func TestNormalizeMacroSeries_DailyKeepsNaturalDay(t *testing.T) {
 	resp := decodeTushareBody(t, shiborLprBody)
 	asOf := time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	rows, err := normalizeMacroSeries(resp, macroIndicatorSpecs["LPR_1Y"], MacroSourceTushare, asOf)
+	res, err := normalizeMacroSeries(resp, macroIndicatorSpecs["LPR_1Y"], MacroSourceTushare, asOf)
 	require.NoError(t, err)
-	require.Len(t, rows, 2)
-	require.Equal(t, MacroFreqDaily, rows[0].Freq)
-	require.Equal(t, time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC), rows[0].ObsDate, "日频取自然日")
-	require.InDelta(t, 3.0, rows[0].Value, 1e-12)
+	require.Len(t, res.Rows, 2)
+	require.Equal(t, MacroFreqDaily, res.Rows[0].Freq)
+	require.Equal(t, time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC), res.Rows[0].ObsDate, "日频取自然日")
+	require.InDelta(t, 3.0, res.Rows[0].Value, 1e-12)
 }
 
 func TestNormalizeMacroSeries_RejectsMissingKeyColumns(t *testing.T) {
@@ -209,16 +210,20 @@ func TestNormalizeMacroSeries_RejectsMissingKeyColumns(t *testing.T) {
 
 func TestNormalizeMacroSeries_SkipsRowsWithBadObsDate(t *testing.T) {
 	// 日期解析失败的行跳过（PIT 身份不完整不进库，同 normalizeETFPortfolio
-	// 先例）；好行照常入库。
+	// 先例）；好行照常入库，跳过计数分列如实上报（R2）。
 	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["month","nt_yoy"],"items":[
 		["202608",0.8],
 		["not-a-month",0.7],
-		["",0.6]
+		["",0.6],
+		["202605",null]
 	]}}`)
-	rows, err := normalizeMacroSeries(resp, macroIndicatorSpecs["CPI_YOY"], MacroSourceTushare, time.Now().UTC())
+	res, err := normalizeMacroSeries(resp, macroIndicatorSpecs["CPI_YOY"], MacroSourceTushare, time.Now().UTC())
 	require.NoError(t, err)
-	require.Len(t, rows, 1, "坏行跳过、好行入库")
-	require.InDelta(t, 0.8, rows[0].Value, 1e-12)
+	require.Len(t, res.Rows, 1, "坏行跳过、好行入库")
+	require.Equal(t, 2, res.SkippedBadDate, "坏日期行数（PIT 身份不完整）")
+	require.Equal(t, 1, res.SkippedNilValue, "nil 值行数（未发布）")
+	require.Equal(t, 3, res.Skipped(), "总跳过 = 坏日期 + nil 值")
+	require.InDelta(t, 0.8, res.Rows[0].Value, 1e-12)
 }
 
 // ── ETL 错误传播（破坏验证②的 Red 腿） ──────────────────────────────────
@@ -395,6 +400,165 @@ func TestFetchMacroIndicators_SharesOneRequestPerAPI(t *testing.T) {
 	require.InDelta(t, 3.5, byIndicator["LPR_5Y"], 1e-12)
 	require.InDelta(t, 3568083.6, byIndicator["M2"], 1e-6)
 	require.InDelta(t, 7.5, byIndicator["M2_YOY"], 1e-12)
+}
+
+// ── R1：探测只发一次请求（P2-1-R2） ─────────────────────────────────────
+
+// TestProbeMacro_ChunkedIndicatorSendsSingleRequest 钉住 R1：探测的语义是
+// 连通性，不按数据量放大——USDCNY_CLOSE 导入要 8 段（2019–2026），探测
+// 必须只发 1 次请求。旧行为（遍历全部窗口）会让每次 HealthCheck 白吃
+// fx_daily（2000 积分档）配额。
+//
+// 破坏腿：ProbeMacro 改回遍历 macroFetchWindows 全量 → calls 变 8，本测试红。
+func TestProbeMacro_ChunkedIndicatorSendsSingleRequest(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"msg":"","data":{"fields":["trade_date","bid_close"],"items":[["20260102",6.95]]}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	rec := &recordingMacroStore{}
+	client := newSupplyChainTestClient(srv.URL, rec)
+	require.NoError(t, client.ProbeMacro(context.Background(), "USDCNY_CLOSE"))
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, 1, calls,
+		"USDCNY_CLOSE 探测只许发 1 次请求（全窗口导入是 8 次——探测不许按数据量放大）")
+	require.Empty(t, rec.macro, "探测不许产生数据副作用")
+}
+
+// ── R2：跳过计数与 fail-loud（P2-1-R2） ─────────────────────────────────
+
+// TestFetchMacroIndicator_FailsLoudWhenAllRowsSkipped 是 R2 的 Red 腿：
+// 响应有行但值列全 nil（上游列整体变空的典型形态）→ 必须报错，不许以
+// 「导入 0 行」静默成功。
+//
+// 破坏腿：去掉 macroAllSkippedError 闸门 → 本测试红（返回 nil, nil）。
+func TestFetchMacroIndicator_FailsLoudWhenAllRowsSkipped(t *testing.T) {
+	rec := &recordingMacroStore{}
+	client := newSupplyChainTestClient(stubTushare(t,
+		`{"code":0,"msg":"","data":{"fields":["month","nt_yoy"],"items":[["202608",null],["202607",null]]}}`, 200), rec)
+
+	rows, err := client.FetchMacroIndicator(context.Background(), "CPI_YOY")
+	require.Error(t, err, "有行但全被跳过必须 fail-loud（上游变故不许伪装成导入 0 行）")
+	require.Nil(t, rows)
+	require.Contains(t, err.Error(), "CPI_YOY")
+	require.Contains(t, err.Error(), "全部被跳过")
+	require.Empty(t, rec.macro, "错误路径不许落库")
+}
+
+// TestFetchMacroIndicators_FailsLoudWhenOneIndicatorAllSkipped：共享响应的
+// 组里一个 indicator 的列全 nil（另一个正常）——点名报错那个 indicator。
+func TestFetchMacroIndicators_FailsLoudWhenOneIndicatorAllSkipped(t *testing.T) {
+	rec := &recordingMacroStore{}
+	client := newSupplyChainTestClient(stubTushareByAPI(t, map[string]string{
+		"cn_m": `{"code":0,"msg":"","data":{"fields":["month","m2","m2_yoy"],"items":[["202608",3568083.6,null]]}}`,
+	}), rec)
+
+	_, err := client.FetchMacroIndicators(context.Background(), "M2", "M2_YOY")
+	require.Error(t, err, "M2 有行、M2_YOY 列全 nil——必须 fail-loud")
+	require.Contains(t, err.Error(), "M2_YOY", "错误必须点名断掉的 indicator")
+	require.Empty(t, rec.macro, "错误路径不许落库")
+}
+
+// ── R3：组不变量与目录自检（P2-1-R2） ───────────────────────────────────
+
+// TestSpecsCanShareResponse_DetectsInconsistentInvariants：fields / 日期列 /
+// 日期格式 / 固定参数 / 窗口序列任一不一致都要被捕获并点名原因。
+func TestSpecsCanShareResponse_DetectsInconsistentInvariants(t *testing.T) {
+	now := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
+	base := macroIndicatorSpecs["M2"]
+
+	fieldsDiff := base
+	fieldsDiff.Indicator, fieldsDiff.Field, fieldsDiff.Fields = "M2_X", "m2_x", "month,m2_x"
+	share, reason := specsCanShareResponse([]macroIndicatorSpec{base, fieldsDiff}, now)
+	require.False(t, share)
+	require.Contains(t, reason, "fields", "原因应点名 fields 不同")
+
+	layoutDiff := base
+	layoutDiff.Indicator, layoutDiff.DateLayout = "M2_X", "20060102"
+	share, reason = specsCanShareResponse([]macroIndicatorSpec{base, layoutDiff}, now)
+	require.False(t, share)
+	require.Contains(t, reason, "日期格式")
+
+	paramsDiff := macroIndicatorSpecs["USDCNY_CLOSE"]
+	paramsDiff.Indicator = "USDCNY_FAKE"
+	paramsDiff.Params = map[string]interface{}{"ts_code": "EURUSD.FXCM"}
+	share, reason = specsCanShareResponse([]macroIndicatorSpec{macroIndicatorSpecs["USDCNY_CLOSE"], paramsDiff}, now)
+	require.False(t, share)
+	require.Contains(t, reason, "固定参数")
+
+	winDiff := base
+	winDiff.Indicator, winDiff.SinceYear = "M2_WIN", 2024 // 月频全量 → 3 段窗口
+	share, reason = specsCanShareResponse([]macroIndicatorSpec{base, winDiff}, now)
+	require.False(t, share)
+	require.Contains(t, reason, "窗口")
+
+	// 真实目录的两个共享组必须通过（自洽）。
+	share, reason = specsCanShareResponse([]macroIndicatorSpec{
+		macroIndicatorSpecs["LPR_1Y"], macroIndicatorSpecs["LPR_5Y"],
+	}, now)
+	require.True(t, share, "LPR 组应可共享：%s", reason)
+	share, reason = specsCanShareResponse([]macroIndicatorSpec{
+		macroIndicatorSpecs["M2"], macroIndicatorSpecs["M2_YOY"],
+	}, now)
+	require.True(t, share, "M2 组应可共享：%s", reason)
+}
+
+// TestMacroIndicatorSpecs_GroupInvariantsHold 是目录自检（R3）：按 APIName
+// 分组的每组 spec 必须能共用一次响应。未来给同接口加指标时若配错
+// fields/params/窗口，这里红——把「目录配置不自洽」拦在测试层，而不是
+// 运行时伪装成「响应形状不符契约」。
+func TestMacroIndicatorSpecs_GroupInvariantsHold(t *testing.T) {
+	now := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
+	groups := map[string][]macroIndicatorSpec{}
+	for _, spec := range macroIndicatorSpecs {
+		groups[spec.APIName] = append(groups[spec.APIName], spec)
+	}
+	shared := 0
+	for api, specs := range groups {
+		if len(specs) < 2 {
+			continue
+		}
+		shared++
+		share, reason := specsCanShareResponse(specs, now)
+		require.True(t, share, "同接口 %s 的 spec 无法共用响应：%s", api, reason)
+	}
+	require.Equal(t, 2, shared, "首版目录有且仅有 cn_m 与 shibor_lpr 两个共享接口组")
+}
+
+// TestFetchMacroIndicators_RejectsInconsistentCatalogGroup：人为往目录塞一个
+// 与 M2 不变量冲突的 spec——FetchMacroIndicators 必须报「目录配置不自洽」
+// （点名根因），而不是发完请求后在 normalize 报「响应形状不符契约」
+// （错误归因）。校验必须发生在发请求/落库之前。
+func TestFetchMacroIndicators_RejectsInconsistentCatalogGroup(t *testing.T) {
+	const fake = "M2_FAKE"
+	orig, had := macroIndicatorSpecs[fake]
+	macroIndicatorSpecs[fake] = macroIndicatorSpec{
+		Indicator: fake, APIName: "cn_m", Field: "m2_fake",
+		Freq: MacroFreqMonthly, Unit: "%", DateField: "month", DateLayout: "200601",
+		Fields: "month,m2_fake", // 与 M2 的 fields 不同 → 不能共用一次响应
+	}
+	t.Cleanup(func() {
+		if had {
+			macroIndicatorSpecs[fake] = orig
+			return
+		}
+		delete(macroIndicatorSpecs, fake)
+	})
+
+	rec := &recordingMacroStore{}
+	client := newSupplyChainTestClient(stubTushare(t, macroOKBody, 200), rec)
+	_, err := client.FetchMacroIndicators(context.Background(), "M2", fake)
+	require.Error(t, err, "组不变量不一致必须报错，不许静默退化逐条拉")
+	require.Contains(t, err.Error(), "配置不自洽", "错误必须点名根因是指标目录，不是上游")
+	require.Empty(t, rec.macro, "报错发生在发请求/落库之前")
 }
 
 // errSentinel 是错误传播测试用的哨兵错误。

@@ -472,7 +472,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 > **✅ 关闭记录（2026-10-12）**：§五 行与小节收口记录已更新（本 commit）；收口记录与代码、真库（6168 行复测）、docs 仓指南逐条对照通过。
 
-### P2-1-R2 · 宏观数据层提交后自审收尾（7 项，2026-10-12 作者自审立单）
+### ✅ P2-1-R2 · 宏观数据层提交后自审收尾（7 项，2026-10-12 作者自审立单，同日落地）
 
 > 来源：2026-10-12 作者对 P2-1（`02058b9`）的**提交后自审**。判定：**实现可用，代码侧无 🔴 阻塞缺陷**；发现 **4 🟠 + 3 🟡**。另有 **3 处事实错误在 docs 仓当场修正（`dd35ab9`）**，不进本工单范围。
 >
@@ -494,6 +494,15 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：不改 `quant.macro_series` 的唯一键与 `source`/`as_of` 溯源列语义（破坏腿①②③的护栏不破）；不新增 `ServerDeps` 字段（`deps_test.go` 钉住总数）；不接新数据源（**大宗 / 境外宏观仍属后续**）；不动 P2-2 四表与行情链路；不碰 `pkg/kernel`/`pkg/backtest` 撮合/`contracts`（K10/K17 并行区域）。
 - **⑤ 验收**：全量 `go test ./...` 绿；R1 测试钉住探测请求数且破坏腿红→还原绿；R2 破坏腿（全 nil 响应）红→还原绿；R3 目录自检测试能捕获人为造的不一致 spec；R4 加 LIMIT 后 `EXPLAIN` 仍走索引、openapi 与 handler 参数一致。
 - **⑥ 边界**：core 仓一个 atomic commit（`fix(data): P2-1-R2 宏观层自审收尾 …`）；不跨仓（docs 仓纠错已在 `dd35ab9`）；与 P2-1-R1（台账关闭）**互不依赖**，可并行。
+
+> **✅ 收口记录（2026-10-12，P2-1-R2 落地，7 项全清）**：
+> - **R1（🟠 探测放大）**：`ProbeMacro` 只发首窗口一次请求（`macroWindowsOrErr` + `windows[0]`，空窗口 fail-loud）；USDCNY_CLOSE 探测由 8 次请求降为 1 次。测试 `TestProbeMacro_ChunkedIndicatorSendsSingleRequest` 钉住请求数；破坏腿：改回遍历全窗口 → 红 → 还原绿。
+> - **R2（🟠 0 行静默）**：`normalizeMacroSeries` 返回 `normalizedMacroRows{Rows, SkippedBadDate, SkippedNilValue}`；`macroAllSkippedError` 闸门在「响应有行但全部被跳过」时 fail-loud（点名 indicator + 分解计数），部分跳过留 Info 日志。破坏腿：闸门失效 → `TestFetchMacroIndicator_FailsLoudWhenAllRowsSkipped` 红 → 还原绿；共享响应腿点名 M2_YOY。
+> - **R3（🟠 分组不变量）**：`specsCanShareResponse(specs, now)` 校验 Fields / DateField / DateLayout / Params / 窗口五组不变量，不一致报「宏观指标目录配置不自洽」并点名（不再静默退化逐条拉）；三件测试：目录自检（钉住恰好 2 个共享组）/ 四分歧人为捕获 / 运行时拒绝（报错先于发请求落库）。破坏腿：改 M2_YOY fields → 自检红 → 还原绿。
+> - **R4（🟠 无上限查询）**：`ListMacroSeries` 加 `Limit`（默认 1000 / 上限 5000，越界 INVALID_INPUT）+ `ORDER BY obs_date DESC`（截断只丢最旧）；handler 解析 limit（1..5000，显式 0 / 非数 / 超限 → 400）+ 响应 `limit`/`truncated`/`hint`（OPTION-A：不做多取 1 行嗅探）；openapi 同步（参数 + 400 语义 + 200 字段）。EXPLAIN 实测（6168 行真库）：ind / ind+freq / ind+freq+range 三形态均走 `idx_macro_series_lookup`。破坏腿 2 条：去 DESC → 红；去 LIMIT → 红；均还原绿。
+> - **R5–R7（🟡）**：查询 / 扫描 / 迭代三处错误改 `apperrors.Wrap(INTERNAL)`；`sameWindows` / `specsCanShareResponse` 的 now 改入参（同一次导入 as_of 与窗口共用一个时间点）；**`idx_macro_series_lookup` 保留**——EXPLAIN 实测三形态均走该索引（非冗余，不凭猜删）。
+> - **验证**：全量 `go test ./...` **68 包 ok / 0 FAIL**；5 组破坏腿全部「红 → 还原绿」；`ServerDeps` 未新增字段（deps_test 护栏未触）、唯一键与溯源列语义未动、未接新数据源。
+> - **遗留**：无（7 项全清）；大宗 / 境外宏观仍属后续工单，不在本收尾范围。
 
 ### ✅ P2-2-R1 · 产业链数据底座审查收尾（三件套，2026-10-12 深度审查立单）
 
