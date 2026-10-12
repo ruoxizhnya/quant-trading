@@ -45,7 +45,9 @@ func waitJobSettled(t *testing.T, store *mockJobStore, jobID string) map[string]
 
 func TestJobService_InvalidRunMarkedFailed(t *testing.T) {
 	store := newMockJobStore()
-	svc := NewJobService(store, invalidRunner{}, zerolog.Nop())
+	registry := contracts.NewEngineRegistry()
+	registry.Register(contracts.DefaultKernel, invalidRunner{})
+	svc := NewJobService(store, registry, zerolog.Nop())
 
 	job, err := svc.CreateJob(context.Background(), CreateJobRequest{
 		StrategyID: "momentum",
@@ -64,7 +66,9 @@ func TestJobService_InvalidRunMarkedFailed(t *testing.T) {
 
 func TestJobService_ValidRunStillCompleted(t *testing.T) {
 	store := newMockJobStore()
-	svc := NewJobService(store, &fakeRunner{}, zerolog.Nop())
+	registry := contracts.NewEngineRegistry()
+	registry.Register(contracts.DefaultKernel, &fakeRunner{})
+	svc := NewJobService(store, registry, zerolog.Nop())
 
 	job, err := svc.CreateJob(context.Background(), CreateJobRequest{
 		StrategyID: "momentum",

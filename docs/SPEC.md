@@ -1577,6 +1577,26 @@ When a LiveTrader is attached, the engine can run in "paper trading" mode where 
 - **Hybrid Mode**: Backtest with live execution for validation
 5. **Finalization**: Calculate metrics, generate report
 
+### RunSpec 内核路由（K10，2026-10-12）：EngineRunner 可插拔
+
+一次回测运行请求可以声明由哪个内核执行（FR-1.1/FR-1.3，ADR-031 D1）：
+
+- **路由键**：`RunSpec.kernel`（`pkg/backtest/contracts.BacktestRequest.Kernel`）。空值 =
+  默认内核 `"go"`（`EffectiveKernel()` 语义，默认值**不**回填字段 —— 存量请求序列化不变）。
+- **注册表**：`contracts.EngineRegistry`（`Register` / `Resolve`）是内核路由的唯一实现。
+  注册仅发生在**装配期**（无热插拔）；`Resolve` 可并发。同步 handler（`POST /api/backtest`
+  旧格式）、异步 job（`pkg/backtest/job`）、batch 编排统一经 `Resolve` 取 runner。
+- **fail-closed（零静默回退）**：未注册/空名内核 → `Resolve` 返回
+  `ErrKernelNotRegistered`，message 点名被拒内核与已注册集合。同步路径映射 400；异步 job
+  终态 `failed` + `error_msg` 点名内核；两者都不得回退 go —— 防「以为在测 NT 其实在测 Go」。
+- **接口边界**：注册表承载 `contracts.EngineRunner`
+  （`RunBacktest(ctx, BacktestRequest) → *BacktestResponse`）。`runner.go` 的
+  `BacktestRunner`（五参签名，返回 `*domain.BacktestResult`）是 AI 管线端口，**签名不动**，
+  与内核路由无关。walk-forward 编排每窗口构造全新 Engine（引擎级缓存 per-instance，
+  共享会跨窗口污染），不经注册表解析共享实例。
+- **护栏**：`pkg/backtest/contracts/registry_test.go`（含「未知名回退 go → 红」的破坏腿）、
+  `pkg/backtest/job/job_kernel_routing_test.go`、`cmd/analysis/handlers_backtest_kernel_test.go`。
+
 ### ResultSpec 冻结（K9，2026-10-12）：BacktestResponse canonical schema
 
 回测结果的 **canonical schema**，四契约（ADR-031）里 ResultSpec 的落地形态，实现于

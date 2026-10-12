@@ -20,6 +20,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/alert"
 	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/bootstrap"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
 	"github.com/ruoxizhnya/quant-trading/pkg/live"
@@ -141,6 +142,14 @@ type dataServices struct {
 	WFEngine         *backtest.WalkForwardEngine
 	BatchEngine      *backtest.BatchEngine
 	FactorAttributor *data.FactorAttributor
+
+	// EngineRegistry（K10）—— 内核路由注册表。装配期注册 go 内核
+	// （现有引擎，默认名）；同步 handler / 异步 job / batch 执行期经
+	// Resolve 取 runner。walk-forward 不在此列：它每窗口必须拿**全新**
+	// Engine 实例（引擎级缓存 per-instance，共享会跨窗口污染 —— 见
+	// NewWalkForwardEngine 注释），保留工厂构造；两个编排包的内部
+	// 逻辑零改动。
+	EngineRegistry *contracts.EngineRegistry
 }
 
 // buildDataServices constructs the data adapter, job/walk-forward/batch
@@ -162,7 +171,15 @@ func buildDataServices(
 	// 参数传入 —— 本函数不再自建（同一进程两条 adapter = 双真相）。
 	engine.SetDataAdapter(dataAdapter)
 
-	jobService := backtest.NewJobService(store, engine)
+	// K10：执行器注册表。装配期注册 go 内核（现有实现，默认名）——
+	// 「默认选中」来自 RunSpec.kernel 空值时的 EffectiveKernel 解析，
+	// 不来自注册表预设。运行期不改（无热插拔）。
+	engineRegistry := contracts.NewEngineRegistry()
+	engineRegistry.Register(contracts.DefaultKernel, engine)
+
+	// JobService 改持注册表：kernel 是请求级路由键，执行期才经 Resolve
+	// 解析（K10）。logger 显式传入，不再从 engine 内部提取。
+	jobService := backtest.NewJobService(store, engineRegistry, logger)
 	logger.Info().Msg("Job service initialized")
 
 	// AUD-50: repair backtest rows left in `running` by a previous process.
@@ -207,7 +224,15 @@ func buildDataServices(
 	}, store, logger)
 	logger.Info().Msg("Walk-forward engine initialized")
 
-	batchEngine := backtest.NewBatchEngine(engine, wfEngine, backtest.DefaultBatchConfig(), logger)
+	// batch 经同一注册表取 go 内核 runner（K10）：batch 任务间无引擎级
+	// 缓存隔离要求，共享注册实例即正确形态。装配期不变量：go 内核刚
+	// 注册成功，Resolve 不可能失败 —— 真失败了说明注册表被运行期
+	// 改动（明令禁止），此时不应对外提供服务。
+	goRunner, err := engineRegistry.Resolve(contracts.DefaultKernel)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("engine registry lost the default go kernel — refusing to serve")
+	}
+	batchEngine := backtest.NewBatchEngine(goRunner, wfEngine, backtest.DefaultBatchConfig(), logger)
 	logger.Info().Msg("Batch engine initialized")
 
 	factorAttributor := data.NewFactorAttributor(store)
@@ -219,6 +244,7 @@ func buildDataServices(
 		WFEngine:         wfEngine,
 		BatchEngine:      batchEngine,
 		FactorAttributor: factorAttributor,
+		EngineRegistry:   engineRegistry,
 	}
 }
 

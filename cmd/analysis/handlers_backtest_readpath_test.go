@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 )
@@ -63,8 +64,12 @@ func putBacktestState(eng *backtest.Engine, id, status string, reasons []string)
 func getReport(t *testing.T, eng *backtest.Engine, id string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := gin.New()
+	// K10：注册表装配 go 内核（读路径不涉路由，但 registerBacktestRoutes
+	// 签名要求传入注册表）。
+	reg := contracts.NewEngineRegistry()
+	reg.Register(contracts.DefaultKernel, eng)
 	// jobService 传 nil：这两条腿都命中内存读路径，不碰 job 服务。
-	registerBacktestRoutes(r, eng, nil, zerolog.Nop())
+	registerBacktestRoutes(r, eng, reg, nil, zerolog.Nop())
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/backtest/"+id+"/report", nil))

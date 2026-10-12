@@ -165,8 +165,9 @@ func (m *mockJobStore) DeleteBacktestJob(ctx context.Context, jobID string) erro
 func newTestJobService(t *testing.T) (*JobService, *mockJobStore) {
 	t.Helper()
 	store := newMockJobStore()
-	runner := &fakeRunner{}
-	svc := NewJobService(store, runner, zerolog.Nop())
+	registry := contracts.NewEngineRegistry()
+	registry.Register(contracts.DefaultKernel, &fakeRunner{})
+	svc := NewJobService(store, registry, zerolog.Nop())
 	return svc, store
 }
 
@@ -174,7 +175,7 @@ func TestJobService_NewJobService(t *testing.T) {
 	svc, _ := newTestJobService(t)
 	assert.NotNil(t, svc)
 	assert.NotNil(t, svc.store)
-	assert.NotNil(t, svc.runner)
+	assert.NotNil(t, svc.registry)
 }
 
 func TestJobService_CreateJob(t *testing.T) {

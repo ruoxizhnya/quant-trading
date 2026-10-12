@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/auth"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
 	"github.com/ruoxizhnya/quant-trading/pkg/live"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
@@ -25,6 +26,11 @@ import (
 type ServerDeps struct {
 	// Core backtest engine — serves /backtest, /backtest/:id/report, etc.
 	Engine *backtest.Engine
+
+	// EngineRegistry — K10 内核路由注册表（装配期注册 go 内核，
+	// 同步 / 异步 job / batch 经 Resolve 按 RunSpec.kernel 取 runner）。
+	// 未注册内核 fail-closed，无静默回退（FR-1.3）。
+	EngineRegistry *contracts.EngineRegistry
 
 	// JobService — async backtest job management (POST /backtest).
 	JobService *backtest.JobService

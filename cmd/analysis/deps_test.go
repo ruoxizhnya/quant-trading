@@ -22,11 +22,15 @@ import (
 // accidental field removal or renaming by enumerating the canonical
 // set of fields. S7-P3-3 added ToolsRegistry (17th field).
 // L0-3 (ADR-022 §5) added Store (18th field) for the Evidence API.
+// K10 added EngineRegistry (kernel routing registry) — assembly-time
+// registration of the default go kernel, Resolve-driven routing for the
+// sync handler / async job / batch paths.
 func TestServerDeps_HasExpectedFields(t *testing.T) {
 	t.Parallel()
 
 	expected := []string{
 		"Engine",
+		"EngineRegistry",
 		"JobService",
 		"WFEngine",
 		"BatchEngine",
@@ -82,6 +86,7 @@ func TestServerDeps_FieldsAreTyped(t *testing.T) {
 		// (*job.JobService, *walkforward.WalkForwardEngine,
 		// *batch.BatchEngine). The alias targets are the source of truth.
 		"Engine":           "*backtest.Engine",
+		"EngineRegistry":   "*contracts.EngineRegistry",
 		"JobService":       "*job.JobService",
 		"WFEngine":         "*walkforward.WalkForwardEngine",
 		"BatchEngine":      "*batch.BatchEngine",

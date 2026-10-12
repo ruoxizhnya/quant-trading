@@ -240,11 +240,12 @@ type (
 	Job              = job.Job
 )
 
-// NewJobService wrapper preserves the original signature (store, engine *Engine)
-// by extracting engine.logger internally, so cmd/analysis/setup.go and all
-// external callers compile unchanged.
-func NewJobService(store JobStore, engine *Engine) *JobService {
-	return job.NewJobService(store, engine, engine.logger)
+// NewJobService wrapper — K10：JobService 改持 EngineRegistry（执行期按
+// RunSpec.kernel 经 Resolve 取 runner），签名随之由 (store, engine)
+// 变为 (store, registry, logger)：runner 的解析推迟到 job 执行时，
+// logger 也不再从 engine 内部提取（调用方显式传入）。
+func NewJobService(store JobStore, registry *contracts.EngineRegistry, logger zerolog.Logger) *JobService {
+	return job.NewJobService(store, registry, logger)
 }
 
 // Compile-time assertion: *Engine satisfies contracts.EngineRunner.

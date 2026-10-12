@@ -86,6 +86,7 @@ func main() {
 
 	deps := &ServerDeps{
 		Engine:           engine,
+		EngineRegistry:   ds.EngineRegistry,
 		JobService:       ds.JobService,
 		WFEngine:         ds.WFEngine,
 		BatchEngine:      ds.BatchEngine,
@@ -180,7 +181,7 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 	registerOpenAPIRoutes(router)
 
 	registerProxyRoutes(router, httpClient, deps.Viper, deps.Logger)
-	registerBacktestRoutes(router, deps.Engine, deps.JobService, deps.Logger)
+	registerBacktestRoutes(router, deps.Engine, deps.EngineRegistry, deps.JobService, deps.Logger)
 	registerWalkForwardRoutes(router, deps.WFEngine, deps.Logger)
 	registerBatchRoutes(router, deps.BatchEngine, deps.Logger)
 	registerStrategyRoutes(router, deps.StrategyDB)

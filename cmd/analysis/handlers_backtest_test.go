@@ -25,6 +25,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 )
 
 // gin 的 mode 由 TestMain 设一次（AUD-12）—— 这里不调 gin.SetMode。
@@ -32,8 +33,13 @@ import (
 func postBacktest(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := gin.New()
+	// K10：注册表装配 go 内核（本腿用的零值引擎）。不带 kernel 的请求
+	// 经 EffectiveKernel 解析到 "go" —— 路由对存量请求透明。
+	eng := &backtest.Engine{}
+	reg := contracts.NewEngineRegistry()
+	reg.Register(contracts.DefaultKernel, eng)
 	// jobService 传 nil：这条腿只走同步回测分支，不碰 job 服务。
-	registerBacktestRoutes(r, &backtest.Engine{}, nil, zerolog.Nop())
+	registerBacktestRoutes(r, eng, reg, nil, zerolog.Nop())
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/backtest", strings.NewReader(body)))

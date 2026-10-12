@@ -17,16 +17,24 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 )
 
 // postBacktestRunSpec 与 handlers_backtest_test.go 的 postBacktest 刻意不同名：
 // 那条用零值引擎（测错误映射，不触引擎），这条用 newReadPathEngine（合法请求
 // 要真的穿进引擎，零值引擎会在 checkCalendarExists 处 panic）。
+//
+// K10：注册表装配 go 内核（newReadPathEngine 本身）。kernel 的取值裁定
+// （未注册 fail-closed）由 handlers_backtest_kernel_test.go 的腿覆盖。
 func postBacktestRunSpec(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := gin.New()
+	eng := newReadPathEngine(t)
+	reg := contracts.NewEngineRegistry()
+	reg.Register(contracts.DefaultKernel, eng)
 	// jobService 传 nil：这些腿都走旧格式同步分支，不碰 job 服务。
-	registerBacktestRoutes(r, newReadPathEngine(t), nil, zerolog.Nop())
+	registerBacktestRoutes(r, eng, reg, nil, zerolog.Nop())
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/backtest", strings.NewReader(body))
@@ -57,27 +65,7 @@ func TestBacktestPost_ValidRunSpecPassesValidation(t *testing.T) {
 	assert.NotContains(t, w.Body.String(), "engine_params", "合法请求不应命中 engine_params 校验错误")
 }
 
-// kernel 透传腿（handler 层）：带 kernel 字段的请求同样不得被校验闸门误拒。
-// kernel 的取值裁定（未知内核 fail-closed）是 K10 路由的职责，K9 只透传。
-func TestBacktestPost_KernelFieldDoesNotTripValidation(t *testing.T) {
-	w := postBacktestRunSpec(t, `{"strategy":"momentum","stock_pool":["600000.SH"],"start_date":"2024-01-01","end_date":"2024-06-30","kernel":"nautilus"}`)
-	assert.NotEqual(t, http.StatusBadRequest, w.Code, "仅带 kernel 的请求不得被拒, body=%s", w.Body.String())
-	assert.NotContains(t, w.Body.String(), "engine_params")
-}
-
-// 异步 job 格式 fail-closed 腿：CreateJobRequest 没有 kernel / engine_params 字段
-// （K10 才接入路由），json.Unmarshal 会静默吞掉它们。钉住：带这两个键进异步分支
-// 必须 400 点名拒绝，而不是受理后丢弃。
-func TestBacktestPost_AsyncJobRejectsKernelRoutingFields(t *testing.T) {
-	for _, tc := range []struct{ name, body, wantKey string }{
-		{"kernel", `{"strategy_id":"momentum","universe":"hs300","start_date":"2024-01-01","end_date":"2024-06-30","kernel":"go"}`, "kernel"},
-		{"engine_params", `{"strategy_id":"momentum","universe":"hs300","start_date":"2024-01-01","end_date":"2024-06-30","engine_params":{"nt":{"log_level":"info"}}}`, "engine_params"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			w := postBacktestRunSpec(t, tc.body)
-			require.Equal(t, http.StatusBadRequest, w.Code, "异步格式带内核路由字段必须 400, body=%s", w.Body.String())
-			assert.Contains(t, w.Body.String(), "rejected, not ignored", "必须是 fail-closed 拒绝措辞")
-			assert.Contains(t, w.Body.String(), tc.wantKey, "错误必须点名被拒字段")
-		})
-	}
-}
+// kernel 字段的取值裁定（未注册内核 fail-closed）是 K10 路由的职责，
+// 由 handlers_backtest_kernel_test.go 的 TestBacktestPost_UnknownKernelFailClosed
+// 等腿覆盖；K9 阶段的「仅带 kernel 不误拒」透传腿随之退役 —— 现在带
+// 未注册 kernel 的请求**应当**被路由闸门 400 拒绝。

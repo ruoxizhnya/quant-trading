@@ -14,10 +14,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/reporting"
 )
 
-func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobService *backtest.JobService, logger zerolog.Logger) {
+func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, engineRegistry *contracts.EngineRegistry, jobService *backtest.JobService, logger zerolog.Logger) {
 	api := router.Group("/api/backtest")
 	{
 		api.GET("", func(c *gin.Context) {
@@ -42,24 +43,16 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 
 			var jobReq backtest.CreateJobRequest
 			if json.Unmarshal(bodyBytes, &jobReq) == nil && jobReq.StrategyID != "" && jobReq.Universe != "" {
-				// K9 fail-closed：异步 job 格式（CreateJobRequest）尚无 kernel / engine_params
-				// 字段（K10 才做 EngineRunner 路由），json.Unmarshal 会静默吞掉它们。请求带了
-				// 就点名 400 拒绝，不静默丢弃 —— 与 ValidateRunSpec 的 "rejected, not ignored"
-				// 同一原则。
-				var raw map[string]json.RawMessage
-				if json.Unmarshal(bodyBytes, &raw) == nil {
-					var rejected []string
-					for _, key := range []string{"kernel", "engine_params"} {
-						if _, ok := raw[key]; ok {
-							rejected = append(rejected, key)
-						}
-					}
-					if len(rejected) > 0 {
-						httpserver.Fail(c, http.StatusBadRequest, fmt.Sprintf(
-							"fields [%s] rejected, not ignored: kernel/engine_params are not accepted on the async job endpoint until K10 (EngineRunner routing)",
-							strings.Join(rejected, ", ")))
-						return
-					}
+				// K10：异步端点接入内核路由。K9 时期这里对 kernel/engine_params
+				// 整体 400 拒绝（"until K10"）；现在两条路由字段正式受理：
+				//   - engine_params 过与同步路径**同一道** ValidateRunSpec 闸门
+				//     （未知名 → 400 点名，"rejected, not ignored" 原则不变）；
+				//   - kernel 原样落库（params 保留键），取值裁定交给执行期注册表
+				//     路由 —— 未注册内核 → job failed + error_msg 点名，不回退 go。
+				runSpec := backtest.BacktestRequest{Kernel: jobReq.Kernel, EngineParams: jobReq.EngineParams}
+				if err := runSpec.ValidateRunSpec(); err != nil {
+					httpserver.Fail(c, http.StatusBadRequest, err.Error())
+					return
 				}
 				logger.Info().
 					Str("strategy", jobReq.StrategyID).
@@ -86,9 +79,19 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, jobServ
 					httpserver.Fail(c, http.StatusBadRequest, err.Error())
 					return
 				}
+				// K10：经 EngineRegistry 按 RunSpec.kernel 路由执行器。未注册
+				// 内核 fail-closed —— 400 且 message 点名内核名（含已注册集合），
+				// **零静默回退**（FR-1.3）：调用方必须知道自己点名的内核没跑，
+				// 而不是拿到一份默认内核偷偷算出来的结果。解析发生在任何执行
+				// 与落库之前，被拒时响应与库内都不会有 go 产物。
+				runner, err := engineRegistry.Resolve(req.EffectiveKernel())
+				if err != nil {
+					httpserver.Fail(c, http.StatusBadRequest, err.Error())
+					return
+				}
 				ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Minute)
 				defer cancel()
-				result, err := engine.RunBacktest(ctx, req)
+				result, err := runner.RunBacktest(ctx, req)
 				if err != nil {
 					// 引擎返回的是**带类别**的错误（pkg/errors），别把它拍平成 500 ——
 					// 见 httpserver.StatusForAppError 的注释（AUD-60）。

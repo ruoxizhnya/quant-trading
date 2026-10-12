@@ -14,10 +14,15 @@ import (
 )
 
 // JobService handles async backtest job lifecycle.
+//
+// K10：runner 不再装配期固定注入，改持 EngineRegistry —— 执行期按
+// RunSpec.kernel 解析（Resolve）。理由：kernel 是**请求级**路由键，
+// 同一个 JobService 要能为不同 job 选不同内核；未注册内核 fail-closed
+// （job → failed + error_msg 点名内核，绝不回退 go，FR-1.3）。
 type JobService struct {
-	store  JobStore
-	runner contracts.EngineRunner
-	logger zerolog.Logger
+	store    JobStore
+	registry *contracts.EngineRegistry
+	logger   zerolog.Logger
 
 	// cancelFuncs holds cancellation functions for running jobs.
 	// Key: jobID, Value: cancellation function.
@@ -122,16 +127,30 @@ func mapToJobRecord(m map[string]any) *JobRecord {
 }
 
 // NewJobService creates a new JobService.
-func NewJobService(store JobStore, runner contracts.EngineRunner, logger zerolog.Logger) *JobService {
+//
+// K10：registry 为必需依赖（构造期不注册任何内核 —— 装配方负责 Register，
+// 通常至少注册 contracts.DefaultKernel）。nil registry = 装配错误，
+// fail-fast（带着没有注册表的 JobService 对外服务，所有 job 都会在
+// 执行期才以 nil-deref 崩溃，不如启动即炸）。
+func NewJobService(store JobStore, registry *contracts.EngineRegistry, logger zerolog.Logger) *JobService {
+	if registry == nil {
+		panic("job: NewJobService requires a non-nil *contracts.EngineRegistry (K10 kernel routing)")
+	}
 	return &JobService{
 		store:    store,
-		runner:   runner,
+		registry: registry,
 		logger:   logger.With().Str("component", "job_service").Logger(),
 		shutdown: make(chan struct{}),
 	}
 }
 
 // CreateJobRequest is the API request to create a backtest job.
+//
+// K10：新增 Kernel / EngineParams 两个内核路由字段（与同步路径的
+// BacktestRequest 同构，K9 冻结的 RunSpec 语义）。Kernel 空值 = 默认
+// go 内核（EffectiveKernel 语义，不写回字段）；EngineParams 的
+// 未知名由 API 层的 ValidateRunSpec 闸门 400 拒绝（校验在 handler，
+// 与同步路径同一口径）。
 type CreateJobRequest struct {
 	StrategyID     string         `json:"strategy_id" binding:"required"`
 	Params         map[string]any `json:"params"`
@@ -141,6 +160,14 @@ type CreateJobRequest struct {
 	InitialCapital float64        `json:"initial_capital"`
 	CommissionRate float64        `json:"commission_rate"`
 	SlippageRate   float64        `json:"slippage_rate"`
+
+	// Kernel 是内核路由键（K10）。落库位置：job 的 params JSONB 保留键
+	// "kernel"（见 CreateJob）—— 不为路由键新增列，存量作业 params 不变。
+	Kernel string `json:"kernel,omitempty"`
+
+	// EngineParams 是引擎特有参数块（K10 透传）。落库位置：params JSONB
+	// 保留键 "engine_params"（见 CreateJob）。
+	EngineParams map[string]any `json:"engine_params,omitempty"`
 }
 
 // Job is the public API response for a job.
@@ -175,6 +202,22 @@ func (s *JobService) CreateJob(ctx context.Context, req CreateJobRequest) (*Job,
 	}
 	if req.SlippageRate > 0 {
 		params["slippage_rate"] = req.SlippageRate
+	}
+	// K10：内核路由键落库。位置是 params JSONB 的两个**保留键**
+	// （服务端权威写入，StartJob 读回）—— 选 params 而不是新列的理由：
+	// 路由键是 job 级元数据而非查询维度，加列要 migration + 改三处
+	// store SQL，收益不抵风险；且只在非空时写入，存量作业的 params
+	// 序列化逐字节不变（回归腿）。
+	//
+	// 已知边界（可接受）：调用方若自行在 params 里塞 "kernel" /
+	// "engine_params" 而顶层字段为空，该值会被当作路由输入 —— 未知
+	// 内核仍 fail-closed（job failed + error_msg 点名），go 内核则
+	// 根本不读 EngineParams，无静默错配通道。
+	if req.Kernel != "" {
+		params["kernel"] = req.Kernel
+	}
+	if len(req.EngineParams) > 0 {
+		params["engine_params"] = req.EngineParams
 	}
 
 	paramsJSON, err := json.Marshal(params)
@@ -299,8 +342,49 @@ func (s *JobService) StartJob(parentCtx context.Context, jobID string) {
 		record := mapToJobRecord(recordMap)
 		stockPool := parseUniverse(record.Universe)
 
+		// K10：内核路由键从 params 保留键读回（CreateJob 写入）。
+		// 与 initial_capital 同一读取点 —— 作业执行所需的 job 级
+		// 配置全部来自 record.Params 这一个 JSONB。
+		var jobParams map[string]any
+		if len(record.Params) > 0 {
+			_ = json.Unmarshal(record.Params, &jobParams)
+		}
+		kernel, _ := jobParams["kernel"].(string)
+		engineParams, _ := jobParams["engine_params"].(map[string]any)
+
+		backtestReq := contracts.BacktestRequest{
+			Strategy:     record.StrategyID,
+			StockPool:    stockPool,
+			StartDate:    record.StartDate,
+			EndDate:      record.EndDate,
+			Kernel:       kernel,
+			EngineParams: engineParams,
+		}
+		if v, ok := jobParams["initial_capital"].(float64); ok && v > 0 {
+			backtestReq.InitialCapital = v
+		}
+
+		// K10：经 EngineRegistry 按 kernel 路由执行器。未注册/不可用 →
+		// job 标记 failed 且 error_msg 点名内核名，**不得回退 go**
+		// （FR-1.3：防「以为在测 NT 其实在测 Go」）。解析失败发生在
+		// 任何 runner 调用之前，库里不会留下 go 内核产物。
+		runner, err := s.registry.Resolve(backtestReq.EffectiveKernel())
+		if err != nil {
+			s.logger.Error().
+				Err(err).
+				Str("job_id", jobID).
+				Str("kernel", backtestReq.EffectiveKernel()).
+				Msg("Kernel routing refused — marking job as failed (no fallback to default kernel)")
+			if dbErr := s.store.UpdateJobFailed(jobCtx, jobID, fmt.Sprintf("kernel routing failed: %v", err)); dbErr != nil {
+				s.logger.Error().Err(dbErr).Str("job_id", jobID).Msg("Failed to mark routing-refused job as failed")
+			}
+			s.cancelFuncs.Delete(jobID)
+			return
+		}
+
 		s.logger.Info().
 			Str("job_id", jobID).
+			Str("kernel", backtestReq.EffectiveKernel()).
 			Str("strategy", record.StrategyID).
 			Str("universe", record.Universe).
 			Int("stock_count", len(stockPool)).
@@ -308,22 +392,7 @@ func (s *JobService) StartJob(parentCtx context.Context, jobID string) {
 			Str("end_date", record.EndDate).
 			Msg("Executing backtest")
 
-		backtestReq := contracts.BacktestRequest{
-			Strategy:  record.StrategyID,
-			StockPool: stockPool,
-			StartDate: record.StartDate,
-			EndDate:   record.EndDate,
-		}
-
-		var jobParams map[string]any
-		if len(record.Params) > 0 {
-			_ = json.Unmarshal(record.Params, &jobParams)
-		}
-		if v, ok := jobParams["initial_capital"].(float64); ok && v > 0 {
-			backtestReq.InitialCapital = v
-		}
-
-		result, err := s.runner.RunBacktest(jobCtx, backtestReq)
+		result, err := runner.RunBacktest(jobCtx, backtestReq)
 		elapsed := time.Since(startTime)
 
 		if err != nil {

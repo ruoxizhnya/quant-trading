@@ -3330,6 +3330,19 @@ components:
         risk_free_rate:
           type: number
           default: 0.03
+        kernel:
+          type: string
+          description: >-
+            Kernel routing key (K9/K10). Omitted = default "go" kernel.
+            Unknown / unregistered kernels are rejected with 400 (fail-closed,
+            no silent fallback — FR-1.3).
+          example: go
+        engine_params:
+          type: object
+          additionalProperties: true
+          description: >-
+            Engine-specific parameters (K9). Unknown keys are rejected with 400,
+            not ignored ("rejected, not ignored"). The go kernel accepts none.
 
     CreateJobRequest:
       type: object
@@ -3353,6 +3366,20 @@ components:
           type: number
         slippage_rate:
           type: number
+        kernel:
+          type: string
+          description: >-
+            Kernel routing key (K10). Omitted = default "go" kernel. The value is
+            resolved against the engine registry at execution time: an unregistered
+            kernel is accepted here (202) but the job settles as failed with an
+            error naming the kernel — no fallback to go.
+          example: go
+        engine_params:
+          type: object
+          additionalProperties: true
+          description: >-
+            Engine-specific parameters (K10). Unknown keys for the target kernel
+            are rejected with 400, not ignored.
 
     BacktestResponse:
       type: object
