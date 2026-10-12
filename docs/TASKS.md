@@ -194,7 +194,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 > **决策**：[ADR-031](https://github.com/ruoxizhnya/quant-trading-docs/blob/main/docs/adr/adr-031-kernel-pluggable-nt-ready.md)（buy vs build：内核降级为可替换执行器，NT 侧车「信号—权重回放适配器」，Go 策略资产零重写）。
 > **需求与设计**：[design/kernel/kernel-pluggable-nt-ready.md](design/kernel/kernel-pluggable-nt-ready.md)（四契约 RunSpec/SignalSpec/ResultSpec/EngineRunner、适配器规则、FR-1~FR-7）。
-> **依赖主线**：阶段 1 = {K8, K9} 并行 → K10；K11 / K12 独立可并行（K12 是阶段 3 前置）。阶段 2 = K13 → K14 → K15（前置 K8–K10）。阶段 3 = K16（前置 K15 + **NT 决策门通过**，见 §五）。K17 独立（K4 遗留收口，不在 NT 阶段链上，任意时点可做）。
+> **依赖主线**：阶段 1 = {K8, K9} 并行 → K10；K11 / K12 独立可并行（K12 是阶段 3 前置）。阶段 2 = K13 → K14 → K15（前置 K8–K10）。阶段 3 = K16（前置 K15 + **NT 决策门通过**，见 §五）。K17 独立（K4 遗留收口，不在 NT 阶段链上）✅ 已完成（2026-10-12，`6205c64`；审查遗留 K17-R1 / K18 待做）。
 > **总原则**：阶段 1 全程「默认行为逐字节不变」——不带新字段的存量请求走 Go 内核，数值、语义、API 形状零变化（回归腿钉住）。
 
 ### K8 · SignalSpec：`SignalProvider` 接口化 + K7 信号通路收口（阶段 1）✅ 完成（2026-10-12，`3c09ed4`）
