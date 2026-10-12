@@ -16,6 +16,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/metrics"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
+	"github.com/ruoxizhnya/quant-trading/pkg/execalgo"
 	"github.com/ruoxizhnya/quant-trading/pkg/httpclient"
 	"github.com/ruoxizhnya/quant-trading/pkg/live"
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
@@ -767,6 +768,11 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 	// 跨服务的解析逻辑，空票池的裁定交给 contracts.CheckValidity。
 	maxUniverseSize := 0
 
+	// K17：exec-algo 派发器（本 run 私有——Engine 实例可被多个回测并发
+	// 共享，父单运行态绝不能跨 run 串。零算法单时它是空转的，默认路径
+	// 数值零变化）。见 pkg/backtest/exec_algo.go。
+	algoDispatch := execalgo.NewDispatcher()
+
 	for i, date := range tradingDays {
 		select {
 		case <-ctx.Done():
@@ -849,7 +855,11 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 			e.signalObserver(date, signals)
 		}
 
-		e.processSignalsAndExecuteTrades(ctx, state, signals, marketDataCache, pricesCache, regime, date, logger)
+		e.processSignalsAndExecuteTrades(ctx, state, signals, marketDataCache, pricesCache, regime, date, algoDispatch, logger)
+
+		// K17：exec-algo 到点子单送撮合（在信号处理之后：新挂父单的首片
+		// SubmitAt = 信号当日，当日到点即发）。无活跃父单时零开销返回。
+		e.processExecAlgoChildren(ctx, state, algoDispatch, marketDataCache, date, logger)
 
 		e.processStopLosses(state, pricesCache, marketDataCache, date, logger)
 
@@ -871,6 +881,12 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 	}
 
 	lastTradingDay := tradingDays[len(tradingDays)-1]
+
+	// K17：会话结束裁决 —— 撤销未报完父单的剩余子单（显式裁决与理由见
+	// pkg/backtest/exec_algo.go 的 finalizeExecAlgo）。必须在日循环之后、
+	// forceCloseAllPositions 之前：撤销只是记账告警，不产生新成交。
+	finalizeExecAlgo(algoDispatch, logger)
+
 	e.forceCloseAllPositions(state, pricesCache, lastTradingDay, logger)
 
 	state.Tracker.RecordDailyValue(lastTradingDay, pricesCache)
@@ -1343,6 +1359,10 @@ func convertStrategySignals(signals []strategy.Signal, defaultDate time.Time) []
 			LimitPrice:     limitPrice,
 			OrderType:      orderType,
 			CompositeScore: s.Strength,
+			// K17：执行算法指定原样透传（零值 = 未指定 = 默认路径不变）。
+			ExecAlgo:    s.ExecAlgo,
+			ExecSlices:  s.ExecSlices,
+			ExecProfile: s.ExecProfile,
 		})
 	}
 	return domainSignals

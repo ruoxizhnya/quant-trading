@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
+	"github.com/ruoxizhnya/quant-trading/pkg/execalgo"
 )
 
 type stockJob struct {
@@ -247,6 +248,7 @@ func (e *Engine) processSignalsAndExecuteTrades(
 	pricesCache map[string]float64,
 	regime *domain.MarketRegime,
 	date time.Time,
+	algo *execalgo.Dispatcher,
 	logger zerolog.Logger,
 ) {
 	if len(signals) == 0 {
@@ -268,7 +270,7 @@ func (e *Engine) processSignalsAndExecuteTrades(
 	positionSizes, err := e.calculatePositionsBatch(ctx, validSignals, portfolio, regime, pricesCache, marketDataCache)
 	if err != nil {
 		logger.Warn().Err(err).Msg("Batch position sizing failed, falling back to per-signal")
-		e.processSignalsFallback(ctx, state, validSignals, marketDataCache, pricesCache, regime, date, logger)
+		e.processSignalsFallback(ctx, state, validSignals, marketDataCache, pricesCache, regime, date, algo, logger)
 		return
 	}
 
@@ -329,7 +331,7 @@ func (e *Engine) processSignalsAndExecuteTrades(
 		}
 
 		if effectiveTarget > 0 {
-			e.executeSignalTrade(state, signal, effectiveTarget, pricesCache, date, execOpts, tp, logger)
+			e.executeSignalTrade(ctx, state, algo, signal, effectiveTarget, pricesCache, date, execOpts, tp, logger)
 		}
 	}
 }
@@ -342,6 +344,7 @@ func (e *Engine) processSignalsFallback(
 	pricesCache map[string]float64,
 	regime *domain.MarketRegime,
 	date time.Time,
+	algo *execalgo.Dispatcher,
 	logger zerolog.Logger,
 ) {
 	for _, signal := range signals {
@@ -387,7 +390,7 @@ func (e *Engine) processSignalsFallback(
 		}
 
 		if effectiveTarget > 0 {
-			e.executeSignalTrade(state, signal, effectiveTarget, pricesCache, date, execOpts, tp, logger)
+			e.executeSignalTrade(ctx, state, algo, signal, effectiveTarget, pricesCache, date, execOpts, tp, logger)
 		}
 	}
 }
@@ -495,7 +498,9 @@ func (e *Engine) reconcileTargetPosition(
 }
 
 func (e *Engine) executeSignalTrade(
+	ctx context.Context,
 	state *BacktestState,
+	algo *execalgo.Dispatcher,
 	signal domain.Signal,
 	effectiveTarget float64,
 	pricesCache map[string]float64,
@@ -507,6 +512,24 @@ func (e *Engine) executeSignalTrade(
 	price := pricesCache[signal.Symbol]
 	if price <= 0 {
 		return
+	}
+
+	// K17：指定了执行算法的信号走拆单路径——挂父单到派发器，按 bar 到点
+	// 逐片撮合（processExecAlgoChildren），不当场整单成交。未指定
+	// （ExecAlgo == ""）→ 下方原路径逐字节不变。
+	if algo != nil {
+		attached, err := attachExecAlgoSignal(ctx, algo, signal, effectiveTarget, state.ID, date)
+		if err != nil {
+			logger.Warn().Err(err).
+				Str("symbol", signal.Symbol).Str("exec_algo", signal.ExecAlgo).
+				Msg("Failed to attach exec-algo parent order, signal skipped")
+			tp.PendingQty = tp.TargetQty - tp.ActualQty
+			tp.LastUpdated = date
+			return
+		}
+		if attached {
+			return
+		}
 	}
 
 	var trade *domain.Trade

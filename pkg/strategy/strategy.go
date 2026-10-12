@@ -53,6 +53,15 @@ type Signal struct {
 	Metadata   map[string]interface{} `json:"metadata"`
 	OrderType  domain.OrderType       `json:"order_type"`
 	LimitPrice float64                `json:"limit_price"`
+
+	// ─── K17：可选执行算法指定（透传给 domain.Signal / domain.Order）──
+	//
+	// 策略用这三个字段请求「按 TWAP/VWAP 拆单执行」；零值 = 未指定 ⇒
+	// 整单直下（默认路径逐字节不变）。语义见 domain.Order 同名字段与
+	// pkg/execalgo（K4 算法 + K17 接线）。
+	ExecAlgo    string    `json:"exec_algo,omitempty"`    // "" / "twap" / "vwap"
+	ExecSlices  int       `json:"exec_slices,omitempty"`  // 拆单片数；<=0 按 profile 长度或 1 片
+	ExecProfile []float64 `json:"exec_profile,omitempty"` // VWAP 成交量权重（原始量，内部归一化）
 }
 
 // Strategy is the canonical composite trading-strategy interface

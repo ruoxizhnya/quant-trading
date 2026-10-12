@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/ruoxizhnya/quant-trading/pkg/clock"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/execalgo"
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
@@ -90,6 +91,11 @@ type PaperSession struct {
 	// 更新，经 CurrentBarSource 钩子喂给 trader 定价/算成本。
 	currentBars map[string]Quote
 
+	// execAlgo 是 K17 的 exec-algo 派发器（本会话私有）。零算法单时它
+	// 空转，默认路径逐字节不变；有指定 exec_algo 的信号时，父单挂这里
+	// 按 bar 到点拆单报送（见 paper_exec_algo.go）。
+	execAlgo *execalgo.Dispatcher
+
 	// signalCollector 是 K5 切片 2 的信号对账钩子（可选）。
 	signalCollector func(date time.Time, signals []domain.Signal)
 }
@@ -122,6 +128,7 @@ func NewPaperSession(cfg PaperSessionConfig) (*PaperSession, error) {
 		execCfg:         cfg.ExecutionConfig,
 		logger:          logger,
 		currentBars:     map[string]Quote{},
+		execAlgo:        execalgo.NewDispatcher(),
 		signalCollector: cfg.SignalCollector,
 	}, nil
 }
@@ -223,6 +230,16 @@ func (s *PaperSession) Run(ctx context.Context, symbols []string, start, end tim
 
 		// 撮合。
 		for _, sig := range domainSignals {
+			// K17：指定了执行算法的信号 → 挂父单拆单（按 bar 到点逐片报送），
+			// 不当场整单报送。未指定 → executeSignal 原路径逐字节不变。
+			if sig.ExecAlgo != "" {
+				if err := s.attachExecAlgo(sig, d); err != nil {
+					s.logger.Warn().Err(err).
+						Str("date", key).Str("symbol", sig.Symbol).Str("exec_algo", sig.ExecAlgo).
+						Msg("paper session: exec-algo parent order skipped")
+				}
+				continue
+			}
 			fill, err := s.executeSignal(ctx, d, sig)
 			if err != nil {
 				s.logger.Warn().Err(err).
@@ -235,11 +252,19 @@ func (s *PaperSession) Run(ctx context.Context, symbols []string, start, end tim
 			}
 		}
 
+		// K17：exec-algo 到点子单报送（在信号之后：新挂父单的首片
+		// SubmitAt = 信号当日，当日到点即发，与回测侧同序）。
+		fills = append(fills, s.dispatchExecAlgoChildren(ctx, d)...)
+
 		// T+1 结算滚动（MockTrader 实现 AdvanceDay）。
 		if adv, ok := s.trader.(interface{ AdvanceDay() }); ok {
 			adv.AdvanceDay()
 		}
 	}
+
+	// K17：会话结束裁决 —— 撤销未报完父单的剩余子单（显式裁决与理由见
+	// paper_exec_algo.go 的 finalizeExecAlgo；与回测侧同一裁决）。
+	s.finalizeExecAlgo()
 
 	// 最终定序：按 (Date, Symbol) 升序。信号顺序不保证符号有序（尤其
 	// 批式策略返回的切片），成交流必须确定性有序。
@@ -409,6 +434,10 @@ func toDomainSignals(signals []strategy.Signal, defaultDate time.Time) []domain.
 			Metadata:       sg.Metadata,
 			LimitPrice:     limitPrice,
 			OrderType:      orderType,
+			// K17：执行算法指定原样透传（零值 = 未指定 = 默认路径不变）。
+			ExecAlgo:    sg.ExecAlgo,
+			ExecSlices:  sg.ExecSlices,
+			ExecProfile: sg.ExecProfile,
 		})
 	}
 	return out

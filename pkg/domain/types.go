@@ -70,6 +70,16 @@ type Signal struct {
 	Metadata       map[string]any     `json:"metadata"`
 	LimitPrice     float64            `json:"limit_price"` // 0 for market orders
 	OrderType      OrderType          `json:"order_type"`  // market or limit
+
+	// ─── K17：可选执行算法指定（与 domain.Order 同名字段同语义）────────
+	//
+	// 策略在信号上请求「这笔意图按 TWAP/VWAP 拆单执行」；零值 = 未指定
+	// ⇒ 整单直下（默认路径逐字节不变）。透传链：strategy.Signal →
+	// domain.Signal（convertStrategySignals / toDomainSignals）→
+	// domain.Order → pkg/execalgo.Dispatcher。语义见 domain.Order 同名字段。
+	ExecAlgo    string    `json:"exec_algo,omitempty"`    // "" / "twap" / "vwap"
+	ExecSlices  int       `json:"exec_slices,omitempty"`  // 拆单片数；<=0 按 profile 长度或 1 片
+	ExecProfile []float64 `json:"exec_profile,omitempty"` // VWAP 成交量权重（原始量，内部归一化）
 }
 
 // Position represents a single position in the portfolio
@@ -146,6 +156,24 @@ type Order struct {
 	OrderType  OrderType `json:"order_type"`
 	Quantity   float64   `json:"quantity"`
 	LimitPrice float64   `json:"limit_price"` // 0 for market orders
+
+	// ─── K17：可选执行算法指定（exec-algo 接线，TASKS.md K17）────────
+	//
+	// 三个字段全部**可选**，零值 = 未指定 ⇒ 整单直下，默认路径行为与
+	// 数值逐字节不变（K17 硬约束，回归腿钉住）。指定后由 pkg/execalgo
+	// 的 TWAP/VWAP 在「送撮合前」拆单：回测侧 pkg/backtest/exec_algo.go、
+	// paper 侧 pkg/live/paper_exec_algo.go。子单走同一 CostModel（含
+	// impact）——大单拆细后单笔冲击下降，即 D5「模拟真实大单」的效果。
+	//
+	// ExecAlgo 仅接受 "twap" / "vwap"（未知值 fail-loud）；真实券商
+	// 算法单不做（D1）。
+	ExecAlgo string `json:"exec_algo,omitempty"` // "" / "twap" / "vwap"
+	// ExecSlices 是拆单片数；<=0 时 VWAP 取 len(ExecProfile)，再不行 1 片。
+	ExecSlices int `json:"exec_slices,omitempty"`
+	// ExecProfile 是 VWAP 的成交量权重（原始量即可，算法内部归一化）；
+	//  TWAP 忽略。非法 profile 由算法退化为等分并置 Degraded 标记。
+	ExecProfile []float64 `json:"exec_profile,omitempty"`
+
 	// P1-3 扩展字段
 	StopPrice     float64   `json:"stop_price,omitempty"`      // 触发价
 	TrailAmount   float64   `json:"trail_amount,omitempty"`    // 跟踪绝对偏移
