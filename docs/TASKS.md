@@ -1,7 +1,7 @@
 ---
 status: evergreen
-last-verified: 2026-10-08
-verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 行，基本已完成）归档至 archive/TASKS-2026-10-08-archived.md；本文件按 AGENTS.md §8.5 任务定义规范重新生成
+last-verified: 2026-10-12
+verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 行，基本已完成）归档至 archive/TASKS-2026-10-08-archived.md；本文件按 AGENTS.md §8.5 任务定义规范重新生成。2026-10-12 内核可插拔 + NT-ready 新主线重构（ADR-031）—— 新增 K8–K16（阶段 1–3），K7 遗留①② / OBS-01 遗留①② / K0-P2-1 / K1-P2-1~4 并入新任务，「impact 默认滑点」并入 NT 决策门；同日补登记 K17（K4 遗留 exec-algo 主路径接线）+ K16 ③-⑤ 认领 K5 告警接线遗留
 ---
 
 # TASKS — 未完成项
@@ -14,11 +14,12 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ---
 
-## 一、主线：模块化内核（目标架构）
+## 一、主线：模块化内核（目标架构）✅ 全部完成（K0–K7，2026-10-08~10）
 
 > 详细蓝图：[design/kernel/target-architecture-modular-kernel.md](design/kernel/target-architecture-modular-kernel.md)（D1–D5 已拍板，2026-10-08）。
 > **依赖主线：K0 → K1 → K2 → {K3, K5, K6, K7}；K4 独立（只依赖 K1 的 exec-engine 挂点）。**
 > K0 是所有并行开发的**硬前提**（契约先行冻结，见蓝图 §5.1）。K0 完成后，K3/K4/K5/K6/K7 可各自交一个独立 agent 并行开发。
+> **本主线已收官，遗留项按 ADR-031 并入新主线（§二）**：K7 遗留①②→K8、OBS-01 遗留①②→K9、K0-P2-1→K11、K1-P2-1~4→K12、K4 遗留（exec-algo 接线）→K17、K5 遗留（告警接线）→K16 ③-⑤。
 
 ### K0 · 契约冻结（P0）✅ 完成（2026-10-08，两切片均独立 agent 派工 + 验收方独立复核）
 
@@ -83,8 +84,8 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 > **默认行为零变化**：engine 默认仍 `"fixed"`、默认滑点率不变，`fixed/variable/none` 分支逐字未动（回归腿钉住）。
 > **正证据**：TWAP `1000/7 → [143×6,142]` 且 `Σ=1000`、`SubmitAt` 相邻间隔全等；VWAP `profile[1,2,3,4] → 占比 0.1/0.2/0.3/0.4`；**大单滑点 0.0632 > 小单 0.0200（10:1 单量，比值 3.1623 = √10）**。
 > **审查加固（验收方做）**：子单 ID 幂等用例原本会被「时间戳派生 ID」骗过 —— Windows `time.Now()` 毫秒级粒度下背靠背两次调用取同一值 ⇒ **假绿（实测 PASS）**；已在 TWAP/VWAP 幂等用例中插 20ms 延迟，重放同一破坏**变红**（灵敏度平台无关）。
-> **待裁决（只登记）**：是否把 `"impact"` 设为**默认**滑点模型（会改变所有回测数值）。
-> **未做（后续）**：把 exec-algo 接进下单主路径（引擎/实盘按算法拆单 → 归 K5）；真实券商算法单；VWAP 的成交量预测（现只用给定 profile）。
+> **待裁决（只登记）**：是否把 `"impact"` 设为**默认**滑点模型（会改变所有回测数值）——⚠️ 2026-10-12 并入 §五「NT 决策门」一并裁决（与内核切换三选一同时拍板，避免两轮全量重跑）。
+> **未做（后续）**：把 exec-algo 接进下单主路径（引擎/实盘按算法拆单 → **归 K17**，2026-10-12 修正：原写「归 K5」但 K5 切片未含、代码核实 `pkg/execalgo` 零生产引用，补 K17 认领）；真实券商算法单（D1 不做）；VWAP 的成交量预测（现只用给定 profile，沿用 K4 登记不做）。
 
 - **① 目标**：exec-algo 模块落地 TWAP/VWAP 执行算法（与策略同构 trait），撮合引擎加市场冲击模型（D5：模拟真实大单）。
 - **② 上下文**：蓝图 UC4（执行算法拆单）；nautilus `crates/trading/src/algorithm/`（TWAP 同构）；K1 的 exec-engine 挂点。
@@ -118,7 +119,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - 两侧信号暴露钩子（默认 nil 零行为变化）：paper 侧 `PaperSessionConfig.SignalCollector`（撮合前回调）；回测侧 `Engine.SetSignalObserver`（getSignals 后、撮合前回调）
 - 端到端测试 `pkg/backtest/signal_reconcile_e2e_test.go`：同一批合成 bar，两侧独立跑 → 91 条信号逐条一致（正证据）；截断窗口 → 5 条差异被点名（反证腿）
 - 对账器单测 8 条（一致/缺失/方向/强度/容差/顺序无关/确定性输出）
-- ⚠️ 告警接线**未做**：现有 `ReconciliationWorker`/`AlertDispatcher` 是「券商资金对账」（持仓/现金），零生产构造点且与信号对账是两码事；信号差异的「告警」以 `ReconcileSignals` 返回的差异列表 + 端到端 fail-loud 兑现，生产告警通道接线留待对账真正进实盘循环时
+- ⚠️ 告警接线**未做**：现有 `ReconciliationWorker`/`AlertDispatcher` 是「券商资金对账」（持仓/现金），零生产构造点且与信号对账是两码事；信号差异的「告警」以 `ReconcileSignals` 返回的差异列表 + 端到端 fail-loud 兑现，生产告警通道接线留待对账真正进实盘循环时——**2026-10-12 已由 K16 ③-⑤ 认领**（阶段 3 生产化一并接线）
 
 ### K6 · L3a WASM（P6）切片 1 ✅ / 切片 2 ✅ / 切片 3 ✅（前置：K2）
 
@@ -185,17 +186,144 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **破坏验证（切片 2）**：去掉 `OnBar` 里的 `rejectFutureSignals` → `TestSignalStrategyRejectsFutureSignal` 红（未来信号被静默接受）→ 还原绿
 - 全量 `go build ./...` + `go vet` + strategy/repoguard/backtest 全绿；gofmt 干净
 
-> **⚠️ 已知边界（登记，不阻塞）**：① 信号表 DDL 尚未并入 `pkg/storage/postgres.go` 的 `migrate()`（同 `strategy_state` 先例，走 `EnsureSchema` 独立可安装，合并留后续切片）；② 外部模型的**写入入口**（HTTP API）未建——本切片只冻结 `SignalStore` 契约 + PG 实现，进程外模型直接写库或经将来 API；③ `SignalStrategy` 的消费是 O(N²) 全量拉取（每 bar 重读 as_of≤当日），游标去重保证正确性、性能优化留后续。
+> **⚠️ 已知边界（2026-10-12 更新归宿）**：① 信号表 DDL 并入 `migrate()` → **已并入 K8**（§二）；② 外部模型 HTTP 写入入口 → **已并入 K8**（`POST /api/signals`）；③ `SignalStrategy` O(N²) 消费优化 → 不阻塞、另立小任务（K8 明确列为非目标）。
 
 ---
 
-## 二、最高优先级独立工单
+## 二、主线（新）：内核可插拔 + 外围 NT-ready（阶段 1–3，ADR-031）
+
+> **决策**：[ADR-031](https://github.com/ruoxizhnya/quant-trading-docs/blob/main/docs/adr/adr-031-kernel-pluggable-nt-ready.md)（buy vs build：内核降级为可替换执行器，NT 侧车「信号—权重回放适配器」，Go 策略资产零重写）。
+> **需求与设计**：[design/kernel/kernel-pluggable-nt-ready.md](design/kernel/kernel-pluggable-nt-ready.md)（四契约 RunSpec/SignalSpec/ResultSpec/EngineRunner、适配器规则、FR-1~FR-7）。
+> **依赖主线**：阶段 1 = {K8, K9} 并行 → K10；K11 / K12 独立可并行（K12 是阶段 3 前置）。阶段 2 = K13 → K14 → K15（前置 K8–K10）。阶段 3 = K16（前置 K15 + **NT 决策门通过**，见 §五）。K17 独立（K4 遗留收口，不在 NT 阶段链上，任意时点可做）。
+> **总原则**：阶段 1 全程「默认行为逐字节不变」——不带新字段的存量请求走 Go 内核，数值、语义、API 形状零变化（回归腿钉住）。
+
+### K8 · SignalSpec：`SignalProvider` 接口化 + K7 信号通路收口（阶段 1）
+
+- **① 目标**：引擎取信号改为经 `SignalProvider` 接口（本地实现行为逐字节不变），且外部信号通路（信号表进 `migrate()` + HTTP 写入入口）收口，成为可插拔信号供给的默认远程形态。
+- **② 上下文**：设计文档 §2.2（接口草案）；K7 交付物 `pkg/strategy/external_signal.go`（`ExternalSignal`/`SignalContentHash`/`ValidateExternalSignal`/`SignalStore`）、`pkg/strategy/signal_store.go`（`PGSignalStore` + `EnsureSchema`）、`pkg/strategy/signal_strategy.go`（`SignalStrategy`，as_of 消费 + `rejectFutureSignals`）；引擎调用点 `pkg/backtest/engine.go`（`getSignalsFromLocalStrategy`，批式 `GenerateSignals` 与流式 `OnBar`/`Signals()` 双路径）；K7「⚠️ 已知边界」①②。ADR-031 D1/D2。
+- **③ 要求**：
+  1. `pkg/strategy` 新增 `SignalProvider` 接口：`Signals(ctx, scope, asOf) ([]Signal, error)`——**返回 `as_of <= asOf` 的信号，未来信号物理不可见是契约级语义**（任何实现违反即违约）；
+  2. `LocalSignalProvider` 包装现有注册表 + 批式/流式双模式调用，**行为逐字节不变**；引擎两条取信号路径改经接口（默认注入 LocalSignalProvider）；
+  3. K7 遗留①：`quant.external_signals` DDL 并入 `pkg/storage/postgres.go` 的 `migrate()`（**内联 DDL**，`docs/migrations/` 加镜像副本、编号顺延；`EnsureSchema` 保留为幂等兜底，与 migrate 语义一致）；
+  4. K7 遗留②：外部模型 HTTP 写入入口 `POST /api/signals`（批量 `ExternalSignal`；`SignalContentHash` 幂等去重；`ValidateExternalSignal` fail-loud 拒坏输入与未来 as_of；敏感写操作走 `RequireRole` RBAC）+ `docs/openapi.yaml` 同步。
+- **④ 约束与非目标**：不改 `SignalStore`/`SignalStrategy` 既有行为与语义（含 UTC 自然日归一）；K7 遗留③（`SignalStrategy` O(N²) 消费优化）**不做**（正确性已有游标去重保证）；`quant.strategy_state` 不并入 migrate（另案）；远程 `SignalProvider` 实现（HTTP/Redis 消费）**不做**（阶段 2）；不动 NT、不动 ResultSpec/RunSpec。
+- **⑤ 验收**：`go build ./...` + 全量 `go test ./...` 全绿（行为零变化正证据：K2 双模式等价、K5 信号对账、K7 注入 e2e 既有测试全过）；真库 `migrate()` 后 `\d quant.external_signals` 存在且与 `EnsureSchema` 结果一致；`POST /api/signals` 写入 → `SignalStrategy` 消费下单 e2e 一条通过；**破坏验证**：① `LocalSignalProvider` 人为返回 `as_of > asOf` 的信号 → 契约拒绝测试变红；② 删接口一个方法 → 编译期合规测试变红；③ migrate 的 DDL 与 `SignalSchemaDDL` 不一致 → 一致性测试红。
+- **⑥ 边界**：只做 SignalProvider 接口 + 本地实现 + 引擎接线 + 信号表 migrate + HTTP 写入门，一个 commit。
+
+### K9 · RunSpec/ResultSpec 冻结 + status 全链路收口（阶段 1）
+
+- **① 目标**：RunSpec 增加内核路由字段（未知引擎参数 fail-closed 拒绝）；ResultSpec canonical schema 冻结为契约；`status` 三值语义（`completed`/`invalid`/`failed`）在 API、compare、UI 全链路一致呈现。
+- **② 上下文**：设计文档 §2.3/FR-3/FR-4；`pkg/backtest/contracts/contracts.go`（`BacktestRequest`/`BacktestResponse`）；`pkg/backtest/contracts/validity.go`（`CheckValidity`，OBS-01 切片 1）；`buildResponseFromState`（OBS-01 切片 2 的唯一透传点）；OBS-01 遗留①（`pkg/backtest/reporting/compare.go` 第三处硬编码 Status，其闸门只认 completed ⇒ 读不到 reasons）②（UI 不读 `BacktestResult.status`，渲染判据是 `result.id` 存在——UI 代码在 **quant-trading-ui 仓** `src/`，跨仓改）。
+- **③ 要求**：
+  1. `BacktestRequest` 增 `kernel` 字段（默认 `"go"`）+ `engine_params`（map，**未知名拒绝**而非忽略）；不带新字段的存量请求序列化行为不变；
+  2. ResultSpec 冻结：`BacktestResponse` 字段集 + 指标口径（封闭系统日收益）+ status 三值语义写入 `docs/SPEC.md`，加合规测试（字段集变更须破坏该测试，走变更评审）；
+  3. `compare.go` 改从 `buildResponseFromState` 同源口径读 status/reasons（invalid 运行不混入成功集、且 compare 能呈现 reasons）；
+  4. UI（quant-trading-ui 仓）读 `result.status`：`invalid` 显式呈现（警示样式 + `invalid_reasons` 列表），`failed` 显式呈现，不再以 `result.id` 存在判成功。
+- **④ 约束与非目标**：默认请求（无新字段）API 响应逐字节不变；不改 metrics 计算口径；不改 `omitempty` 零值语义（P1-25 另案）；不做 EngineRunner 路由实现（K10）；不做 openapi 大版本化（P2-16 已有机制）。
+- **⑤ 验收**：core：契约测试（`kernel` 透传 / 未知 `engine_params` 键 → 400 / ResultSpec 字段集护栏破坏验证）+ compare 对含 invalid 的混合集断言；ui：`npm run typecheck` + `npm run lint` + `npm test` 全绿 + Playwright 一条（invalid 结果页呈现警示与 reasons）。**破坏验证**：UI 渲染判据改回 `result.id` → 对应 vitest 变红；compare 闸门改回只认 completed → reasons 断言变红。
+- **⑥ 边界**：RunSpec/ResultSpec/status 三件事，跨 core + quant-trading-ui 两仓（各自 atomic commit，core 先、ui 后）。
+
+### K10 · EngineRunner 可插拔 + 内核路由（阶段 1，前置：K9）
+
+- **① 目标**：执行器注册表 + 按 `RunSpec.kernel` 路由落地：Go runner 默认选中、行为不变；未知/不可用内核 **fail-closed 明确报错、零静默回退**；用 fake runner 证明「外部引擎可插拔」全链路成立。
+- **② 上下文**：设计文档 §2.4/FR-1；`pkg/backtest/contracts/runner.go`（`BacktestRunner` 窄接口，签名不动）；两条调用链：同步 `cmd/analysis/handlers_backtest.go`（`POST /api/backtest`）与异步 `pkg/backtest/job/job.go`（job worker）；ADR-031 D1。
+- **③ 要求**：
+  1. `EngineRegistry`（`Register(name string, runner contracts.BacktestRunner)` / `Resolve(name) (BacktestRunner, error)`），装配期注册 `go` runner（现有实现包装，默认名）；
+  2. 同步与 job 异步两条路径都改经 `Resolve`；`kernel` 字段（K9）为路由键；
+  3. 路由失败语义：未注册/侧车不可达 → 显式错误（同步 4xx/5xx 且 message 点名内核名；job → `failed` + error_msg），**不得回退 go**；
+  4. walk-forward / batch 经同一注册表取 runner（编排逻辑零改动）。
+- **④ 约束与非目标**：`BacktestRunner` 签名不改；不实现 NT runner（K13）；不改 job/batch/walkforward 的编排语义与并行度；不加内核热插拔（注册在装配期，运行期不改）。
+- **⑤ 验收**：测试注册 fake runner 为 `"fake"` → 请求 `kernel=fake` 走 fake 并落库同 schema（正证据）；`kernel=nautilus`（未注册）→ 明确报错、**断言响应与库内均无 go 内核产物**（反证腿：证明没有静默回退）；不带 `kernel` → 与现状逐字节一致（回归腿）。**破坏验证**：路由改成「未知名回退 go」→ fail-closed 测试红。
+- **⑥ 边界**：注册表 + 路由 + 两条调用链接线，一个 commit。
+
+### K11 · 三条内核不变量 AST 护栏（阶段 1，原 K0-P2-1 并入）
+
+- **① 目标**：把三条**只在注释里**的核心不变量变成机器可验证的护栏。
+- **② 上下文**：K0 契约的三条关键语义约束目前只有注释——`ExecEngine.Submit` 必须先过 `risk.RiskEngine.CheckOrder`（`pkg/live/interfaces.go:87`）；`msgbus.Publish` 必须先经 EventStore 记录、再分发（BusTap 语义，D4）；`BarHandler.OnBar` 不得回看未来 bar（`pkg/strategy/streaming.go:52`）。项目先例：`internal/repoguard/calendar_seed_isolation_test.go` 的 AST 扫、`cmd/analysis/auth_public_paths_test.go` 的 AST 双向对齐。与 K8 的 SignalProvider 防前视契约同族（未来数据不可见）。
+- **③ 要求**：用 AST 护栏钉住三条不变量（每条一护栏，位置随被约束代码所在包）。
+- **④ 约束与非目标**：只加护栏、不改契约签名；护栏本身必须破坏验证（改坏→红→还原）；**防「扫原文被注释误报」**——用 `scanInside(FuncName)` 限定函数体，别扫全文。
+- **⑤ 验收**：三条不变量各有一条破坏腿（如 Submit 去掉 CheckOrder 调用 → 该护栏红），且反证腿证明护栏不是永真；`go test ./internal/repoguard/ ./pkg/...` 全绿。
+- **⑥ 边界**：只做这三条护栏，不扩到其他语义约束，一个 commit。
+
+### K12 · 内核装配治理收口 K1-P2-1~4（阶段 3 前置，独立）
+
+- **① 目标**：K1/K2 审查登记的四条装配缺陷收口，让 Kernel 装配达到「可托管可插拔执行器」的稳定度。
+- **② 上下文**：本文件 §六「K1/K2 实现审查发现」表 K1-P2-1~4（Boot ctx 生命周期 / 回滚 error 静默丢弃 / eventstore 资源归属未定 / 模块回调内核死锁）；`pkg/kernel/kernel.go`（`rollbackLocked`）；`cmd/analysis/kernel_wiring.go`（`assembleKernel`）；ADR-031 D1（EngineRunner 可插拔的稳定性基础）。
+- **③ 要求**：① Boot 的 ctx 生命周期修正——内核传长生命周期 ctx，或契约注释显式「ctx 仅限 Boot 期间」并加测试钉住（二选一，裁决理由写注释）；② `rollbackLocked` 的 Stop error 至少 log 并包进返回 error 的 message；③ **裁决** pool 归属（内核资源：模块 Stop 关 / 应用层资源：保持现状）并同步到代码注释 + 设计文档；④ 「模块不得在生命周期方法内回调 `Module()`」固化为契约注释 + 护栏（AST 或编译期约束，破坏验证一条）。
+- **④ 约束与非目标**：不改 BootOrder 与模块契约签名（要改须走变更评审）；不动业务模块逻辑；不做内核功能扩展。
+- **⑤ 验收**：四条各有一条正测试或护栏 + 各一条破坏腿（改坏→红→还原）；全量 `go test ./...` 绿。
+- **⑥ 边界**：只做 K1-P2-1~4 四条，一个 commit。
+
+### K13 · NT 侧车骨架：RunSpec API + 数据馈送（阶段 2，前置：K8–K10）
+
+- **① 目标**：独立 Python 进程（NT 侧车）经回环提供「RunSpec 执行」服务跑通最小链路（NT 内置 demo 策略即可），Go 侧 `NautilusRunner` 注册进 K10 注册表，证明「外部引擎经契约可插拔」在真实 NT 上成立。
+- **② 上下文**：调研报告 §3.4/§5.3（唯一干净形态 = 独立 Python 服务；无 Go 绑定、无 gRPC 控制 API、cgo 不可行）；设计文档 §4；NT 现状 v2.0.0rc6（pip wheel，Python 3.12–3.14）；`ohlcv_daily_qfq`（390 万行日线）；ADR-031 D5 安全约束。
+- **③ 要求**：
+  1. core 仓新增 `nt-sidecar/`（独立 Python 项目：`requirements.txt` **钉死 NT 版本** + 服务入口 + README）：HTTP 或 gRPC（**本任务裁决通道选型，写入设计文档 §8 表第 2 项**）包装 `BacktestNode`/`BacktestRunConfig`，**只监听 127.0.0.1**；
+  2. 数据馈送：`ohlcv_daily_qfq` → NT 可消费形态（Parquet 导出，纳秒 UTC 时间戳口径，或低层 `add_data()` 馈送脚本）；**裁决复权口径映射并写入设计文档 §8 表第 3 项**；
+  3. Go 侧 `NautilusRunner` 实现 `contracts.BacktestRunner`（调侧车 API；超时/错误 → `failed` 透传，不吞错）+ 装配注册名 `"nautilus"`；
+  4. 无策略逻辑——用 NT 内置 buy-and-hold demo 验证链路（RunSpec → 侧车 → 结果 JSON → 落库）。
+- **④ 约束与非目标**：ADR-031 D5 全部安全约束（不直连 DB、回环 only、不对外暴露）；不做权重回放适配器（K14）；不做结果指标映射对齐（K15，本任务返回最小字段集即可）；不进生产 compose 主路径（可加 docker-compose.nt.yml 独立样例）。
+- **⑤ 验收**：Go 集成测试：`kernel=nautilus` 跑通 demo 回测并落库（正证据）；侧车未启动 → `kernel=nautilus` 显式 failed 且**无 go 内核产物**（反证腿，复用 K10 fail-closed 断言）；`nt-sidecar/` 有可复现启动文档（一条命令起服务）。**破坏验证**：客户端错误吞掉改静默回退 → K10 fail-closed 测试红。
+- **⑥ 边界**：侧车骨架 + 数据馈送 + Go 客户端注册，一个 commit（Python 与 Go 同 commit 属同一任务交付）。
+
+### K14 · 信号—权重回放适配器（阶段 2，前置：K13）
+
+- **① 目标**：NT 侧通用 Python Strategy（权重回放适配器）落地——从 SignalSpec 信号流读目标权重生成调仓订单，含 A 股最小规则集（T+1 / 涨跌停 / 费率），Go 策略资产零改动即能在 NT 上执行。
+- **② 上下文**：设计文档 §3（适配器四步：消费→下单→规则→对齐友好）；K7 信号表消费语义（as_of ≤ 当日、首 bar 消费、未来拒绝——与 `pkg/strategy/signal_strategy.go` 一致）；Go 侧规则参照 `pkg/backtest/tracker/tracker.go`（T+1 今昨仓）、`pkg/backtest/pricelimit.go`（涨跌停）、`pkg/fees/ashare.go`（印花税/过户费/最低佣金）；ADR-031 D2。
+- **③ 要求**：
+  1. 适配器消费：每调仓日读 `as_of <= 当日` 目标权重信号（与 `SignalStrategy` 同一消费语义），目标权重 → 目标仓位 → 调仓订单（`order_factory`）；
+  2. A 股最小规则集：**卖单量 ≤ 昨仓可卖量**（今仓不可卖）；**触及涨停不追买、触及跌停不追卖**；费率映射（印花税卖出单边 / 过户费 / 最低佣金 → NT fee model）；
+  3. 对齐友好：不做 Go 侧没有的执行增强（禁用冰山单/部分成交默认增强），差异可归因；
+  4. ST/新股价格限制、集合竞价是否入最小集：按双跑需要**裁决并写入设计文档 §8 表第 5 项**（可裁「不做」，理由入档）。
+- **④ 约束与非目标**：不扩展 NT venue 模型（规则全在适配器下单逻辑）；不做 L2/L3 微观结构策略（超「信号—权重」表达上限，非目标）；不做实盘。
+- **⑤ 验收**：合成信号流单测：T+1 反证腿（今仓卖出被拒/截断）、涨停追买反证腿（触板不追单）、费率与 `pkg/fees/ashare.go` 同输入对拍（容差 0 或实测记录）；**破坏验证**：去掉 T+1 检查 → 反证腿红；去掉触板不追单 → 反证腿红。
+- **⑥ 边界**：只做适配器与最小规则集（`nt-sidecar/` 内），一个 commit。
+
+### K15 · 结果映射 + 双跑对齐实验（阶段 2，前置：K14）
+
+- **① 目标**：NT 报告 → ResultSpec 映射层落地；产出**同信号流、双内核**的对齐报告（逐指标 diff、差异归因可读），容差阈值实测确定并回写设计文档。
+- **② 上下文**：设计文档 §2.3/FR-6；K5 信号对账方法论（`pkg/live/signal_reconcile.go` 的「同输入对差异归因」思路）；指标口径 `pkg/backtest/metrics/performance.go`（封闭系统日收益）；K4 冲击/费率基线。
+- **③ 要求**：
+  1. 映射层：NT pandas 报告（orders/fills/positions/equity/stats）→ ResultSpec（收益率/夏普/最大回撤/交易明细/净值 + status 语义）；
+  2. 对齐工具：同一信号流（K7 信号表）+ 同一时间窗 + 同一费率配置 → Go 内核与 NT 侧车各跑一次 → 逐指标 diff 报告（含交易明细级对账）；
+  3. 实验：**至少 2 只策略 × 1 个年度窗口**（含一只含 T+1/涨跌停触发的）；差异逐项归因（费率 / T+1 / 涨跌停 / 撮合机制）；
+  4. 容差阈值按实测分指标确定，**写回设计文档 §8 表第 1 项**（不拍脑袋）。
+- **④ 约束与非目标**：实验可复现（确定性回放/固定输入，双跑各跑两遍结果一致）；不改 Go 内核任何数值；容差不得放宽到「掩盖真实差异」——差异解释不了就如实记录为开放问题；不做生产化（K16）。
+- **⑤ 验收**：对齐报告落 `docs/design/kernel/`（或 `docs/archive/`，含数据、命令、结论）；映射层单测（含 status 映射）；**反证腿**：人为注入一处差异（如改费率）→ diff 报告捕获并点名。
+- **⑥ 边界**：映射层 + 对齐工具 + 实验报告，一个 commit。
+
+### K16 · 双内核生产化（阶段 3，⛔ 前置：K12 + K15 完成 + NT 决策门通过）
+
+- **① 目标**：决策门通过后，双内核形态进生产：kernel 路由可控、对齐回归进 CI 门禁、Python 运行时进 CI/CD、监控与运维文档齐备。
+- **② 上下文**：ADR-031 D4 阶段 3；§五「NT 决策门」；K12–K15 交付物（K12 装配治理是「可托管可插拔执行器」的稳定性前提）；CI 现状（Go `-race` + 前端 typecheck/lint/test）。
+- **③ 要求**：① 对齐回归测试进 CI 门禁（Go + Python，双跑 diff 超阈即红）；② 侧车部署形态（compose 服务 vs 独立进程，裁决并回写设计文档 §8 表第 6 项）+ 健康检查 + 监控指标（侧车延迟/失败率/回退次数=0 断言）；③ 运维文档（NT 版本升级流程、故障回退流程）落 `quant-trading-docs/docs/guides/`；④ 生产路由开关（默认 `go`，`nautilus` 显式开启）；⑤ **K5 遗留认领（2026-10-12）**：生产告警通道接线——对账/双跑差异超阈经 `AlertDispatcher` 告警（现有 `ReconciliationWorker`/`AlertDispatcher` 零生产构造点，K5 切片 2 只以差异列表 + fail-loud 兑现）。
+- **④ 约束与非目标**：ADR-031 D5 安全约束全部有效；不迁移编排到 NT；不接真实券商（D1）。
+- **⑤ 验收**：CI 全绿含对齐回归腿；部署文档按文档起侧车 + 跑通一条 `kernel=nautilus` 回测；监控面板/告警演示（人为停侧车 → failed 显式、零回退；人为注入对账差异 → 告警触发点名）。
+- **⑥ 边界**：生产化收尾，一个 commit。
+
+### K17 · exec-algo 接进下单主路径（独立，K4 遗留收口，2026-10-12 补登记）
+
+- **① 目标**：把 K4 交付的 `pkg/execalgo`（TWAP/VWAP/Schedule 拆单）接进下单主路径（回测撮合 + paper），使 D5「模拟真实大单」真正闭环；**未指定执行算法的订单行为逐字节不变**。
+- **② 上下文**：K4「未做」条（本文件 K4 区块，原写「归 K5」但 K5 切片未含，2026-10-12 代码核实 `pkg/execalgo` 全仓零生产引用，仅自身测试）；`pkg/execalgo/`（`ExecAlgorithm`：`OnBar`/`OnFill`/`Schedule()`/`DueChildOrders()` 取走即清空；TWAP `Σ子单量=父单`、子单号 `(父单号,片序号)` 纯函数幂等；VWAP profile 退化 → 等分 + `Degraded` 标记）；下单路径：`pkg/backtest` 撮合（`BacktestExecutionService`）与 `pkg/live`（`MockTrader`/`SimulatedBroker`/`OrderManager`、`PaperSession` 日循环）；K5 共享成本核 `pkg/execution.CostModel`（fixed/variable/impact/none）。
+- **③ 要求**：
+  1. 订单/下单请求增加**可选**执行算法指定（如 `exec_algo: twap|vwap` + `slices` / `profile` 参数）；未指定 → 整单直下，默认路径数值逐字节不变；
+  2. 回测与 paper 两条下单路径在「订单送撮合前」经 `ExecAlgorithm` 拆单：按 bar 到点取 `DueChildOrders()` 逐笔送撮合、`OnFill` 回填进度；子单走同一 `CostModel`（含 impact——大单拆细后单笔冲击下降，正是 D5 要模拟的效果）；
+  3. 父单状态一致性：`父单量 = Σ子单成交量 + 待报子单量`，超额 fail-loud；会话/回测结束仍有未报完子单的处置（撤销或强制撮完）必须显式裁决并写入实现注释；
+  4. 确定性：同一输入两次拆单结果一致（复用 K4 幂等语义，禁止时间戳派生 ID）。
+- **④ 约束与非目标**：默认（无 `exec_algo`）行为与数值零变化（回归腿钉住）；真实券商算法单不做（D1）；VWAP 成交量预测不做（沿用给定 profile，K4 登记项）；不改 `ExecAlgorithm` 既有接口签名；不动 NT 侧车（K14 的权重回放适配器是另一条转化路径，互不影响）。
+- **⑤ 验收**：e2e——指定 TWAP 拆 7 片的大单 → 撮合收到 7 笔子单、`Σ=父单`、时间片均匀、大单总冲击成本低于同量整单（D5 正证据）；默认路径回归腿全绿（无 `exec_algo` 的既有回测/paper 测试零改动全过）；**破坏验证**：① 指定 `exec_algo` 后强制整单 → 拆单断言红；② `OnFill` 不回填 → 进度/超额 fail-loud 断言红；③ 子单号改时间戳派生 → 幂等断言红。
+- **⑥ 边界**：只做下单主路径接线（回测 + paper 两条），一个 commit。
+
+---
+
+## 三、最高优先级独立工单
 
 ### OBS-01 · 空票池假成功必须 fail-loud ✅ 完成（2026-10-09，两切片）
 
 > **切片 1 ✅（2026-10-09）**：裁定 + 报告层 + 自动化层落地 —— `pkg/backtest/contracts/validity.go`（纯函数 `CheckValidity`，4 个稳定 Code：`empty_universe` / `zero_trades` / `zero_start_date` / `garbage_metric`，垃圾阈值 `|x|>1e12` 网住 MaxFloat64/NaN/±Inf）；`domain.BacktestResult` 增 `UniverseMaxSize` + `InvalidReasons`（引擎算一次、下游只读不重算）；引擎**正常路径行为不变**、无效时日志不再无条件报 completed 且同步响应 `Status="invalid"`；`pipeline`×2 / `job` 不再宣告 successfully（job 走 failed + error_msg）；**`loop` 的 `a.OK` 加裁定前置 ⇒ 无效运行按 failed 计、伪造观测不再进 `history`/`observed`**（否则 `adjP=1-(1-rawP)^N` 算出的 p 值是假的）；验证器新增 `universe` 维（空 → 进 Dimensions 且 0；非空 → 不进 map）。真库证据（只读）：空票池 `status=invalid`、reasons 三条；反证腿（真库 2024 全年 3 票）`status=completed`、25 笔成交不受影响。
 > **切片 2 ✅（2026-10-09）**：读路径收口 —— `state.SetStatus` 按裁定置 `"invalid"`（有效仍 `"completed"`）；`GetBacktestResult` 状态闸门放行 `{"completed","invalid"}`（**无效运行必须可读**，否则「为什么无效」在 UI/报告层不可见，调用方只拿到 409 会把「跑完但无效」误报成「还没跑完」）；抽出 **`buildResponseFromState`** 作为「引擎内存态 → API 响应」的**唯一**透传点，`GET /:id/report` 与 `lookupBacktestResponse` 都改调它 —— 消灭「两处各自内联重建、各自硬编码 Status」的病根结构（这才是 OBS-01 的成因）。handler 层 httptest + engine 断言 + 真库集成三处取证；15 包全绿。
-> **遗留（后续任务）**：① `pkg/backtest/reporting/compare.go:130` 是**第三处**硬编码 `Status`（其闸门只认 completed ⇒ invalid 不会混进成功集，但 compare 也读不到 reasons），建议用同一共用函数思路收口；② **UI 仍按成功呈现指标**（`web/src` 无人读 `BacktestResult.status`，渲染判据是 `result.id` 存在）⇒「UI 呈现无效运行」待做。
+> **遗留（2026-10-12 已并入 K9，§二）**：① `pkg/backtest/reporting/compare.go:130` 第三处硬编码 `Status`（invalid 读不到 reasons）；② **UI 仍按成功呈现指标**（无人读 `BacktestResult.status`，渲染判据是 `result.id`）——两项均归 K9「status 全链路收口」。
 
 - **① 目标**：回测/验证在「0 交易 / 空票池」时必须 **fail-loud**（报错或显式标记），不得报成功并产出伪造观测值。
 - **② 上下文**：ADR-030 OBS-01（`docs/adr/adr-030-draft-observed-improvements.md`）；实测：`total_trades=0` + `start_date=0001-01-01`（零值）+ `sortino_ratio=1.797e308`（MaxFloat64 垃圾值）仍报成功；根因 `index_constituents`/`sectors`/`stock_sector_map` 全 0 行 ⇒ YAML 默认 `universe: csi300` 解析为空票池；`pkg/ai/loop/loop.go` 会把这些伪造观测计入 `NumTrials` ⇒ **多重检验校正（`pkg/validation/statistical.go` `adjP=1-(1-rawP)^N`）算出的 p 值是假的**。
@@ -206,7 +334,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ---
 
-## 三、OBS 独立工单（未被设计吸收，源自 ADR-030）
+## 四、OBS 独立工单（未被设计吸收，源自 ADR-030）
 
 > 完整描述见 [ADR-030](adr/adr-030-draft-observed-improvements.md)。按依赖与价值排序，开工前各自按 §8.5 补全六字段。
 
@@ -243,7 +371,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ---
 
-## 四、遗留待裁决（源自旧 TASKS，未关闭）
+## 五、遗留待裁决（源自旧 TASKS，未关闭）+ NT 决策门
 
 | 项 | 现状 | 待裁决内容 |
 |---|---|---|
@@ -251,24 +379,17 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | **P2-8** | ✅ 已裁决关闭（2026-10-09，若曦授权「按你的建议走」）：**不落 hfq 表** | **裁决：不落 hfq，回测一律用 qfq。**取证与理由：① hfq 价 = qfq 价 × k（k = 每股累积复权因子，**因股而异**），**单位不是「元」** ⇒ 固定资金下股数计算错误 ⇒ 改写票池成分与权重；② **资金无法按同一基准缩放**——不同股票 k 不同，组合层面不存在统一基准，这是几何事实不是实现问题；③ **hfq 与 qfq 的收益率序列逐点相同**（已验证）⇒ hfq 不提供 qfq 没有的 alpha 信息；④ 实测 `splits` 0 行、`dividends` 0 行、`ohlcv_daily_qfq` **无复权因子列** ⇒ 本地无法自行推导 hfq，只能靠数据源且无法自校验。⇒ hfq 唯一增量价值是「长期走势的直观展示（复权净值曲线）」，而**回测必须用 qfq**（价格真实 ⇒ 股数/权重正确）。落 hfq 是纯风险无收益：存储翻倍（390 万行 ×2）+ 引入「拿 hfq 跑固定资金回测」的误用风险（错误结论极难察觉，与 OBS-01 同源）。**若将来确需 hfq（如 UI 展示复权净值）**：由数据源直接提供 hfq 序列或复权因子列，本地不自行推导；落库必须在 schema 注释与文档标注「单位非元，禁止用于资金/股数计算」，且引擎侧要有护栏拒绝 hfq 作为回测价格源 |
 | **P2-1** | ⬜ 宏观数据源（跨境那一半已做完，见 `guides/data-dependencies.md`） | 补宏观数据源 |
 | **P2-2** | ⬜ 产业链数据底座 | 补产业链数据底座 |
+| **NT 决策门** | ⛔ 阻塞（前置：K15 完成 + NT v2.0.0 正式版发布） | 阶段 2 对齐数据在手后裁决**三选一**：① 推进阶段 3（K16 双内核生产化）/ ② 长期双内核停在 PoC / ③ 回退（废弃侧车，落「借鉴设计增强 Go 内核」方案）。届时 **VeighNa 并列评估**（A 股覆盖更好的 Python 候选）；**K4「`impact` 是否设为默认滑点模型」一并在此裁决**（依据双跑对比数据，见 K4「待裁决」条）。裁决结果写入 ADR-031 |
 
 ---
 
-## 五、K0 契约审查发现（2026-10-08）
+## 六、K0 契约审查发现（2026-10-08）
 
 > 审查通过项（记录以免重复审）：依赖方向无环且层次干净（clock/msgbus 零依赖 → eventstore → kernel；`live→risk`、`execalgo→portfolio` 别名方向均与 BootOrder 同向）；11 模块全覆盖；8 张表齐全且归属清楚；编译期守卫经双方独立破坏验证有效；零现有实现改动。
 
-### K0-P2-1 · 核心语义约束需 AST 护栏 ⬜（建议 K1/K2 同步做）
+### K0-P2-1 · 核心语义约束需 AST 护栏 ⬜ → 已并入 K11
 
-- **① 目标**：把三条**只在注释里**的核心不变量变成机器可验证的护栏。
-- **② 上下文**：K0 契约的三条关键语义约束目前只有注释，K1/K2 实现后无从自动验证——
-  - `ExecEngine.Submit` 必须先过 `risk.RiskEngine.CheckOrder`（`pkg/live/interfaces.go:87`）
-  - `msgbus.Publish` 必须先经 EventStore 记录、再分发（BusTap 语义，D4）
-  - `BarHandler.OnBar` 不得回看未来 bar（`pkg/strategy/streaming.go:52`）
-- **③ 要求**：用 AST 护栏钉住（项目先例：`internal/repoguard/calendar_seed_isolation_test.go` 的 AST 扫、`cmd/analysis/auth_public_paths_test.go` 的 AST 双向对齐）。
-- **④ 约束与非目标**：只加护栏、不改契约签名；护栏本身必须破坏验证（改坏→红→还原）；**防「扫原文被注释误报」**——用 `scanInside(FuncName)` 限定函数体，别扫全文。
-- **⑤ 验收**：三条不变量各有一条破坏腿（如 Submit 去掉 CheckOrder 调用 → 该护栏红），且反证腿证明护栏不是永真。
-- **⑥ 边界**：只做这三条护栏，不扩到其他语义约束。
+> ⚠️ **2026-10-12 墓碑注记**：本任务内容已整体移入 §二 **K11**（内核三条不变量 AST 护栏，作为新主线的独立任务保留），此处不再重复维护。后续执行与验收以 K11 六字段为准。
 
 ### K0-P2-2 · `strategy → ai` 循环已破 ✅（2026-10-09 完成 ADR-027 §5 第 3 步）
 
@@ -330,6 +451,8 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | K1-P2-3 | **eventstore 模块的资源归属未定**：`EventStoreModule.Stop` 不关 pool（归 pkg/storage 统一 Close）——影子期正确，但接管后必须裁决「pool 是内核资源（模块 Stop 关）还是应用层资源（保持现状）」 | 接管时（与 setup.go 的 gracefulShutdown 归属一起裁决） |
 | K1-P2-4 | **模块回调内核会死锁**：`Boot/Shutdown` 全程持 `k.mu`；`Clock()/Bus()/Store()` 不加锁安全，但模块若在 Init/Start/Stop 里调 `Module()`（加锁）会死锁。注释已声明「模块拿不到内核引用」 | 作为**未来模块约束**登记：模块不得在生命周期方法内回调 `Module()` |
 
+> ⚠️ **2026-10-12 归宿注记**：K1-P2-1~4 四条已整体并入 §二 **K12**（内核装配治理收口，阶段 3 前置）。「接管时」即 K12 执行时；上表保留作为问题登记与出处，后续状态与验收以 K12 六字段为准。
+
 ### K3 切片 2（+OBS-06）审查发现（2026-10-09，含真库核对）
 
 > **通过项**：注册表（31 算子）结构清晰，`selfWarmup/selfLookback` 由实参推导，闸门递归覆盖四类节点，`DeriveWarmup/Lookback` 与 ADR-028 §8 及附录 A 对齐。**真库核对**（把 `factor_genes.formula` / `experiments.expression` / `strategy_genes.params` / `strategies.params` 的存量表达式全部喂给新闸门）：**可解析 1 条、被拒 0 条** ⇒ 无「既有表达式被判非法」的回归。`pow` 不在注册表（历史 `IsMathOp` 有它但无实现）——复查用它的三处（agent 提示词 / 基因池名单 / yaml 生成器）都没用，无现网影响。
@@ -342,7 +465,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ---
 
-## 六、AI / core 边界归属（2026-10-09 若曦拍板，DDD 判定）
+## 七、AI / core 边界归属（2026-10-09 若曦拍板，DDD 判定）
 
 判据（若曦定的）：**「AI 层每次都要用、而 core 层没有用它的地方 ⇒ 放进 AI 层」**，并用 DDD 复核。
 
