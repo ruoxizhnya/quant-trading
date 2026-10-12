@@ -11,12 +11,14 @@ package strategy
 import (
 	"context"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 	"github.com/stretchr/testify/require"
 )
 
@@ -225,4 +227,29 @@ func TestPGSignalStoreSaveRejectsBadInput(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM quant.external_signals WHERE model_id = $1`, modelID).Scan(&count))
 	require.Equal(t, 0, count, "被拒的 Save 竟然留下了痕迹")
+}
+
+// ─── migrate() 与 EnsureSchema 的 DDL 同步（K8 破坏腿③）────────────
+
+// TestSignalSchemaDDLSyncedWithMigrate 钉住两侧建表 DDL 的一致性：
+// SignalSchemaDDL（EnsureSchema 幂等兜底）↔ storage.ExternalSignalsSchemaDDL
+// （migrate() 的 Migration 048 执行文本）。不一致 → 本测试红——两条建表路径
+// 漂移会让「migrate 建的库」与「EnsureSchema 建的库」结构不同，而两处都自称
+// 正确、谁也发现不了。比较口径：逐条 + 归一化空白（缩进风格差异不算漂移）。
+//
+// 破坏腿③：改 postgres.go 的 ExternalSignalsSchemaDDL（或本包 SignalSchemaDDL）
+// 任意一处而不改另一处 → 本测试红。本测试不需要真库。
+func TestSignalSchemaDDLSyncedWithMigrate(t *testing.T) {
+	t.Parallel()
+
+	require.Len(t, storage.ExternalSignalsSchemaDDL, len(SignalSchemaDDL),
+		"migrate() 的 Migration 048 条数与 SignalSchemaDDL 不一致（破坏腿③）")
+	for i := range SignalSchemaDDL {
+		got := strings.Join(strings.Fields(storage.ExternalSignalsSchemaDDL[i]), " ")
+		want := strings.Join(strings.Fields(SignalSchemaDDL[i]), " ")
+		require.Equal(t, want, got,
+			"第 %d 条 DDL 在 migrate() 与 EnsureSchema 两侧不一致（破坏腿③："+
+				"改 pkg/storage/postgres.go 的 ExternalSignalsSchemaDDL 时"+
+				"必须同步 pkg/strategy.SignalSchemaDDL，反之亦然）", i+1)
+	}
 }

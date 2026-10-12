@@ -53,7 +53,7 @@ type PaperSessionConfig struct {
 	Logger zerolog.Logger
 	// SignalCollector 可选；非 nil 时每个交易日生成 domain.Signal 后回调
 	// （K5 切片 2 的信号对账用：把 paper 侧信号序列导出来，与回测侧
-	// getSignalsFromLocalStrategy 产出的信号做 ReconcileSignals 比对）。
+	// strategy.LocalSignalProvider 产出的信号做 ReconcileSignals 比对）。
 	// nil = 不收集（零行为变化）。
 	SignalCollector func(date time.Time, signals []domain.Signal)
 }
@@ -137,8 +137,7 @@ func NewPaperSession(cfg PaperSessionConfig) (*PaperSession, error) {
 //  3. 组合起点为该 trader 的 InitialCapital（由构造它的 MockTraderConfig
 //     决定），每日从 trader 快照出 portfolio；
 //  4. 对每个交易日 d（升序）：窗口 = **只含 Date <= d 的 bars**（与
-//     pkg/backtest/engine.go:getSignalsFromLocalStrategy 的 marketData
-//     累积语义一致，也是防前视的那条线）：
+//     strategy.Scope.MarketData 的累积语义一致，也是防前视的那条线）：
 //     - 流式策略（实现 strategy.BarHandler）→ 当日各 symbol 的 bar 按
 //     symbol 字典序逐根 OnBar，再 Signals()（取走即清空）；
 //     - 批式策略 → GenerateSignals(ctx, 窗口, portfolio)；
@@ -216,7 +215,7 @@ func (s *PaperSession) Run(ctx context.Context, symbols []string, start, end tim
 		domainSignals := toDomainSignals(stratSignals, d)
 
 		// K5 切片 2：信号对账钩子（在撮合前导出，此时信号尚未受 T+1/现金
-		// 约束影响，是与回测 getSignalsFromLocalStrategy 产出的信号同构的
+		// 约束影响，是与回测 LocalSignalProvider 产出的信号同构的
 		// 那一层）。
 		if s.signalCollector != nil {
 			s.signalCollector(d, domainSignals)
@@ -259,7 +258,7 @@ func (s *PaperSession) Run(ctx context.Context, symbols []string, start, end tim
 	return fills, nil
 }
 
-// generateSignals 按策略形态选执行模式（与回测 getSignalsFromLocalStrategy
+// generateSignals 按策略形态选执行模式（与回测 LocalSignalProvider.Signals
 // 同一判定顺序：优先流式 BarHandler，否则批式 GenerateSignals）。
 func (s *PaperSession) generateSignals(
 	ctx context.Context,

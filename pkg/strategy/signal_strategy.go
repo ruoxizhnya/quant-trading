@@ -109,7 +109,7 @@ func (s *SignalStrategy) OnBar(ctx context.Context, bar domain.OHLCV) error {
 		return errors.New("strategy: SignalStrategy 的 modelID 为空——不知道消费哪个模型，静默产零信号比报错更危险")
 	}
 
-	today := dayOf(bar.Date)
+	today := DayOf(bar.Date)
 	sigs, err := s.store.ListFor(ctx, s.modelID, bar.Symbol, today)
 	if err != nil {
 		return fmt.Errorf("strategy: SignalStrategy 拉取信号失败 (symbol=%s date=%s): %w",

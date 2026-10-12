@@ -180,6 +180,7 @@ func TestRegisterRoutes_RegistersCoreEndpoints(t *testing.T) {
 		"POST /api/compliance/check",        // ComplianceHandler
 		"GET /api/tools",                    // ToolsHandler (S7-P3-3)
 		"GET /api/evidence/:content_hash",   // EvidenceHandler (L0-3)
+		"POST /api/signals",                 // SignalsHandler (K8)
 	}
 	for _, route := range handlerGroupSamples {
 		assert.True(t, seen[route],

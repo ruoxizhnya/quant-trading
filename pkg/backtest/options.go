@@ -36,6 +36,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/marketdata"
 	"github.com/ruoxizhnya/quant-trading/pkg/risk"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 )
 
 // EngineOption 函数式注入：每个选项返回的闭包会修改 *Engine。
@@ -107,6 +108,17 @@ func WithLogger(logger zerolog.Logger) EngineOption {
 	return func(e *Engine) {
 		e.mu.Lock()
 		e.logger = logger
+		e.mu.Unlock()
+	}
+}
+
+// WithSignalProvider 注入可插拔信号供给（K8 · SignalSpec）。传 nil 退回
+// 默认 strategy.LocalSignalProvider（注册表 + 批式/流式双模式，行为不变）。
+// 远程/自定义实现（HTTP、Redis 等）在阶段 2 经本选项接入。
+func WithSignalProvider(p strategy.SignalProvider) EngineOption {
+	return func(e *Engine) {
+		e.mu.Lock()
+		e.signalProvider = p
 		e.mu.Unlock()
 	}
 }

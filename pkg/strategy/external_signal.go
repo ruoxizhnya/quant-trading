@@ -61,7 +61,7 @@ type signalHashPayload struct {
 	AsOf      string  `json:"as_of"`
 }
 
-// dayOf 归一 UTC 自然日（丢弃时分秒与时区，锚定 00:00 UTC）。
+// DayOf 归一 UTC 自然日（丢弃时分秒与时区，锚定 00:00 UTC）。
 //
 // ─── 裁决：信号对齐以「日」为粒度 ──────────────────────────────────
 // 内核是日线驱动的（K2 的 BarHandler 逐 bar = 逐交易日），外部信号的 as_of
@@ -70,7 +70,11 @@ type signalHashPayload struct {
 // 在 15:00、bar.Date 在 00:00，`as_of <= bar.Date` 恒假，当日信号被误排除）。
 // 这与 K5 的 signalKey 归一化是同一类病根（time.Time 含单调钟/时区，比较
 // 脆弱）。故统一归一到 00:00 UTC，让「日」成为唯一比较单位。
-func dayOf(t time.Time) time.Time {
+//
+// K8 导出：HTTP 写入门（POST /api/signals）的未来 as_of 拒绝与
+// SignalProvider 契约守卫（RejectFutureSignals）必须与本口径一致——
+// 「未来」的判定只有一份。
+func DayOf(t time.Time) time.Time {
 	y, m, d := t.UTC().Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
@@ -93,7 +97,7 @@ func SignalContentHash(sig ExternalSignal) string {
 		Symbol:    sig.Symbol,
 		Direction: string(sig.Direction),
 		Strength:  sig.Strength,
-		AsOf:      dayOf(sig.AsOf).UTC().Format(time.RFC3339Nano),
+		AsOf:      DayOf(sig.AsOf).UTC().Format(time.RFC3339Nano),
 	}
 	b, err := json.Marshal(p)
 	if err != nil {

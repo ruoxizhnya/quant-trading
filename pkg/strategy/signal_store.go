@@ -5,13 +5,12 @@
 // 归属是 strategy-runtime 模块（蓝图 §5 矩阵 L3 行），不走 pkg/storage 应用层
 // store——「内核模块自带 store」先例（eventstore / PGStateStore 同源）。
 //
-// ─── 与 pkg/storage/postgres.go migrate() 的关系（本切片不做合并） ──
-// 同 state_store.go：项目加表的唯一执行路径是 migrate() 内联数组。本切片把
-// DDL 放本包 SignalSchemaDDL + EnsureSchema 显式调用（kernel Boot 装配时调、
-// 测试 setup 时调），理由与 state_store.go 注释逐字同源（边界 / 自证）。
-// 合并时机 = 后续切片（把 SignalSchemaDDL 逐字追加进 migrate() 数组，保留
-// EnsureSchema 作「独立可安装」入口）。本文件 DDL 与
-// contracts/kernel_modules.schema.sql 追加节逐字一致，以契约文件为准。
+// ─── 与 pkg/storage/postgres.go migrate() 的关系（K8 已合并） ──────
+// 同 state_store.go：项目加表的唯一执行路径是 migrate() 内联数组。K8 已把
+// 本 DDL 逐字并入 migrate()（Migration 048，文本在 storage.ExternalSignals-
+// DDL），并保留 SignalSchemaDDL + EnsureSchema 作「独立可安装」幂等兜底入口。
+// 两侧文本的「归一化空白后逐条相等」由本包一致性测试钉住（K8 破坏腿③）。
+// 本文件 DDL 与 contracts/kernel_modules.schema.sql 追加节逐字一致，以契约文件为准。
 package strategy
 
 import (
@@ -143,9 +142,9 @@ func (s *PGSignalStore) Save(ctx context.Context, sig ExternalSignal) error {
 		factors = sig.Factors
 	}
 
-	// AsOf 归一 UTC 日边界（dayOf）后落库：信号对齐以「日」为粒度（见
-	// external_signal.go 的 dayOf 裁决），TIMESTAMPTZ 存 00:00 UTC。
-	asOf := dayOf(sig.AsOf)
+	// AsOf 归一 UTC 日边界（DayOf）后落库：信号对齐以「日」为粒度（见
+	// external_signal.go 的 DayOf 裁决），TIMESTAMPTZ 存 00:00 UTC。
+	asOf := DayOf(sig.AsOf)
 
 	if _, err := s.pool.Exec(ctx, saveSignalSQL,
 		sig.ModelID, sig.Symbol, string(sig.Direction), sig.Strength,
@@ -164,7 +163,7 @@ func (s *PGSignalStore) ListFor(ctx context.Context, modelID, symbol string, upT
 	ctx, cancel := mergeTimeout(ctx, signalListTimeout)
 	defer cancel()
 
-	rows, err := s.pool.Query(ctx, listSignalsSQL, modelID, symbol, dayOf(upTo))
+	rows, err := s.pool.Query(ctx, listSignalsSQL, modelID, symbol, DayOf(upTo))
 	if err != nil {
 		return nil, fmt.Errorf("strategy: PGSignalStore.ListFor 查询失败 (model=%s symbol=%s upTo=%s): %w",
 			modelID, symbol, upTo.UTC().Format(time.RFC3339Nano), err)

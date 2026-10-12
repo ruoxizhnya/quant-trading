@@ -100,7 +100,7 @@ const batchAdapterStateVersion = 1
 //     lastSignals。调用方经 Signals()（取走即清空，K2 切片 2 契约出口）或
 //     LastSignals()（非破坏性 peek，切片 1 遗留）读取。**本适配器不把信号
 //     路由到 Broker / 引擎**：是否消费、如何下单由调用方（backtest engine
-//     的 getSignalsFromLocalStrategy / 实盘运行时）决定。把消费逻辑提前
+//     的 SignalProvider / 实盘运行时）决定。把消费逻辑提前
 //     塞进适配器会让它同时承担「窗口维护」与「下单路由」两件事，而后者
 //     依赖尚未定型的执行上下文——所以这里只产出、不消费，边界清晰。
 //

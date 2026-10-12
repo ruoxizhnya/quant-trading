@@ -828,6 +828,13 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_strategy_genes_type_status ON strategy_genes(strategy_type, status)`,
 	}
 
+	// Migration 048: docs/migrations/048_add_external_signals_table.sql
+	// quant.external_signals（K8 / K7 遗留①：信号表并入 migrate 唯一执行路径）。
+	// DDL 文本在包级 ExternalSignalsSchemaDDL——与 pkg/strategy.SignalSchemaDDL
+	// 归一化空白后逐条相等，由 pkg/strategy 的一致性测试钉住（破坏腿③：
+	// 两侧改一处不改另一处 → 测试红）。
+	migrations = append(migrations, ExternalSignalsSchemaDDL...)
+
 	for _, m := range migrations {
 		if _, err := s.pool.Exec(ctx, m); err != nil {
 			return fmt.Errorf("migration failed: %w", err)
@@ -898,4 +905,29 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 
 	s.logger.Info().Msg("Database migrations completed")
 	return nil
+}
+
+// ExternalSignalsSchemaDDL 是 quant.external_signals（schema + 表 + 消费索引）
+// 的建表 DDL——migrate() 的 Migration 048 执行的就是这组语句（K8 / K7 遗留①）。
+//
+// 与 pkg/strategy.SignalSchemaDDL 的关系：那边是 EnsureSchema（幂等兜底 /
+// 独立可安装入口）用的同源副本。两侧文本「归一化空白后逐条相等」由
+// pkg/strategy 的一致性测试钉住（破坏腿③：改一处不改另一处 → 测试红）。
+// 顺序同 SignalSchemaDDL：schema 先于表，表先于索引。
+var ExternalSignalsSchemaDDL = []string{
+	`CREATE SCHEMA IF NOT EXISTS quant`,
+	`CREATE TABLE IF NOT EXISTS quant.external_signals (
+		id           BIGSERIAL PRIMARY KEY,
+		model_id     TEXT NOT NULL,
+		symbol       TEXT NOT NULL,
+		direction    TEXT NOT NULL,
+		strength     DOUBLE PRECISION NOT NULL,
+		as_of        TIMESTAMPTZ NOT NULL,
+		content_hash TEXT NOT NULL,
+		factors      JSONB,
+		created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+		CONSTRAINT uq_external_signals_hash UNIQUE (content_hash)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_external_signals_lookup
+		ON quant.external_signals (model_id, symbol, as_of)`,
 }

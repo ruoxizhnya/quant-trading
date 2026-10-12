@@ -10,6 +10,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/bootstrap"
 	"github.com/ruoxizhnya/quant-trading/pkg/compliance"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	_ "github.com/ruoxizhnya/quant-trading/pkg/strategy/plugins"
 	"github.com/spf13/viper"
 )
@@ -235,6 +236,21 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 	// (404 = not ingested). This is the platform's single evidence
 	// coordinate — work faces read through it instead of storing copies.
 	NewEvidenceHandler(deps.Store, deps.Logger).RegisterRoutes(router)
+
+	// K8（TASKS K8 ③.4）：外部模型信号 HTTP 写入门 POST /api/signals。
+	// 信号表归属 strategy-runtime（pkg/strategy.PGSignalStore），store 缺失
+	// （未接库/零值）时传 nil —— 路由照常注册、请求时 503，registerRoutes
+	// 不因 deps.Store 零值 panic（deps_test.newMinimalDeps 约束）。
+	var signalStore strategy.SignalStore
+	if deps.Store != nil && deps.Store.DB() != nil {
+		ss, err := strategy.NewPGSignalStore(deps.Store.DB())
+		if err != nil {
+			deps.Logger.Error().Err(err).Msg("signal store init failed; POST /api/signals will return 503")
+		} else {
+			signalStore = ss
+		}
+	}
+	NewSignalsHandler(signalStore, deps.Logger, WithSignalsAuth(deps.AuthSvc)).RegisterRoutes(router)
 }
 
 // loadDefaultSuitabilityProfile reads the suitability profile from

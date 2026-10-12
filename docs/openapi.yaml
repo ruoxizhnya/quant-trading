@@ -2428,6 +2428,75 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/signals:
+    post:
+      tags: [Signals]
+      summary: Batch-write external model signals (K8 write door)
+      description: |
+        K8 (TASKS.md K8 ③.4): the HTTP write door through which out-of-process
+        ML models inject signals into the kernel. Consumption side is
+        `strategy.SignalStrategy`, which pulls by `as_of` (future signals are
+        physically invisible) and drives orders.
+
+        Fail-loud validation, all-or-nothing per request:
+        every item must pass `ValidateExternalSignal` (model_id / symbol /
+        direction ∈ {long, short, close} / finite strength / non-zero as_of),
+        and `as_of` must not be in the future (UTC-day granularity). Any bad
+        item rejects the whole batch with 400 and an indexed error message.
+
+        Idempotency: `content_hash` dedupe lives in the store
+        (`ON CONFLICT (content_hash) DO NOTHING`) — retrying the same batch is
+        safe and does not duplicate rows.
+
+        K8: requires role `trader` or `admin` (RBAC, same gate as order
+        mutation). A `viewer` token gets 403.
+      operationId: createSignals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signals]
+              properties:
+                signals:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: '#/components/schemas/ExternalSignal'
+            example:
+              signals:
+                - model_id: ml-model
+                  symbol: 600000.SH
+                  direction: long
+                  strength: 0.8
+                  as_of: '2026-10-12T00:00:00Z'
+                  factors:
+                    momentum_z: 1.7
+      responses:
+        '201':
+          description: Batch accepted (idempotent retries may not add new rows)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted:
+                    type: integer
+                    example: 1
+        '400':
+          description: Invalid body, empty batch, bad signal (indexed), or future as_of (indexed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Authenticated but role is not trader/admin
+        '503':
+          description: Signal store unavailable (not wired / no database)
+
 components:
   # ============================================================
   # Security
@@ -2556,6 +2625,49 @@ components:
             Optional. When supplied it is verified against the payload, letting
             a caller confirm it is re-sending the response it cited; a mismatch
             is rejected instead of poisoning the evidence index.
+
+    ExternalSignal:
+      type: object
+      description: |
+        One external model signal injected into the kernel (K7/K8 contract,
+        `strategy.ExternalSignal`). The kernel only accepts the signal contract —
+        model freedom stays out of process. `content_hash` covers the executable
+        fields (model_id, symbol, direction, strength, as_of); `factors` is a
+        diagnostic snapshot that is stored but not hashed.
+      required: [model_id, symbol, direction, strength, as_of]
+      properties:
+        model_id:
+          type: string
+          description: Out-of-process model identifier (citation `source` position)
+          example: ml-model
+        symbol:
+          type: string
+          description: Instrument symbol (citation `key` position)
+          example: 600000.SH
+        direction:
+          type: string
+          enum: [long, short, close]
+          description: Signal direction. `hold` is not a signal — send nothing instead.
+        strength:
+          type: number
+          format: double
+          description: Signal strength. No range constraint (scale is model-defined); NaN/±Inf rejected.
+          example: 0.8
+        as_of:
+          type: string
+          format: date-time
+          description: |
+            Trading day / moment the signal applies to (RFC3339). Compared at
+            UTC-day granularity; future values are rejected at the write door.
+          example: '2026-10-12T00:00:00Z'
+        factors:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+          description: Optional diagnostic factor snapshot (excluded from content_hash)
+          example:
+            momentum_z: 1.7
 
     RawIngest:
       type: object
