@@ -387,9 +387,23 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 |---|---|---|
 | **AUD-61** | ⬜ e2e UI 套件与前端结构严重脱节（干净环境实测 127 passed / 34 failed / 2 skipped；34 条全归因、与代码改动无关） | ① 按页面分批重对齐选择器与期望值（工作量大）；② 先 `test.fixme` + 显式登记恢复「全绿」可信度再消债。⚠️ 不得把「34 条红」洗成「已验证通过」，也不得放宽断言消红 |
 | **P2-8** | ✅ 已裁决关闭（2026-10-09，若曦授权「按你的建议走」）：**不落 hfq 表** | **裁决：不落 hfq，回测一律用 qfq。**取证与理由：① hfq 价 = qfq 价 × k（k = 每股累积复权因子，**因股而异**），**单位不是「元」** ⇒ 固定资金下股数计算错误 ⇒ 改写票池成分与权重；② **资金无法按同一基准缩放**——不同股票 k 不同，组合层面不存在统一基准，这是几何事实不是实现问题；③ **hfq 与 qfq 的收益率序列逐点相同**（已验证）⇒ hfq 不提供 qfq 没有的 alpha 信息；④ 实测 `splits` 0 行、`dividends` 0 行、`ohlcv_daily_qfq` **无复权因子列** ⇒ 本地无法自行推导 hfq，只能靠数据源且无法自校验。⇒ hfq 唯一增量价值是「长期走势的直观展示（复权净值曲线）」，而**回测必须用 qfq**（价格真实 ⇒ 股数/权重正确）。落 hfq 是纯风险无收益：存储翻倍（390 万行 ×2）+ 引入「拿 hfq 跑固定资金回测」的误用风险（错误结论极难察觉，与 OBS-01 同源）。**若将来确需 hfq（如 UI 展示复权净值）**：由数据源直接提供 hfq 序列或复权因子列，本地不自行推导；落库必须在 schema 注释与文档标注「单位非元，禁止用于资金/股数计算」，且引擎侧要有护栏拒绝 hfq 作为回测价格源 |
-| **P2-1** | ⬜ 宏观数据源（跨境那一半已做完，见 `guides/data-dependencies.md`） | 补宏观数据源 |
+| **P2-1** | ⬜ 宏观数据源（跨境那一半已做完，见 quant-trading-docs 仓 `docs/guides/data-dependencies.md`） | 补宏观数据源 —— **六字段工单已补，见表格下方 `### P2-1` 小节** |
 | **P2-2** | ⬜ 产业链数据底座 | 补产业链数据底座 |
 | **NT 决策门** | ⛔ 阻塞（前置：K15 完成 + NT v2.0.0 正式版发布） | 阶段 2 对齐数据在手后裁决**三选一**：① 推进阶段 3（K16 双内核生产化）/ ② 长期双内核停在 PoC / ③ 回退（废弃侧车，落「借鉴设计增强 Go 内核」方案）。届时 **VeighNa 并列评估**（A 股覆盖更好的 Python 候选）；**K4「`impact` 是否设为默认滑点模型」一并在此裁决**（依据双跑对比数据，见 K4「待裁决」条）。裁决结果写入 ADR-031 |
+
+### P2-1 · 宏观数据源（六字段工单，2026-10-12 补全）
+
+- **① 目标**：补上**国内宏观**数据（汇率 / 利率 / 物价 / 货币）的数据源接入——新增宏观 DataType + Tushare 宏观 adapter 落库，带溯源列、幂等重导、提供只读查询。跨境那一半已完成（`global_ohlcv: yahoo_finance primary + alpha_vantage secondary`），不在本任务。
+- **② 上下文**：quant-trading-docs 仓 `docs/guides/data-dependencies.md` §P2-1（结论「**宏观是真空白**」——`pkg/data/source/adapter.go` 的 DataType 常量里只有行情/资金流/财务/板块/公告/新闻，没有任何宏观类型，**要新增 DataType + adapter 不是填 key**；候选源：Tushare 宏观接口复用 `TUSHARE_TOKEN` 0 新 key 但吃积分 / FRED 1 免费 key / Alpha Vantage 免费档 25 req/day 只够探测 / World Bank 0 key；**待核实**：除 `cn_cpi`（doc_id=228）外各宏观接口名称与积分未逐条核对）；adapter 注册与 kill switch 模式 `cmd/data/registry_init.go`（缺依赖注册 disabled 降级、不阻断启动）；现有 call/normalize/save 模式 `pkg/data/tushare.go`；P2-2 刚落地的同族先例（postgres 内联 DDL + 溯源列 + DDL 一致性测试 + 只读 handler 样板）——`quant.macro_series` 与 `quant.industry_vitality` 并列不重复（后者是行业景气，本任务是国家层宏观）。
+- **③ 要求**：
+  1. **先核对再动手**：查 Tushare 官方文档逐条核对宏观接口清单与积分要求，结果回写指南 §「待核实」——权限/积分不够的指标登记「不做」；不许凭接口文档臆断（P2-8 曾据文档推断 `stk_factor_pro` 可用，被 40203 实测推翻）；
+  2. 路线**首版 Tushare 单路线**（复用 `TUSHARE_TOKEN`，0 新 key）；目标指标集以第 1 步核对为准，含 CPI / PPI / PMI / M2 / 社融 / LPR / 汇率；
+  3. Schema：Migration **050**（当前最新 049=P2-2；若并行期间被占用则以 `migrate()` 内当时最大编号顺延）内联 DDL + `docs/migrations/050_*` 镜像；表 `quant.macro_series`（indicator、freq、obs_date、value、unit、source、as_of；唯一键 indicator+freq+obs_date+source）+ DDL 一致性测试（照 `TestSignalSchemaDDLSyncedWithMigrate` 先例）；
+  4. domain 类型 + storage 读写；`adapter.go` 增宏观 DataType 常量 + tushare 宏观 adapter 注册进 `registry_init.go`（遵循 disabled 降级与 `DATA_DISABLE_*` kill switch）；**ETL 错误向上传播不吞**；重导幂等（同唯一键不重复插行）；
+  5. 只读查询 API（照 P2-2 handler 样板：struct + Option + New + RegisterRoutes）+ `docs/openapi.yaml` 同步——⚠️ `deps_test.go` 断言 `ServerDeps` 字段总数，**不得新增字段**。
+- **④ 约束与非目标**：不做跨境（已完）；不消费宏观数据产因子/策略（消费方另案）；首版不接 FRED / World Bank / Alpha Vantage（key 增量为零）；不动 P2-2 四表与行情链路；不碰内核线目录 `pkg/kernel`/`pkg/backtest` 撮合/`contracts`（K10、K17 并行区域）；mootdx/实时行情不在范围。
+- **⑤ 验收**：`go build ./...` + 全量 `go test ./...` 绿（本地无 -race，CI 覆盖）；真库 migrate 后 `\d quant.macro_series` 与 EnsureSchema 一致；导入幂等测试（同批重导行数不变）；查询 API httptest 契约测试（正常 / 空结果 / 非法参数 400）；`TUSHARE_TOKEN` 可用时真拉 ≥1 条宏观指标入库取证（无 token 则 fixture 全绿 + commit message 登记「真拉未实测」）。**破坏验证**（改坏→红→还原，留证 commit message）：① 删 source 的 NOT NULL → 溯源约束测试红；② 导入器改吞错（log 后 continue 返 nil）→ 错误传播测试红；③ 撤唯一键 → 幂等测试红（重导行数翻倍）。
+- **⑥ 边界**：静态宏观数据层 + 导入 + 只读查询，core 仓一个 atomic commit（`feat(data): P2-1 宏观数据源 …`）；指南 §待核实 回写在 quant-trading-docs 仓单独 commit（跨仓各自一 commit）。
 
 ---
 
