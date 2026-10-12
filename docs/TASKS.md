@@ -441,7 +441,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：TASKS.md 内 P2-1 两处（表行 + 小节标题）均 ✅；收口记录事实与代码、真库、docs 仓指南逐条对照一致（不许出现「文档说已落地、代码未落地」的错位）。
 - **⑥ 边界**：core 仓 `docs/TASKS.md` 一个 docs commit（指南实测结论已在 docs 仓 `34255d9`，不重复）。
 
-### P2-2-R1 · 产业链数据底座审查收尾（三件套，2026-10-12 深度审查立单）
+### ✅ P2-2-R1 · 产业链数据底座审查收尾（三件套，2026-10-12 深度审查立单）
 
 > 来源：2026-10-12 对 K9/K11/K12/P2-2 四任务深度审查（四任务判定**达标**，无 🔴；发现 1 🟠 + 2 🟡，全部归属 P2-2，本工单为其可执行化）。审查报告：WorkBuddy 会话工作区 `quant-review-report.md`。审查基准（实测）：core 提交态全量 `go test ./...` **67 包 0 FAIL**（含真库）；`./internal/repoguard/ ./pkg/...` **61 ok**；UI 仓 `b28d5b6` typecheck 0 错 / lint 0 error / vitest **221/221** / Playwright K9 invalid e2e **1 绿**；UI 破坏腿复现 **2 红→还原**。
 
@@ -457,6 +457,11 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：不改 DDL 与唯一键语义、不动 P2-2 既有存储/导入/API 行为；不做 K60 因子/传导计算、不做 P2-1 宏观、不做 UI；不碰 K9–K12 已冻结契约与 K10 注册表。
 - **⑤ 验收**：R1——真文件测试腿绿，且破坏腿（去掉 TrimPrefix → 红，还原绿）；全量 `go test ./...` 绿。R3——四表行数 > 0 或逐接口额度结论已登记。R1+R2 完成后 §五 P2-2 行 ✅。
 - **⑥ 边界**：R1（代码+测试+台账关行）core 仓一个 atomic commit（`fix(data): P2-2-R1 seed CSV BOM …`）；R3 结果登记可为后续 docs commit；逐接口真拉记录写进本工单收口记录。
+
+> **✅ 收口记录（2026-10-12，R1+R2 commit `3ceb69d`，R3 登记随 docs commit）**：
+> - **R1（🟠 seed CSV BOM）**：`ImportIndustryVitalityCSV` 表头归一化改为 `strings.TrimPrefix(h, "\ufeff")` 后再 `TrimSpace`；新增 `TestImportIndustryVitalityCSV_RealSeedFile` 直读 `testdata/industry_vitality_seed.csv` 真文件（断言钉住「文件带 BOM」为该腿存在理由），seed 文件从此有消费方。破坏腿留证：去掉 TrimPrefix → 红（`缺列 "industry_code"`，实际表头首列带 U+FEFF）→ 还原绿；全量 `go test ./...` **68 包 0 FAIL**（含真库）。
+> - **R2（🟡 台账）**：§五 P2-2 行已打 ✅ + 补 P2-2 简短收口记录（同 `3ceb69d`）。
+> - **R3（🟡 真实喂数实测，2026-10-12，真库 `quant_trading` + 真 `TUSHARE_TOKEN` 逐接口真拉）**：`index_classify` **OK — 359 节点**（全量申万行业树，source=tushare）；`index_member`（801010.SI 一级行业）**OK — 归一化 184 条边 → 唯一键折叠 160 行**（同股多期 in/out_date 记录按 (upstream,downstream,relation) 收敛）；`fund_portfolio`（510300.SH）**不可用 — tushare 40203「您没有接口(fund_portfolio)访问权限」**（token 权限/积分档位不足，对齐「stock_fundamentals 等空表属设计行为」口径，登记不阻塞）；seed CSV 导入 **OK — 5 行**（走生产导入面，BOM 修复真文件自证）。四表行数：`quant.sw_industry_tree` **359** / `quant.supply_chain_edge` **160** / `quant.industry_vitality` **5** / `quant.etf_constituent` **0**（唯一空表，40203 权限结论在案）。喂数后复跑全量：**67 ok / 1 FAIL**，唯一红为并行在途文件 `cmd/analysis/handlers_backtest_nautilus_test.go:77`（K13 线 `gin.SetMode` 违反守卫，非本任务文件、与喂数无关）——如实登记不洗绿，归属 K13 线自行处理。遗留：`fund_portfolio` 待 token 权限升档后按 R3 步骤补拉 ETF 成分，届时 `etf_constituent` 转 > 0（数据源升级事项，不属本收尾范围）。
 
 ---
 
