@@ -148,6 +148,12 @@ func assembleKernel(v *viper.Viper, store *storage.PostgresStore, logger zerolog
 
 	// Boot：按 BootOrder 逐个 Init→Start，失败内部已逆序回滚；此处
 	// fail-fast（接管后内核承重）。超时 20s 继承影子期取值。
+	//
+	// ctx 生命周期（K12 / K1-P2-1 裁决）：这个 ctx **仅限 Boot 期间有效**
+	// （返回即 cancel）——这是契约而非疏漏，模块不得留存它（要长寿 ctx
+	// 自建，见 pkg/kernel/interfaces.go 的 Module 注释）。保留 20s 超时
+	// 的理由：它是挂死 Init/Start 的唯一中断手段；裁决理由与钉住测试
+	// TestLifecycleCtxIsCallScoped 同址。
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if err := k.Boot(ctx); err != nil {

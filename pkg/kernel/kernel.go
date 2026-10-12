@@ -155,23 +155,19 @@ func (k *StandardKernel) Boot(ctx context.Context) error {
 	for _, name := range BootOrder {
 		m, ok := k.modules[name]
 		if !ok {
-			k.rollbackLocked(ctx)
-			return fmt.Errorf("%w: %q（BootOrder 第 %d 位）", ErrMissingModule, name, len(k.booted)+1)
+			return k.bootFailedLocked(ctx, fmt.Errorf("%w: %q（BootOrder 第 %d 位）", ErrMissingModule, name, len(k.booted)+1))
 		}
 		if err := m.Init(ctx); err != nil {
-			k.rollbackLocked(ctx)
-			return fmt.Errorf("%w: 模块 %q Init 失败: %w", ErrBootFailed, name, err)
+			return k.bootFailedLocked(ctx, fmt.Errorf("%w: 模块 %q Init 失败: %w", ErrBootFailed, name, err))
 		}
 		if err := m.Start(ctx); err != nil {
-			k.rollbackLocked(ctx)
-			return fmt.Errorf("%w: 模块 %q Start 失败: %w", ErrBootFailed, name, err)
+			return k.bootFailedLocked(ctx, fmt.Errorf("%w: 模块 %q Start 失败: %w", ErrBootFailed, name, err))
 		}
 		k.booted = append(k.booted, name)
 	}
 
 	if err := k.publishLocked(ctx, msgbus.TopicKernelBoot); err != nil {
-		k.rollbackLocked(ctx)
-		return fmt.Errorf("%w: 发布 %s 失败: %w", ErrBootFailed, msgbus.TopicKernelBoot, err)
+		return k.bootFailedLocked(ctx, fmt.Errorf("%w: 发布 %s 失败: %w", ErrBootFailed, msgbus.TopicKernelBoot, err))
 	}
 	return nil
 }
@@ -250,17 +246,38 @@ func (k *StandardKernel) Store() eventstore.EventStore { return k.store }
 
 // ─── 内部辅助 ──────────────────────────────────────────────────────
 
-// rollbackLocked 逆序 Stop 已成功 Start 的模块，并清空 booted。
-// 调用方必须持有 k.mu（Boot 持锁路径调用）。
+// bootFailedLocked 逆序回滚已启动的模块，并把回滚期的 Stop 失败并进返回
+// error（message 可见、errors.Is 语义不变）。调用方必须持有 k.mu。
 //
-// 回滚自身的 error 只能丢弃：Boot 已经把「原始失败 error」作为返回值，回滚
-// 是尽力而为的清理，把它的错误 Join 进去会掩盖调用方真正要看的根因。
-// 这条取舍写在这里，免得日后有人「顺手」把回滚 error 也 Join 上。
-func (k *StandardKernel) rollbackLocked(ctx context.Context) {
+// 组合口径（K12 / K1-P2-2 裁决）：root（原始失败）保持为返回 error 的主体
+// 与 errors.Is 锚点；回滚失败以并列 %w 挂在同一条 error 上——两者都在
+// message 里，谁也不吞谁。内核自身无 logger 依赖，可见性由返回 error 承载：
+// 调用方（cmd/analysis 的 logger.Fatal / shutdownKernel）打日志时两者同现。
+func (k *StandardKernel) bootFailedLocked(ctx context.Context, root error) error {
+	if rbErr := k.rollbackLocked(ctx); rbErr != nil {
+		return fmt.Errorf("%w；回滚期 Stop 失败（资源可能未释放）: %w", root, rbErr)
+	}
+	return root
+}
+
+// rollbackLocked 逆序 Stop 已成功 Start 的模块，并清空 booted；返回回滚期
+// 的 Stop 失败聚合（无失败返回 nil）。调用方必须持有 k.mu（Boot 持锁路径调用）。
+//
+// ─── 回滚 error 的处置（K12 / K1-P2-2 修订 K1 旧裁决）────────────────
+// K1 旧裁决「回滚 error 丢弃（避免掩盖根因）」只对了一半：根因确实要保住，
+// 但 Stop 失败 = 资源泄漏，静默丢弃等于让泄漏无人知晓——比多一行错误更糟。
+// 现口径：不再丢弃，经 bootFailedLocked 并进返回 error（根因为主体、回滚
+// 失败并列），打包细节见那里的注释。本函数只负责收集，不决定呈现。
+func (k *StandardKernel) rollbackLocked(ctx context.Context) error {
+	var errs []error
 	for i := len(k.booted) - 1; i >= 0; i-- {
-		_ = k.modules[k.booted[i]].Stop(ctx)
+		name := k.booted[i]
+		if err := k.modules[name].Stop(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("模块 %q Stop 失败: %w", name, err))
+		}
 	}
 	k.booted = nil
+	return errors.Join(errs...)
 }
 
 // publishLocked 发布一条内核生命周期消息（kernel.boot / kernel.shutdown）。

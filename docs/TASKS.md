@@ -245,7 +245,9 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：三条不变量各有一条破坏腿（如 Submit 去掉 CheckOrder 调用 → 该护栏红），且反证腿证明护栏不是永真；`go test ./internal/repoguard/ ./pkg/...` 全绿。
 - **⑥ 边界**：只做这三条护栏，不扩到其他语义约束，一个 commit。
 
-### K12 · 内核装配治理收口 K1-P2-1~4（阶段 3 前置，独立）
+### K12 · 内核装配治理收口 K1-P2-1~4（阶段 3 前置，独立）✅ 完成（2026-10-12）
+
+> **收口记录 ✅（2026-10-12）**：四条全落地，各配正测试/护栏 + 破坏腿（改坏→红→还原验证）。① Boot ctx 裁决「**ctx 仅限调用期间**」（选契约钉住而非内核传长寿 ctx，保住超时中断能力）——契约注释 `pkg/kernel/interfaces.go` + `TestLifecycleCtxIsCallScoped`；② 回滚期 Stop 失败并进返回 error 的 message（根因为主体、回滚失败并列 %w）——`bootFailedLocked` + `TestBootErrorCarriesRollbackStopFailures`；③ **裁决 pool = 应用层资源（保持现状，谁构造谁释放）**——`adapters.go` 注释 + 蓝图 §4.2 资源归属 + ADR-031（quant-trading-docs）+ `TestEventStoreModuleStopLeavesPoolOpen`；④ 「生命周期方法内禁回调 `Module()`」契约注释 + AST 护栏 `internal/repoguard/module_lifecycle_callback_test.go`（含防注释误报对照腿）。BootOrder 与模块契约签名未动，业务模块逻辑未动。
 
 - **① 目标**：K1/K2 审查登记的四条装配缺陷收口，让 Kernel 装配达到「可托管可插拔执行器」的稳定度。
 - **② 上下文**：本文件 §六「K1/K2 实现审查发现」表 K1-P2-1~4（Boot ctx 生命周期 / 回滚 error 静默丢弃 / eventstore 资源归属未定 / 模块回调内核死锁）；`pkg/kernel/kernel.go`（`rollbackLocked`）；`cmd/analysis/kernel_wiring.go`（`assembleKernel`）；ADR-031 D1（EngineRunner 可插拔的稳定性基础）。

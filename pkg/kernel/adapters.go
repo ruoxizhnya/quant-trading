@@ -82,7 +82,22 @@ func (m *EventStoreModule) Init(ctx context.Context) error { return m.store.Ensu
 // Start no-op：eventstore 无独立「启动」动作。
 func (m *EventStoreModule) Start(context.Context) error { return nil }
 
-// Stop no-op：连接池由 pkg/storage 持有并统一 Close，本模块不越权关它。
+// Stop no-op：不关连接池。
+//
+// ─── 资源归属裁决（K12 / K1-P2-3）────────────────────────────────────
+// **pool 是应用层资源，不是内核资源**——裁决「保持现状」，理由：
+//  1. 池在 main() 里随 PostgresStore 构造（一个进程一个池），且被内核
+//     10 模块**之外**的组件共享（HTTP 层 JobService/WF/Batch/
+//     FactorAttributor/StrategyDB/auth/alert 全部经 store 访问 DB）；
+//     内核只 Boot 蓝图 10 模块，不拥有整个进程的资源面；
+//  2. 关停时序（kernel_wiring.go 文件头）要求 kernel.Shutdown 早于
+//     gracefulShutdown——后者 phase 4 才 store.Close()。若模块 Stop 关池，
+//     关停中仍在落审计（kernel.shutdown → eventstore.Append）的路径与
+//     HTTP 排水期的 DB 访问会被自己的内核掐断。
+// 归属不变量：谁构造谁释放——pool 由 pkg/storage 持有并统一 Close，
+// 模块 Stop 只放模块自有资源。钉住测试：kernel_pg_test.go 的
+// TestEventStoreModuleStopLeavesPoolOpen；同步文档：kernel 蓝图 §4.2
+// 资源归属 + ADR-031（quant-trading-docs）。
 func (m *EventStoreModule) Stop(context.Context) error { return nil }
 
 // MsgBusModule 把 msgbus.MsgBus 包装成模块。Name 恒为 "msgbus"

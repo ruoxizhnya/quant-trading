@@ -24,6 +24,26 @@ import (
 // 内核的 11 个模块全部实现本接口；Kernel.Boot/Shutdown 按 BootOrder
 // 逐个调用。Init 与 Start 分离的理由：Init 只做本地构造与配置校验
 // （可失败且无副作用），Start 才连接外部资源（DB/feed/broker）。
+//
+// ─── ctx 生命周期语义（K12 / K1-P2-1 裁决）────────────────────────────
+// Init/Start/Stop 收到的 ctx **仅在本次调用内有效**——装配层在
+// Boot/Shutdown 返回后即 cancel 它（cmd/analysis 的20s 超时 ctx）。
+// 模块**不得**把 ctx 存活到调用之外：Start 里起的 goroutine 若拿它当
+// 生命周期，会在 Boot 返回瞬间被抢先 Cancel（K1 登记的 K1-P2-1 缺陷）。
+// 需要长生命周期 ctx 的模块自建（或用 context.WithoutCancel 派生以继承
+// 值），并在 Stop 里终止它——关停的驱动力是 Stop 调用，不是 ctx 取消。
+//
+// 裁决理由（二选一里选「契约钉住」而非「内核传长寿 ctx」）：保留 ctx
+// 对挂死 Init/Start 的中断能力（Boot/Shutdown 的超时是唯一解救手段），
+// 且与 Go 惯例（不得跨调用持有 ctx）一致。语义由
+// TestLifecycleCtxIsCallScoped 钉住——该测试红 = 本契约被改动，须走变更
+// 评审。
+//
+// ─── 禁令（K12 / K1-P2-4）────────────────────────────────────────────
+// 生命周期方法内**不得回调 Kernel.Module()**：Boot/Shutdown 全程持
+// 内核锁，回调会在同一把锁上自死锁。模块要拿别的模块的产物，走构造期
+// 注入（装配处把前序模块的导出字段传进来，见 StrategyRuntimeDeps）。
+// 护栏：internal/repoguard 的模块生命周期回调 AST 扫描。
 type Module interface {
 	// Name 返回模块名，必须与 BootOrder 中的名字一致
 	//（由 TestBootOrderContract 与 K1 的装配测试共同冻结）。
@@ -47,6 +67,10 @@ type Kernel interface {
 	// 先落库的语义不破坏。
 	Shutdown(ctx context.Context) error
 	// Module 按名检索已装配的模块；未注册的名字返回 error。
+	//
+	// **模块不得在 Init/Start/Stop 内调用本方法**（K12 / K1-P2-4）：
+	// Boot/Shutdown 全程持内核锁，生命周期里回调会在同一把锁上自死锁。
+	// 检索只发生在装配/运行期的内核外部调用方；模块间依赖走构造期注入。
 	Module(name string) (Module, error)
 	// Clock 返回内核时钟（替换点①：回测 VirtualClock / 实盘 LiveClock）。
 	Clock() clock.Clock

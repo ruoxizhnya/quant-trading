@@ -213,6 +213,61 @@ func TestBootRollsBackInReverseOnStartFailure(t *testing.T) {
 	}
 }
 
+// ─── 2c. 回滚期 Stop 失败不得静默（K12 / K1-P2-2）──────────────────
+
+// TestBootErrorCarriesRollbackStopFailures 钉住修订后的裁决：Boot 失败的
+// 返回 error 必须**同时**可见根因与回滚期的 Stop 失败（资源泄漏不能无人
+// 知晓）。对照腿（回滚全成功 → error 不带回滚后缀）证明断言不是永真。
+func TestBootErrorCarriesRollbackStopFailures(t *testing.T) {
+	const failIdx = 5 // exec-engine Start 注入失败
+	failName := kernel.BootOrder[failIdx]
+	// 让已启动模块里排位靠前的 clock（第 2 位）在回滚 Stop 时也失败。
+	const leakyName = "clock"
+
+	rec := &recorder{}
+	k := newKernelWithFakes(rec, &fakeBus{rec: rec}, func(name string, m *fakeModule) {
+		switch name {
+		case failName:
+			m.failStart = true
+		case leakyName:
+			m.failStop = true
+		}
+	})
+
+	err := k.Boot(context.Background())
+	if err == nil {
+		t.Fatal("Boot 应当失败（exec-engine Start 注入失败），但返回 nil")
+	}
+	// 根因仍为主体（errors.Is 锚点不被回滚错误破坏）。
+	if !errors.Is(err, kernel.ErrBootFailed) {
+		t.Errorf("Boot error 未包装 ErrBootFailed: %v", err)
+	}
+	// 根因 message 可见。
+	if !strings.Contains(err.Error(), "boom-start:"+failName) {
+		t.Errorf("Boot error 未含根因 %q: %v", "boom-start:"+failName, err)
+	}
+	// K12/K1-P2-2 核心：回滚期 Stop 失败（= 资源泄漏）必须并进 message。
+	if !strings.Contains(err.Error(), "boom-stop:"+leakyName) {
+		t.Errorf("回滚期 Stop 失败被静默丢弃 —— error message 未含 %q（K12/K1-P2-2）: %v",
+			"boom-stop:"+leakyName, err)
+	}
+
+	// 对照腿：回滚全部成功时，error 不得带「回滚期 Stop 失败」后缀。
+	rec2 := &recorder{}
+	k2 := newKernelWithFakes(rec2, &fakeBus{rec: rec2}, func(name string, m *fakeModule) {
+		if name == failName {
+			m.failStart = true
+		}
+	})
+	err2 := k2.Boot(context.Background())
+	if err2 == nil {
+		t.Fatal("对照腿 Boot 应当失败")
+	}
+	if strings.Contains(err2.Error(), "回滚期") {
+		t.Errorf("回滚全部成功却带了回滚失败后缀 —— 断言永真即无信息量: %v", err2)
+	}
+}
+
 // TestBootRollsBackOnInitFailure 同样验证 Init 阶段失败的回滚路径。
 func TestBootRollsBackOnInitFailure(t *testing.T) {
 	const failIdx = 3 // portfolio
@@ -449,4 +504,90 @@ func TestAdapterNamesMatchBootOrder(t *testing.T) {
 	}
 	// EventStoreModule 需要真 PGEventStore（EnsureSchema 是 Init 的动作），
 	// 其 Name 一致性由真库集成测试覆盖。
+}
+
+// ─── 11. ctx 生命周期语义钉住（K12 / K1-P2-1）──────────────────────
+
+// ctxCaptureModule 把 Init/Start 收到的 ctx 留下来供断言（只为测试）。
+type ctxCaptureModule struct {
+	name string
+	rec  *recorder
+	got  map[string]context.Context
+}
+
+func (m *ctxCaptureModule) Name() string { return m.name }
+
+func (m *ctxCaptureModule) Init(ctx context.Context) error {
+	m.rec.add("init:" + m.name)
+	m.got["init"] = ctx
+	return nil
+}
+
+func (m *ctxCaptureModule) Start(ctx context.Context) error {
+	m.rec.add("start:" + m.name)
+	m.got["start"] = ctx
+	return nil
+}
+
+func (m *ctxCaptureModule) Stop(context.Context) error {
+	m.rec.add("stop:" + m.name)
+	return nil
+}
+
+// TestLifecycleCtxIsCallScoped 钉住 K12/K1-P2-1 的契约裁决（interfaces.go
+// 的 Module 注释）：内核把调用方的 ctx **原样**传给 Init/Start，不做寿命
+// 延长——ctx 仅限本次调用，装配层 cancel 时它必须随之失效。
+//
+// 为什么钉这个方向而不是反方向：契约告诉模块「别留存 ctx」，配套的可观测
+// 事实就是「你拿到的确实是短命 ctx」。若日后有人把内核改成传长寿 ctx
+// （context.WithoutCancel 之类），本测试红 = 契约被改动，须走变更评审后
+// 连同契约注释一起改，而不是悄悄换语义。
+//
+// 前半段（cancel 前必须活着）是反证腿：证明本测试不是永真。
+func TestLifecycleCtxIsCallScoped(t *testing.T) {
+	rec := &recorder{}
+	k := kernel.NewKernel(clock.NewLiveClock(), &fakeBus{rec: rec}, nil)
+
+	capture := &ctxCaptureModule{
+		name: kernel.BootOrder[0],
+		rec:  rec,
+		got:  map[string]context.Context{},
+	}
+	if err := k.Register(capture); err != nil {
+		t.Fatalf("Register(ctxCaptureModule) 失败: %v", err)
+	}
+	for _, name := range kernel.BootOrder[1:] {
+		if err := k.Register(&fakeModule{name: name, rec: rec}); err != nil {
+			t.Fatalf("Register(%s) 失败: %v", name, err)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := k.Boot(ctx); err != nil {
+		t.Fatalf("Boot 失败: %v", err)
+	}
+
+	// 反证腿：cancel 之前 ctx 必须还活着（若断言恒成立，测试没有信息量）。
+	for _, phase := range []string{"init", "start"} {
+		got := capture.got[phase]
+		if got == nil {
+			t.Fatalf("%s 未收到 ctx —— 捕获器没被调用，下面的断言什么也没证明", phase)
+		}
+		select {
+		case <-got.Done():
+			t.Fatalf("%s 收到的 ctx 在 cancel 之前就已失效", phase)
+		default:
+		}
+	}
+
+	// 装配层 cancel（Boot 返回后的现实时序）⇒ 模块看到的 ctx 必须随之失效。
+	cancel()
+	for _, phase := range []string{"init", "start"} {
+		select {
+		case <-capture.got[phase].Done():
+		default:
+			t.Errorf("%s 收到的 ctx 在装配层 cancel 后仍存活 —— 契约是「ctx 仅限调用期间」"+
+				"（Module 注释，K12/K1-P2-1）：内核必须转发调用方原 ctx，模块留存它会被抢先 Cancel", phase)
+		}
+	}
 }

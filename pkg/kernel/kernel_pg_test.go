@@ -119,6 +119,42 @@ func TestKernelLifecycleLandsInAuditLog(t *testing.T) {
 	}
 }
 
+// TestEventStoreModuleStopLeavesPoolOpen 钉住 K12/K1-P2-3 的资源归属裁决：
+// **pool 是应用层资源**（main 构造 PostgresStore 一个进程一个池、
+// gracefulShutdown phase 4 统一 Close），EventStoreModule.Stop 不得关它
+// （裁决全文见 adapters.go 的 Stop 注释）。可观测形态：Stop 之后池必须
+// 仍可用。
+//
+// 破坏腿（改坏→红→还原）：给 EventStoreModule 加上关池动作（如新增
+// PGEventStore.Close() 并在 Stop 里调）→ 本测试红。
+func TestEventStoreModuleStopLeavesPoolOpen(t *testing.T) {
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, kernelTestDSN())
+	if err != nil {
+		t.Fatalf("连接测试库失败（DSN=%s；本机起库见 docs/TEST.md §2.0.1）: %v", kernelTestDSN(), err)
+	}
+	t.Cleanup(pool.Close)
+
+	store, err := eventstore.NewPGEventStore(pool, "kernel-itest", "")
+	if err != nil {
+		t.Fatalf("NewPGEventStore 失败: %v", err)
+	}
+	mod := kernel.NewEventStoreModule(store)
+	if err := mod.Init(ctx); err != nil {
+		t.Fatalf("Init（EnsureSchema）失败: %v", err)
+	}
+	if err := mod.Stop(ctx); err != nil {
+		t.Fatalf("Stop 应为 no-op 返回 nil: %v", err)
+	}
+
+	// 核心断言：Stop 之后池仍活着 ——「pool 归属应用层」的可观测形态。
+	if err := pool.Ping(ctx); err != nil {
+		t.Fatalf("EventStoreModule.Stop 之后连接池不可用 —— pool 是应用层资源"+
+			"（main 构造、gracefulShutdown 统一 Close），模块 Stop 不得关它（K12/K1-P2-3 裁决）: %v", err)
+	}
+}
+
 // assertReplayContainsTopic 用 store.Replay 在 [from,to] 窗口内回放，
 // 断言至少有一条 topic == want 的消息。
 func assertReplayContainsTopic(

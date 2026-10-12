@@ -189,6 +189,8 @@ Kernel.Shutdown()  // 逆序，先停分发再落库
 
 **为什么这个顺序是契约**：EventStore 必须第一个起（否则启动期消息丢失），MsgBus 必须最后开（否则策略在状态未恢复完就收到 bar）。nautilus 的 Kernel 就是这么排的我们直接对齐。
 
+> **资源归属裁决（K12 / K1-P2-3，2026-10-12）：连接池（pgxpool）是应用层资源，不是内核资源**——`EventStoreModule.Stop` **不关** pool，保持「谁构造谁释放」：pool 由 `main()` 随 `PostgresStore` 构造（一个进程一个池），被内核 10 模块之外的 HTTP 层组件（JobService / WF / Batch / FactorAttributor / StrategyDB / auth / alert）共享，最终由 `gracefulShutdown` phase 4 统一 `store.Close()`。理由：① 内核只 Boot 蓝图 10 模块，不拥有整个进程的资源面；② 关停时序要求 `kernel.Shutdown` 早于 `gracefulShutdown`（kernel.shutdown 落库时 pool 必须活着），若模块 Stop 关池会掐断审计落库与 HTTP 排水期的 DB 访问。裁决同步于代码注释（`pkg/kernel/adapters.go` `EventStoreModule.Stop`），钉住测试 `TestEventStoreModuleStopLeavesPoolOpen`（`pkg/kernel/kernel_pg_test.go`）。
+
 ---
 
 ## 5. 模块矩阵（四件套 × 11 模块）
