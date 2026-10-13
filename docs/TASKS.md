@@ -396,7 +396,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ### K16 · 双内核生产化（阶段 3，⛔ 前置：K12 + K15 完成 + NT 决策门通过）
 
-> **进度（2026-10-13）**：① CI 对齐回归门禁✅（`522c11b`）② compose+健康检查+监控✅（`7ee2626`，§8.6 部署形态裁决已回写设计文档）④ 生产路由开关✅（`34621c6`）⑤ **生产告警通道接线✅（`9502ec2`，K5 遗留认领收口）**——`pkg/alert` 增 `ReconciliationDispatcher`/`SignalDispatcher`（一条差异一条告警，severity 同名词表映射、未知 fail-closed 到 warning；`DispatchDualRunBreaches` 对齐 `GateViolation` 信息面全 critical），`cmd/analysis` 首个 reconciliation worker 生产构造点（`buildReconciliation`，自检形态对账、`FeeSnap` 恒零缺口记档、陌生账户 fail-loud），`cmd/dualrun -gate` 违例经 `dispatchGateAlerts` 进告警通道（`$DUALRUN_ALERT_WEBHOOK`）；验收「人为注入对账差异 → 告警触发点名」由装配演示测试兑现（现金/持仓逐条点名 account/symbol/delta），破坏验证（不转发 → 红）闭环。**剩余**：③ 运维文档（NT 升级流程首节 + 故障回退，落 `quant-trading-docs/docs/guides/`）。
+> **进度（2026-10-13）**：① CI 对齐回归门禁✅（`522c11b`）② compose+健康检查+监控✅（`7ee2626`，§8.6 部署形态裁决已回写设计文档）③ 运维文档✅（docs 仓 `5adda21`，`guides/nt-sidecar-operations.md`：升级流程首节三条纪律+三个 API 盯防面+对齐回归验收门；故障回退「零回退是结构属性」+临时退 go 内核路径；微坑 5 条）④ 生产路由开关✅（`34621c6`）⑤ **生产告警通道接线✅（`9502ec2`，K5 遗留认领收口）**——`pkg/alert` 增 `ReconciliationDispatcher`/`SignalDispatcher`（一条差异一条告警，severity 同名词表映射、未知 fail-closed 到 warning；`DispatchDualRunBreaches` 对齐 `GateViolation` 信息面全 critical），`cmd/analysis` 首个 reconciliation worker 生产构造点（`buildReconciliation`，自检形态对账、`FeeSnap` 恒零缺口记档、陌生账户 fail-loud），`cmd/dualrun -gate` 违例经 `dispatchGateAlerts` 进告警通道（`$DUALRUN_ALERT_WEBHOOK`）；验收「人为注入对账差异 → 告警触发点名」由装配演示测试兑现（现金/持仓逐条点名 account/symbol/delta），破坏验证（不转发 → 红）闭环。
 
 - **① 目标**：决策门通过后，双内核形态进生产：kernel 路由可控、对齐回归进 CI 门禁、Python 运行时进 CI/CD、监控与运维文档齐备。
 - **② 上下文**：ADR-031 D4 阶段 3；§五「NT 决策门」；K12–K15 交付物（K12 装配治理是「可托管可插拔执行器」的稳定性前提）；CI 现状（Go `-race` + 前端 typecheck/lint/test）。
