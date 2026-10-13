@@ -71,6 +71,13 @@ const (
 	// URLEnvVar overrides DefaultURL at assembly time.
 	URLEnvVar = "NT_SIDECAR_URL"
 
+	// EnableEnvVar is the production routing switch for the nautilus kernel
+	// (K16 ④). Default is **off**: the production registry exposes only the
+	// go kernel, and nautilus must be explicitly opted in — a run request
+	// naming kernel="nautilus" against an unregistered kernel fails closed
+	// with ErrKernelNotRegistered (naming the kernel), never falls back.
+	EnableEnvVar = "NT_SIDECAR_ENABLED"
+
 	// RunPath is the sidecar's RunSpec execution endpoint.
 	RunPath = "/v1/backtest"
 
@@ -94,6 +101,34 @@ func URLFromEnv() string {
 		return v
 	}
 	return DefaultURL
+}
+
+// KernelEnabledFromEnv reports whether the nautilus kernel should be
+// registered in the production registry (K16 ④ routing switch).
+//
+// Semantics are deliberately fail-closed on typos, not on absence:
+//
+//	unset / empty → false （默认 go-only，nautilus 不注册）
+//	"1" / "true" / "yes" / "on" → true（显式开启）
+//	"0" / "false" / "no" / "off" → false（显式关闭）
+//	anything else → error（打错字必须在装配期炸，不能静默当关闭）
+//
+// A disabled kernel is a *routing* decision: a request naming
+// kernel="nautilus" then fails closed at Resolve (ErrKernelNotRegistered),
+// which is the correct production behaviour — the run is refused with an
+// explicit message rather than silently executed by another kernel.
+func KernelEnabledFromEnv() (bool, error) {
+	v := strings.TrimSpace(os.Getenv(EnableEnvVar))
+	switch strings.ToLower(v) {
+	case "", "0", "false", "no", "off":
+		return false, nil
+	case "1", "true", "yes", "on":
+		return true, nil
+	default:
+		return false, fmt.Errorf(
+			"nautilus: %s=%q is not a recognised boolean (want 1/true/yes/on or 0/false/no/off) — refusing to guess, fix the configuration",
+			EnableEnvVar, v)
+	}
 }
 
 // Runner executes backtests through the NT sidecar over HTTP.

@@ -182,12 +182,21 @@ func buildDataServices(
 	// 回环、只经 EngineRunner 契约交互（ADR-031 D5）——进程隔离，不直连
 	// 数据库，Go 侧不留任何 NT 依赖。
 	//
-	// 无条件注册：内核「已知」（FR-1.1 的 kernel 路由键里 nautilus 是合法
-	// 取值），可用性失败在执行期显式透出为 failed（runner 不吞错），而不是
-	// 在装配期假装它不存在。地址来自 $NT_SIDECAR_URL，缺省 DefaultURL
-	// （127.0.0.1:9100）；侧车没起时该内核的请求得到显式错误 + 库内零行，
-	// 绝不静默回退 go 内核（FR-1.3）。
-	engineRegistry.Register(nautilus.KernelName, nautilus.NewRunner(nautilus.URLFromEnv(), nil))
+	// K16 ④ 生产路由开关：nautilus **默认不注册**（$NT_SIDECAR_ENABLED
+	// 缺省 = go-only）。显式开启后才注册——这是生产放量的控制点：默认
+	// 形态下 kernel="nautilus" 的请求在 Resolve 处 fail-closed（点名内核名
+	// + 已注册集合，绝不静默回退 go 内核，FR-1.3）；开启后可用性失败在
+	// 执行期显式透出为 failed（runner 不吞错）。地址来自 $NT_SIDECAR_URL
+	// （缺省 DefaultURL 127.0.0.1:9100）。开关值非法（打错字）在装配期
+	// 直接报错退出，不静默当关闭。
+	if ntEnabled, err := nautilus.KernelEnabledFromEnv(); err != nil {
+		logger.Fatal().Err(err).Msg("invalid NT_SIDECAR_ENABLED")
+	} else if ntEnabled {
+		engineRegistry.Register(nautilus.KernelName, nautilus.NewRunner(nautilus.URLFromEnv(), nil))
+		logger.Info().Str("url", nautilus.URLFromEnv()).Msg("NT sidecar kernel registered (NT_SIDECAR_ENABLED)")
+	} else {
+		logger.Info().Msg("NT sidecar kernel not registered (production default: go-only; set NT_SIDECAR_ENABLED=1 to opt in)")
+	}
 
 	// JobService 改持注册表：kernel 是请求级路由键，执行期才经 Resolve
 	// 解析（K10）。logger 显式传入，不再从 engine 内部提取。

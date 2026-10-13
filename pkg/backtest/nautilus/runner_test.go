@@ -252,6 +252,30 @@ func TestURLFromEnv(t *testing.T) {
 	assert.Equal(t, "http://127.0.0.1:9999", URLFromEnv())
 }
 
+// K16 ④：生产路由开关。默认关（go-only）；显式值解析；打错字 fail-loud。
+func TestKernelEnabledFromEnv(t *testing.T) {
+	// 默认关：缺省/空 = 不注册 nautilus（生产 go-only）。
+	for _, unset := range []string{"", "  ", "0", "false", "no", "off", "OFF", "False"} {
+		t.Setenv(EnableEnvVar, unset)
+		got, err := KernelEnabledFromEnv()
+		assert.NoError(t, err, "value %q", unset)
+		assert.False(t, got, "value %q 应解析为关（默认 go-only）", unset)
+	}
+	// 显式开启。
+	for _, on := range []string{"1", "true", "yes", "on", "TRUE", " On "} {
+		t.Setenv(EnableEnvVar, on)
+		got, err := KernelEnabledFromEnv()
+		assert.NoError(t, err, "value %q", on)
+		assert.True(t, got, "value %q 应解析为开", on)
+	}
+	// 打错字必须报错（装配期炸），不许静默当关闭。
+	for _, bad := range []string{"2", "ture", "enable", "y", "on-please"} {
+		t.Setenv(EnableEnvVar, bad)
+		_, err := KernelEnabledFromEnv()
+		assert.Error(t, err, "value %q 必须被拒绝而非静默当关闭", bad)
+	}
+}
+
 func TestNewRunnerTrimsTrailingSlash(t *testing.T) {
 	runner := NewRunner("http://127.0.0.1:9100/", nil)
 	assert.Equal(t, "http://127.0.0.1:9100", runner.baseURL)
