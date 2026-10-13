@@ -160,7 +160,7 @@ func main() {
 		violations := EvaluateGate(report)
 		fmt.Fprintln(os.Stderr, FormatViolations(violations))
 		if len(violations) > 0 {
-			dispatchGateAlerts(violations, productionBreachFire())
+			dispatchGateAlerts(violations, productionBreachFire(zerolog.New(os.Stderr)))
 			os.Exit(2)
 		}
 	}
@@ -170,12 +170,14 @@ func main() {
 // alert.SignalDispatcher 发进告警通道（一条违例一条告警，rule=dualrun_gate）。
 // 与分析服务共用 pkg/alert 的通道集实现（log + webhook）；webhook 目标由
 // $DUALRUN_ALERT_WEBHOOK 给出（CI 环境通常不配置 webhook，只记结构化
-// 日志，由日志告警规则抓）。管理器生命周期限制在本函数内——告警发完即关。
-func productionBreachFire() func(ctx context.Context, runID string, breaches []alert.DualRunBreach) {
+// 日志，由日志告警规则抓——因此 logger 不能是 Nop，否则不配 webhook 时
+// 告警会整条吞掉，只剩 exit 2）。管理器生命周期限制在本函数内——告警发完
+// 即关。
+func productionBreachFire(logger zerolog.Logger) func(ctx context.Context, runID string, breaches []alert.DualRunBreach) {
 	return func(ctx context.Context, runID string, breaches []alert.DualRunBreach) {
 		mgr := alert.NewAlertManager(alert.AlertManagerConfig{
 			WebhookURL: os.Getenv("DUALRUN_ALERT_WEBHOOK"),
-		}, zerolog.Nop()) // 实验产物即报告；告警正文是给告警通道的，不进 stdout
+		}, logger.With().Str("component", "dualrun_gate_alert").Logger())
 		defer mgr.Close()
 		alert.NewSignalDispatcher(mgr).DispatchDualRunBreaches(ctx, runID, breaches)
 	}

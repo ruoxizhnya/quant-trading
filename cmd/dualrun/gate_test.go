@@ -6,6 +6,7 @@ package main
 //      门禁必须红并点名规则。红不了的门禁等于没有门禁。
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/alert"
 )
@@ -320,7 +323,7 @@ func TestGateAlerts_DispatchForEachViolation(t *testing.T) {
 }
 
 func TestGateAlerts_ProductionFireDeliversAlerts(t *testing.T) {
-	// 生产腿：productionBreachFire 经真实告警通道（webhook）送达，
+	// 生产腿：productionBreachFire 经真实告警通道（log + webhook）送达，
 	// rule=dualrun_gate、severity=critical、消息点名违例规则。
 	received := make(chan alert.Alert, 8)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -332,8 +335,9 @@ func TestGateAlerts_ProductionFireDeliversAlerts(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("DUALRUN_ALERT_WEBHOOK", srv.URL)
 
+	var logBuf bytes.Buffer
 	vs := []GateViolation{{Rule: "metric/sharpe", Message: "sharpe: go=1.2 nt=1.377 |Δ|=0.177 超绝对阈 0.05"}}
-	dispatchGateAlerts(vs, productionBreachFire())
+	dispatchGateAlerts(vs, productionBreachFire(zerolog.New(&logBuf)))
 
 	// productionBreachFire 的 mgr.Close() 排空 webhook 队列后送达已确定；
 	// 超时护栏防将来通道语义变化时测试挂死。
@@ -364,5 +368,27 @@ func TestGateAlerts_ProductionFireDeliversAlerts(t *testing.T) {
 	case extra := <-received:
 		t.Errorf("一条违例一条告警，不应多发，got extra: %+v", extra)
 	default:
+	}
+	// log 通道同腿送达：CI 常态（不配 webhook）靠的就是这条结构化日志，
+	// logger 若被换成 Nop 会整条吞掉——此处断言日志腿不空转。
+	if out := logBuf.String(); !strings.Contains(out, "dualrun_gate") || !strings.Contains(out, "metric/sharpe") {
+		t.Errorf("告警日志应点名 rule 与违例规则，got %q", out)
+	}
+}
+
+// TestGateAlerts_ProductionFireLogOnly：不配 webhook 时（CI 常态），
+// 告警仍必须落到结构化日志——运维侧不靠翻 CI stdout 也能抓到。
+func TestGateAlerts_ProductionFireLogOnly(t *testing.T) {
+	t.Setenv("DUALRUN_ALERT_WEBHOOK", "")
+
+	var logBuf bytes.Buffer
+	vs := []GateViolation{{Rule: "determinism", Message: "go 内核两次运行不一致（确定性腿破坏）"}}
+	dispatchGateAlerts(vs, productionBreachFire(zerolog.New(&logBuf)))
+
+	out := logBuf.String()
+	for _, want := range []string{alert.RuleDualRunGate, "determinism", string(alert.SeverityCritical)} {
+		if !strings.Contains(out, want) {
+			t.Errorf("无 webhook 时日志腿必须点名 %q，got %q", want, out)
+		}
 	}
 }

@@ -7,7 +7,7 @@
 //
 // 判定口径与报告表格一致：
 //   - 相对差阈值（RelDiff = (NT-Go)/Go）：total_return / annual_return
-//         ≤ 0.2%，max_drawdown ≤ 0.5%；
+//     ≤ 0.2%，max_drawdown ≤ 0.5%；
 //   - 绝对差阈值（Diff = NT-Go）：sharpe / sortino / calmar ≤ 0.05；
 //   - win_rate **不设阈值**（K15 归因④：配对算法对成交明细微差放大，
 //     阈值只会制造假红；明细对账为准）。
