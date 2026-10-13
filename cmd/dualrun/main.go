@@ -49,6 +49,7 @@ func main() {
 	rf := flag.Float64("rf", 0.0, "risk-free rate (annual)")
 	strategy := flag.String("strategy", "bh", "signal plan: bh | quarterly")
 	out := flag.String("out", "", "write the markdown report to this path")
+	gate := flag.Bool("gate", false, "enforce the K15 alignment tolerance table: exit 2 on any violation (CI gate mode)")
 	flag.Parse()
 
 	logger := zerolog.Nop() // 实验产物即报告；tracker 的 debug 日志不进 stdout
@@ -146,6 +147,16 @@ func main() {
 	if *out != "" {
 		must(os.WriteFile(*out, []byte(report.Markdown()), 0o644), "write report")
 		fmt.Printf("report written to %s\n", *out)
+	}
+
+	// K16 ① 门禁腿：-gate 打开时按 K15 阈值表判定，超阈即红（exit 2）。
+	// 报告仍照常输出/落盘——失败要带完整证据，不是只给一个非零退出码。
+	if *gate {
+		violations := EvaluateGate(report)
+		fmt.Fprintln(os.Stderr, FormatViolations(violations))
+		if len(violations) > 0 {
+			os.Exit(2)
+		}
 	}
 }
 
