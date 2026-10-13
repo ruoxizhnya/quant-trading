@@ -98,6 +98,13 @@ type PaperSession struct {
 
 	// signalCollector 是 K5 切片 2 的信号对账钩子（可选）。
 	signalCollector func(date time.Time, signals []domain.Signal)
+
+	// used 是 K17-R2 的一次性回放护栏：Run 的语义是「整段确定性回放恰好
+	// 一次」。重入会撞父单号（EA-日期-symbol-方向 纯函数派生，第二次
+	// Run 全部撞 duplicate）、把两段回放的成交流与 T+1 结算搅在一起，
+	// 且 VirtualClock 只准非递减——旧实现的重入失败模式是一条与真实
+	// 原因（重入）无关的「时间倒退」错误。第二次调用在入口显式拒绝。
+	used bool
 }
 
 // NewPaperSession 依赖注入构造。缺 Provider / Clock / Trader 一律 fail-loud，
@@ -161,6 +168,15 @@ func (s *PaperSession) Run(ctx context.Context, symbols []string, start, end tim
 	if len(symbols) == 0 {
 		return nil, fmt.Errorf("paper session: no symbols")
 	}
+	// K17-R2：重入护栏 —— 取舍：进入即置位（哪怕本次 Run 随后因数据
+	// 问题失败）。理由：Run 一旦开跑就动了 trader 账（T+1 / 持仓）与
+	// VirtualClock，这两个状态都无法安全重置回放前；与其让调用方误以为
+	// 「失败后可以原地重跑」，不如显式拒绝并指向「新建会话」这条唯一
+	// 干净路径。
+	if s.used {
+		return nil, fmt.Errorf("paper session: Run already executed — PaperSession is a one-shot deterministic replay; create a new session to replay again")
+	}
+	s.used = true
 
 	// 1) 交易日历（升序）。
 	days, err := s.provider.GetTradingDays(ctx, start, end)
@@ -240,7 +256,7 @@ func (s *PaperSession) Run(ctx context.Context, symbols []string, start, end tim
 				// 会训练人把「信号静默消失」读成「策略没信号」）。回测侧
 				// 的同族失败走既有 invalid_reasons（run 判 invalid），
 				// 分类判据同源：execalgo.ClassifyAttachError。
-				if err := s.attachExecAlgo(sig, d); err != nil {
+				if err := s.attachExecAlgo(ctx, sig, d); err != nil {
 					return nil, fmt.Errorf("paper session: exec-algo parent order rejected at %s (%s, algo %q): %w",
 						key, sig.Symbol, sig.ExecAlgo, err)
 				}

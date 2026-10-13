@@ -348,6 +348,7 @@ func (d *Dispatcher) OnBar(ctx context.Context, bar domain.OHLCV) ([]DueChild, e
 	defer d.mu.Unlock()
 
 	var out []DueChild
+	var errs []error
 	for _, pid := range d.sortedParentIDsLocked() {
 		run := d.parents[pid]
 		if run.cancelled {
@@ -358,14 +359,26 @@ func (d *Dispatcher) OnBar(ctx context.Context, bar domain.OHLCV) ([]DueChild, e
 			continue
 		}
 		if err := run.algo.OnBar(ctx, bar); err != nil {
-			return out, fmt.Errorf("execalgo: OnBar parent %s: %w", pid, err)
+			// K17-R2-R1 取舍：错误**不提前返回**，遍历完全部父单后才返回。
+			// 理由：调用方拿到返回值即视为「已报送」（DueChild 取走即清空
+			// 的对接语义），提前 return 会把两种状态搅在一起——排在错误
+			// 父单之后的正常父单从未被推进（已到点子单凭空消失），而错误
+			// 却只暴露一个，调用方既无法安全重放也无法对账。故：错误父单
+			// 本轮不产出（其已到点未取走的片留在缓冲，下次 OnBar 补交，
+			// submitted 不虚增），其余父单照常推进、已取子单照常交还，错误
+			// 累积后经 errors.Join 一并返回（fail-loud 不吞）。该路径正常
+			// 接线不可达（Attach 后 planState.onBar 不报错），保护的是未来
+			// 算法实现的错误处理；测试腿见 dispatch_onbar_test.go（in-package
+			// 注入报错 stub）。
+			errs = append(errs, fmt.Errorf("execalgo: OnBar parent %s: %w", pid, err))
+			continue
 		}
 		for _, c := range run.due.DueChildOrders() {
 			run.submitted += c.Qty
 			out = append(out, DueChild{ChildOrder: c, OrderType: run.spec.OrderType})
 		}
 	}
-	return out, nil
+	return out, errors.Join(errs...)
 }
 
 // OnFill 回填一笔子单成交，推进父单进度。

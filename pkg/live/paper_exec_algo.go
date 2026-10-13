@@ -80,9 +80,16 @@ func execAlgoParentID(date time.Time, symbol string, dir domain.Direction) strin
 // Σ子单量不等 / Schedule 非法）返回 error，由 Run **显式失败**整段回放
 // （K17-R1：rejected, not ignored——不再 warn+skip 静默吞掉信号；与
 // 回测侧同一判定，处置映射到 paper 侧唯一可见通道：Run 的 error）。
-func (s *PaperSession) attachExecAlgo(sig domain.Signal, d time.Time) error {
+func (s *PaperSession) attachExecAlgo(ctx context.Context, sig domain.Signal, d time.Time) error {
 	if sig.ExecAlgo == "" {
 		return fmt.Errorf("paper session: attachExecAlgo called without exec algo (caller bug)")
+	}
+	// K17-R2-R3：Run 的 ctx 贯通到挂载（与回测侧 attachExecAlgoSignal 已带
+	// ctx 同构，两侧一致）。取消即刻生效：不再用 context.Background() 绕过
+	// 调用方的取消决定——否则挂载照常成功、当日子单照常报送，回放带着
+	// 已取消的 ctx 跑到次一交易日才中止（半截回放 + 静默建仓）。
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("paper session: exec-algo attach cancelled for %s: %w", sig.Symbol, err)
 	}
 	n, end := execalgo.ResolveExecWindow(d, sig.ExecSlices, sig.ExecProfile)
 	orderType := sig.OrderType
@@ -104,7 +111,7 @@ func (s *PaperSession) attachExecAlgo(sig domain.Signal, d time.Time) error {
 		StartAt:    d,
 		EndAt:      end,
 	}
-	if _, err := s.execAlgo.Attach(context.Background(), spec); err != nil {
+	if _, err := s.execAlgo.Attach(ctx, spec); err != nil {
 		return err
 	}
 	return nil
