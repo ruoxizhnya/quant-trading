@@ -27,19 +27,20 @@
 | sortino | -0.276% | -0.345% | \|Δ\| ≤ 0.05（绝对） |
 | max_drawdown | -0.346% | -0.278% | \|Δ\| ≤ 0.5% |
 | calmar | +0.261% | +0.202% | \|Δ\| ≤ 0.05（绝对） |
-| total_trades | +1.85% | -3.70% | \|Δ\| ≤ 5%（相对） |
+| total_trades | +1.85% | -3.70% | ~~\|Δ\| ≤ 5%（相对）~~ **不设硬阈**（K16 ① 裁决：配对计数 + Direction 词汇敏感，见 §3 归因④扩展；笔数守恒由 fills 对账腿 \|Δ\|≤5% 执法） |
 | win_rate | +37.7% | +42.1% | **不设硬阈**（见归因④） |
 
 - **确定性腿 ✅**：两侧各跑两遍，净值/成交/费率逐项一致（忽略随机 UUID 编号）。
 - **成交明细对账**：matched 363/328（bh/quarterly），go_only 68/89、nt_only 61/81——全部为价源精度差的下游路径分叉（±100 股级 delta 偏移），无机制性缺笔（归因①③）。
-- **阈值判定法**：对齐回归超阈 → 显式失败；win_rate 不进阈值（明细敏感性，归因④）。
+- **阈值判定法**：对齐回归超阈 → 显式失败；win_rate 与 total_trades 不进指标阈值（同族配对敏感性，归因④及扩展），笔数守恒由 fills 对账腿（原始条数 |Δ|≤5%）+ mismatch=0 执法。门禁执法者 = `cmd/dualrun -gate`（CI `align-gate` job）。
 
 ## 3. 差异归因（实测 → 口径，完整版见数据文件）
 
 1. **价源精度（主因）**：PG 前复权浮点价（7.566182…）vs catalog Decimal tick 0.01（7.57）——每笔 ≤0.005 价差，经恒定名义额再平衡放大成持仓路径微分叉（go_only/nt_only 的 ±100 股级 delta 偏移）。两侧同源 PG，非取数时点问题（§8.2 观察项关闭）。
 2. **费用（K15-R1 复查后关闭）**：两侧费用口径**同源且逐笔对齐**（matched 行 go=77.40/nt=77.44、40.24/40.24、5.03/5.03，残差全部来自 1 的价差）。K15 首轮报告的「NT 缺过户费」是 **diff 展示层 bug**（matched 行 nt 费用误用 Go trade 的 commission 分量 74.905，而非 NT trade 的全项 77.44），已在 K15-R1 修复并重跑验证——NT FeeModel 链路本身无缺陷。
 3. **win_rate 敏感性**：配对算法对明细错位放大，不设硬阈。
-4. **未触发项如实记录**：本窗口无涨跌停拒单、无 T+1 拒单（卖昨仓合法）——护栏由两侧单测覆盖（Go tracker T+1 测试、侧车 sellable 测试、wrReplay no-chase 破坏腿）+ K15-R1 的 fills 费用回归腿（`tests/test_k15r1_fees.py`）。
+4. **归因③/④扩展（K16 ① fixture 复核，2026-10-13）——total_trades 也不设硬阈**：`metrics.calculateTradeMetrics` 的 total_trades 是 entry/exit **配对完成数**（entryPrice 加权均价、逐笔 min(qty) 抵扣、配对完成才 totalTrades++），与 win_rate **同一个算法、同一族敏感性**；更根本的是它对成交的 **Direction 词汇表**敏感（long/short/close 三支语义分流），而两侧词汇本就不同（wrReplay 卖出记 `DirectionShort`，NT fills 映射记 `DirectionClose`）。K15 真数据 216 vs 220（+1.85%）落在 5% 内是小样本运气——CI 合成 fixture 实测 128 vs 233（+82%）证明它作为硬阈是 flake 源。**裁决**：total_trades 从指标层硬阈降级（report 照常输出、仅不设阈），改为**词汇无关的成交笔数对账腿**（fills 原始条数 |Δ| ≤ 5%，见 `cmd/dualrun/gate.go`）；若将来要指标级稳定，需另立任务改配对口径（同 §5 遗留）。
+5. **未触发项如实记录**：本窗口无涨跌停拒单、无 T+1 拒单（卖昨仓合法）——护栏由两侧单测覆盖（Go tracker T+1 测试、侧车 sellable 测试、wrReplay no-chase 破坏腿）+ K15-R1 的 fills 费用回归腿（`tests/test_k15r1_fees.py`）。
 
 ## 4. 工单③-5 费率口径裁决（b 项执行记录）
 

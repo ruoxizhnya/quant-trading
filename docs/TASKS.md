@@ -400,7 +400,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **② 上下文**：ADR-031 D4 阶段 3；§五「NT 决策门」；K12–K15 交付物（K12 装配治理是「可托管可插拔执行器」的稳定性前提）；CI 现状（Go `-race` + 前端 typecheck/lint/test）。
 - **③ 要求**：① 对齐回归测试进 CI 门禁（Go + Python，双跑 diff 超阈即红）；② 侧车部署形态（compose 服务 vs 独立进程，裁决并回写设计文档 §8 表第 6 项）+ 健康检查 + 监控指标（侧车延迟/失败率/回退次数=0 断言）；③ 运维文档（NT 版本升级流程、故障回退流程）落 `quant-trading-docs/docs/guides/`；④ 生产路由开关（默认 `go`，`nautilus` 显式开启）；⑤ **K5 遗留认领（2026-10-12）**：生产告警通道接线——对账/双跑差异超阈经 `AlertDispatcher` 告警（现有 `ReconciliationWorker`/`AlertDispatcher` 零生产构造点，K5 切片 2 只以差异列表 + fail-loud 兑现）。
   ⑥ **部署形态遗留认领（2026-10-12，K13-R1 交付）**：`docker-compose.nt.yaml` + `nt-sidecar/Dockerfile` 是 K13-R1 的**独立样例**，**未在任何 Docker 环境实测**（交付时本机 Docker 未运行），且 ADR-031 D5 回环约束下容器内 127.0.0.1 跨网络不可达（样例用 `network_mode: host`，Linux/Windows 差异已注明）。裁决 §8 表第 6 项前**必须先实测该 compose**（起容器 + 跑通一条 `kernel=nautilus` 回测）。
-- **④ 约束与非目标**：ADR-031 D5 安全约束全部有效；不迁移编排到 NT；不接真实券商（D1）。
+- **④ 约束与非目标**：ADR-031 D5 安全约束全部有效；不迁移编排到 NT；不接真实券商（D1）。**NT 版本纪律（2026-10-13 开工裁决，详见设计文档 §8.5）**：① `nautilus_trader==2.0.0rc6` 精确 pin，不追 nightly；② 「NT 版本升级流程」进运维文档首节（升级工单以对齐回归为验收门）；③ 升级时只盯三个 API 面（Backtest 配置族签名 / fee model 接口 / 三个报告 API）。
 - **⑤ 验收**：CI 全绿含对齐回归腿；部署文档按文档起侧车 + 跑通一条 `kernel=nautilus` 回测；监控面板/告警演示（人为停侧车 → failed 显式、零回退；人为注入对账差异 → 告警触发点名）。
 - **⑥ 边界**：生产化收尾，一个 commit。
 

@@ -163,7 +163,7 @@ type SignalProvider interface {
 
 | # | 问题 | 关闭时机 | 状态 |
 |---|---|---|---|
-| 1 | 双跑对齐容差阈值（分指标） | 阶段 2 实验（K15） | ✅ 已关闭（K15 实测定，见 [k15-dualrun-report.md](k15-dualrun-report.md)：total_return/annual ≤0.2%、sharpe/sortino/calmar ≤0.05、maxDD ≤0.5%、total_trades ≤5% 相对、win_rate 不设硬阈；K15-R1 修掉费用链路疑点后可收紧） |
+| 1 | 双跑对齐容差阈值（分指标） | 阶段 2 实验（K15） | ✅ 已关闭（K15 实测定，见 [k15-dualrun-report.md](k15-dualrun-report.md)：total_return/annual ≤0.2%、sharpe/sortino/calmar ≤0.05 绝对、maxDD ≤0.5%；win_rate 与 total_trades **不设硬阈**（K16 ① 裁决：两者同出 `calculateTradeMetrics` 配对算法，total_trades 另对 Direction 词汇表敏感——实测 +82% flake，真数据 +1.85% 是小样本运气），笔数守恒改由 fills 对账腿 \|Δ\|≤5% 执法（`cmd/dualrun/gate.go`）。执法者 = `cmd/dualrun -gate`，已进 CI `align-gate` job，改阈值必须同步 K15 报告 + 本表） |
 | 2 | 侧车通道选型（HTTP vs gRPC vs Redis Streams） | K13 | ✅ 已关闭（见 §8.1） |
 | 3 | Parquet 导出复权口径与 `ohlcv_daily_qfq` 映射 | K13 | ✅ 已关闭（见 §8.2） |
 | 4 | NT 版本锁定 / 升级跟随策略 | 阶段 2 前 | PoC 已钉 `2.0.0rc6`；升级跟随策略未决 |
@@ -235,4 +235,31 @@ K14 交付（`d76cf3d`）自审发现 **1 🔴 + 2 🟠 + 4 🟡**（对照评�
 | **E**（🟡 `d_max` 无法从 Go 侧下发） | **裁决：暂维持侧车默认 0.10、不可外部设置**。已识别外置路径：`contracts.BacktestRequest.EngineParams`（K9 已冻结的、kernel 专属参数字典）透传 `d_max`，侧车在 `RunSpec.from_json` 白名单接受。此刻**不动契约、不改 Go `KnownEngineParams`**，留待 K15 需按运行设置参与率时启用。 |
 | **F**（🟡 `SignalStream.as_of` 每 bar O(N) 全扫） | **落代码（轻量）**：流本已按 `as_of` 预排序，`as_of` / `target_weight` 改用 `bisect` 界定前缀 + 反向早退，去掉每 bar 的全量扫描。真实信号表（K7 `quant.external_signals`）样本量级下已足够；若将来量级放大到扫描仍可感，再引入 per-symbol 游标（与 K7 遗留③ 同源）。 |
 | **G**（🟡 目标仓位用期初本金 ⇒ 恒定名义额再平衡） | **裁决：显式声明为「恒定名义额」再平衡**——目标额 = `capital_base × weight`，`capital_base` 为按标的数分摊后的期初本金。**不改用实时权益**：目标依赖权益、权益依赖成交，会形成回放反馈回路，并给 K15 归因引入不受控变量（与「不做 Go 侧没有的执行增强」同一纪律）。注：Go 侧 `SignalStrategy` 表达的是 direction/strength 而非目标权重，两侧本非同一种表达，G 的语义由本适配器自行定义并显式声明。 |
+
+### 8.5 NT 版本风险与升级上下文（K16 开工裁决，2026-10-13）
+
+**裁决：在 NT v2.0.0 RC（rc6）上先行开工阶段 3**，正式版发布后按「升级预案」收口。本节是给**后续升级 agent** 的上下文——执行 NT 版本升级前必须先读完本节。
+
+#### 8.5.1 为什么 RC 上开工是可接受的（风险评估）
+
+- **RC 节奏**：2.0.0 RC 按月滚动（rc1 2026-06-29 → rc4 2026-09-02 → rc6 2026-10-04，rc7 已在 develop 待发）——正式版不会立刻到来，等版本号 = 长期阻塞；而 RC 间确实持续有 breaking changes（rc4 动 enum、rc7 又一批），**任何时点开工都要面对升级**。
+- **爆炸半径已锁定**（ADR-031 D5 红利）：NT API 变化只波及 `nt-sidecar/` 一个 Python 目录（engine.py / catalog.py / runspec.py / strategies.py / ashare.py），Go 核心、四契约、ResultSpec 冻结字段全部绝缘。最坏情况 = 改十来个 import 点 + 63 个 Python 测试重跑。
+- **rc6→rc7 实测对照（2026-10-13 核对 develop/RELEASES.md）**：rc7 的 Breaking Changes 全部集中在 Rust 侧类型、IB/Kraken/Deribit 等**我们不用的适配器**、order book delta 批处理（我们只用 Bar 数据）——**没有一条落在我们的面上**。唯一沾边项：`BacktestNode` 默认批处理 book delta（"fills can differ"），bar 回放不受影响。rc7 移除 Python 3.12 支持，侧车已是 3.13.14，无影响。
+- **升级安全网 = K15 双跑对齐工具**：升级验收 = bump 版本 → Python 测试全绿 → 重跑 `cmd/dualrun`（bh/quarterly）→ 阈值表逐项比对 → 收口。这是半天的工单，不是返工。
+
+#### 8.5.2 三条纪律（硬约束，写进升级工单验收）
+
+1. **版本 pin**：`nt-sidecar/requirements.txt` 锁 `nautilus_trader==2.0.0rc6`（精确版本，无 `>=`/`~=`），不追 nightly，Dockerfile 注释同步标注 pin 理由。
+2. **升级预案即交付物**：运维文档（K16 ③，`quant-trading-docs/docs/guides/`）以「NT 版本升级流程」为首节——正式版发布 → 立升级工单 → 以对齐回归为验收门，本节的 API 盯防清单即该工单的输入。
+3. **升级时只盯三个真正在我们面上的 API 面**：
+   - `BacktestRunConfig` / `BacktestVenueConfig` / `BacktestDataConfig` / `BacktestEngineConfig` 签名（engine.py 组装处）；
+   - fee model 接口（`ashare.AShareFeeModel.get_commission` 覆写语义，含「返回全项 total」的 K15-R1 口径）；
+   - 三个报告 API：`generate_fills_report` / `generate_account_report` / `get_engine_portfolio`（engine.py 的 `_map_result` 消费面）。
+
+#### 8.5.3 已知的 RC 期微坑（升级 agent 预警，排查时先排除）
+
+- **Windows 端口复用绑定**：9100 可同时多个进程监听，连接随机分配到新旧代码 ⇒ 「同请求不同结果」诡异现象先查 `Get-NetTCPConnection -LocalPort 9100` 再查代码（K15-R1 排查实录）。
+- **NT Logger.warning 不接受 % 占位参数**（只接受已格式化字符串）。
+- **`generate_account_report(rid, venue=)` 返回 DataFrame 索引 = 事件时刻**，total 列 = 现金（非总权益）；日末现金须按日取最后一事件结转（`synth_equity_curve` 口径）。
+- **fills 的 symbol 带 `.SIM` venue 后缀**，与 catalog closes key 不匹配时会静默算出恒 0 持仓——`_symbol_of(value, venue)` 剥后缀（K15 实测踩坑）。
 
