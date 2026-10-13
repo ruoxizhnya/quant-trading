@@ -303,6 +303,21 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：① A 项：以「价 10→20」判别语境固化断言，证明 `total_return` 不再等于现金流出率（走 (a) 则断言侧车不返回该字段）；② B 项：上述最小复现脚本作为回归腿固化进 `nt-sidecar/tests/`，断言**第二个请求必须 200**；③ C 项：`inf` / `nan` / `0` 三条表驱动断言（400 或显式文档化默认）；④ D 项：非有限指标经 Go 端不再变 0；⑤ K13 三腿 + 全量 `go test ./...` + Python 套件继续全绿。**破坏验证**：把 B 的修复还原 → 回归腿红。
 - **⑥ 边界**：只碰 `nt-sidecar/` 与 `pkg/backtest/nautilus/`；一个 commit。
 
+### K13-R1-R1 · 侧车收口残余（2026-10-13 自审立单）
+
+> 来源：K13-R1（`db3a127`）交付后的**自审**——对照评审清单逐项过 + 每条最小复现。K13-R1 的 A/B/C/D 与 3 项增项经实测成立，**本工单不推翻 K13-R1**，只收口自审新发现的残余（1 🟠 + 3 🟡）。
+
+- **① 目标**：清掉「静默错值」1 处与传输/守门残余 3 处，使 `completed` 语义与落库字段不再可能承载已知错误值；测试守门不因工作目录/环境而静默失效。
+- **② 上下文**：`pkg/backtest/nautilus/runner.go`（`deref`/`toResponse`/响应体读取）、`nt-sidecar/sidecar/engine.py`（`_end_equity`）、`nt-sidecar/sidecar/server.py`（`do_GET`）、`pkg/backtest/nautilus/k14_acceptance_test.go`（fixture 读取路径）。
+- **③ 要求**：
+  1. **🟠 A · `completed` + `total_return` 缺失仍被折叠成 0 并落库（静默错值）**。链路：`engine._end_equity` 是 best-effort（任一异常 → `total_return=None`，而 run 仍报 `completed`）→ `runner.deref(nil) = 0.0` → `SaveSyncResult` 落库 → API/UI 呈现「0% 收益」。这与 K13-R1 A 要修的「静默错值」是同一类：**读不到的口径被呈现成一个像真的数字**。注意当前 `TestRunner_AbsentMetricFoldsToZeroInDTO` **正在断言这个折叠**，即把该行为固化了。修法二选一（不得继续静默折叠）：**(a) fail-closed**：`status=completed` 但 `total_return` 缺失 → `RunBacktest` 返回显式错误（点名 kernel +「metric not reported」）；**(b) 源头兜底**：`_end_equity` 失败即让该 run `failed`，使「缺字段」在源头不可能发生。建议 **(b) 为主 + (a) 作纵深防御**，并同步改掉那条固化折叠的断言。
+  2. **🟡 B · `do_GET` 404 不 drain body**。与 K13-R1 B 同类的 keep-alive 错位（GET 带 body 虽罕见，但部分客户端/代理确实会发）。修法：与 `do_POST` 一致——`_drain_body()` 失败则 `close_connection = True`。
+  3. **🟡 C · 侧车响应体读取无上限**。`io.ReadAll(resp.Body)` 无界（K13 遗留，不属 K13-R1 范围）。恶意/故障侧车可让 Go 端内存膨胀。修法：`io.LimitReader` + 明确上限；**注意**上限要与 K15 可能返回的净值曲线体量匹配，不可过小。
+  4. **🟡 D · 对拍 fixture 读不到时静默 Skip**。`k14_acceptance_test.go` 用相对路径读 `ashare_fees_parity.json`，失败即 `t.Skipf` → 换工作目录守门即失效（CI 里等同没有）。修法：改 `t.Fatal`，或把 fixture 放进 `testdata/`（Go 惯例路径）。
+- **④ 约束与非目标**：不改 K13-R1 已冻结的失败语义（正/反证/破坏三腿必须继续绿）；不扩到 K15 全指标对齐；不引入新依赖。
+- **⑤ 验收**：① A 项：构造「`completed` + `total_return` 缺失」的 stub 侧车 → 断言 Go 端**不返回** `TotalReturn=0` 的成功响应（走 (a) 断言报错；走 (b) 在 Python 侧断言 equity 读失败 → `status=failed`）；② B 项：GET 带 body → 404 后**同连接**第二请求必须 200（扩 K13-R1 回归腿）；③ C 项：超上限响应体 → 显式错误、不无界读；④ D 项：在「仓库根」与「包目录」两种工作目录下跑该测试，均不得 Skip。**破坏验证**：还原 A 的修法 → 该腿红。
+- **⑥ 边界**：只碰 `nt-sidecar/` 与 `pkg/backtest/nautilus/`；一个 commit。
+
 ### K14 · 信号—权重回放适配器（阶段 2，前置：K13）
 
 - **① 目标**：NT 侧通用 Python Strategy（权重回放适配器）落地——从 SignalSpec 信号流读目标权重生成调仓订单，含 A 股最小规则集（T+1 / 涨跌停 / 费率），Go 策略资产零改动即能在 NT 上执行。
@@ -315,6 +330,24 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：不扩展 NT venue 模型（规则全在适配器下单逻辑）；不做 L2/L3 微观结构策略（超「信号—权重」表达上限，非目标）；不做实盘。
 - **⑤ 验收**：合成信号流单测：T+1 反证腿（今仓卖出被拒/截断）、涨停追买反证腿（触板不追单）、费率与 `pkg/fees/ashare.go` 同输入对拍（容差 0 或实测记录）；**破坏验证**：去掉 T+1 检查 → 反证腿红；去掉触板不追单 → 反证腿红。
 - **⑥ 边界**：只做适配器与最小规则集（`nt-sidecar/` 内），一个 commit。
+
+### K14-R1 · 权重回放适配器自审收口（2026-10-13 自审立单）
+
+> 来源：K14（`d76cf3d`）交付后的**自审**——对照评审清单逐项过 + 每条最小复现。K14 的 T+1 / 涨跌停 / 费率 / D_max 四条反证腿经实测成立，**本工单不推翻 K14**，只收口自审新发现：**1 🔴（多标的资金超配 → 腿静默消失）+ 2 🟠（回执记账 / 整手）+ 4 🟡**。
+
+- **① 目标**：让适配器在**多标的**与**订单被拒**两种情形下不再静默产出错误结果；补齐整手、记账、参数下发、复杂度四处口径。
+- **② 上下文**：`nt-sidecar/sidecar/weight_replay.py`（`_buy` / `_sell` / `_submit` / `_record` / `_participation_remaining`）、`nt-sidecar/sidecar/engine.py`（每 symbol 一个策略实例、逐实例传 `initial_capital`）、`nt-sidecar/sidecar/strategies.py`（sample 权重 0.5）、`nt-sidecar/sidecar/signals.py`、`runspec.py`。
+- **③ 要求**：
+  1. **🔴 A · 多标的资金超配 → 腿静默消失、结果仍报 `completed`（已复现）**。`engine.run_backtest` 对**每个 symbol** 各建一个策略实例，且每实例都拿到**全额** `initial_capital`；sample 权重 0.5 × N 标的 ⇒ 合计承诺 `N × 0.5 × 本金`。**2 标的实测**：`total_orders=7`、`total_positions=1`——`000001.SZ` 5 次买单全被 NT 以现金不足拒绝，只有 `600000.SH` 成交，而响应仍是 `completed` + 一个像真的 `total_return`（−0.00056）。修法：把权重解释为**组合总权重**并在适配器内做组合级资金预算（正解），或最小修 = 按标的数分摊 `capital_base`（`initial_capital / len(stock_pool)`）。**必须同时**补 B 的回执处理，否则分摊后仍会静默退化。
+  2. **🟠 B · 订单提交无回执记账（被拒当成交 + 每 bar 重试）（已复现）**。`_submit` 无条件 `self._sellable -= qty` / `self._traded_today += qty` 并记 `"submitted"`，不看 NT 是否接受/成交；目标仓位又取自 `_net_position()` ⇒ 被拒后**每根 bar 重复提交**（实测 `000001.SZ` 连续 5 次）。修法：接 `on_order_rejected` / `on_order_filled`（或与 `cache` 对账）回填真实成交量；`_traded_today` 口径改「已**成交**」而非「已提交」（参与率本就是成交口径）。**注**：同一条路径也覆盖「NT 侧拒单」（现金不足、非交易时段）——拒单必须有可观测记录，不能只进日志。
+  3. **🟠 C · 参与率 cap 未按整手再取整（已复现）**。`_buy` 的 `qty = min(delta, self._participation_remaining(bar))`：`delta` 已整手对齐，但 cap 可以是任意股数。实测 `participation_cap(1_050, 0.10) = 105` ⇒ 提交 **105 股**买单，违反本单已声明的「买入整手」。修法：买入侧 `qty = ashare.round_down_to_lot(min(...))`（卖出保留零股——A 股允许卖出零股）。
+  4. **🟡 D · `ReplayDecision.submitted` 恒为 0（死字段）**。`_record` 硬编码 `submitted=0.0`，测试只能解析 reason 字符串 `"submitted 100"` ⇒ 结构化字段与测试脱钩、改文案即碎。修法：`_submit` 填 `submitted=qty`，测试改读字段。
+  5. **🟡 E · `d_max` 无法从 Go 侧下发**。「外生参数」当前只能吃侧车默认 0.10（Go `runRequest` 无该字段，K14 边界内未改 Go）⇒ 实际上**不可外在设置**。修法：在 `contracts.BacktestRequest` 增可选字段并透传（走契约变更评审），或明确记为「侧车默认值、暂不可外置」并写入设计文档 §8.4。
+  6. **🟡 F · `SignalStream.as_of` 每 bar O(N) 全扫**。真实信号表（K7 `quant.external_signals`）量级下为 O(N×B) 热点（与 K7 遗留③ 的游标去重同源）。修法：预排序 + 游标/二分。**无数据不报 🟠**——修前先量样本量级，量级小则维持现状并记档。
+  7. **🟡 G · 目标仓位用期初本金 ⇒ 恒定名义额再平衡**。`capital_base × weight / price` 在价格变动时每 bar 向「恒定名义额」再平衡（涨则减仓、跌则加仓），与「目标权重占实时净值」的直觉语义不同，会产生非预期换手并影响 K15 归因。需**明确裁决**（改实时权益 / 显式声明为恒定名义额）并写入设计文档 §8.4。
+- **④ 约束与非目标**：不改已验证的四条反证腿（T+1 / 涨跌停 / 费率 / D_max 必须继续绿）；不做 K15 全指标对齐；不做实盘。
+- **⑤ 验收**：① A 项：2 标的 end-to-end 断言**两腿都有仓位**，且不再出现「腿被拒但报 completed」；② B 项：注入一次拒单 → 断言不重复提交、`_traded_today` 只计成交；③ C 项：`cap=105` 场景断言提交量为整手（100）；④ D 项：测试读 `submitted` 字段而非字符串；⑤ E/F/G 项：结论（含「维持现状」的裁决）落设计文档 §8.4。**破坏验证**：还原 B 的回执记账 → 重复提交腿红；还原 C 的整手取整 → 105 股腿红。
+- **⑥ 边界**：只碰 `nt-sidecar/`（以及 `pkg/backtest/nautilus/` 里对应的测试），一个 commit。
 
 ### K15 · 结果映射 + 双跑对齐实验（阶段 2，前置：K14）
 
