@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -126,6 +127,36 @@ func fieldToStr(v any) string {
 		return s
 	}
 	return ""
+}
+
+// tushareFloatOK 是 fieldToFloat 的「可判定失败」变体：显式报告一个值能否
+// 解析为**有限** float64。fieldToFloat 对不可解析/非标量的值静默折 0，其既有
+// 签名与共享行为不变（波及行情/链路消费方，另案评估）；normalize 层用本函数
+// 区分「数值未发布（nil）」与「非 nil 但形状变故（"N/A"/"13,42"/"--"/bool/数组）」，
+// 后者静默折 0 等于编数据（P2-10 教训、P2-1-R3 R1）。
+func tushareFloatOK(v any) (float64, bool) {
+	var f float64
+	switch val := v.(type) {
+	case float64:
+		f = val
+	case int:
+		f = float64(val)
+	case int64:
+		f = float64(val)
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(val), 64)
+		if err != nil {
+			return 0, false
+		}
+		f = parsed
+	default:
+		// bool / []any / map / nil 等非标量：不可解析。
+		return 0, false
+	}
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, false
+	}
+	return f, true
 }
 
 // waitForRateLimit ensures we don't exceed 200 req/min.

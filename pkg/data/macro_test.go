@@ -226,6 +226,60 @@ func TestNormalizeMacroSeries_SkipsRowsWithBadObsDate(t *testing.T) {
 	require.InDelta(t, 0.8, res.Rows[0].Value, 1e-12)
 }
 
+// TestNormalizeMacroSeries_SkipsUnparseableValues 钉住 P2-1-R3 R1：数值列
+// **非 nil 但不可解析**（上游把 number 改成字符串/非标量）的行跳过并单独计数，
+// 绝不静默折 0（缺失值折 0 等于编数据）。
+func TestNormalizeMacroSeries_SkipsUnparseableValues(t *testing.T) {
+	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["month","nt_yoy"],"items":[
+		["202608",0.8],
+		["202607","N/A"],
+		["202606","13,42"],
+		["202605","--"],
+		["202604",true],
+		["202603",[1,2]]
+	]}}`)
+	res, err := normalizeMacroSeries(resp, macroIndicatorSpecs["CPI_YOY"], MacroSourceTushare, time.Now().UTC())
+	require.NoError(t, err)
+	require.Len(t, res.Rows, 1, "只有可解析的行入库")
+	require.Equal(t, 5, res.SkippedBadValue, "不可解析串 / 千分位 / 占位符 / bool / 数组 均计入坏值")
+	require.Equal(t, 0, res.SkippedNilValue, "本响应无 nil 值列，不该误计 nil")
+	require.InDelta(t, 0.8, res.Rows[0].Value, 1e-12)
+}
+
+// TestFetchMacroIndicator_FailsLoudWhenAllValuesUnparseable：有行但数值列全部
+// 不可解析 ⇒ fail-loud（口径与既有 nil 全跳过一致）。
+func TestFetchMacroIndicator_FailsLoudWhenAllValuesUnparseable(t *testing.T) {
+	rec := &recordingMacroStore{}
+	client := newSupplyChainTestClient(stubTushare(t,
+		`{"code":0,"msg":"","data":{"fields":["month","nt_yoy"],"items":[["202608","N/A"],["202607","--"]]}}`, 200), rec)
+
+	rows, err := client.FetchMacroIndicator(context.Background(), "CPI_YOY")
+	require.Error(t, err, "有行但全被跳过必须 fail-loud")
+	require.Nil(t, rows)
+	require.Contains(t, err.Error(), "坏值", "错误文案应分别暴露坏值计数")
+	require.Empty(t, rec.macro, "错误路径不许落库")
+}
+
+// TestEqualMacroParams_NonScalarDoesNotPanic 是 P2-1-R3 R2 的目录自检：
+// Params 的 value 是非可比较类型（slice/map）时，改前用 != 会 runtime panic
+// （"comparing uncomparable type"），改后 DeepEqual 安全且能判不等。
+func TestEqualMacroParams_NonScalarDoesNotPanic(t *testing.T) {
+	a := map[string]interface{}{"codes": []string{"a", "b"}, "n": 1}
+	b := map[string]interface{}{"codes": []string{"a", "b"}, "n": 1}
+	c := map[string]interface{}{"codes": []string{"a", "c"}, "n": 1}
+
+	require.NotPanics(t, func() { _ = equalMacroParams(a, b) }, "非标量 value 不得 panic")
+	require.True(t, equalMacroParams(a, b), "内容相同的非标量应判等")
+	require.False(t, equalMacroParams(a, c), "内容不同的非标量应判不等")
+	require.False(t, equalMacroParams(a, map[string]interface{}{}), "长度不同判不等")
+
+	// 嵌套 map 同样走 DeepEqual，不得 panic。
+	m1 := map[string]interface{}{"o": map[string]any{"k": []int{1}}}
+	m2 := map[string]interface{}{"o": map[string]any{"k": []int{1}}}
+	require.NotPanics(t, func() { _ = equalMacroParams(m1, m2) })
+	require.True(t, equalMacroParams(m1, m2))
+}
+
 // ── ETL 错误传播（破坏验证②的 Red 腿） ──────────────────────────────────
 
 // macroOKBody 是任意指标可用的最小合法响应。

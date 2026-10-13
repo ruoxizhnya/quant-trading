@@ -28,6 +28,7 @@ package data
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -343,7 +344,10 @@ func equalMacroParams(a, b map[string]interface{}) bool {
 	}
 	for k, av := range a {
 		bv, ok := b[k]
-		if !ok || bv != av {
+		// P2-1-R3 R2 · Params 的 value 是 interface{}：用 != 比较非可比较类型
+		// （slice/map/func）会 runtime panic（"comparing uncomparable type"），
+		// 绕过 apperrors 链路。DeepEqual 对非标量安全且能判不等。
+		if !ok || !reflect.DeepEqual(bv, av) {
 			return false
 		}
 	}
@@ -365,7 +369,9 @@ func sameWindows(specs []macroIndicatorSpec, now time.Time) bool {
 				return false
 			}
 			for k, v := range base[i] {
-				if ov, ok := other[i][k]; !ok || ov != v {
+				// P2-1-R3 R2 · 同 equalMacroParams：窗口参数值也是 interface{}，
+				// 用 != 比较非标量会 panic。DeepEqual 安全。
+				if ov, ok := other[i][k]; !ok || !reflect.DeepEqual(ov, v) {
 					return false
 				}
 			}
@@ -452,10 +458,13 @@ type normalizedMacroRows struct {
 	Rows            []domain.MacroSeries
 	SkippedBadDate  int // obs_date 解析失败（PIT 身份不完整）
 	SkippedNilValue int // 数值列 nil / 行缺列（未发布，不补 0）
+	SkippedBadValue int // 数值列非 nil 但不可解析/非有限（形状变故，P2-1-R3 R1）
 }
 
-// Skipped 是总跳过行数（坏日期 + 数值 nil）。
-func (n normalizedMacroRows) Skipped() int { return n.SkippedBadDate + n.SkippedNilValue }
+// Skipped 是总跳过行数（坏日期 + 数值 nil + 坏值）。
+func (n normalizedMacroRows) Skipped() int {
+	return n.SkippedBadDate + n.SkippedNilValue + n.SkippedBadValue
+}
 
 // macroColumnIndex 在响应的 Fields 头里按**名字（大小写不敏感）**找列：
 // names 靠前的优先，与列在响应里的实际顺序无关。大小写不敏感是因为
@@ -481,6 +490,8 @@ func macroColumnIndex(resp *TushareResponse, names ...string) int {
 //   - obs_date 按 spec.DateLayout 解析；月频 YYYYMM 取当月首日；
 //   - value 取 spec.Field 列；该列为 nil（未发布/未公布）的行跳过——
 //     缺失值折成 0 等于编数据（同 tushare.go 的 P2-10 教训）；
+//   - 该列**非 nil 但不可解析/非有限**（"N/A" / "13,42" / "--" / bool / 数组）
+//     的行同样跳过并单独计数（P2-1-R3 R1）——静默折 0 与上一条同罪；
 //   - obs_date 解析失败的行跳过（PIT 身份不完整不进库，同
 //     normalizeETFPortfolio 先例）；
 //   - 缺日期列或数值列（整个响应没有该列）→ 报错，形状不符契约；
@@ -505,11 +516,19 @@ func normalizeMacroSeries(resp *TushareResponse, spec macroIndicatorSpec, source
 			out.SkippedNilValue++
 			continue // 数值未发布，不进库（不补 0）
 		}
+		value, ok := tushareFloatOK(item[iVal])
+		if !ok {
+			// P2-1-R3 R1：非 nil 但不可解析/非有限（上游把 value 列从 JSON
+			// number 改成 "N/A" / "13,42" / "--" 或非标量）——静默折 0 等于
+			// 编数据（与本函数注释自述一致）。计入跳过，不落库，不进 Value。
+			out.SkippedBadValue++
+			continue
+		}
 		out.Rows = append(out.Rows, domain.MacroSeries{
 			Indicator: spec.Indicator,
 			Freq:      spec.Freq,
 			ObsDate:   obs,
-			Value:     tushareCellFloat(item, iVal),
+			Value:     value,
 			Unit:      spec.Unit,
 			Source:    source,
 			AsOf:      asOf,
@@ -527,8 +546,8 @@ func macroAllSkippedError(api, indicator string, items int, res normalizedMacroR
 		return nil
 	}
 	return apperrors.New(apperrors.ErrCodeDataQuality, fmt.Sprintf(
-		"宏观指标 %s：%s 响应返回 %d 行但全部被跳过（坏日期 %d / 数值 nil %d）——上游形状/格式变故，拒绝以「导入 0 行」伪装成功",
-		indicator, api, items, res.SkippedBadDate, res.SkippedNilValue))
+		"宏观指标 %s：%s 响应返回 %d 行但全部被跳过（坏日期 %d / 数值 nil %d / 坏值 %d）——上游形状/格式变故，拒绝以「导入 0 行」伪装成功",
+		indicator, api, items, res.SkippedBadDate, res.SkippedNilValue, res.SkippedBadValue))
 }
 
 // logMacroSkipped 在 normalize 跳过了行时记一条 Info 日志（R2）：部分
@@ -542,6 +561,7 @@ func logMacroSkipped(c *TushareClient, indicator, api string, res normalizedMacr
 		Int("rows", len(res.Rows)).
 		Int("skipped_bad_date", res.SkippedBadDate).
 		Int("skipped_nil_value", res.SkippedNilValue).
+		Int("skipped_bad_value", res.SkippedBadValue).
 		Msg("macro rows skipped during normalize")
 }
 
