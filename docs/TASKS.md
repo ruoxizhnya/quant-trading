@@ -119,7 +119,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - 两侧信号暴露钩子（默认 nil 零行为变化）：paper 侧 `PaperSessionConfig.SignalCollector`（撮合前回调）；回测侧 `Engine.SetSignalObserver`（getSignals 后、撮合前回调）
 - 端到端测试 `pkg/backtest/signal_reconcile_e2e_test.go`：同一批合成 bar，两侧独立跑 → 91 条信号逐条一致（正证据）；截断窗口 → 5 条差异被点名（反证腿）
 - 对账器单测 8 条（一致/缺失/方向/强度/容差/顺序无关/确定性输出）
-- ⚠️ 告警接线**未做**：现有 `ReconciliationWorker`/`AlertDispatcher` 是「券商资金对账」（持仓/现金），零生产构造点且与信号对账是两码事；信号差异的「告警」以 `ReconcileSignals` 返回的差异列表 + 端到端 fail-loud 兑现，生产告警通道接线留待对账真正进实盘循环时——**2026-10-12 已由 K16 ③-⑤ 认领**（阶段 3 生产化一并接线）
+- ✅ 告警接线**已收口（2026-10-13，K16 ⑤，`9502ec2`）**：原遗留「`ReconciliationWorker`/`AlertDispatcher` 零生产构造点、信号差异只以列表 + fail-loud 兑现」——已由 K16 ⑤ 认领并落地：`pkg/alert` 的 `ReconciliationDispatcher`/`SignalDispatcher` 生产实现（一条差异一条告警）+ `cmd/analysis` reconciliation worker 首个生产构造点 + `cmd/dualrun -gate` 违例进告警通道，验收「注入对账差异 → 告警触发点名」兑现
 
 ### K6 · L3a WASM（P6）切片 1 ✅ / 切片 2 ✅ / 切片 3 ✅（前置：K2）
 
@@ -395,6 +395,8 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑦ 收口记录（2026-10-13）**：**根因不在 NT FeeModel，在对账报告的展示层**——`cmd/dualrun/diff.go` matched 行的 `nt=` 费用误用**循环变量（Go trade）的 Commission 分量**（ComputeFees 的纯佣金 74.905），而非 NT trade 的全项 total（77.44）；「NT 缺过户费」是假象。三层实测定位：① FeeModel 单元（`get_commission` 返回 total ✓）② 单笔真 run（直调 + HTTP 双路径 fills commission = 77.44 全项 ✓，且账户 cash 与 K15 首轮报告一字不差——实际扣费从来是全项）③ server 端 RAW FILLS dump（fills 原始值正确）。**修复**：diff.go 用 `ntBy[k]` 取 NT trade 自身费用对账；重跑 bh/quarterly 费用列逐笔对齐（77.40/77.44、40.24/40.24、5.03/5.03——残差 = 价源精度差）。**回归护栏**：`tests/test_k15r1_fees.py`（FeeModel 单元 2 腿 + 端到端 `FillReportFeeRegressionTest`：fills commission == compute_fees.total 逐笔断言）。**附带发现（运维教训）**：排查中本机 9100 端口曾同时存在两个 sidecar 监听进程（Windows 允许端口复用绑定、连接随机分配），已清理；「同请求不同结果」先查端口占用者。**排查辅助代码已清理**（DUALRUN_DUMP_REQ / SIDECAR_DUMP_FILL_FEES）。Python 63 绿 / Go 全量绿。K15 报告 §3/§5 与设计文档 §8.4 记档同步更新；阈值维持 §8 表 1（total_return |Δ| ≤ 0.2%——主导因素是价源精度，费用对齐后不再有收紧空间，除非两侧价源精度先统一）。
 
 ### K16 · 双内核生产化（阶段 3，⛔ 前置：K12 + K15 完成 + NT 决策门通过）
+
+> **进度（2026-10-13）**：① CI 对齐回归门禁✅（`522c11b`）② compose+健康检查+监控✅（`7ee2626`，§8.6 部署形态裁决已回写设计文档）④ 生产路由开关✅（`34621c6`）⑤ **生产告警通道接线✅（`9502ec2`，K5 遗留认领收口）**——`pkg/alert` 增 `ReconciliationDispatcher`/`SignalDispatcher`（一条差异一条告警，severity 同名词表映射、未知 fail-closed 到 warning；`DispatchDualRunBreaches` 对齐 `GateViolation` 信息面全 critical），`cmd/analysis` 首个 reconciliation worker 生产构造点（`buildReconciliation`，自检形态对账、`FeeSnap` 恒零缺口记档、陌生账户 fail-loud），`cmd/dualrun -gate` 违例经 `dispatchGateAlerts` 进告警通道（`$DUALRUN_ALERT_WEBHOOK`）；验收「人为注入对账差异 → 告警触发点名」由装配演示测试兑现（现金/持仓逐条点名 account/symbol/delta），破坏验证（不转发 → 红）闭环。**剩余**：③ 运维文档（NT 升级流程首节 + 故障回退，落 `quant-trading-docs/docs/guides/`）。
 
 - **① 目标**：决策门通过后，双内核形态进生产：kernel 路由可控、对齐回归进 CI 门禁、Python 运行时进 CI/CD、监控与运维文档齐备。
 - **② 上下文**：ADR-031 D4 阶段 3；§五「NT 决策门」；K12–K15 交付物（K12 装配治理是「可托管可插拔执行器」的稳定性前提）；CI 现状（Go `-race` + 前端 typecheck/lint/test）。
