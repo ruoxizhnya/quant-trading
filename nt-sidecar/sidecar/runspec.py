@@ -205,14 +205,24 @@ def _parse_signals(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
         as_of = item.get("as_of")
         if not isinstance(as_of, str) or not as_of.strip():
             raise RunSpecError(f"run spec: signals[{i}].as_of must be an ISO date string")
+        text = as_of.strip()
         try:
-            _dt.datetime.strptime(as_of.strip(), _DATE_FMT)
+            parsed = _dt.datetime.strptime(text, _DATE_FMT)
         except ValueError as exc:
             raise RunSpecError(
                 f"run spec: signals[{i}].as_of must be an ISO date (YYYY-MM-DD), got {as_of!r}"
             ) from exc
+        # Round-trip guard: strptime is lenient about zero padding ("2024-1-2"
+        # parses fine), but the Go side's time.Parse rejects it — the two
+        # validators must agree on exactly the same set of accepted rows, or a
+        # request can be "Go accepts, sidecar accepts" today and silently
+        # diverge when the call order changes.
+        if parsed.strftime(_DATE_FMT) != text:
+            raise RunSpecError(
+                f"run spec: signals[{i}].as_of must be a zero-padded ISO date (YYYY-MM-DD), got {as_of!r}"
+            )
         rows.append(
-            {"symbol": symbol.strip(), "weight": weight_f, "as_of": as_of.strip()}
+            {"symbol": symbol.strip(), "weight": weight_f, "as_of": text}
         )
     return tuple(rows)
 

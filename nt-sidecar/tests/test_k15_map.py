@@ -87,6 +87,12 @@ class RunSpecSignalsTest(unittest.TestCase):
         with self.assertRaisesRegex(RunSpecError, r"signals\[0\]\.as_of"):
             RunSpec.from_json(self._payload([{"symbol": "S", "weight": 0.5, "as_of": "20240102"}]))
 
+    def test_non_zero_padded_date_rejected(self):
+        # L1 · 与 Go time.Parse 同口径："2024-1-2" 在 strptime 下能过，但
+        # 两侧校验必须接受**完全相同**的行集合——round-trip 校验拒绝它。
+        with self.assertRaisesRegex(RunSpecError, r"zero-padded"):
+            RunSpec.from_json(self._payload([{"symbol": "S", "weight": 0.5, "as_of": "2024-1-2"}]))
+
     def test_blank_symbol_rejected(self):
         with self.assertRaisesRegex(RunSpecError, r"signals\[0\]\.symbol"):
             RunSpec.from_json(self._payload([{"symbol": "  ", "weight": 0.5, "as_of": "2024-01-02"}]))

@@ -415,13 +415,15 @@ func (r *Runner) toResponse(req contracts.BacktestRequest, out runResponse) *con
 			Positions:  p.Positions,
 		})
 	}
-	for _, t := range out.Trades {
+	for i, t := range out.Trades {
 		ts, err := time.Parse(time.RFC3339, t.Ts)
 		if err != nil {
 			continue
 		}
+		// ID 含序号：同日同 symbol 同 side 同 qty 的两笔 fill（理论上不应
+		// 出现，但 fills 报告不保证）不能共用一个 ID——编号必须唯一。
 		resp.Trades = append(resp.Trades, domain.Trade{
-			ID:          fmt.Sprintf("nt-%s-%s-%g", t.Symbol, t.Side, t.Qty),
+			ID:          fmt.Sprintf("nt-%04d-%s-%s-%g", i, t.Symbol, t.Side, t.Qty),
 			Symbol:      t.Symbol,
 			Direction:   tradeDirection(t.Side),
 			Quantity:    t.Qty,

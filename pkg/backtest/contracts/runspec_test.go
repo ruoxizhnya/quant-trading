@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 )
@@ -138,5 +139,90 @@ func TestRunSpec_ValidateListsAllUnknownKeys(t *testing.T) {
 	}
 	if strings.Index(msg, "aaa") > strings.Index(msg, "bbb") {
 		t.Errorf("未知键输出应排序稳定, got: %v", err)
+	}
+}
+
+// K15 契约腿：signals（目标权重流）的 fail-closed 校验。
+//
+// 反证腿三例（与侧车 runspec._parse_signals 同口径）：非法值拒绝而非钳制
+// /跳过 —— 一行 weight=1.5 的脏数据被钳到 1.0 会让双跑对齐报告多出「查无
+// 实据」的差异。
+func TestRunSpec_ValidateSignalsRejectsInvalidRows(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		signals []SignalWeight
+		wantMsg string
+	}{
+		{
+			name:    "weight above one",
+			signals: []SignalWeight{{Symbol: "000001.SZ", Weight: 1.01, AsOf: "2024-01-02"}},
+			wantMsg: "signals[0].weight",
+		},
+		{
+			name:    "negative weight",
+			signals: []SignalWeight{{Symbol: "000001.SZ", Weight: -0.1, AsOf: "2024-01-02"}},
+			wantMsg: "signals[0].weight",
+		},
+		{
+			name:    "NaN weight",
+			signals: []SignalWeight{{Symbol: "000001.SZ", Weight: math.NaN(), AsOf: "2024-01-02"}},
+			wantMsg: "signals[0].weight",
+		},
+		{
+			name:    "blank symbol",
+			signals: []SignalWeight{{Symbol: "  ", Weight: 0.5, AsOf: "2024-01-02"}},
+			wantMsg: "signals[0].symbol",
+		},
+		{
+			name:    "non ISO date",
+			signals: []SignalWeight{{Symbol: "000001.SZ", Weight: 0.5, AsOf: "20240102"}},
+			wantMsg: "signals[0].as_of",
+		},
+		{
+			name:    "second row invalid",
+			signals: []SignalWeight{{Symbol: "000001.SZ", Weight: 0.5, AsOf: "2024-01-02"}, {Symbol: "600000.SH", Weight: 0.5, AsOf: "2024-01-02T00:00:00Z"}},
+			wantMsg: "signals[1].as_of",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := BacktestRequest{Strategy: "weight_replay", Signals: tc.signals}
+			err := req.ValidateRunSpec()
+			if err == nil {
+				t.Fatalf("%s 必须被拒绝（fail-closed）", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Fatalf("错误必须点名 %q, got: %v", tc.wantMsg, err)
+			}
+		})
+	}
+}
+
+func TestRunSpec_ValidateSignalsAcceptsValidRows(t *testing.T) {
+	req := BacktestRequest{
+		Strategy: "weight_replay",
+		Signals: []SignalWeight{
+			{Symbol: "000001.SZ", Weight: 0.5, AsOf: "2024-01-02"},
+			{Symbol: "600000.SH", Weight: 0, AsOf: "2024-12-31"},
+			{Symbol: "600000.SH", Weight: 1, AsOf: "2024-06-03"},
+		},
+	}
+	if err := req.ValidateRunSpec(); err != nil {
+		t.Fatalf("合法信号流不得被拒: %v", err)
+	}
+	// 边界：weight 恰 0 与 1 合法（0 = 全平，1 = 全仓）。
+}
+
+func TestRunSpec_SignalsWireRoundTrip(t *testing.T) {
+	// signals 随 JSON 往返不丢（NautilusRunner 是直拷映射，字段名必须对齐）。
+	const body = `{"strategy":"weight_replay","start_date":"2024-01-02","end_date":"2024-12-31","signals":[{"symbol":"000001.SZ","weight":0.5,"as_of":"2024-01-02"}]}`
+	var req BacktestRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(req.Signals) != 1 || req.Signals[0].Symbol != "000001.SZ" || req.Signals[0].Weight != 0.5 || req.Signals[0].AsOf != "2024-01-02" {
+		t.Fatalf("signals 反序列化失真: %#v", req.Signals)
+	}
+	if err := req.ValidateRunSpec(); err != nil {
+		t.Fatalf("合法请求被拒: %v", err)
 	}
 }
