@@ -15,6 +15,7 @@ individual signals, so it cannot read a future bar.
 
 from __future__ import annotations
 
+import bisect
 import datetime as _dt
 from dataclasses import dataclass
 
@@ -63,6 +64,9 @@ class SignalStream:
 
     def __init__(self, signals: list[TargetWeight] | tuple[TargetWeight, ...] = ()) -> None:
         self._signals = sorted(signals, key=lambda s: (s.as_of, s.symbol))
+        # K14-R1 F · the sorted as_of keys let as_of()/target_weight() bound their
+        # scan with a bisect instead of a full O(N) sweep on every bar.
+        self._as_of = [s.as_of for s in self._signals]
 
     @classmethod
     def from_rows(cls, rows: list[dict]) -> "SignalStream":
@@ -81,6 +85,10 @@ class SignalStream:
     def __len__(self) -> int:
         return len(self._signals)
 
+    def _prefix_end(self, cutoff: _dt.datetime) -> int:
+        """Index just past every signal with ``as_of <= cutoff`` (sorted prefix)."""
+        return bisect.bisect_right(self._as_of, cutoff)
+
     def as_of(self, moment: _dt.date | _dt.datetime | str) -> dict[str, TargetWeight]:
         """Latest target weight **per symbol** with ``as_of <= moment``.
 
@@ -90,15 +98,21 @@ class SignalStream:
         """
         cutoff = _to_utc(moment)
         latest: dict[str, TargetWeight] = {}
-        for signal in self._signals:
-            if signal.as_of <= cutoff:  # type: ignore[operator]
-                latest[signal.symbol] = signal
+        for i in range(self._prefix_end(cutoff)):
+            signal = self._signals[i]
+            latest[signal.symbol] = signal
         return latest
 
     def target_weight(self, symbol: str, moment: _dt.date | _dt.datetime | str) -> float | None:
         """Target weight for one symbol as of ``moment``, or ``None`` if unset."""
-        signal = self.as_of(moment).get(symbol)
-        return None if signal is None else signal.weight
+        cutoff = _to_utc(moment)
+        # Scan the eligible prefix backwards: the first match is the latest as_of
+        # for that symbol, so we exit early instead of building the whole map.
+        for i in range(self._prefix_end(cutoff) - 1, -1, -1):
+            signal = self._signals[i]
+            if signal.symbol == symbol:
+                return signal.weight
+        return None
 
 
 def sample_signals(

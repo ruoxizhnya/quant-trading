@@ -139,6 +139,13 @@ def run_backtest(
     node = BacktestNode(configs=[run_config])
     try:
         node.build()
+        # K14-R1 A · 权重是「组合总权重」，而 NT 为每个 symbol 各建一个策略
+        # 实例。若每实例都拿**全额** initial_capital，N 个标的最多承诺
+        # N × weight × 本金 ⇒ 组合级资金超配（2 标的实测：一条腿被现金不足
+        # 拒单，run 仍报 completed + 一个像真的 total_return）。
+        # 最小正确修：把本金按标的数分摊，使 Σ 名义额 ≤ 本金（各 weight ≤ 1）。
+        # 组合级统一预算（跨实例共享可变状态）会引入非确定性，留待 K15 按需评估。
+        capital_per_symbol = run_spec.initial_capital / len(instruments)
         for symbol, instrument in instruments.items():
             node.add_strategy(
                 run_config.id,
@@ -150,7 +157,7 @@ def run_backtest(
                     trade_size=trade_size,
                     start_date=run_spec.start_date,
                     end_date=run_spec.end_date,
-                    initial_capital=run_spec.initial_capital,
+                    initial_capital=capital_per_symbol,
                     d_max=run_spec.d_max,
                 ),
             )

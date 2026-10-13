@@ -93,6 +93,7 @@ def _run_replay(
     signals: SignalStream,
     d_max: float = 0.10,
     capital: float = CAPITAL,
+    capital_base: float | None = None,
 ) -> _Run:
     tmp = Path(tempfile.mkdtemp(prefix="nt-k14-"))
     try:
@@ -136,7 +137,9 @@ def _run_replay(
                 instrument_id=instrument.id,
                 bar_type=bar_type,
                 signals=signals,
-                capital_base=capital,
+                # K14-R1 B needs the venue cash and the intended notional to be
+                # independently controllable to force a real rejection.
+                capital_base=capital if capital_base is None else capital_base,
                 d_max=d_max,
             )
         )
@@ -277,14 +280,107 @@ class ParticipationCapTest(unittest.TestCase):
         # resulting order quantity via the fills report.
         self.assertEqual(100.0, _first_order_qty(run), "traded qty must be capped at D_max*volume")
 
+    def test_cap_quantity_is_re_rounded_to_a_whole_lot(self) -> None:
+        """K14-R1 C · cap=105 场景：买入须再取整为整手（100），不得提交 105。"""
+        # volume 1,050 × D_max 0.10 -> floor(105) = 105, which is not lot-aligned.
+        signals = SignalStream([TargetWeight(SYMBOL, 0.5, dt.date(2024, 1, 2))])
+        run = _run_replay(
+            bar_type_str=DAY_BAR,
+            rows=_daily_rows([10.0, 10.0], volume=1_050),
+            signals=signals,
+        )
+        self.assertEqual(
+            100.0,
+            _first_order_qty(run),
+            "a non-lot participation cap must be rounded down to a whole lot",
+        )
+
 
 def _first_order_qty(run: _Run) -> float:
-    fills = {d.reason for d in run.strategy.decisions}
-    # The decision trace carries the submitted qty in the reason ("submitted 100").
+    # K14-R1 D · read the structured ``submitted`` field, not a parsed reason string.
     for d in run.strategy.decisions:
-        if d.side in ("buy", "sell") and d.reason.startswith("submitted"):
-            return float(d.reason.split()[1])
-    raise AssertionError(f"no submitted quantity in decisions: {fills}")
+        if d.submitted > 0:
+            return d.submitted
+    raise AssertionError(
+        f"no submitted quantity in decisions: {[d.reason for d in run.strategy.decisions]}"
+    )
+
+
+class OrderReceiptAccountingTest(unittest.TestCase):
+    """K14-R1 B · 拒单被记账且不重复提交；``_traded_today`` 只计成交。"""
+
+    def test_rejected_order_is_recorded_and_not_retried(self) -> None:
+        # The venue cash (1,000 CNY) is far below the intended 0.5 × 1,000,000
+        # notional, so NT rejects the buy. The rejected leg must be recorded and
+        # then stop — not resubmit the identical order on every bar (the observed
+        # pre-fix loop).
+        run = _run_replay(
+            bar_type_str=DAY_BAR,
+            rows=_daily_rows([10.0, 10.0, 10.0, 10.0]),
+            signals=SignalStream([TargetWeight(SYMBOL, 0.5, dt.date(2024, 1, 2))]),
+            capital=1_000.0,
+            capital_base=1_000_000.0,
+        )
+        submissions = [d for d in run.strategy.decisions if d.side in ("buy", "sell")]
+        self.assertEqual(
+            1,
+            len(submissions),
+            f"a rejected order must not be retried every bar: "
+            f"{[(d.side, d.reason) for d in run.strategy.decisions]}",
+        )
+        self.assertGreaterEqual(run.strategy.rejections, 1, "the rejection must be observable")
+        self.assertEqual(0.0, run.strategy._traded_today, "a rejected order is not a fill")
+
+
+class MultiSymbolCapitalBudgetTest(unittest.TestCase):
+    """K14-R1 A · 权重是组合总权重，多标的不得资金超配（腿不静默消失）。"""
+
+    def test_two_symbols_both_take_positions(self) -> None:
+        from sidecar.engine import run_backtest
+        from sidecar.runspec import RunSpec
+
+        symbols = ("600000.SH", "000001.SZ")
+        tmp = Path(tempfile.mkdtemp(prefix="nt-k14-multi-"))
+        try:
+            catalog = ParquetDataCatalog(str(tmp))
+            catalog.write_instruments([make_equity(s, VENUE) for s in symbols])
+            for s in symbols:
+                _write_bars(
+                    catalog,
+                    BarType.from_str(f"{s}.{VENUE}-1-DAY-LAST-EXTERNAL"),
+                    _daily_rows([10.0, 10.0, 10.0, 10.0, 10.0, 10.0]),
+                )
+            spec = RunSpec.from_json(
+                {
+                    "strategy": "weight_replay",
+                    "stock_pool": list(symbols),
+                    "start_date": "2024-01-02",
+                    "end_date": "2024-01-07",
+                }
+            )
+            result = run_backtest(spec, catalog_path=str(tmp))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        self.assertEqual("completed", result["status"])
+        # Both legs must fill. The A-share fee total is a deterministic fill-side
+        # observable: two legs pay exactly twice one leg's fees, whereas the broken
+        # (full-capital-per-instance) path filled only one leg.
+        single_leg_fees = (
+            ashare.compute_fees(0.5 * (CAPITAL / 2), is_sell=False).total
+            + ashare.compute_fees(0.5 * (CAPITAL / 2), is_sell=True).total
+        )
+        detail = (
+            f"orders={result['total_orders']} positions={result['total_positions']} "
+            f"pnl={result['nt_stats']['pnls']}"
+        )
+        self.assertAlmostEqual(
+            -2 * single_leg_fees,
+            result["nt_stats"]["pnls"]["CNY"]["PnL (total)"],
+            delta=1.0,
+            msg=f"both legs must fill, not just one ({detail})",
+        )
+        self.assertEqual(2, result["total_positions"], f"both legs must take a position ({detail})")
 
 
 class ServedSampleChainTest(unittest.TestCase):

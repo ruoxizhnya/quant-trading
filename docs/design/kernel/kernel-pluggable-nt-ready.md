@@ -220,3 +220,18 @@ type SignalProvider interface {
 
 **K15 观察项（新增）**：Go 回测撮合路径（`pkg/backtest/execution` → `pkg/execution` CostModel）**只计佣金**（`max(notional×CommissionRate, MinCommission)`），不建模印花税/过户费——这是代码注释里写明的「两侧共同已知口径边界」。而 K14 适配器的 NT fee model 计**全三项**。K15 对齐时该差异必须**显式归因**（是口径边界而非执行机制差异），不得被容差掩盖。
 
+### 8.4.1 K14-R1 自审收口（2026-10-13）
+
+K14 交付（`d76cf3d`）自审发现 **1 🔴 + 2 🟠 + 4 🟡**（对照评审清单逐项过 + 最小复现）。
+🔴/🟠 与部分 🟡 落代码，其余为**口径裁决记账**（下列 E/F/G 即工单要求写入本表的三项）：
+
+| 项 | 裁决 / 结论 |
+|---|---|
+| **A**（🔴 多标的资金超配，腿静默消失仍报 completed） | **落代码**：`engine.run_backtest` 把 `initial_capital` 按 `len(instruments)` 分摊给每个 symbol 的策略实例，使 Σ 名义额 ≤ 本金（各 weight ≤ 1）。选「按标的数分摊」这一**最小正确修**，而非跨实例共享可变状态的「组合级统一预算」——后者会给确定性回放引入反馈，与 K15 的确定性要求冲突。 |
+| **B**（🟠 订单无回执记账，被拒当成交 + 每 bar 重试） | **落代码**：`_traded_today` / `_sellable` 改由 `on_order_filled` 按**成交**回填；`on_order_rejected` 记 `rejections` 计数（可观测字段，非仅日志）并**停止**后续派发，消除「被拒后每 bar 重复提交」。 |
+| **C**（🟠 参与率 cap 未按整手再取整） | **落代码**：买入侧 `min(delta, cap)` 之后再 `round_down_to_lot`；卖出**保留零股**（A 股允许卖出零股）。 |
+| **D**（🟡 `ReplayDecision.submitted` 恒 0） | **落代码**：`_submit` 填 `submitted=qty`；测试改读该结构化字段，不再解析 reason 字符串。 |
+| **E**（🟡 `d_max` 无法从 Go 侧下发） | **裁决：暂维持侧车默认 0.10、不可外部设置**。已识别外置路径：`contracts.BacktestRequest.EngineParams`（K9 已冻结的、kernel 专属参数字典）透传 `d_max`，侧车在 `RunSpec.from_json` 白名单接受。此刻**不动契约、不改 Go `KnownEngineParams`**，留待 K15 需按运行设置参与率时启用。 |
+| **F**（🟡 `SignalStream.as_of` 每 bar O(N) 全扫） | **落代码（轻量）**：流本已按 `as_of` 预排序，`as_of` / `target_weight` 改用 `bisect` 界定前缀 + 反向早退，去掉每 bar 的全量扫描。真实信号表（K7 `quant.external_signals`）样本量级下已足够；若将来量级放大到扫描仍可感，再引入 per-symbol 游标（与 K7 遗留③ 同源）。 |
+| **G**（🟡 目标仓位用期初本金 ⇒ 恒定名义额再平衡） | **裁决：显式声明为「恒定名义额」再平衡**——目标额 = `capital_base × weight`，`capital_base` 为按标的数分摊后的期初本金。**不改用实时权益**：目标依赖权益、权益依赖成交，会形成回放反馈回路，并给 K15 归因引入不受控变量（与「不做 Go 侧没有的执行增强」同一纪律）。注：Go 侧 `SignalStrategy` 表达的是 direction/strength 而非目标权重，两侧本非同一种表达，G 的语义由本适配器自行定义并显式声明。 |
+

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
 import pandas as pd
 from nautilus_trader.config import StrategyConfig
@@ -97,11 +98,60 @@ class WeightReplay(Strategy):
         self._prev_close: float | None = None
         self._sellable: float = 0.0
         self._traded_today: float = 0.0
+        #: K14-R1 B · orders submitted but not yet resolved (filled / rejected).
+        #: Keyed by client order id, valued by the submitted quantity.
+        self._pending: dict[str, float] = {}
+        #: K14-R1 B · how many orders NT rejected. An **observable** record, not
+        #: just a log line — a rejected leg must never pass silently.
+        self.rejections: int = 0
+        #: K14-R1 B · a rejected order halts further dispatch: the target weight is
+        #: unreachable (e.g. cash), and blindly retrying every bar produced the
+        #: observed "resubmit 5×" loop. Recorded once, then stop.
+        self._halted: bool = False
         #: Every decision this run made, in order — the consistency gate reads it.
         self.decisions: list[ReplayDecision] = []
 
     def on_start(self) -> None:
         self.subscribe_bars(self.config.bar_type)
+
+    # ── order lifecycle (K14-R1 B) ───────────────────────────────────────────
+
+    def on_order_filled(self, event: Any) -> None:
+        """Backfill the real fill into the participation budget and T+1 view.
+
+        K14-R1 B: the previous code debited ``_traded_today`` / ``_sellable`` at
+        *submit* time, so a rejected order still consumed budget and corrupted the
+        T+1 sellable view. Accounting now happens on the actual fill.
+        """
+        oid = str(event.client_order_id)
+        qty = float(event.last_qty.as_double())
+        self._pending.pop(oid, None)
+        self._traded_today += qty
+        order = self.cache.order(event.client_order_id)
+        if order is not None and order.side == OrderSide.SELL:
+            self._sellable = max(0.0, self._sellable - qty)
+
+    def on_order_denied(self, event: Any) -> None:
+        """A pre-trade rejection by the risk engine (e.g. insufficient cash).
+
+        K14-R1 B: NT reports a denied order here (``OrderDenied``), not via
+        ``on_order_rejected`` (which carries *venue* rejections). Both must be
+        accounted for, or a rejected leg keeps resubmitting every bar.
+        """
+        self._resolve_unfilled(str(event.client_order_id), getattr(event, "reason", ""))
+
+    def on_order_rejected(self, event: Any) -> None:
+        """A venue rejection — record it observably and halt further dispatch."""
+        self._resolve_unfilled(str(event.client_order_id), getattr(event, "reason", ""))
+
+    def _resolve_unfilled(self, oid: str, reason: str) -> None:
+        qty = self._pending.pop(oid, 0.0)
+        self.rejections += 1
+        # A rejected/denied order halts dispatch: the target weight is unreachable
+        # (e.g. cash), and retrying every bar only repeats the rejection.
+        self._halted = True
+        # NT's Logger takes a single pre-formatted message (no %-style args).
+        self.log.warning(f"order not accepted (id={oid} qty={qty:g}): {reason}")
 
     def on_bar(self, bar: Bar) -> None:
         moment = pd.Timestamp(bar.ts_event, unit="ns", tz="UTC")
@@ -155,6 +205,11 @@ class WeightReplay(Strategy):
                 self._record(day, target_qty, "none", f"no chase buy at limit-up {upper:.2f}")
                 return
         qty = min(delta, self._participation_remaining(bar))
+        # K14-R1 C · the participation cap can be any share count, so the buy must
+        # be re-rounded to a whole lot after the min() — otherwise a cap of 105
+        # submits 105 shares, violating the buy-整手 rule. Sells keep odd lots
+        # (A-share allows selling 零股).
+        qty = ashare.round_down_to_lot(qty, self.config.lot_size)
         if qty <= 0:
             self._record(day, target_qty, "none", "participation cap reached")
             return
@@ -187,6 +242,11 @@ class WeightReplay(Strategy):
     # ── helpers ──────────────────────────────────────────────────────────────
 
     def _submit(self, day: date, target_qty: float, side: OrderSide, qty: float, side_name: str) -> None:
+        # K14-R1 B · a halt set by a prior rejection stops further dispatch: the
+        # target is unreachable, so retrying every bar only repeats the rejection.
+        if self._halted:
+            self._record(day, target_qty, "none", "halted after a rejected order")
+            return
         instrument = self.cache.instrument(self.config.instrument_id)
         if instrument is None:
             raise SidecarError(
@@ -196,10 +256,12 @@ class WeightReplay(Strategy):
             self.config.instrument_id, side, instrument.make_qty(qty)
         )
         self.submit_order(order)
-        if side == OrderSide.SELL:
-            self._sellable -= qty
-        self._traded_today += qty
-        self._record(day, target_qty, side_name, f"submitted {qty:g}")
+        # K14-R1 B · do NOT debit budget/T+1 here — wait for on_order_filled (or
+        # on_order_rejected) so a rejected order is not silently treated as done.
+        self._pending[str(order.client_order_id)] = qty
+        # K14-R1 D · (structured ``submitted`` field instead of a hardcoded 0;
+        # tests read the field, not a parsed reason string.)
+        self._record(day, target_qty, side_name, f"submitted {qty:g}", submitted=qty)
 
     def _participation_remaining(self, bar: Bar) -> float:
         cap = ashare.participation_cap(
@@ -211,14 +273,17 @@ class WeightReplay(Strategy):
         # NT's portfolio net position for the instrument (signed: long > 0).
         return float(self.portfolio.net_position(self.config.instrument_id))
 
-    def _record(self, day: date, target_qty: float, side: str, reason: str) -> None:
+    def _record(
+        self, day: date, target_qty: float, side: str, reason: str, submitted: float = 0.0
+    ) -> None:
+        net = self._net_position()
         self.decisions.append(
             ReplayDecision(
                 day=day,
                 target_qty=target_qty,
-                current_qty=self._net_position(),
-                delta=target_qty - self._net_position(),
-                submitted=0.0,
+                current_qty=net,
+                delta=target_qty - net,
+                submitted=submitted,
                 side=side,
                 reason=reason,
             )
