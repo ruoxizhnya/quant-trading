@@ -276,6 +276,42 @@ func (am *AlertManager) Evaluate(ctx context.Context, snap PortfolioSnapshot) in
 	return len(alerts)
 }
 
+// Fire dispatches a single externally-produced alert to all channels
+// (K16 ⑤). Evaluate runs the built-in detectors; Fire is the entry
+// point for alerts produced elsewhere — reconciliation discrepancies,
+// dual-run alignment breaches — so they ride the same channel set
+// (log + webhook) as detector alerts.
+//
+// A zero Timestamp / empty ID / empty Rule is filled in here so callers
+// need only set Severity + Message. Fire is a no-op after Close.
+func (am *AlertManager) Fire(ctx context.Context, a Alert) {
+	am.mu.RLock()
+	closed := am.closed
+	channels := make([]Channel, len(am.channels))
+	copy(channels, am.channels)
+	am.mu.RUnlock()
+	if closed {
+		return
+	}
+	if a.Timestamp.IsZero() {
+		a.Timestamp = time.Now()
+	}
+	if a.Rule == "" {
+		a.Rule = "external"
+	}
+	if a.ID == "" {
+		a.ID = am.nextAlertID(a.Rule)
+	}
+	for _, ch := range channels {
+		ch.Send(ctx, a)
+	}
+	am.logger.Info().
+		Str("alert_id", a.ID).
+		Str("rule", a.Rule).
+		Str("severity", string(a.Severity)).
+		Msg("AlertManager fired external alert")
+}
+
 // Close shuts down all channels and marks the manager as closed. After
 // Close, Evaluate is a no-op and AddChannel/SetWebhookURL return false.
 func (am *AlertManager) Close() {

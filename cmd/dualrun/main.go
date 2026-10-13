@@ -32,6 +32,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/alert"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/metrics"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/nautilus"
@@ -151,13 +152,45 @@ func main() {
 
 	// K16 ① 门禁腿：-gate 打开时按 K15 阈值表判定，超阈即红（exit 2）。
 	// 报告仍照常输出/落盘——失败要带完整证据，不是只给一个非零退出码。
+	//
+	// K16 ⑤ 告警接线：违例同时进生产告警通道（log + webhook，webhook 由
+	// $DUALRUN_ALERT_WEBHOOK 配置，缺省只记 log）——CI 门禁红了，运维侧
+	// 同步收到一条 critical 告警，不靠翻 CI 日志发现对齐回归。
 	if *gate {
 		violations := EvaluateGate(report)
 		fmt.Fprintln(os.Stderr, FormatViolations(violations))
 		if len(violations) > 0 {
+			dispatchGateAlerts(violations, productionBreachFire())
 			os.Exit(2)
 		}
 	}
+}
+
+// productionBreachFire 是 dispatchGateAlerts 的生产 fireBreach 实现：经
+// alert.SignalDispatcher 发进告警通道（一条违例一条告警，rule=dualrun_gate）。
+// 与分析服务共用 pkg/alert 的通道集实现（log + webhook）；webhook 目标由
+// $DUALRUN_ALERT_WEBHOOK 给出（CI 环境通常不配置 webhook，只记结构化
+// 日志，由日志告警规则抓）。管理器生命周期限制在本函数内——告警发完即关。
+func productionBreachFire() func(ctx context.Context, runID string, breaches []alert.DualRunBreach) {
+	return func(ctx context.Context, runID string, breaches []alert.DualRunBreach) {
+		mgr := alert.NewAlertManager(alert.AlertManagerConfig{
+			WebhookURL: os.Getenv("DUALRUN_ALERT_WEBHOOK"),
+		}, zerolog.Nop()) // 实验产物即报告；告警正文是给告警通道的，不进 stdout
+		defer mgr.Close()
+		alert.NewSignalDispatcher(mgr).DispatchDualRunBreaches(ctx, runID, breaches)
+	}
+}
+
+// dispatchGateAlerts 把门禁违例逐条转成 alert.DualRunBreach 并经 fireBreach
+// 发进告警通道。fireBreach 是可注入缝（生产用 productionBreachFire），
+// 测试经它观察「违例必经告警通道」的转达面（K16 ⑤ 验收）。
+func dispatchGateAlerts(violations []GateViolation, fireBreach func(context.Context, string, []alert.DualRunBreach)) {
+	runID := fmt.Sprintf("dualrun-%s", time.Now().Format("20060102-150405"))
+	breaches := make([]alert.DualRunBreach, 0, len(violations))
+	for _, v := range violations {
+		breaches = append(breaches, alert.DualRunBreach{Rule: v.Rule, Message: v.Message})
+	}
+	fireBreach(context.Background(), runID, breaches)
 }
 
 // buildSignals 构造实验信号流（两侧消费的同一条流）。

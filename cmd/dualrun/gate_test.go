@@ -6,8 +6,15 @@ package main
 //      门禁必须红并点名规则。红不了的门禁等于没有门禁。
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ruoxizhnya/quant-trading/pkg/alert"
 )
 
 // okReport 构造一份 K15 bh 实测值量级的报告（全部在阈值内）。
@@ -269,5 +276,93 @@ func TestFormatViolations(t *testing.T) {
 	msg := FormatViolations([]GateViolation{{Rule: "metric/sharpe", Message: "boom"}})
 	if !strings.Contains(msg, "1 项违例") || !strings.Contains(msg, "boom") {
 		t.Errorf("违例清单渲染不完整: %q", msg)
+	}
+}
+
+// ── K16 ⑤ 告警接线腿：门禁违例必经告警通道 ──────────────────────────
+// 破坏验证：dispatchGateAlerts 不转发 → TestGateAlerts_* 全红。
+
+func TestGateAlerts_DispatchForEachViolation(t *testing.T) {
+	// 转达面：一条违例一条 breach，rule/message 原样带上，runID 带来源前缀。
+	r := okReport()
+	r.GoDeterministic = false
+	for i := range r.MetricRows {
+		if r.MetricRows[i].Name == "total_return" {
+			r.MetricRows[i].Diff = 0.005 * r.MetricRows[i].Go
+			r.MetricRows[i].RelDiff = 0.005
+			r.MetricRows[i].NT = r.MetricRows[i].Go + r.MetricRows[i].Diff
+		}
+	}
+	vs := violationsOf(t, r)
+	if len(vs) != 2 {
+		t.Fatalf("构造应产生 2 条违例（确定性 + total_return 超阈），got %d:\n%s", len(vs), FormatViolations(vs))
+	}
+
+	var gotRunID string
+	var got []alert.DualRunBreach
+	dispatchGateAlerts(vs, func(_ context.Context, runID string, breaches []alert.DualRunBreach) {
+		gotRunID = runID
+		got = breaches
+	})
+
+	if !strings.HasPrefix(gotRunID, "dualrun-") {
+		t.Errorf("runID 应带 dualrun- 来源前缀，got %q", gotRunID)
+	}
+	if len(got) != len(vs) {
+		t.Fatalf("一条违例一条告警，want %d got %d", len(vs), len(got))
+	}
+	for i, b := range got {
+		if b.Rule != vs[i].Rule || b.Message != vs[i].Message {
+			t.Errorf("breach[%d] 应原样转达门禁违例，want {%s %q} got {%s %q}",
+				i, vs[i].Rule, vs[i].Message, b.Rule, b.Message)
+		}
+	}
+}
+
+func TestGateAlerts_ProductionFireDeliversAlerts(t *testing.T) {
+	// 生产腿：productionBreachFire 经真实告警通道（webhook）送达，
+	// rule=dualrun_gate、severity=critical、消息点名违例规则。
+	received := make(chan alert.Alert, 8)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var a alert.Alert
+		_ = json.NewDecoder(r.Body).Decode(&a)
+		received <- a
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	t.Setenv("DUALRUN_ALERT_WEBHOOK", srv.URL)
+
+	vs := []GateViolation{{Rule: "metric/sharpe", Message: "sharpe: go=1.2 nt=1.377 |Δ|=0.177 超绝对阈 0.05"}}
+	dispatchGateAlerts(vs, productionBreachFire())
+
+	// productionBreachFire 的 mgr.Close() 排空 webhook 队列后送达已确定；
+	// 超时护栏防将来通道语义变化时测试挂死。
+	var a alert.Alert
+	select {
+	case a = <-received:
+	case <-time.After(3 * time.Second):
+		t.Fatal("webhook 送达超时：门禁违例未进告警通道")
+	}
+	if a.Rule != alert.RuleDualRunGate {
+		t.Errorf("rule 应为 %q（外部告警带来源前缀约定），got %q", alert.RuleDualRunGate, a.Rule)
+	}
+	if a.Severity != alert.SeverityCritical {
+		t.Errorf("门禁违例全 critical（对齐一致是硬门禁），got %q", a.Severity)
+	}
+	for _, want := range []string{"metric/sharpe", "超绝对阈", vs[0].Message} {
+		if !strings.Contains(a.Message, want) {
+			t.Errorf("告警消息应点名 %q，got %q", want, a.Message)
+		}
+	}
+	if a.Attributes["breach_rule"] != "metric/sharpe" {
+		t.Errorf("breach_rule 属性应记录违例规则，got %v", a.Attributes["breach_rule"])
+	}
+	if runID, _ := a.Attributes["run_id"].(string); !strings.HasPrefix(runID, "dualrun-") {
+		t.Errorf("run_id 属性应带 dualrun- 前缀，got %v", a.Attributes["run_id"])
+	}
+	select {
+	case extra := <-received:
+		t.Errorf("一条违例一条告警，不应多发，got extra: %+v", extra)
+	default:
 	}
 }

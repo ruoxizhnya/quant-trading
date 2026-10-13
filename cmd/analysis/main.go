@@ -115,10 +115,30 @@ func main() {
 	registerAlertRoutes(router, alertLoop)
 	go alertLoop.Start(context.Background())
 
+	// K16 ⑤：资金对账 worker 的生产接线（此前 ReconciliationWorker /
+	// AlertDispatcher 零生产构造点）。enabled 未配置 → worker 为 nil，
+	// /api/reconciliation 路由照常注册、请求 503（与 alerts 路由同一姿态）；
+	// 启用时差异逐条经 alert.ReconciliationDispatcher 进告警通道集
+	// （log + webhook，与风控告警同通道）。
+	reconWorker := buildReconciliation(v, alertManager, executionTrader, logger)
+	NewReconciliationHandler(reconWorker, logger).RegisterRoutes(router)
+	var stopRecon context.CancelFunc
+	if reconWorker != nil {
+		var reconCtx context.Context
+		reconCtx, stopRecon = context.WithCancel(context.Background())
+		go reconWorker.Start(reconCtx)
+	}
+
 	srv := startHTTPServer(router, v, logger)
 
 	sig := waitForShutdown()
 	logger.Info().Str("signal", sig.String()).Msg("Shutdown signal received; beginning graceful drain")
+
+	// 对账 worker 先于内核关停停止：worker tick 可能正持一笔对账，别让它
+	// 撞上后面的 store.Close()。
+	if stopRecon != nil {
+		stopRecon()
+	}
 
 	// ─── 内核关停（K1 切片 3；时序裁决继承切片 2）─────────────────────
 	// 必须早于 gracefulShutdown：后者 phase 4 会 store.Close() 关掉连接池，

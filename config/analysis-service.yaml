@@ -154,6 +154,26 @@ alert:
   webhook_url: ""             # empty = webhook disabled
   webhook_timeout_sec: 5
 
+# ── ReconciliationWorker (K16 ⑤) ─────────────────────────────────
+#
+# 资金对账 worker：定时比对本地账 vs 券商账，差异逐条经
+# alert.ReconciliationDispatcher 进告警通道（log + webhook，与上方
+# alert.* 共用通道集）。
+#
+# enabled: false = worker 不启动（默认；/api/reconciliation 路由返回 503）。
+# 自检形态（当前）：broker 侧视图 = 同一 MockTrader 状态，账实差异恒零；
+# 真实券商适配器（D1）落地后只替换 broker 侧实现，此配置不变。
+reconciliation:
+  enabled: false
+  account_id: "default"
+  interval_sec: 900           # 监管下限 15min（中国结算 §3.2）
+  cash_tolerance: 0.01
+  quantity_tolerance: 0.0
+  market_value_tol: 0.005
+  fee_tolerance: 0.01
+  report_path: "compliance/reconciliation"
+  history_limit: 100
+
 backtest:
   initial_capital: 1000000.0
   commission_rate: 0.0003
