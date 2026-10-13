@@ -105,6 +105,10 @@ func cnt(name string, goV, ntV float64) metricRow {
 // NT 侧 catalog 的 tick 精度是 0.01（7.57）——两侧数据链路的精度不同是
 // 记档的口径差异，不该把每一笔都打成 mismatch；量到 0.01 股精度精确比。
 // 同键两侧都有 → matched；单侧存在 → go_only / nt_only。
+//
+// K15-R1 复查修正：matched 行的费用对比必须取 **NT trade 自己的**
+// Commission（NT fee model 返回全项 total）——此前误用循环变量 t（Go
+// trade）的 Commission 分量，制造出「NT 缺过户费」的假象。
 func (r *Report) reconcileTrades(goTrades, ntTrades []domain.Trade) {
 	type key struct {
 		day    string
@@ -121,9 +125,14 @@ func (r *Report) reconcileTrades(goTrades, ntTrades []domain.Trade) {
 	for _, t := range goTrades {
 		goKeys[mk(t)]++
 	}
+	ntBy := make(map[key]domain.Trade, len(ntTrades))
 	ntKeys := make(map[key]int, len(ntTrades))
 	for _, t := range ntTrades {
-		ntKeys[mk(t)]++
+		k := mk(t)
+		ntKeys[k]++
+		if _, seen := ntBy[k]; !seen {
+			ntBy[k] = t
+		}
 	}
 
 	seen := make(map[key]bool)
@@ -136,8 +145,10 @@ func (r *Report) reconcileTrades(goTrades, ntTrades []domain.Trade) {
 		switch {
 		case ntKeys[k] > 0:
 			r.MatchedTrades += goKeys[k]
+			nt := ntBy[k]
 			r.TradeRows = append(r.TradeRows, tradeReconRow{Kind: "matched", Day: k.day, Symbol: k.symbol, Side: k.side,
-				Detail: fmt.Sprintf("qty=%.0f px=%.2f (fees: go=%.2f nt=%.2f)", k.qty, k.price, t.Commission+t.TransferFee+t.StampTax, t.Commission)})
+				Detail: fmt.Sprintf("qty=%.0f px=%.2f (fees: go=%.2f nt=%.2f)", k.qty, k.price,
+					t.Commission+t.TransferFee+t.StampTax, nt.Commission+nt.TransferFee+nt.StampTax)})
 		case ntKeys[k] == 0:
 			r.GoOnlyTrades += goKeys[k]
 			r.TradeRows = append(r.TradeRows, tradeReconRow{Kind: "go_only", Day: k.day, Symbol: k.symbol, Side: k.side,

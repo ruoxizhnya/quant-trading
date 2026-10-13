@@ -219,7 +219,7 @@ type SignalProvider interface {
 | **集合竞价** | ❌ | catalog 只有日线（`1-DAY-LAST-EXTERNAL`），无分时/竞价数据；「日频目标权重」表达上限之外的撮合机制不建模（设计文档 §3 代价声明） |
 
 **K15 观察项（新增，2026-10-13 K15 执行后关闭）**：Go 回测撮合路径（`pkg/backtest/execution` → `pkg/execution` CostModel）**只计佣金**（`max(notional×CommissionRate, MinCommission)`），不建模印花税/过户费——这是代码注释里写明的「两侧共同已知口径边界」。而 K14 适配器的 NT fee model 计**全三项**。K15 对齐时该差异必须**显式归因**（是口径边界而非执行机制差异），不得被容差掩盖。
-**K15 执行结果**：对齐路径选 **Tracker+ComputeFees**（全三项，与 NT `compute_fees` parity fixture 同源），CostModel 口径边界不进入对齐路径（裁决 b，见报告 §4）。实测残留一笔费用微差（NT fills 报告 ≈ 纯佣金，过户费分量未体现）→ 立 **K15-R1** 复查 NT FeeModel 生效链路。
+**K15 执行结果**：对齐路径选 **Tracker+ComputeFees**（全三项，与 NT `compute_fees` parity fixture 同源），CostModel 口径边界不进入对齐路径（裁决 b，见报告 §4）。K15-R1 复查确认两侧费用逐笔对齐（首轮报告的「NT 缺过户费」为对账展示 bug，非 FeeModel 缺陷）。
 
 ### 8.4.1 K14-R1 自审收口（2026-10-13）
 

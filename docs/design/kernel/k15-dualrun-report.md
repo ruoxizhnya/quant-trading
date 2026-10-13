@@ -36,17 +36,18 @@
 
 ## 3. 差异归因（实测 → 口径，完整版见数据文件）
 
-1. **价源精度**（主因）：PG 前复权浮点价（7.566182…）vs catalog Decimal tick 0.01（7.57）——每笔 ≤0.005 价差，经恒定名义额再平衡放大成持仓路径微分叉。两侧同源 PG，非取数时点问题（§8.2 观察项关闭）。
-2. **费用微差**：Go ComputeFees 全三项逐笔精确对上；NT fills 报告的 commission ≈ 纯佣金（过户费分量未体现，单笔约 3% 低估）→ **立 K15-R1**：查 AShareFeeModel 返回值到 NT fills 报告的链路。累计影响约 -0.08% total_return。
+1. **价源精度（主因）**：PG 前复权浮点价（7.566182…）vs catalog Decimal tick 0.01（7.57）——每笔 ≤0.005 价差，经恒定名义额再平衡放大成持仓路径微分叉（go_only/nt_only 的 ±100 股级 delta 偏移）。两侧同源 PG，非取数时点问题（§8.2 观察项关闭）。
+2. **费用（K15-R1 复查后关闭）**：两侧费用口径**同源且逐笔对齐**（matched 行 go=77.40/nt=77.44、40.24/40.24、5.03/5.03，残差全部来自 1 的价差）。K15 首轮报告的「NT 缺过户费」是 **diff 展示层 bug**（matched 行 nt 费用误用 Go trade 的 commission 分量 74.905，而非 NT trade 的全项 77.44），已在 K15-R1 修复并重跑验证——NT FeeModel 链路本身无缺陷。
 3. **win_rate 敏感性**：配对算法对明细错位放大，不设硬阈。
-4. **未触发项如实记录**：本窗口无涨跌停拒单、无 T+1 拒单（卖昨仓合法）——护栏由两侧单测覆盖（Go tracker T+1 测试、侧车 sellable 测试、wrReplay no-chase 破坏腿）。
+4. **未触发项如实记录**：本窗口无涨跌停拒单、无 T+1 拒单（卖昨仓合法）——护栏由两侧单测覆盖（Go tracker T+1 测试、侧车 sellable 测试、wrReplay no-chase 破坏腿）+ K15-R1 的 fills 费用回归腿（`tests/test_k15r1_fees.py`）。
 
 ## 4. 工单③-5 费率口径裁决（b 项执行记录）
 
-**裁决：b) 报告单列归因。** Go 记账选 Tracker+ComputeFees 路径（全三项费率，与 NT parity fixture 同源），「撮合路径只计佣金」的 CostModel 口径边界**不进入本次对齐**；ExecutionService 路径的口径边界维持 §8.4 记档不变。实测中两侧费率公式同源成立（每笔费用差全部归因到 2 的链路疑点，非费率表差异）。
+**裁决：b) 报告单列归因。** Go 记账选 Tracker+ComputeFees 路径（全三项费率，与 NT parity fixture 同源），「撮合路径只计佣金」的 CostModel 口径边界**不进入本次对齐**；ExecutionService 路径的口径边界维持 §8.4 记档不变。实测两侧费率公式同源成立（费用残差 = 价源精度差，非费率表差异）。
 
 ## 5. 遗留与后续
 
-- **K15-R1**（随本任务立）：NT 侧过户费分量未在 fills 报告体现——复查 AShareFeeModel 在 NT 2.0.0rc6 的生效路径（FeeModel.get_commission 返回的 Money 是否被撮合层覆盖/拆分）。修复后阈值可收紧（预计 total_return |Δ| ≤ 0.1%）。
+- **K15-R1 已收口**（费用链路复查）：根因是对账报告的展示 bug 而非 NT FeeModel 缺陷；修复后费用逐笔对齐。回归腿 `tests/test_k15r1_fees.py::FillReportFeeRegressionTest` 钉住「fills commission == compute_fees.total」。
+- **运维教训（记档）**：本轮排查中本机 9100 端口曾同时存在**两个 sidecar 监听进程**（Windows 允许端口复用绑定），连接随机分配到新旧代码——任何「同请求不同结果」的诡异现象先查端口占用者（`Get-NetTCPConnection -LocalPort 9100`）再查代码。
 - win_rate 配对算法对微差敏感是 `metrics.calculateTradeMetrics` 的既有特性（非本任务范围）；若要指标级稳定，需另立任务改配对口径。
 - K16 前置已满足（K15 完成）；对齐回归进 CI 门禁是 K16 ① 的范围，本实验的容差阈值表即其门禁参数。

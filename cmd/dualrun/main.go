@@ -134,11 +134,11 @@ func main() {
 	report.NTDeterministic = ntDeterministic
 	// 归因清单：实测差异逐项对到已知口径差异，解释不了的留开放问题。
 	report.Attribution = []string{
-		"① 价源精度：Go 消费 PG 前复权浮点价（7.566182…），NT catalog 为 tick 0.01 的 Decimal（7.57）——每笔成交价有 ≤0.005 的口径差，是持仓路径分叉（go_only/nt_only 少量成交）与净值微差的根因（§8.2 观察项：系统性价差先复核取数时点——本次两侧同源 PG，差异为精度而非时点）。",
-		"② 费用微差：Go 侧 ComputeFees = 佣金+过户费（+卖侧印花税）逐笔精确对上；NT 侧 AShareFeeModel 在真实 run 的 fills 报告里 ≈ 纯佣金——过户费分量未体现（单笔约 3% 相对差，方向为 NT 低估）。疑点在 NT FeeModel 返回值到 fills 报告的链路，立 K15-R1 复查；其对齐影响累计约 -0.08% total_return。",
-		"③ go_only / nt_only：全部是 ①② 的下游（两侧持仓路径在多次微差后出现 ±100 股级 delta 偏移），非执行机制缺失——对账键（date/symbol/side/qty/px-到分）已确认无机制性缺笔。",
+		"① 价源精度（主因）：Go 消费 PG 前复权浮点价（7.566182…），NT catalog 为 tick 0.01 的 Decimal（7.57）——每笔成交价有 ≤0.005 的口径差，经恒定名义额再平衡放大成持仓路径分叉（go_only/nt_only ±100 股级 delta 偏移）与净值微差（§8.2 观察项：两侧同源 PG，差异为精度而非取数时点）。",
+		"② 费用（K15-R1 复查后关闭）：两侧费用口径**同源且逐笔对齐**——Go ComputeFees 全三项 vs NT AShareFeeModel total（parity fixture 同源）；K15 首轮报告的「NT 缺过户费」是 diff 展示层 bug（matched 行 nt 费用误用 Go trade 的 commission 分量），已在 6a782c5 后的复查中修复并重跑验证。",
+		"③ go_only / nt_only：全部是 ① 的下游（持仓路径微分叉），非执行机制缺失——对账键（date/symbol/side/qty/px-到分）已确认无机制性缺笔。",
 		"④ win_rate：按 entry/exit 配对计算，对成交明细的微小分叉高度敏感（37%~42% 相对差全部来自配对序列错位），不设硬容差，以明细对账为准。",
-		"⑤ 费率口径裁决（工单③-5）：选 b) 报告单列归因——Go 记账走 Tracker+ComputeFees（全三项，与 NT AShareFeeModel 的 compute_fees parity fixture 同源），「撮合路径只计佣金」的 CostModel 口径边界不进入本次对齐路径；ExecutionService 路径的口径边界维持 §8.4 记档。",
+		"⑤ 费率口径裁决（工单③-5）：选 b) 报告单列归因——Go 记账走 Tracker+ComputeFees（全三项），「撮合路径只计佣金」的 CostModel 口径边界不进入本次对齐路径；ExecutionService 路径的口径边界维持 §8.4 记档。",
 		"⑥ 涨跌停/T+1 触发：本窗口两只主板标的的调仓路径未触发涨跌停拒单与 T+1 拒单（卖的是昨仓，合法）——两条护栏由两侧各自的单测护栏覆盖（Go tracker T+1 测试 / 侧车 sellable 测试 + 本次 wrReplay no-chase 腿），实验窗口内未触发如实记录。",
 	}
 

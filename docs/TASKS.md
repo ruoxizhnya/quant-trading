@@ -367,7 +367,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ### K15 · 结果映射 + 双跑对齐实验（阶段 2，前置：K14）✅ 完成（2026-10-13）
 
-> **⑦ 收口记录（2026-10-13）**：三件套一次交付——① **映射层**：侧车 `engine.py` 的 `_map_result` 扩全数据面（`equity_curve` 日净值合成 = cash(d)+Σ qty×close，与 Go tracker `totalValue` 同构；`trades` 逐笔 fills 映射；status 三值；completed 但曲线合成失败 → failed fail-loud）+ `runspec.py` 的 `signals` wire 解析（fail-closed，与 Go `ValidateRunSpec` 逐字同口径）；Go `runner.go` 数据面落入冻结字段 `PortfolioValues/Trades`（无 schema 新增）。② **对齐工具** `cmd/dualrun`：Go 侧权重回放执行器（`wrreplay.go`，决策规则与 `weight_replay.py` 逐字对拍——恒定名义额分摊 capital/N / 涨跌停不追 / T+1 / 整手 / D_max；撮合记账走 Tracker+ComputeFees 内核既有实现）+ 同一 `metrics.GenerateBacktestResult` 算两侧指标 + 逐指标/逐笔 diff 报告。③ **实验**：2024 全年两标的（主板）× 2 信号流（bh/quarterly），确定性腿两侧 ✅，total_return 差 -0.086%/-0.076%、sharpe 差 ≤0.0023、maxDD 差 ≤0.35%，matched 成交 363/328、无机制性缺笔；报告落 [docs/design/kernel/k15-dualrun-report.md](docs/design/kernel/k15-dualrun-report.md)（+ 两份机器生成数据文件），容差阈值实测回写设计文档 §8 表 1 ✅。**破坏腿实测红**：① wrReplay 整手 round→Round（`1 != 3` 红）② 涨停 no-chase 短路（`1 != 2` 红）③ diff 报告删 NT 一笔成交 → go_only 点名（单测钉住）④ 侧车 equity 合成缺 account 报告 → failed（单测）。**正证据**：Python 59 绿 / Go 全量绿。**归因与遗留**：价源精度（PG 浮点 vs catalog tick）为路径分叉主因；NT fills 费用 ≈ 纯佣金（过户费分量未体现）→ 立 **K15-R1**；win_rate 配对敏感性如实记档不设硬阈；费率口径裁决 b 项执行（Tracker+ComputeFees 路径，§8.4 记档）。
+> **⑦ 收口记录（2026-10-13）**：三件套一次交付——① **映射层**：侧车 `engine.py` 的 `_map_result` 扩全数据面（`equity_curve` 日净值合成 = cash(d)+Σ qty×close，与 Go tracker `totalValue` 同构；`trades` 逐笔 fills 映射；status 三值；completed 但曲线合成失败 → failed fail-loud）+ `runspec.py` 的 `signals` wire 解析（fail-closed，与 Go `ValidateRunSpec` 逐字同口径）；Go `runner.go` 数据面落入冻结字段 `PortfolioValues/Trades`（无 schema 新增）。② **对齐工具** `cmd/dualrun`：Go 侧权重回放执行器（`wrreplay.go`，决策规则与 `weight_replay.py` 逐字对拍——恒定名义额分摊 capital/N / 涨跌停不追 / T+1 / 整手 / D_max；撮合记账走 Tracker+ComputeFees 内核既有实现）+ 同一 `metrics.GenerateBacktestResult` 算两侧指标 + 逐指标/逐笔 diff 报告。③ **实验**：2024 全年两标的（主板）× 2 信号流（bh/quarterly），确定性腿两侧 ✅，total_return 差 -0.086%/-0.076%、sharpe 差 ≤0.0023、maxDD 差 ≤0.35%，matched 成交 363/328、无机制性缺笔；报告落 [docs/design/kernel/k15-dualrun-report.md](docs/design/kernel/k15-dualrun-report.md)（+ 两份机器生成数据文件），容差阈值实测回写设计文档 §8 表 1 ✅。**破坏腿实测红**：① wrReplay 整手 round→Round（`1 != 3` 红）② 涨停 no-chase 短路（`1 != 2` 红）③ diff 报告删 NT 一笔成交 → go_only 点名（单测钉住）④ 侧车 equity 合成缺 account 报告 → failed（单测）。**正证据**：Python 59 绿 / Go 全量绿。**归因与遗留**：价源精度（PG 浮点 vs catalog tick）为路径分叉主因；NT fills 费用 ≈ 纯佣金（过户费分量未体现）→ 立 **K15-R1**（复查结论：为对账展示 bug，NT 费用实际全项正确，见 K15-R1 ⑦）；win_rate 配对敏感性如实记档不设硬阈；费率口径裁决 b 项执行（Tracker+ComputeFees 路径，§8.4 记档）。
 
 - **① 目标**：NT 报告 → ResultSpec 映射层落地；产出**同信号流、双内核**的对齐报告（逐指标 diff、差异归因可读），容差阈值实测确定并回写设计文档。
 - **② 上下文**：设计文档 §2.3/FR-6；K5 信号对账方法论（`pkg/live/signal_reconcile.go` 的「同输入对差异归因」思路）；指标口径 `pkg/backtest/metrics/performance.go`（封闭系统日收益）；K4 冲击/费率基线。
@@ -381,7 +381,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：对齐报告落 `docs/design/kernel/`（或 `docs/archive/`，含数据、命令、结论）；映射层单测（含 status 映射）；**反证腿**：人为注入一处差异（如改费率）→ diff 报告捕获并点名。
 - **⑥ 边界**：映射层 + 对齐工具 + 实验报告，一个 commit。
 
-### K15-R1 · NT fills 费用链路复查（K15 实验发现，2026-10-13 登记）
+### K15-R1 · NT fills 费用链路复查（K15 实验发现，2026-10-13 登记）✅ 完成（2026-10-13）
 
 - **① 目标**：定位并修复「NT 侧车 fills 报告的 commission ≈ 纯佣金、过户费分量缺失」的链路疑点，使 NT 侧费用与 `ashare.compute_fees(...).total` 逐笔一致，对齐阈值可收紧到 total_return |Δ| ≤ 0.1%。
 - **② 上下文**：K15 实验（[k15-dualrun-report.md](docs/design/kernel/k15-dualrun-report.md) 归因②）实测：Go 侧每笔费用 = ComputeFees 全三项精确对上（例 7.5662×33000 → 77.40 = 佣金 74.91 + 过户 2.50）；NT 同一笔 fills 报告 commission = 74.91（= 纯佣金，`ashare.make_fee_model` 声明返回 `compute_fees(...).total` 但实际未含过户费）。疑点在 FeeModel 返回的 Money → NT 撮合 → `generate_fills_report` 的 commission 列之间的链路（被覆盖 / 只取部分 / Money 精度截断）。工具：`nt-sidecar/.venv/Scripts/python.exe` + NT 2.0.0rc6 源码（site-packages 内 Rust/PyO3）。
@@ -392,6 +392,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：不改 `ashare.compute_fees` 公式与 parity fixture（那是与 Go ComputeFees 的冻结对拍）；不追求与 NT 内部账户余额路径对账（只对齐 fills 报告这一数据面）；不扩到 K16 CI 门禁。
 - **⑤ 验收**：单笔复现测试绿；重跑两实验的 fills 费用列 matched 行 fees: go == nt（或补偿后差值 = 0）；`go test ./...` 绿 + Python 全套绿；K15 报告数据文件与阈值备注更新。
 - **⑥ 边界**：`nt-sidecar/sidecar/`（或 diff 补偿在 `cmd/dualrun`）+ 报告数据文件更新，一个 commit。
+- **⑦ 收口记录（2026-10-13）**：**根因不在 NT FeeModel，在对账报告的展示层**——`cmd/dualrun/diff.go` matched 行的 `nt=` 费用误用**循环变量（Go trade）的 Commission 分量**（ComputeFees 的纯佣金 74.905），而非 NT trade 的全项 total（77.44）；「NT 缺过户费」是假象。三层实测定位：① FeeModel 单元（`get_commission` 返回 total ✓）② 单笔真 run（直调 + HTTP 双路径 fills commission = 77.44 全项 ✓，且账户 cash 与 K15 首轮报告一字不差——实际扣费从来是全项）③ server 端 RAW FILLS dump（fills 原始值正确）。**修复**：diff.go 用 `ntBy[k]` 取 NT trade 自身费用对账；重跑 bh/quarterly 费用列逐笔对齐（77.40/77.44、40.24/40.24、5.03/5.03——残差 = 价源精度差）。**回归护栏**：`tests/test_k15r1_fees.py`（FeeModel 单元 2 腿 + 端到端 `FillReportFeeRegressionTest`：fills commission == compute_fees.total 逐笔断言）。**附带发现（运维教训）**：排查中本机 9100 端口曾同时存在两个 sidecar 监听进程（Windows 允许端口复用绑定、连接随机分配），已清理；「同请求不同结果」先查端口占用者。**排查辅助代码已清理**（DUALRUN_DUMP_REQ / SIDECAR_DUMP_FILL_FEES）。Python 63 绿 / Go 全量绿。K15 报告 §3/§5 与设计文档 §8.4 记档同步更新；阈值维持 §8 表 1（total_return |Δ| ≤ 0.2%——主导因素是价源精度，费用对齐后不再有收紧空间，除非两侧价源精度先统一）。
 
 ### K16 · 双内核生产化（阶段 3，⛔ 前置：K12 + K15 完成 + NT 决策门通过）
 
