@@ -168,7 +168,7 @@ const indexMemberBody = `{"code":0,"msg":"","data":{"fields":["index_code","con_
 
 func TestNormalizeSWIndustryMembers_MapsToEdges(t *testing.T) {
 	resp := decodeTushareBody(t, indexMemberBody)
-	edges, err := normalizeSWIndustryMembers(resp, "801012.SI", SupplyChainSourceTushare, time.Now().UTC())
+	edges, _, err := normalizeSWIndustryMembers(resp, "801012.SI", SupplyChainSourceTushare, time.Now().UTC())
 	require.NoError(t, err)
 	require.Len(t, edges, 2, "con_code 为空的行跳过")
 
@@ -180,7 +180,7 @@ func TestNormalizeSWIndustryMembers_MapsToEdges(t *testing.T) {
 
 func TestNormalizeSWIndustryMembers_FallsBackToRequestedIndex(t *testing.T) {
 	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["con_code","out_date"],"items":[["600519.SH",""]]}}`)
-	edges, err := normalizeSWIndustryMembers(resp, "801012.SI", SupplyChainSourceTushare, time.Now().UTC())
+	edges, _, err := normalizeSWIndustryMembers(resp, "801012.SI", SupplyChainSourceTushare, time.Now().UTC())
 	require.NoError(t, err)
 	require.Len(t, edges, 1)
 	require.Equal(t, "801012.SI", edges[0].Downstream, "响应无 index_code 列时退化用请求参数")
@@ -188,7 +188,7 @@ func TestNormalizeSWIndustryMembers_FallsBackToRequestedIndex(t *testing.T) {
 
 func TestNormalizeSWIndustryMembers_RejectsMissingConCode(t *testing.T) {
 	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["index_code","in_date"],"items":[["801012.SI","20140101"]]}}`)
-	_, err := normalizeSWIndustryMembers(resp, "801012.SI", SupplyChainSourceTushare, time.Now().UTC())
+	_, _, err := normalizeSWIndustryMembers(resp, "801012.SI", SupplyChainSourceTushare, time.Now().UTC())
 	require.Error(t, err)
 }
 
@@ -203,20 +203,35 @@ func TestNormalizeSWIndustryMembers_SkipsOutOfDateSegments(t *testing.T) {
 	["801010.SI","300498.SZ","20220101",""],
 	["801010.SI","601888.SH","20150101","20250630"]
 ]}}`)
-	edges, err := normalizeSWIndustryMembers(resp, "801010.SI", SupplyChainSourceTushare, time.Now().UTC())
+	edges, filtered, err := normalizeSWIndustryMembers(resp, "801010.SI", SupplyChainSourceTushare, time.Now().UTC())
 	require.NoError(t, err)
 	require.Len(t, edges, 2, "仅 out_date 为空的段入边表：600519 当前段 + 300498 的 2022 再入段")
+	require.Equal(t, 3, filtered, "P2-2-R3 R1：历史出表段的行数如实上报（000998 / 300498 2018 / 601888）")
 
 	require.Equal(t, "600519.SH", edges[0].Upstream)
 	require.Equal(t, "300498.SZ", edges[1].Upstream, "多期记录只留当前段（2018 出表段被过滤）")
 	require.Equal(t, domain.RelationIndustryMember, edges[1].Relation)
 }
 
+// TestNormalizeSWIndustryMembers_AllSegmentsOutOfDate 是 P2-2-R3 R2 的
+// 新增形态：「全部段都是历史」→ 0 条边（且过滤计数如实），配合
+// Fetch 层闸门 fail-loud。
+func TestNormalizeSWIndustryMembers_AllSegmentsOutOfDate(t *testing.T) {
+	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["index_code","con_code","in_date","out_date"],"items":[
+	["801010.SI","600519.SH","20140101","20180630"],
+	["801010.SI","000998.SZ","20140101","20201231"]
+]}}`)
+	edges, filtered, err := normalizeSWIndustryMembers(resp, "801010.SI", SupplyChainSourceTushare, time.Now().UTC())
+	require.NoError(t, err, "全历史段不是形状违约，normalize 本身不报错")
+	require.Empty(t, edges, "全部段都是历史 → 0 条边")
+	require.Equal(t, 2, filtered, "两行都被过滤")
+}
+
 // TestNormalizeSWIndustryMembers_RejectsMissingOutDate out_date 列缺失必须
 // fail-loud：当前/历史不可判定时静默全保留 = 悄然回退到「历史成员混入」旧行为。
 func TestNormalizeSWIndustryMembers_RejectsMissingOutDate(t *testing.T) {
 	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["index_code","con_code","in_date"],"items":[["801012.SI","600519.SH","20140101"]]}}`)
-	_, err := normalizeSWIndustryMembers(resp, "801012.SI", SupplyChainSourceTushare, time.Now().UTC())
+	_, _, err := normalizeSWIndustryMembers(resp, "801012.SI", SupplyChainSourceTushare, time.Now().UTC())
 	require.Error(t, err, "缺 out_date 列 = 当前/历史不可判定，必须报错（不许静默全保留）")
 	require.Contains(t, err.Error(), "out_date")
 }
@@ -247,6 +262,23 @@ func TestNormalizeETFPortfolio_RejectsMissingSymbol(t *testing.T) {
 	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["ts_code","end_date"],"items":[["510300.SH","20260630"]]}}`)
 	_, err := normalizeETFPortfolio(resp, "510300.SH", SupplyChainSourceTushare, time.Now().UTC())
 	require.Error(t, err)
+}
+
+// TestNormalizeETFPortfolio_SkipsUnparseableWeight 是 P2-2-R3 R2 的专项确认：
+// weight 列在但该行不可解析 / 非有限 / 为空 → 跳过该行（不编 0，口径与
+// P2-1-R3 R1 对齐）；可解析的行照常入库。
+func TestNormalizeETFPortfolio_SkipsUnparseableWeight(t *testing.T) {
+	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["ts_code","end_date","symbol","stk_mkv_ratio"],"items":[
+	["510300.SH","20260630","600519.SH",5.23],
+	["510300.SH","20260630","000001.SZ","N/A"],
+	["510300.SH","20260630","601318.SH",true],
+	["510300.SH","20260630","600000.SH",null]
+]}}`)
+	rows, err := normalizeETFPortfolio(resp, "510300.SH", SupplyChainSourceTushare, time.Now().UTC())
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "不可解析 / 非标量 / 空的 weight 行全部跳过（不编 0）")
+	require.Equal(t, "600519.SH", rows[0].Symbol)
+	require.InDelta(t, 5.23, rows[0].Weight, 1e-12)
 }
 
 // ── Fetch*：错误传播（破坏验证②的 Red 腿） ──────────────────────────────
@@ -284,6 +316,54 @@ func TestFetchETFPortfolio_PropagatesSaveError(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, rows)
 	require.Contains(t, err.Error(), "db on fire")
+}
+
+// TestFetchSWIndustryMembers_FailsLoudWhenAllFiltered 是 P2-2-R3 R1 的
+// fail-loud 腿（口径已拍板）：响应有行、但全部被过滤（当前成员被全判历史段）
+// → 必须报错，不得以「导入 0 行」伪装成功。
+// 破坏腿：还原闸门 → 本测试红（返回 nil, nil）。
+func TestFetchSWIndustryMembers_FailsLoudWhenAllFiltered(t *testing.T) {
+	// out_date 被上游填了 "0"（空值形态变故）：当前成员被全判历史段。
+	body := `{"code":0,"msg":"","data":{"fields":["index_code","con_code","in_date","out_date"],"items":[
+		["801010.SI","600519.SH","20140101","0"],
+		["801010.SI","000998.SZ","20140101","0"]
+	]}}`
+	store := &recordingSupplyChainStore{}
+	client := newSupplyChainTestClient(stubTushare(t, body, 200), store)
+
+	edges, err := client.FetchSWIndustryMembers(context.Background(), "801010.SI")
+	require.Error(t, err, "有行但全被过滤必须 fail-loud（上游 out_date 形态变故不许伪装成导入 0 行）")
+	require.Nil(t, edges)
+	require.Contains(t, err.Error(), "801010.SI")
+	require.Contains(t, err.Error(), "全部被过滤")
+	require.Empty(t, store.edges, "错误路径不许落库")
+}
+
+// TestFetchSWIndustryMembers_TrueEmptyResponseIsOK 反证腿：上游确实返回 0 行
+// 是合法真空，不得误报（闸门只拦「有行却全被过滤」）。
+func TestFetchSWIndustryMembers_TrueEmptyResponseIsOK(t *testing.T) {
+	body := `{"code":0,"msg":"","data":{"fields":["index_code","con_code","in_date","out_date"],"items":[]}}`
+	store := &recordingSupplyChainStore{}
+	client := newSupplyChainTestClient(stubTushare(t, body, 200), store)
+
+	edges, err := client.FetchSWIndustryMembers(context.Background(), "801010.SI")
+	require.NoError(t, err, "上游真的 0 行是合法真空，不是变故")
+	require.Empty(t, edges)
+}
+
+// TestFetchETFPortfolio_FailsLoudWhenAllSkipped：ETF 侧同款闸门（口径统一）。
+func TestFetchETFPortfolio_FailsLoudWhenAllSkipped(t *testing.T) {
+	body := `{"code":0,"msg":"","data":{"fields":["ts_code","end_date","symbol","stk_mkv_ratio"],"items":[
+		["510300.SH","20260630","600519.SH","N/A"]
+	]}}`
+	store := &recordingSupplyChainStore{}
+	client := newSupplyChainTestClient(stubTushare(t, body, 200), store)
+
+	rows, err := client.FetchETFPortfolio(context.Background(), "510300.SH", "")
+	require.Error(t, err, "有行但全被跳过必须 fail-loud")
+	require.Nil(t, rows)
+	require.Contains(t, err.Error(), "全部被跳过")
+	require.Empty(t, store.etf, "错误路径不许落库")
 }
 
 // TestFetchSWIndustryClassify_PropagatesCallError HTTP 层与信封层失败同样传播。

@@ -103,10 +103,21 @@ func (c *TushareClient) FetchSWIndustryMembers(ctx context.Context, indexCode st
 		return nil, err
 	}
 
-	edges, err := normalizeSWIndustryMembers(resp, indexCode, SupplyChainSourceTushare, time.Now().UTC())
+	edges, filtered, err := normalizeSWIndustryMembers(resp, indexCode, SupplyChainSourceTushare, time.Now().UTC())
 	if err != nil {
 		return nil, apperrors.Wrap(err, apperrors.ErrCodeDataQuality,
 			"index_member 响应形状不符合契约", "data.FetchSWIndustryMembers")
+	}
+	// P2-2-R3 R1（口径已拍板 fail-loud）· 响应**有行**却一行都没入边表 ⇒ 拒绝
+	// 以「导入 0 行」伪装成功：口径①后「全部段 out_date 非空（被过滤）」与
+	// 「上游返回 0 行」同形不可分，上游 out_date 空值形态变故（填 "0"/"-"/
+	// "00000000"）会让当前成员被全判历史段 → 静默 0 行。闸门口径与宏观层
+	// macroAllSkippedError 统一。
+	if len(resp.Data.Items) > 0 && len(edges) == 0 {
+		return nil, apperrors.New(apperrors.ErrCodeDataQuality, fmt.Sprintf(
+			"申万行业 %s：index_member 响应返回 %d 行但全部被过滤（其中 %d 行为历史出表段 out_date 非空）——"+
+				"若确为全部出表属上游数据形态判断，需人工确认；拒绝以「导入 0 行」伪装成功",
+			indexCode, len(resp.Data.Items), filtered))
 	}
 	if len(edges) == 0 {
 		return nil, nil
@@ -148,6 +159,13 @@ func (c *TushareClient) FetchETFPortfolio(ctx context.Context, etfCode, period s
 		return nil, apperrors.Wrap(err, apperrors.ErrCodeDataQuality,
 			"fund_portfolio 响应形状不符合契约（缺 symbol 列）", "data.FetchETFPortfolio")
 	}
+	// P2-2-R3 R1 同款闸门（口径统一）：响应有行却一行都没入表 ⇒ 上游变故
+	// （symbol/obs_date 缺失、weight 不可解析），拒绝以「导入 0 行」伪装成功。
+	if len(resp.Data.Items) > 0 && len(rows) == 0 {
+		return nil, apperrors.New(apperrors.ErrCodeDataQuality, fmt.Sprintf(
+			"ETF %s：fund_portfolio 响应返回 %d 行但全部被跳过（缺 symbol / 缺 obs_date / weight 不可解析）——拒绝以「导入 0 行」伪装成功",
+			etfCode, len(resp.Data.Items)))
+	}
 	if len(rows) == 0 {
 		return nil, nil
 	}
@@ -185,14 +203,6 @@ func tushareCell(item []any, idx int) string {
 		return ""
 	}
 	return fieldToStr(item[idx])
-}
-
-// tushareCellFloat 取 item 在列 idx 的值，转 float64。
-func tushareCellFloat(item []any, idx int) float64 {
-	if idx < 0 || idx >= len(item) || item[idx] == nil {
-		return 0
-	}
-	return fieldToFloat(item[idx])
 }
 
 // parseSWLevel 把申万层级字段归一为整数：接受 "L1"/"l1"/"1"。
@@ -282,18 +292,22 @@ func markSWIndustryLeaves(nodes []domain.SWIndustryNode) {
 // out_date 列缺失 = fail-loud：请求固定含 out_date（FetchSWIndustryMembers），
 // 缺列意味着当前/历史无法判定，静默按空处理会悄然回退到「历史混入」的
 // 旧行为——拒绝（与缺 con_code 列同处理）。
-func normalizeSWIndustryMembers(resp *TushareResponse, indexCode, source string, asOf time.Time) ([]domain.SupplyChainEdge, error) {
+// 返回值第二项是**因 out_date 非空被过滤的历史段行数**（P2-2-R3 R1）——调用方
+// 据此在「响应有行却一行都没入边表」时 fail-loud（口径与宏观层 macroAllSkippedError
+// 统一），而不是静默成功。
+func normalizeSWIndustryMembers(resp *TushareResponse, indexCode, source string, asOf time.Time) ([]domain.SupplyChainEdge, int, error) {
 	iIndex := tushareColumnIndex(resp, "index_code")
 	iCon := tushareColumnIndex(resp, "con_code", "ts_code")
 	iOut := tushareColumnIndex(resp, "out_date")
 	if iCon < 0 {
-		return nil, fmt.Errorf("index_member 响应缺 con_code 列（实际 fields=%v）", resp.Data.Fields)
+		return nil, 0, fmt.Errorf("index_member 响应缺 con_code 列（实际 fields=%v）", resp.Data.Fields)
 	}
 	if iOut < 0 {
-		return nil, fmt.Errorf("index_member 响应缺 out_date 列（实际 fields=%v）——无法判定当前/历史成分，拒绝静默全保留", resp.Data.Fields)
+		return nil, 0, fmt.Errorf("index_member 响应缺 out_date 列（实际 fields=%v）——无法判定当前/历史成分，拒绝静默全保留", resp.Data.Fields)
 	}
 
 	var edges []domain.SupplyChainEdge
+	filtered := 0
 	for _, item := range resp.Data.Items {
 		con := strings.TrimSpace(tushareCell(item, iCon))
 		if con == "" {
@@ -303,6 +317,7 @@ func normalizeSWIndustryMembers(resp *TushareResponse, indexCode, source string,
 		// 历史段，过滤。唯一键按成分股折叠，历史段混入会让 K60 消费方
 		// 按当前成分拿到陈旧成员（P2-2-R1 审查实测 56/160 已出表）。
 		if strings.TrimSpace(tushareCell(item, iOut)) != "" {
+			filtered++
 			continue
 		}
 		down := strings.TrimSpace(tushareCell(item, iIndex))
@@ -317,12 +332,14 @@ func normalizeSWIndustryMembers(resp *TushareResponse, indexCode, source string,
 			AsOf:       asOf,
 		})
 	}
-	return edges, nil
+	return edges, filtered, nil
 }
 
 // normalizeETFPortfolio 把 fund_portfolio 响应转为 ETF 成分行。
 // obs_date 取 end_date（报告期），缺失退化为 ann_date；weight 取
-// stk_mkv_ratio。缺 obs_date 或 symbol 的行跳过（PIT 身份不完整）。
+// stk_mkv_ratio。缺 obs_date 或 symbol 的行跳过（PIT 身份不完整）；
+// weight 列存在但该行为空/不可解析/非有限时同样跳过（内容不完整，不编 0，
+// P2-2-R3 R2 专项确认，口径与 P2-1-R3 R1 对齐）。
 func normalizeETFPortfolio(resp *TushareResponse, etfCode, source string, asOf time.Time) ([]domain.ETFConstituent, error) {
 	iTsCode := tushareColumnIndex(resp, "ts_code")
 	iSymbol := tushareColumnIndex(resp, "symbol", "con_code")
@@ -350,10 +367,26 @@ func normalizeETFPortfolio(resp *TushareResponse, etfCode, source string, asOf t
 		if code == "" {
 			code = etfCode
 		}
+		// P2-2-R3 R2 专项确认（口径与 P2-1-R3 R1 对齐）：weight 列存在时，该行
+		// 为空 **或** 有值但不可解析/非有限 → 视为「内容不完整」跳过。与本函数
+		// 对 obs_date 的「PIT 身份不完整就跳过」同源，也避免把读不到的权重编成
+		// 0（缺失值折 0 等于编数据——P2-10 教训）。列整体缺失（iRatio<0）时该
+		// 响应变体没有权重字段，无从判定，weight 记 0。
+		weight := 0.0
+		if iRatio >= 0 {
+			if iRatio >= len(item) || item[iRatio] == nil {
+				continue
+			}
+			w, ok := tushareFloatOK(item[iRatio])
+			if !ok {
+				continue
+			}
+			weight = w
+		}
 		rows = append(rows, domain.ETFConstituent{
 			ETFCode: code,
 			Symbol:  symbol,
-			Weight:  tushareCellFloat(item, iRatio),
+			Weight:  weight,
 			ObsDate: obs,
 			Source:  source,
 			AsOf:    asOf,
