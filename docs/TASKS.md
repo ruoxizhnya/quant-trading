@@ -552,6 +552,36 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 > - **测试与提交**：新增 2 用例（历史段过滤 / 缺 out_date 列拒绝）+ 更新 1 用例（`FallsBackToRequestedIndex` body 补 out_date 列，测试意图不变）；全量 `go test ./...` **68 包 ok / 0 FAIL**。R2 commit（`fix(data): …`，`docs/SPEC.md` + 本台账同 commit）。
 > - **遗留**：口径②（PIT 全历史 + 有效期列，须先过 DDL 变更评审）按需另案；K60 消费侧以契约「当前成分快照，非 PIT」为准，若需 PIT 语义另案表达。
 
+### P2-1-R3 · 宏观层复检发现（2 项，2026-10-13 自审立单）
+
+> 来源：2026-10-13 对 P2 数据线 4 commit（`69889f4` / `eb689ab` / `b845f10` / `ffb7388`）的结构化复检（对照 code-review checklist 逐节过，含 API 真实性核查）。判定：**改动整体达标，无 🔴 阻塞缺陷**；发现 3 🟠 + 1 🟡，按线拆分落 **P2-1-R3**（宏观面）与 **P2-2-R3**（产业链面）。
+
+- **① 目标**：清掉宏观面复检两项——`fieldToFloat` 不可解析值静默折 0（R2 闸门的漏网面）、`interface{}` 用 `!=` 比较的 panic 隐患。
+- **② 上下文**：
+  - **R1（🟠 静默折 0，与自述纪律矛盾）**：`pkg/data/tushare.go` `fieldToFloat` 的 `string` 分支 `f, _ := strconv.ParseFloat(val, 64); return f`（err 丢弃）、`default` 分支 `return 0`。消费点 `pkg/data/macro.go`（`normalizeMacroSeries` 的 `Value: tushareCellFloat(item, iVal)`，L512 区）。闸门只拦 `item[iVal] == nil`（L504 区）——「**非 nil 但不可解析**」（上游 value 列从 JSON number 改字符串 `"N/A"` / `"13,42"` / `"--"`，或改非标量类型）**静默入库 0**。与同函数注释自述「缺失值折成 0 等于编数据（同 tushare.go 的 P2-10 教训）」**直接矛盾**；`SkippedNilValue` 计数亦不暴露（只计 nil）。当前 tushare 返回 JSON number，**未触发**。**同洞波及 P2-2**：`normalizeETFPortfolio` 的 `Weight: tushareCellFloat(item, iRatio)`（ETF 权重静默 0，交叉见 P2-2-R3）。
+  - **R2（🟠 interface 比较 panic 隐患）**：`specsCanShareResponse` 的 `equalMacroParams`（`macro.go` L346 区 `bv != av`）与 `sameWindows`（L368 区 `ov != v`）对 `interface{}` 用 `!=` —— 值若为非可比较类型（slice/map/func）将 runtime panic（"comparing uncomparable type"），绕过 apperrors 链路。已核实当前目录 Params 仅 1 处标量（`USDCNY_CLOSE` 的 `ts_code: "USDCNH.FXCM"`），共享组（cn_m / shibor_lpr）均无 Params，**当前不可达**；未来任一 spec 的 `Params` 引入非标量即触发，且触发点在导入路径。
+- **③ 要求**：
+  1. **R1**：normalize 层显式判定可解析性——新增 `tushareFloatOK(any) (float64, bool)`（或 `tushareCell` + `strconv.ParseFloat` 判 err）→ `SkippedBadValue` 计数分列，纳入 `macroAllSkippedError` 报错文案与 `logMacroSkipped` 字段；补测试（不可解析串 / bool / array 三种输入 → 计入跳过不进库；全坏 → fail-loud 红→还原）。**不改 `fieldToFloat` 共享签名**（波及行情链路，另案评估）。
+  2. **R2**：`equalMacroParams` / `sameWindows` 的 map value 比较改 `reflect.DeepEqual`；配一条「非标量 Params」目录自检用例（改前 panic → 改后不 panic 且能判不等）。
+- **④ 约束与非目标**：不动 `fieldToFloat` / `fieldToStr` 既有签名与共享行为（行情/链路消费方不受影响）；不动 `quant.macro_series` 唯一键与 `source`/`as_of` 溯源列；不新增 ServerDeps 字段；ETF weight 面由 P2-2-R3 处理（本单只做交叉引用）。
+- **⑤ 验收**：R1——三种不可解析输入的测试腿绿 + 全坏响应 fail-loud 腿红→还原；R2——非标量 Params 用例绿（改前 panic → 改后不 panic）+ 破坏腿；全量 `go test ./...` 绿。
+- **⑥ 边界**：core 仓一个 atomic commit（`fix(data): P2-1-R3 …`）；`pkg/data/macro.go` + `pkg/data/macro_test.go` + `pkg/data/tushare.go`（仅新增函数，不改既有）+ 台账。
+
+### P2-2-R3 · 产业链层复检发现（2 项，2026-10-13 自审立单）
+
+> 来源：同上（2026-10-13 P2 数据线 4 commit 复检，P2-1-R3 的姊妹单）。判定：产业链面 2 项（1 🟠 + 1 🟡）。
+
+- **① 目标**：清掉产业链面复检两项——口径①落地后的「全过滤静默」（无计数 / 无日志 / 无闸门）、口径①新行为的测试缺口。
+- **② 上下文**：
+  - **R1（🟠 全过滤静默）**：`FetchSWIndustryMembers`（`pkg/data/supply_chain.go` L111-113 区）`if len(edges) == 0 { return nil, nil }` —— 口径①后「响应有行但**全部段** out_date 非空（被过滤）」与「上游返回 0 行」**同形不可分**，两者都静默成功：无 raw 行数计数、无过滤计数、0 行路径无日志。上游 out_date 空值形态变故（填 `"0"` / `"-"` / `"00000000"`）→ 当前成员被全判历史段 → **静默 0 行入边表**，K60 消费方拿到空产业链而无信号。对比 P2-1-R2 R2 已在宏观层为同类风险立 fail-loud 闸门（`macroAllSkippedError`）——**同仓两条数据线纪律不一致**。
+  - **R2（🟡 测试缺口）**：口径①新增的过滤有混合形态用例（`TestNormalizeSWIndustryMembers_SkipsOutOfDateSegments`），但「**全部**段都是历史 → 0 条边」形态**无用例**；`FetchSWIndustryMembers` 的 `len(edges)==0 → nil,nil` 路径亦无测试。另：`normalizeETFPortfolio` 的 `Weight` 走 `tushareCellFloat` → `fieldToFloat` 同 **P2-1-R3 R1** 静默 0 洞（本单做专项确认：weight 不可解析 / 非有限时是否该拒绝该行）。
+- **③ 要求**：
+  1. **R1 先裁决口径（二选一，理由写收口记录）**：① **fail-loud**（`ErrCodeDataQuality`，文案对齐 `macroAllSkippedError`，注明「若确为全部出表属上游数据形态判断，需人工确认」）——推荐（与宏观层纪律统一，防静默错误）；② Warn + 计数（保守，0 行仍返回 nil）。落地：`normalizeSWIndustryMembers` 返回过滤计数（raw 行数 `len(resp.Data.Items)` 调用方已可得），`FetchSWIndustryMembers` 增闸门；「raw == 0」保持 `nil, nil`（真真空合法）。
+  2. **R2**：补 `TestNormalizeSWIndustryMembers_AllSegmentsOutOfDate`（全历史段 → 0 条边）+（若 R1 选 fail-loud）`TestFetchSWIndustryMembers_FailsLoudWhenAllFiltered`；`normalizeETFPortfolio` weight 不可解析 / 非有限的处置确认（口径与 P2-1-R3 R1 对齐）。
+- **④ 约束与非目标**：不动 `sw_industry_tree` / `industry_vitality` / `etf_constituent` 三表；不动口径①「仅当前成员」语义本身（本单只补闸门 / 计数 / 测试）；不改 P2-2-R2 收口记录的事实部分（只可加交叉引用）。
+- **⑤ 验收**：R1——闸门 / 告警测试腿红→还原绿 + 真库重导不受影响（`801010.SI` 仍 104 行）；R2——新用例绿；全量 `go test ./...` 绿。
+- **⑥ 边界**：core 仓一个 atomic commit（`fix(data): P2-2-R3 …`）；`pkg/data/supply_chain.go` + 其测试 + 台账。
+
 ---
 
 ## 六、K0 契约审查发现（2026-10-08）
