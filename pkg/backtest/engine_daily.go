@@ -249,6 +249,7 @@ func (e *Engine) processSignalsAndExecuteTrades(
 	regime *domain.MarketRegime,
 	date time.Time,
 	algo *execalgo.Dispatcher,
+	execAlgoDiag *execAlgoRunDiag,
 	logger zerolog.Logger,
 ) {
 	if len(signals) == 0 {
@@ -270,7 +271,7 @@ func (e *Engine) processSignalsAndExecuteTrades(
 	positionSizes, err := e.calculatePositionsBatch(ctx, validSignals, portfolio, regime, pricesCache, marketDataCache)
 	if err != nil {
 		logger.Warn().Err(err).Msg("Batch position sizing failed, falling back to per-signal")
-		e.processSignalsFallback(ctx, state, validSignals, marketDataCache, pricesCache, regime, date, algo, logger)
+		e.processSignalsFallback(ctx, state, validSignals, marketDataCache, pricesCache, regime, date, algo, execAlgoDiag, logger)
 		return
 	}
 
@@ -331,7 +332,7 @@ func (e *Engine) processSignalsAndExecuteTrades(
 		}
 
 		if effectiveTarget > 0 {
-			e.executeSignalTrade(ctx, state, algo, signal, effectiveTarget, pricesCache, date, execOpts, tp, logger)
+			e.executeSignalTrade(ctx, state, algo, execAlgoDiag, signal, effectiveTarget, pricesCache, date, execOpts, tp, logger)
 		}
 	}
 }
@@ -345,6 +346,7 @@ func (e *Engine) processSignalsFallback(
 	regime *domain.MarketRegime,
 	date time.Time,
 	algo *execalgo.Dispatcher,
+	execAlgoDiag *execAlgoRunDiag,
 	logger zerolog.Logger,
 ) {
 	for _, signal := range signals {
@@ -390,7 +392,7 @@ func (e *Engine) processSignalsFallback(
 		}
 
 		if effectiveTarget > 0 {
-			e.executeSignalTrade(ctx, state, algo, signal, effectiveTarget, pricesCache, date, execOpts, tp, logger)
+			e.executeSignalTrade(ctx, state, algo, execAlgoDiag, signal, effectiveTarget, pricesCache, date, execOpts, tp, logger)
 		}
 	}
 }
@@ -501,6 +503,7 @@ func (e *Engine) executeSignalTrade(
 	ctx context.Context,
 	state *BacktestState,
 	algo *execalgo.Dispatcher,
+	execAlgoDiag *execAlgoRunDiag,
 	signal domain.Signal,
 	effectiveTarget float64,
 	pricesCache map[string]float64,
@@ -520,9 +523,15 @@ func (e *Engine) executeSignalTrade(
 	if algo != nil {
 		attached, err := attachExecAlgoSignal(ctx, algo, signal, effectiveTarget, state.ID, date)
 		if err != nil {
+			// K17-R1：挂载失败不再只是「记一条易被淹没的 Warn」——分类
+			// 计入运行诊断（会话结束挂进 result.InvalidReasons，run 判
+			// invalid），该信号被拒不下单。「单信号失败不中断整场」保留。
+			kind := execalgo.ClassifyAttachError(err)
+			execAlgoDiag.record(kind, execAlgoParentID(date, signal.Symbol, signal.Direction))
 			logger.Warn().Err(err).
 				Str("symbol", signal.Symbol).Str("exec_algo", signal.ExecAlgo).
-				Msg("Failed to attach exec-algo parent order, signal skipped")
+				Str("failure_kind", string(kind)).
+				Msg("Failed to attach exec-algo parent order — signal rejected and counted in run diagnostics")
 			tp.PendingQty = tp.TargetQty - tp.ActualQty
 			tp.LastUpdated = date
 			return

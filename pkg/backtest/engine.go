@@ -772,6 +772,8 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 	// 共享，父单运行态绝不能跨 run 串。零算法单时它是空转的，默认路径
 	// 数值零变化）。见 pkg/backtest/exec_algo.go。
 	algoDispatch := execalgo.NewDispatcher()
+	// K17-R1：挂载失败运行诊断（本 run 私有，与派发器同生命周期）。
+	execAlgoDiag := newExecAlgoRunDiag()
 
 	for i, date := range tradingDays {
 		select {
@@ -861,7 +863,7 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 			e.signalObserver(date, signals)
 		}
 
-		e.processSignalsAndExecuteTrades(ctx, state, signals, marketDataCache, pricesCache, regime, date, algoDispatch, logger)
+		e.processSignalsAndExecuteTrades(ctx, state, signals, marketDataCache, pricesCache, regime, date, algoDispatch, execAlgoDiag, logger)
 
 		// K17：exec-algo 到点子单送撮合（在信号处理之后：新挂父单的首片
 		// SubmitAt = 信号当日，当日到点即发）。无活跃父单时零开销返回。
@@ -920,6 +922,13 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 	// 所以这里取地址即可 —— 见 domain.BacktestResult.UniverseMaxSize 注记。
 	result.UniverseMaxSize = &maxUniverseSize
 	result.InvalidReasons = InvalidReasonCodes(CheckValidity(&result))
+
+	// K17-R1：exec-algo 挂载失败 —— 信号被拒不是「忽略」。四类失败已在
+	// 日循环里分类计数，这里把计数汇总进日志、并把两条稳定 Code 挂进
+	// **既有** invalid_reasons 通道（不新增 ResultSpec 字段），run 状态
+	// 随之为 invalid。两条 Code 见 contracts/validity.go。
+	result.InvalidReasons = append(result.InvalidReasons, execAlgoDiag.invalidReasonCodes()...)
+	execAlgoDiag.logSummary(logger)
 
 	if len(result.InvalidReasons) > 0 {
 		// 无效运行：不再无条件报「Backtest completed」。原因如实带出，

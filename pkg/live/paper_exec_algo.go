@@ -77,7 +77,9 @@ func execAlgoParentID(date time.Time, symbol string, dir domain.Direction) strin
 
 // attachExecAlgo 把「指定了执行算法」的信号挂到派发器（拆单）。
 // 调用方已判定 sig.ExecAlgo != ""；挂载失败（未知算法 / 父单号重复 /
-// Schedule 非法输入）返回 error，由调用方记 Warn 并跳过该信号。
+// Σ子单量不等 / Schedule 非法）返回 error，由 Run **显式失败**整段回放
+// （K17-R1：rejected, not ignored——不再 warn+skip 静默吞掉信号；与
+// 回测侧同一判定，处置映射到 paper 侧唯一可见通道：Run 的 error）。
 func (s *PaperSession) attachExecAlgo(sig domain.Signal, d time.Time) error {
 	if sig.ExecAlgo == "" {
 		return fmt.Errorf("paper session: attachExecAlgo called without exec algo (caller bug)")

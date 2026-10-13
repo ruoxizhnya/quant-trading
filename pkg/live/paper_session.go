@@ -233,10 +233,16 @@ func (s *PaperSession) Run(ctx context.Context, symbols []string, start, end tim
 			// K17：指定了执行算法的信号 → 挂父单拆单（按 bar 到点逐片报送），
 			// 不当场整单报送。未指定 → executeSignal 原路径逐字节不变。
 			if sig.ExecAlgo != "" {
+				// K17-R1：挂载失败 fail-loud（与回测侧同一判定同一处置）。
+				// 四类失败全部是调用方静态错误——信号要求的执行方式没能
+				// 落地，交易将从成交流里消失。paper 无「结果/状态」通道，
+				// 唯一诚实的 fail-loud 是显式 error：不再 warn+skip（那
+				// 会训练人把「信号静默消失」读成「策略没信号」）。回测侧
+				// 的同族失败走既有 invalid_reasons（run 判 invalid），
+				// 分类判据同源：execalgo.ClassifyAttachError。
 				if err := s.attachExecAlgo(sig, d); err != nil {
-					s.logger.Warn().Err(err).
-						Str("date", key).Str("symbol", sig.Symbol).Str("exec_algo", sig.ExecAlgo).
-						Msg("paper session: exec-algo parent order skipped")
+					return nil, fmt.Errorf("paper session: exec-algo parent order rejected at %s (%s, algo %q): %w",
+						key, sig.Symbol, sig.ExecAlgo, err)
 				}
 				continue
 			}

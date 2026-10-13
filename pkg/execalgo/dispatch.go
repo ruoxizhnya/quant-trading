@@ -46,10 +46,20 @@
 // 被取消父单**不再进 Unfinished()** —— 故不会在会话结束被记第二遍
 // 「CANCELLED」告警；取消这一事件本身由调用方带 cancel-reason 记日志
 // （区分「窗口中段取消」与「会话结束撤销」两种判据）。
+//
+// ─── 挂载失败的口径统一（K17-R1）────────────────────────────────────
+//
+// Attach 的 fail-loud 失败按成因分四类（全部为调用方**静态错误**，
+// TASKS.md K17-R1 ②）。两条下单主路径（回测 / paper）必须对同一失败给出
+// 同一判定与同一处置——分类器在本包**单点实现**（ClassifyAttachError），
+// 调用方不得对 error 文本做字符串匹配（各自匹配必然漂移成两套口径，
+// 那正是本工单要治的病）。算法名的静态判据（IsKnownStyle）供两条路径
+// 在**信号校验期**先行拦截，不等构造算法实例才发现。
 package execalgo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -58,6 +68,72 @@ import (
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 )
+
+// ─── K17-R1：受支持算法名与挂载失败分类（单点真相）─────────────────
+
+// 受支持的执行算法名（AttachSpec.Style 的全部合法取值）。
+const (
+	StyleTWAP = "twap"
+	StyleVWAP = "vwap"
+)
+
+// IsKnownStyle 是算法名的**静态判据**：不构造算法实例即可判定 style 是否
+// 受支持。两条下单主路径在信号校验期用它拦下拼错的算法名（对齐 K9
+// 「rejected, not ignored」）——误配置在离信号最近处被点名，而不是留到
+// 挂载期甚至更晚。
+func IsKnownStyle(style string) bool {
+	return style == StyleTWAP || style == StyleVWAP
+}
+
+// 挂载失败的四类 sentinel（K17-R1）。调用方用 errors.Is 分支处置，
+// 禁止匹配 error 文本。
+var (
+	// ErrUnknownAlgo：Style 不是受支持算法名（静态误配置，如拼错 "twp"）。
+	ErrUnknownAlgo = errors.New("execalgo: unknown exec algo")
+	// ErrDuplicateParent：同一 ParentID 重复挂载（会话内父单号必须唯一——
+	// 一个算法实例只服务一个父单，静默覆盖会残留一份永不上报的旧计划）。
+	ErrDuplicateParent = errors.New("execalgo: duplicate parent order")
+	// ErrQtySumMismatch：Σ 子单计划量 != 父单量（allocateQty 保证的复核，
+	// 纵深防御分支——公开 API 不可达）。
+	ErrQtySumMismatch = errors.New("execalgo: plan qty sum mismatch")
+	// ErrInvalidSchedule：Schedule 判父单不可排程（Qty<=0 / 窗口非法等）。
+	ErrInvalidSchedule = errors.New("execalgo: invalid schedule")
+)
+
+// AttachFailureKind 是挂载失败的分类（K17-R1 口径统一）。字符串值同时
+// 用作运行诊断的计数键与日志字段——「结果可见」的锚点。
+type AttachFailureKind string
+
+const (
+	AttachFailureUnknownStyle    AttachFailureKind = "unknown_style"
+	AttachFailureDuplicateParent AttachFailureKind = "duplicate_parent"
+	AttachFailureQtySumMismatch  AttachFailureKind = "qty_sum_mismatch"
+	AttachFailureInvalidSchedule AttachFailureKind = "schedule_invalid"
+	// AttachFailureOther 是四类之外的挂载失败（纵深防御分支：空父单号 /
+	// 空计划 / 子单号撞车）。正常接线不可达；出现即接线规则被破坏，
+	// 诊断里如实计入，不静默。
+	AttachFailureOther AttachFailureKind = "other"
+)
+
+// ClassifyAttachError 把 Attach 返回的 error 分类为已知类别；err == nil
+// 返回空串（调用方只在 err != nil 时调用）。分类在 execalgo 单点实现，
+// 两条下单主路径共用同一判定（K17-R1 要求 3「同一判定同一处置」）。
+func ClassifyAttachError(err error) AttachFailureKind {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, ErrUnknownAlgo):
+		return AttachFailureUnknownStyle
+	case errors.Is(err, ErrDuplicateParent):
+		return AttachFailureDuplicateParent
+	case errors.Is(err, ErrQtySumMismatch):
+		return AttachFailureQtySumMismatch
+	case errors.Is(err, ErrInvalidSchedule):
+		return AttachFailureInvalidSchedule
+	default:
+		return AttachFailureOther
+	}
+}
 
 // AttachSpec 是「把一个父单挂到 Dispatcher」所需的全部参数。
 //
@@ -170,12 +246,14 @@ func ResolveExecWindow(start time.Time, slices int, profile []float64) (n int, e
 
 // Attach 挂载一个父单：构造算法实例 → Schedule → 登记，返回子单计划。
 //
-// fail-loud 情形（一律 error，不静默）：
-//   - 空 ParentID / 未知 Style / Schedule 非法输入（Qty<=0、窗口非法等）；
-//   - 同一 ParentID 重复挂载（会话内父单号必须唯一）；
-//   - Σ 子单计划量 != 父单量（allocateQty 保证的复核）；
+// fail-loud 情形（一律 error，不静默；sentinel 见文件头 K17-R1 一节，
+// 调用方用 errors.Is 分类，不匹配文本）：
+//   - 空 ParentID / 未知 Style（ErrUnknownAlgo）/ Schedule 非法输入
+//     （Qty<=0、窗口非法等，ErrInvalidSchedule）；
+//   - 同一 ParentID 重复挂载（ErrDuplicateParent，会话内父单号必须唯一）；
+//   - Σ 子单计划量 != 父单量（ErrQtySumMismatch，allocateQty 保证的复核）；
 //   - 子单号在会话内撞车（childOrderID 含父单号，正常不会发生——
-//     发生了说明父单号派生规则被破坏）。
+//     发生了说明父单号派生规则被破坏；无专属 sentinel，归 Other）。
 func (d *Dispatcher) Attach(ctx context.Context, spec AttachSpec) ([]ChildOrder, error) {
 	if spec.ParentID == "" {
 		return nil, fmt.Errorf("execalgo: attach requires non-empty parent id")
@@ -183,12 +261,12 @@ func (d *Dispatcher) Attach(ctx context.Context, spec AttachSpec) ([]ChildOrder,
 
 	var algo ExecAlgorithm
 	switch spec.Style {
-	case "twap":
+	case StyleTWAP:
 		algo = NewTWAP(spec.Slices)
-	case "vwap":
+	case StyleVWAP:
 		algo = NewVWAP(spec.Slices, spec.Profile)
 	default:
-		return nil, fmt.Errorf("execalgo: unknown exec algo %q for parent %s (want twap|vwap)", spec.Style, spec.ParentID)
+		return nil, fmt.Errorf("%w: %q for parent %s (want %s|%s)", ErrUnknownAlgo, spec.Style, spec.ParentID, StyleTWAP, StyleVWAP)
 	}
 	due, ok := algo.(dueSource)
 	if !ok {
@@ -209,7 +287,9 @@ func (d *Dispatcher) Attach(ctx context.Context, spec AttachSpec) ([]ChildOrder,
 	}
 	plan, err := algo.Schedule(ctx, parent)
 	if err != nil {
-		return nil, fmt.Errorf("execalgo: schedule parent %s: %w", spec.ParentID, err)
+		// Schedule 的不可排程判定（Qty<=0 / 窗口非法）归 ErrInvalidSchedule；
+		// 双 %w 保留原始 error，errors.Is 对两者都成立。
+		return nil, fmt.Errorf("%w: schedule parent %s: %w", ErrInvalidSchedule, spec.ParentID, err)
 	}
 	if len(plan) == 0 {
 		return nil, fmt.Errorf("execalgo: parent %s produced empty plan", spec.ParentID)
@@ -227,7 +307,7 @@ func (d *Dispatcher) Attach(ctx context.Context, spec AttachSpec) ([]ChildOrder,
 	defer d.mu.Unlock()
 
 	if _, dup := d.parents[spec.ParentID]; dup {
-		return nil, fmt.Errorf("execalgo: duplicate parent order %s (one algo instance serves one parent; re-attach would orphan the running plan)", spec.ParentID)
+		return nil, fmt.Errorf("%w: parent %s (one algo instance serves one parent; re-attach would orphan the running plan)", ErrDuplicateParent, spec.ParentID)
 	}
 	for i := range plan {
 		if _, clash := d.childIdx[plan[i].OrderID]; clash {

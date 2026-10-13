@@ -55,10 +55,12 @@ package backtest
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/rs/zerolog"
 
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/execalgo"
 )
@@ -76,8 +78,16 @@ func execAlgoParentID(date time.Time, symbol string, dir domain.Direction) strin
 // attachExecAlgoSignal 把「指定了执行算法」的信号挂到派发器（拆单），
 // 返回是否已按算法路径处理。true = 调用方**不得**再整单直下。
 //
-// 挂载失败（未知算法 / 父单号重复 / Schedule 非法输入）返回 error，
-// 由调用方记 Warn 并跳过该信号——与既有「单信号失败不中断整场」一致。
+// 挂载失败返回 error，由调用方分类记入运行诊断（execAlgoRunDiag）并
+// 拒绝该信号——run 不中断（K17-R1 要求 2「单信号失败不中断整场」），
+// 但失败计数在会话结束挂进结果（见 engine.go runBacktestInternal）。
+//
+// K17-R1 要求 1（形态裁决）：未知算法名是**静态误配置**，在信号校验期
+// 用 IsKnownStyle 直接拒绝，不等构造算法实例才发现。工单给出的两种形态
+// 里选「该 run 走 invalid + reason code」、不选「直接 fail 该信号」——
+// 后者只是把 Warn 换个说法，跑完照样没人知道少了交易；invalid 状态经
+// ResponseFromState / 报告 / 对比全链路透传（OBS-01 读路径），误配置对
+// 调用方与自动化层都可见，且与 K9「rejected, not ignored」同口径。
 func attachExecAlgoSignal(
 	ctx context.Context,
 	d *execalgo.Dispatcher,
@@ -88,6 +98,12 @@ func attachExecAlgoSignal(
 ) (bool, error) {
 	if signal.ExecAlgo == "" {
 		return false, nil
+	}
+	if !execalgo.IsKnownStyle(signal.ExecAlgo) {
+		return false, fmt.Errorf("exec-algo: %w: signal requests %q for %s on %s (want %s|%s)",
+			execalgo.ErrUnknownAlgo, signal.ExecAlgo, signal.Symbol,
+			execAlgoParentID(date, signal.Symbol, signal.Direction),
+			execalgo.StyleTWAP, execalgo.StyleVWAP)
 	}
 	n, end := execalgo.ResolveExecWindow(date, signal.ExecSlices, signal.ExecProfile)
 	orderType := signal.OrderType
@@ -297,4 +313,86 @@ func cancelExecAlgoParentsForSymbol(
 			Float64("cancelled_qty", p.Total-p.Filled).
 			Msg("exec-algo: parent order cancelled mid-window — remaining child slices dropped (external position change; already-filled slices kept)")
 	}
+}
+
+// ─── K17-R1：挂载失败的运行诊断 ────────────────────────────────────
+//
+// execAlgoRunDiag 累计本 run 内 exec-algo 挂载失败的分类计数（每类记
+// 首个样例 parentID，供日志点名定位）。四类失败都意味着「信号被拒、
+// 交易从结果里消失」——「单信号失败不中断整场」的既有约定保留，但
+// 结束时由 runBacktestInternal 把计数汇总进日志、并把对应稳定 Code 挂
+// 进 result.InvalidReasons（既有 invalid_reasons 通道，不新增字段）：
+// 禁止「跑完没人知道少了交易」。
+type execAlgoRunDiag struct {
+	fails   map[execalgo.AttachFailureKind]int
+	samples map[execalgo.AttachFailureKind]string
+}
+
+func newExecAlgoRunDiag() *execAlgoRunDiag {
+	return &execAlgoRunDiag{
+		fails:   make(map[execalgo.AttachFailureKind]int),
+		samples: make(map[execalgo.AttachFailureKind]string),
+	}
+}
+
+// record 记一次挂载失败。每类保留首个样例（诊断点名第一个现场）。
+func (dg *execAlgoRunDiag) record(kind execalgo.AttachFailureKind, parentID string) {
+	if dg.fails == nil { // 零值可用
+		dg.fails = make(map[execalgo.AttachFailureKind]int)
+		dg.samples = make(map[execalgo.AttachFailureKind]string)
+	}
+	dg.fails[kind]++
+	if _, ok := dg.samples[kind]; !ok {
+		dg.samples[kind] = parentID
+	}
+}
+
+// empty 报告本 run 是否零挂载失败。
+func (dg *execAlgoRunDiag) empty() bool {
+	return dg == nil || len(dg.fails) == 0
+}
+
+// invalidReasonCodes 把计数收敛为两条稳定 Code（contracts/validity.go）：
+//   - 未知算法名 → exec_algo_unknown_style（静态误配置，校验期拦下）；
+//   - 其余各类 → exec_algo_attach_failed（挂载期拦下）。
+//
+// 输出定序固定（unknown_style 在前），同一输入两次 run 逐字节一致。
+func (dg *execAlgoRunDiag) invalidReasonCodes() []string {
+	if dg.empty() {
+		return nil
+	}
+	var codes []string
+	if dg.fails[execalgo.AttachFailureUnknownStyle] > 0 {
+		codes = append(codes, contracts.InvalidExecAlgoUnknownStyle)
+	}
+	for kind, n := range dg.fails {
+		if kind != execalgo.AttachFailureUnknownStyle && n > 0 {
+			codes = append(codes, contracts.InvalidExecAlgoAttachFailed)
+			break
+		}
+	}
+	return codes
+}
+
+// logSummary 在会话结束（finalizeExecAlgo 之后）汇总挂载失败计数。
+// Error 级：挂载失败不是「可忽略的 Warn 噪音」，它是「交易消失」的现场
+// 记录——invalid 状态之外，这里是给排障者看的人类可读版。键序先排序，
+// 不让 map 遍历序进日志。
+func (dg *execAlgoRunDiag) logSummary(logger zerolog.Logger) {
+	if dg.empty() {
+		return
+	}
+	kinds := make([]string, 0, len(dg.fails))
+	total := 0
+	for kind, n := range dg.fails {
+		kinds = append(kinds, string(kind))
+		total += n
+	}
+	sort.Strings(kinds)
+	evt := logger.Error().Int("attach_failures_total", total)
+	for _, k := range kinds {
+		kind := execalgo.AttachFailureKind(k)
+		evt = evt.Int(k, dg.fails[kind]).Str(k+"_sample_parent", dg.samples[kind])
+	}
+	evt.Msg("exec-algo: parent order attach failures — signal trades dropped and counted in run diagnostics (result marked invalid; see invalid_reasons)")
 }

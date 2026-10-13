@@ -138,3 +138,18 @@ func resultMetrics(res *domain.BacktestResult) []metricEntry {
 		{"calmar_ratio", res.CalmarRatio},
 	}
 }
+
+// K17-R1：exec-algo 挂载失败的两类稳定 Code。
+//
+// 挂载失败 = 「信号显式要求的执行方式没能落地」——该信号的交易从结果里
+// 消失了。OBS-01 的同一逻辑：这样的 run 不算一次干净的观测，如实挂进
+// 既有 invalid_reasons 通道（**不新增 ResultSpec 字段**），run 状态随为
+// invalid。Code 是稳定标识（自动化层按 Code 判断），Detail 级信息走日志。
+const (
+	// InvalidExecAlgoUnknownStyle：信号显式指定的 exec_algo 不是受支持的
+	// 算法名（静态误配置，如拼错 "twp"）——信号校验期已拒绝、不下单。
+	InvalidExecAlgoUnknownStyle = "exec_algo_unknown_style"
+	// InvalidExecAlgoAttachFailed：exec-algo 父单挂载失败（父单号重复 /
+	// Σ子单量不等 / Schedule 非法 / 其他），信号被拒、交易消失。
+	InvalidExecAlgoAttachFailed = "exec_algo_attach_failed"
+)
