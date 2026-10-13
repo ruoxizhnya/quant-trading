@@ -712,9 +712,9 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **③ 审查新发现并已修的静默陷阱**：旧 `NewSyncBus(tap)` 在 clk 为 nil 时兜底墙钟——回测装配漏注入 VirtualClock 时编译照过、运行照跑，但 `audit.message_log` 落的是真实世界时刻，两次回放无从比对，**BusTap 审计价值归零且全程不报错**。现改为构造期 panic（故障钉在离错误最近处），墙钟只能由 `NewLiveBus` 显式声明。
 - **已解决的架构模式（记录复用）**：`msgbus` ↔ `eventstore` 的 import 环（eventstore 必须 import msgbus 的 `Message`）用**消费方定义窄接口**绕开 —— `msgbus.Tap { Append(ctx, Message) error }`，`eventstore.EventStore` 结构化满足，并由 `var _ msgbus.Tap = (*eventstore.PGEventStore)(nil)` 钉住。这是 Go 惯用法，值得在其他跨模块依赖处复用（与 topics.go 落位修正是同一类问题）。
 
-**本条新登记的两条待办（本次不做，仅记录）**：
+**本条新登记的两条待办（已于 2026-10-13 收口，见各节 ⑦）**：
 
-#### K0-P2-3a · `Verify` 依赖内存计数器，实例重建即归零 ⬜
+#### K0-P2-3a · `Verify` 依赖内存计数器，实例重建即归零 ✅ 完成（2026-10-13，`b639270`）
 
 - **① 目标**：把 `Verify` 的「写入账」基准从进程内 `atomic.Int64` 换成库内计数。
 - **② 现状**：`PGEventStore.Verify` 用本实例成功 Append 的次数（`appended`）与库里 `count(*)` 对账。**实例重建（进程重启、断点续跑）后计数器归零**，而库里的行还在 ⇒ Verify 误报「落库 N 行 vs Append 0 次」，红灯是假的；假红灯会训练人忽略 Verify。
@@ -722,8 +722,9 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：不改 `audit.message_log` 的 DDL 与列名；不改 `Verify` 的方法签名。
 - **⑤ 验收**：构造 store → Append 5 条 → 丢弃实例 → 用同一 (publisher, run_id) 新建实例 → `Verify` 仍绿。
 - **⑥ 边界**：只改 Verify 的计数口径，不做哈希链/checksum、不做 id 连续性检查。
+- **⑦ 收口（2026-10-13，`b639270`）**：口径落为**基线+增量**（比 ③ 的「期望值对账」更简单且不需外部传期望值）：`baseline`（首次需要时捕获的库内计数，`ensureBaseline` 懒建立 + mutex 一次性）+ `appended`（本实例增量）== 当前库内计数。懒建立是因为构造期表可能尚不存在（测试先构造后 EnsureSchema，生产 kernel_wiring 在 Boot 前构造），捕获点必在本实例首条 INSERT 之前。验收 ⑤ 由 `TestVerifySurvivesInstanceRebuild` 落地（含重建后续写对账与「删行仍红」红灯腿）；破坏验证：口径改回 `== appended` → 验收 ⑤ 假红场景变红。约束守住（DDL/列名/Verify 签名未动）。**已知边界**（注释记档）：同 `(publisher, run_id)` 双实例并发写入会误红，属「一 run 一实例」用法之外的罕见场景，不为此加复杂度。
 
-#### K0-P2-3b · `pkg/msgbus/registry.go` 的 topicSet 与 `topics.go` 常量是两份真相 ⬜
+#### K0-P2-3b · `pkg/msgbus/registry.go` 的 topicSet 与 `topics.go` 常量是两份真相 ✅ 完成（2026-10-13，`9f6dfbc`）
 
 - **① 目标**：把注册表收敛为一处真相后删除 `registry.go`。
 - **② 现状**：`topics.go` 的 16 个常量是编译期符号，运行期拿不到「全体已注册 topic」集合，于是 `registry.go` 里又手工镜像了一份 `topicSet` map——**加常量忘了登记**是静默失效（新 topic 会被 Publish 拒掉，错误信息清楚但没人提前知道）。现状靠 `registry_internal_test.go` 与 `interfaces_compliance_test.go` 各引用一次全部常量来钉，属于测试兜底而非结构消除。
@@ -731,6 +732,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：topic 数量与取值不得变更（仍是 16 个、值同 K0 冻结）；`IsRegisteredTopic` / `RegisteredTopics` 的对外语义不变。
 - **⑤ 验收**：删除 `registry.go` 后 `go build ./...` 与 `pkg/msgbus` 全部测试仍绿，且「新增常量未登记」会编译失败（不再只是测试红）。
 - **⑥ 边界**：只做这份双真相收敛，不动 topic 取值与 `Publish/Subscribe` 的校验语义。
+- **⑦ 收口（2026-10-13，`9f6dfbc`）**：验收 ⑤ 以**声明即登记**落地，比原验收的「编译失败」更强——Go 里「常量声明了但忘登记进列表」无法成为编译错误（声明与列表是两个语法位点），故改为 `TopicX = topic("x.y")`：`topic()` 在包初始化期校验命名正则、查重、登记进 `registry` map，「新增 topic 未登记」**结构上不可能发生**。16 个 topic const 改 var（名与值不变，K0 冻结面由 `interfaces_compliance_test.go` 的 `frozenTopicValues` 继续钉值；var 的篡改风险由 `IsRegisteredTopic` 当场拒掉）；`IsRegisteredTopic`/`RegisteredTopics` 迁入 `topics.go` 基于 `registry` 实现，`registry.go` 删除。绕过 `topic()` 的违规写法（裸字符串/const）由 `topics_internal_test.go` 的 AST 护栏兜底。破坏验证：把 `TopicKernelShutdown` 改为裸字符串赋值 → AST 护栏 + 注册表护栏双红；还原后全量 `go test ./...` 绿。
 
 ### K1/K2 实现审查发现（2026-10-08，设计层审查）
 
