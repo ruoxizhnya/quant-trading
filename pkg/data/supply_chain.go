@@ -82,6 +82,10 @@ func (c *TushareClient) FetchSWIndustryClassify(ctx context.Context) ([]domain.S
 // FetchSWIndustryMembers 拉取一个申万行业的成分股（index_member）落库为
 // quant.supply_chain_edge（relation=industry_member）。
 //
+// **口径（P2-2-R2 裁决①）：当前成分快照，非 PIT。** 仅 out_date 为空的段
+// （当前在表成员）入边表，历史出表段在 normalize 层过滤——理由与处理细节
+// 见 normalizeSWIndustryMembers 注释。
+//
 // 成分关系入边表而非另建表：边表 upstream/downstream 的设计语义就是
 // 「symbol 或行业 code 的映射」（见 domain.SupplyChainEdge 注释），行业成分
 // 是同一形态的映射；唯一键 (upstream, downstream, relation) 天然隔离不同
@@ -102,7 +106,7 @@ func (c *TushareClient) FetchSWIndustryMembers(ctx context.Context, indexCode st
 	edges, err := normalizeSWIndustryMembers(resp, indexCode, SupplyChainSourceTushare, time.Now().UTC())
 	if err != nil {
 		return nil, apperrors.Wrap(err, apperrors.ErrCodeDataQuality,
-			"index_member 响应形状不符合契约（缺 con_code 列）", "data.FetchSWIndustryMembers")
+			"index_member 响应形状不符合契约", "data.FetchSWIndustryMembers")
 	}
 	if len(edges) == 0 {
 		return nil, nil
@@ -266,17 +270,39 @@ func markSWIndustryLeaves(nodes []domain.SWIndustryNode) {
 // normalizeSWIndustryMembers 把 index_member 响应转为成分边
 // （relation=industry_member，upstream=con_code，downstream=index_code）。
 // downstream 优先取响应里的 index_code 列，退化用请求参数 indexCode。
+//
+// **口径（P2-2-R2 裁决①）：仅保留 out_date 为空的段（当前在表成员）；
+// out_date 非空的历史出表段不入边表。** 边表唯一键 (upstream,downstream,
+// relation) 按成分股折叠多期记录；若历史段一并导入，已出表成员与当前成员
+// 同形态落库，K60 消费方按当前成分使用会引入陈旧成员（P2-2-R1 审查实测
+// 801010.SI 160 个唯一成分中 56 个已全部出表）。故本 relation 的语义定为
+// **「当前成分快照，非 PIT」**——需要历史成分为 PIT 序列时另案表达
+// （带有效期的表或新 relation），不在本边表折叠形态里表达。
+//
+// out_date 列缺失 = fail-loud：请求固定含 out_date（FetchSWIndustryMembers），
+// 缺列意味着当前/历史无法判定，静默按空处理会悄然回退到「历史混入」的
+// 旧行为——拒绝（与缺 con_code 列同处理）。
 func normalizeSWIndustryMembers(resp *TushareResponse, indexCode, source string, asOf time.Time) ([]domain.SupplyChainEdge, error) {
 	iIndex := tushareColumnIndex(resp, "index_code")
 	iCon := tushareColumnIndex(resp, "con_code", "ts_code")
+	iOut := tushareColumnIndex(resp, "out_date")
 	if iCon < 0 {
 		return nil, fmt.Errorf("index_member 响应缺 con_code 列（实际 fields=%v）", resp.Data.Fields)
+	}
+	if iOut < 0 {
+		return nil, fmt.Errorf("index_member 响应缺 out_date 列（实际 fields=%v）——无法判定当前/历史成分，拒绝静默全保留", resp.Data.Fields)
 	}
 
 	var edges []domain.SupplyChainEdge
 	for _, item := range resp.Data.Items {
 		con := strings.TrimSpace(tushareCell(item, iCon))
 		if con == "" {
+			continue
+		}
+		// P2-2-R2 裁决①：仅当前在表段入边表——out_date 非空 = 已出表
+		// 历史段，过滤。唯一键按成分股折叠，历史段混入会让 K60 消费方
+		// 按当前成分拿到陈旧成员（P2-2-R1 审查实测 56/160 已出表）。
+		if strings.TrimSpace(tushareCell(item, iOut)) != "" {
 			continue
 		}
 		down := strings.TrimSpace(tushareCell(item, iIndex))

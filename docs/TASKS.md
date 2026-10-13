@@ -528,7 +528,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 > - **R2（🟡 台账）**：§五 P2-2 行已打 ✅ + 补 P2-2 简短收口记录（同 `3ceb69d`）。
 > - **R3（🟡 真实喂数实测，2026-10-12，真库 `quant_trading` + 真 `TUSHARE_TOKEN` 逐接口真拉）**：`index_classify` **OK — 359 节点**（全量申万行业树，source=tushare）；`index_member`（801010.SI 一级行业）**OK — 归一化 184 条边 → 唯一键折叠 160 行**（同股多期 in/out_date 记录按 (upstream,downstream,relation) 收敛；折叠的 PIT 语义损失——历史/当前成员混同——由审查立单 **P2-2-R2** 清账）；`fund_portfolio`（510300.SH）**不可用 — tushare 40203「您没有接口(fund_portfolio)访问权限」**（token 权限/积分档位不足，对齐「stock_fundamentals 等空表属设计行为」口径，登记不阻塞）；seed CSV 导入 **OK — 5 行**（走生产导入面，BOM 修复真文件自证）。四表行数：`quant.sw_industry_tree` **359** / `quant.supply_chain_edge` **160** / `quant.industry_vitality` **5** / `quant.etf_constituent` **0**（唯一空表，40203 权限结论在案）。喂数后复跑全量：**67 ok / 1 FAIL**，唯一红为并行在途文件 `cmd/analysis/handlers_backtest_nautilus_test.go:77`（K13 线 `gin.SetMode` 违反守卫，非本任务文件、与喂数无关）——如实登记不洗绿，归属 K13 线自行处理。遗留：`fund_portfolio` 待 token 权限升档后按 R3 步骤补拉 ETF 成分，届时 `etf_constituent` 转 > 0（数据源升级事项，不属本收尾范围）。
 
-### P2-2-R2 · P2-2-R1 收尾审查发现（两件，2026-10-12 自审立单）
+### ✅ P2-2-R2 · P2-2-R1 收尾审查发现（两件，2026-10-12 自审立单，同日落地）
 
 > 来源：2026-10-12 对 P2-2-R1 两 commit（`3ceb69d`/`8deda87`）的代码审查（结构化审查 + 双验证者独立交叉验证 2/2 确认）。审查取证（实测）：raw tushare `index_member(801010.SI)` 184 行 / 160 唯一 con_code，其中 **56 个（35%）全部成分段 out_date 非空（已出表历史成员）**、104 个当前在表；`quant.sw_industry_tree` level 分布 **28/104/227 = 359**（SW 三级全在，收口记录「全量树」措辞复核成立）。
 
@@ -543,6 +543,14 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：不动 `sw_industry_tree` / `industry_vitality` / `etf_constituent` 三表；不做 K60 消费方改造（消费侧过滤另案）；不改 P2-2-R1 已收口记录的事实部分（只可加交叉引用）；R2 口径②的 DDL 变更不许混进 R1 的 commit。
 - **⑤ 验收**：R1——inline BOM 用例绿 + 破坏腿（删 TrimPrefix → 不依赖真文件的独立红）；R2——口径注释/文档与实现一致、真库重导行数符合所选口径、全量 `go test ./...` 绿。
 - **⑥ 边界**：R1 一个独立 commit（`test(data): …`）；R2 按裁决结果另起 commit（若选口径②，先过变更评审）。数据线工单，与内核线零交集。
+
+> **✅ 收口记录（2026-10-12，P2-2-R2 落地，两件全清）**：
+> - **R1（🟡 BOM 覆盖单点）**：`supply_chain_test.go` 新增 `TestImportIndustryVitalityCSV_InlineBOMHeader`——表头串以 `"\ufeff"` 开头 inline 构造、不依赖 testdata 真文件，与真文件腿互为独立覆盖；真文件腿「BOM 存在理由」断言保留不动。破坏腿：注释移除 `strings.TrimPrefix(h, "\ufeff")` → 只跑 inline 用例独立红（缺列 "industry_code"，实际表头首列带 U+FEFF）→ 还原绿；还原后 `pkg/data/supply_chain.go` 与 HEAD 零差异（`git diff --quiet` 通过）。commit `b845f10`（生产代码零改动）。
+> - **R2（🟠 成分边 PIT 语义）**：**裁决口径①「只导当前成员」**——理由：轻量（无 DDL/唯一键变更，立即可落地）、契约明示「当前成分快照，非 PIT」即消除 K60 误用面；口径②（补有效期保留全历史）涉边表 DDL 与唯一键语义变更，按「DDL 内联 postgres.go + 一致性测试」口径须**单独变更评审**，本单不做、按需另案。落地：`normalizeSWIndustryMembers` 仅保留 `out_date` 为空的段（当前在表），历史出表段过滤；`out_date` 列缺失 fail-loud（请求固定含该列，缺列 = 当前/历史不可判定，静默全保留会悄然回退旧行为——与缺 con_code 列同处理）；契约注释（`FetchSWIndustryMembers` / `normalizeSWIndustryMembers` 双 doc）+ `docs/SPEC.md` 四表登记段与导入段同步明示。
+> - **真库重导验证（口径①，真库 `quant_trading` + 真 `TUSHARE_TOKEN`）**：BEFORE 801010.SI 旧边 **160 行** → 清边重导 → AFTER **104 行**；raw 对账 184 行 / 唯一 con_code 160 / out_date 空行 104 / out_date 空唯一 104——与审查「56 个（35%）全段出表」结论精确一致；抽查全段出表历史成员 `000061.SZ` 库中 **0 行** ✅。
+> - **破坏腿（R2）**：注释移除过滤 `continue` → `TestNormalizeSWIndustryMembers_SkipsOutOfDateSegments` 红（5 条边、3 条历史段混入）→ 还原绿、无残留（BREAKLEG 清零）。
+> - **测试与提交**：新增 2 用例（历史段过滤 / 缺 out_date 列拒绝）+ 更新 1 用例（`FallsBackToRequestedIndex` body 补 out_date 列，测试意图不变）；全量 `go test ./...` **68 包 ok / 0 FAIL**。R2 commit（`fix(data): …`，`docs/SPEC.md` + 本台账同 commit）。
+> - **遗留**：口径②（PIT 全历史 + 有效期列，须先过 DDL 变更评审）按需另案；K60 消费侧以契约「当前成分快照，非 PIT」为准，若需 PIT 语义另案表达。
 
 ---
 

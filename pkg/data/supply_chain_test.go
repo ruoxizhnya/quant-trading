@@ -179,7 +179,7 @@ func TestNormalizeSWIndustryMembers_MapsToEdges(t *testing.T) {
 }
 
 func TestNormalizeSWIndustryMembers_FallsBackToRequestedIndex(t *testing.T) {
-	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["con_code"],"items":[["600519.SH"]]}}`)
+	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["con_code","out_date"],"items":[["600519.SH",""]]}}`)
 	edges, err := normalizeSWIndustryMembers(resp, "801012.SI", SupplyChainSourceTushare, time.Now().UTC())
 	require.NoError(t, err)
 	require.Len(t, edges, 1)
@@ -190,6 +190,35 @@ func TestNormalizeSWIndustryMembers_RejectsMissingConCode(t *testing.T) {
 	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["index_code","in_date"],"items":[["801012.SI","20140101"]]}}`)
 	_, err := normalizeSWIndustryMembers(resp, "801012.SI", SupplyChainSourceTushare, time.Now().UTC())
 	require.Error(t, err)
+}
+
+// TestNormalizeSWIndustryMembers_SkipsOutOfDateSegments 钉住 P2-2-R2 裁决①
+// 口径：仅 out_date 为空的段（当前在表）入边表；历史出表段过滤；同一
+// 成分股多期记录（先出后进）只留当前段。
+func TestNormalizeSWIndustryMembers_SkipsOutOfDateSegments(t *testing.T) {
+	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["index_code","con_code","in_date","out_date"],"items":[
+	["801010.SI","600519.SH","20140101",""],
+	["801010.SI","000998.SZ","20140101","20180630"],
+	["801010.SI","300498.SZ","20140101","20201231"],
+	["801010.SI","300498.SZ","20220101",""],
+	["801010.SI","601888.SH","20150101","20250630"]
+]}}`)
+	edges, err := normalizeSWIndustryMembers(resp, "801010.SI", SupplyChainSourceTushare, time.Now().UTC())
+	require.NoError(t, err)
+	require.Len(t, edges, 2, "仅 out_date 为空的段入边表：600519 当前段 + 300498 的 2022 再入段")
+
+	require.Equal(t, "600519.SH", edges[0].Upstream)
+	require.Equal(t, "300498.SZ", edges[1].Upstream, "多期记录只留当前段（2018 出表段被过滤）")
+	require.Equal(t, domain.RelationIndustryMember, edges[1].Relation)
+}
+
+// TestNormalizeSWIndustryMembers_RejectsMissingOutDate out_date 列缺失必须
+// fail-loud：当前/历史不可判定时静默全保留 = 悄然回退到「历史成员混入」旧行为。
+func TestNormalizeSWIndustryMembers_RejectsMissingOutDate(t *testing.T) {
+	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["index_code","con_code","in_date"],"items":[["801012.SI","600519.SH","20140101"]]}}`)
+	_, err := normalizeSWIndustryMembers(resp, "801012.SI", SupplyChainSourceTushare, time.Now().UTC())
+	require.Error(t, err, "缺 out_date 列 = 当前/历史不可判定，必须报错（不许静默全保留）")
+	require.Contains(t, err.Error(), "out_date")
 }
 
 // ── normalize：fund_portfolio ────────────────────────────────────────────

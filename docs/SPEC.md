@@ -867,11 +867,11 @@ SELECT create_hypertable('factor_cache', 'date');
 | 表 | 唯一键（幂等） | 用途 |
 |---|---|---|
 | `quant.sw_industry_tree` | `code` | 申万行业树（`parent_code` 一级行业为空串哨兵；`is_leaf` 由父子关系导入时推导） |
-| `quant.supply_chain_edge` | `upstream+downstream+relation` | 组件→整机 / 上下游映射；`relation=industry_member` 为申万行业成分（index_member） |
+| `quant.supply_chain_edge` | `upstream+downstream+relation` | 组件→整机 / 上下游映射；`relation=industry_member` 为申万行业成分（index_member）——**当前成分快照，非 PIT**：仅 `out_date` 为空的段（当前在表成员）入表，历史出表段导入时过滤（P2-2-R2 裁决①） |
 | `quant.industry_vitality` | `industry_code+metric+obs_date+source` | 行业景气指标（`obs_date` 为 DATE，PIT；唯一键含 source——不同来源各行其行） |
 | `quant.etf_constituent` | `etf_code+symbol+obs_date` | ETF 成分（`obs_date` 为报告期，PIT；`weight` 为占净值比例百分数） |
 
-**导入**（`pkg/data/supply_chain.go`，ETL 错误一律向上传播、幂等落库）：tushare `index_classify` → 行业树；`index_member` → 成分边；`fund_portfolio` → ETF 成分；行业景气指标首版为 seed CSV 导入器（无现成 API，`source` 取自 CSV 列，人工维护）。
+**导入**（`pkg/data/supply_chain.go`，ETL 错误一律向上传播、幂等落库）：tushare `index_classify` → 行业树；`index_member` → 成分边（仅 `out_date` 为空的当前在表段，历史出表段过滤，见上表注）；`fund_portfolio` → ETF 成分；行业景气指标首版为 seed CSV 导入器（无现成 API，`source` 取自 CSV 列，人工维护）。
 
 **只读查询 API**（`cmd/analysis/handlers_industry.go`，不设 RBAC；空结果为 200 + `[]`；非法参数 400 先于库访问；未接库 503）：
 
