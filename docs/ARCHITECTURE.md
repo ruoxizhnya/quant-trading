@@ -128,7 +128,7 @@ quant-trading/
 ├── web/              # Vue 3 前端——⚠️ 已拆仓至 quant-trading-ui（2026-10-09），本目录历史遗留
 ├── docs/             # 文档（SPEC/ADR/ODR/TASKS/migrations 镜像）
 ├── contracts/        # 内核模块契约（schema.sql 等）
-├── e2e/              # Playwright E2E（随前端拆仓，部分脱节——AUD-61）
+├── e2e/              # Playwright E2E 历史遗留（已拆仓，真相源在 quant-trading-ui/e2e；AUD-61 测试债工单亦迁至该仓 docs/TASKS.md）
 └── tools/            # 运维脚本（不被 CI 执行）
 ```
 
