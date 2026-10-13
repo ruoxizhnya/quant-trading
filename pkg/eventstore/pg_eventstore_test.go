@@ -593,6 +593,23 @@ func TestVerifySurvivesInstanceRebuild(t *testing.T) {
 	if !errors.Is(err, eventstore.ErrIntegrity) {
 		t.Errorf("Verify = %v, want errors.Is(err, ErrIntegrity)", err)
 	}
+
+	// Append-first 腿：第三个实例**先 Append、再 Verify**——生产真实路径
+	// （kernel_wiring 构造后直接跑 Publish→Append，Verify 在 Shutdown 前才调）
+	// 走的是这条入口。基线必须在 Append 的 INSERT 之前捕获：若有人把
+	// ensureBaseline 从 Append 路径删掉（只留 Verify 入口），本实例首条
+	// INSERT 会被算进基线，写入账从此少一——上面 rebuilt 的两腿都测不到
+	// （它们的基线都经 Verify 入口捕获），必须单独钉住。
+	fresh, err := eventstore.NewPGEventStore(pool, testPublisher, runID)
+	if err != nil {
+		t.Fatalf("第三个实例构造失败: %v", err)
+	}
+	if err := fresh.Append(ctx, msg(msgbus.TopicDataBar, testTS(9), map[string]int{"i": 9})); err != nil {
+		t.Fatalf("Append-first 腿 Append 失败: %v", err)
+	}
+	if err := fresh.Verify(); err != nil {
+		t.Errorf("Append-first 腿 Verify 失败（基线没在 INSERT 前捕获，写入账少一）: %v", err)
+	}
 }
 
 // ─── 构造函数边界 ──────────────────────────────────────────────────

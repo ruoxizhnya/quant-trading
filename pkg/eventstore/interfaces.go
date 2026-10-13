@@ -346,8 +346,8 @@ func (s *PGEventStore) Verify() error {
 		return fmt.Errorf("eventstore: Verify 计数失败: %w", err)
 	}
 	if got != want {
-		return fmt.Errorf("eventstore: 本实例写入账不一致——落库 %d 行，成功 Append %d 次: %w",
-			got, want, ErrIntegrity)
+		return fmt.Errorf("eventstore: 本实例写入账不一致——落库 %d 行，期望 基线 %d + 本实例 Append %d 条: %w",
+			got, s.baseline, s.appended.Load(), ErrIntegrity)
 	}
 	if err := s.pool.QueryRow(ctx, verifyCorruptSQL, s.publisher, textOrNull(s.runID)).Scan(&corrupt); err != nil {
 		return fmt.Errorf("eventstore: Verify 损坏行检查失败: %w", err)
