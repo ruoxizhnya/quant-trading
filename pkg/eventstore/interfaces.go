@@ -28,7 +28,7 @@
 // **不得** import 本包——那会是导入环。后果：SyncBus 的构造参数类型不能写成
 // eventstore.EventStore，而由消费方 msgbus 自己定义一个窄接口（msgbus.Tap，
 // 只有一个 Append(ctx, Message) error）。eventstore.EventStore 天然满足它
-//（Go 结构化类型），由 pkg/msgbus 测试里的静态断言钉住。
+// （Go 结构化类型），由 pkg/msgbus 测试里的静态断言钉住。
 package eventstore
 
 import (
@@ -36,6 +36,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -156,6 +157,30 @@ type PGEventStore struct {
 	// 的对账基准。用 atomic 而不是普通 int：契约只保证 Publish 的**分发**是
 	// 同步的，没要求整个进程单线程，Append 完全可能被多个 goroutine 调用。
 	appended atomic.Int64
+	// baseline 是本实例建立时库里已有的行数（K0-P2-3a）。
+	//
+	// 为什么需要它：Verify 的对账口径原先是「库内行数 == 本实例 appended」，
+	// appended 是**进程内**计数器——进程重启 / 断点续跑后新实例的计数器归零，
+	// 而库里旧行还在，于是 Verify 恒红。假红灯是会训练人忽略 Verify 的，比
+	// 没有 Verify 更糟。改成「baseline + appended == 当前库内行数」后：
+	//
+	//	实例重建：新实例 baseline=旧行数、appended=0，对账绿（验收 ⑤）；
+	//	真实丢行（手工 DELETE）：库内 < baseline+appended，仍然红
+	//	（TestVerifyDetectsMissingRow 保住）。
+	//
+	// 基线是**懒建立**的（ensureBaseline）：构造期表可能尚不存在
+	// （newTestStore 先构造后 EnsureSchema；生产 kernel_wiring 也在 Boot 之前
+	// 构造），构造期查库只会拿到「relation does not exist」。首次 Append 在
+	// INSERT 之前捕获、Verify 在对账前捕获，两者都走 ensureBaseline 的一次性
+	// 保护——基线查询必然发生在本实例第一条 INSERT 之前（mutex 串行化保证）。
+	//
+	// 已知边界（罕见用法，接受）：同一 (publisher, run_id) 两个实例**并发**
+	// 写入时，后建基线的实例会把前一实例的增量算进基线，各自 Verify 可能
+	// 误红——与旧口径（共享计数器缺失）同类，均为「一 run 一实例」用法之外
+	// 的场景，不为此加复杂度。
+	baselineMu  sync.Mutex
+	baselineSet bool
+	baseline    int64
 }
 
 // NewPGEventStore 注入连接池构造。publisher 不得为空（列是 NOT NULL，且空
@@ -207,6 +232,12 @@ func (s *PGEventStore) Append(ctx context.Context, msg msgbus.Message) error {
 		return fmt.Errorf("eventstore: Append(%s) 未落库（ctx 已取消/超时，调用方不得派发该消息）: %w", topic, err)
 	}
 
+	// 写入账基线必须在本实例第一条 INSERT **之前**捕获，否则这条 INSERT 会被
+	// 算进基线，Verify 的增量对账就少一（ensureBaseline 一次性，锁内查询）。
+	if err := s.ensureBaseline(ctx); err != nil {
+		return fmt.Errorf("eventstore: Append(%s) 未落库（写入账基线建立失败，宁可不写也不让 Verify 从错误基线起算）: %w", topic, err)
+	}
+
 	// ts 归一到 UTC：回测时间来自 VirtualClock（已是 UTC），实盘是墙钟（带
 	// 时区）。TIMESTAMPTZ 本身存瞬时、与时区无关，归一只是为了让传参确定性。
 	if _, err := s.pool.Exec(ctx, appendSQL,
@@ -215,6 +246,24 @@ func (s *PGEventStore) Append(ctx context.Context, msg msgbus.Message) error {
 		return fmt.Errorf("eventstore: Append(%s) 落库失败（调用方不得派发该消息）: %w", topic, err)
 	}
 	s.appended.Add(1)
+	return nil
+}
+
+// ensureBaseline 在首次需要时捕获写入账基线（见 struct 字段注释）。一次性：
+// baselineMu 保证「查库 + 记录」整体串行，首 Append 并发到来时只有一个会
+// 真正执行查询，且都排在任何 INSERT 之前。
+func (s *PGEventStore) ensureBaseline(ctx context.Context) error {
+	s.baselineMu.Lock()
+	defer s.baselineMu.Unlock()
+	if s.baselineSet {
+		return nil
+	}
+	var n int64
+	if err := s.pool.QueryRow(ctx, verifyCountSQL, s.publisher, textOrNull(s.runID)).Scan(&n); err != nil {
+		return fmt.Errorf("eventstore: 写入账基线查询失败: %w", err)
+	}
+	s.baseline = n
+	s.baselineSet = true
 	return nil
 }
 
@@ -262,7 +311,8 @@ func (s *PGEventStore) Replay(ctx context.Context, from, to time.Time) ([]msgbus
 // Verify 校验落库完整性。**K1 的最小可用边界**（不做什么写在下面）：
 //
 //	做：
-//	  1. 本实例写入范围内的行数 == 本实例成功 Append 的次数（写入账对账）；
+//	  1. 写入账对账（K0-P2-3a 起为基线+增量口径）：本实例写入范围内的行数
+//	     == 基线（实例建立时库里已有行数）+ 本实例成功 Append 的次数；
 //	  2. 范围内没有结构性损坏行（topic 空 / payload 为 NULL）。
 //
 //	不做（明确留作将来，K1 不做以保证 Victim-less 的最小实现）：
@@ -272,14 +322,24 @@ func (s *PGEventStore) Replay(ctx context.Context, from, to time.Time) ([]msgbus
 //	    整性」不是一回事，误报会训练人忽略红灯）；
 //	  - ts 单调性检查（消息本身就是按业务时间乱序到达的，ts 天然不单调）。
 //
-// 注意：本方法只数与本实例 (publisher, run_id) 匹配的行，所以若有人手工
-// DELETE 了这些行，Verify 会失败——这是刻意的：那确实就是数据丢了，红灯是
-// 对的。测试里清理数据必须在 Verify 断言之后做（或另起 store）。
+// 为什么是基线+增量而不是「== appended」（K0-P2-3a）：appended 是进程内
+// 计数器，实例重建（进程重启 / 断点续跑）后归零而库里旧行还在，旧口径
+// 恒红——假红灯训练人忽略 Verify。新口径下重建场景对账绿（验收 ⑤），而
+// 真实丢行（手工 DELETE 掉基线内的行）仍然红——红灯只在**真的**丢数据时
+// 亮。注意：若在本实例 Append 之后手工删行，库内 < 基线+增量，同样红。
+//
+// 注意：本方法只数与本实例 (publisher, run_id) 匹配的行。已知边界：同一
+// (publisher, run_id) 两个实例并发写入会误红（见 struct 字段注释）。
 func (s *PGEventStore) Verify() error {
 	ctx, cancel := context.WithTimeout(context.Background(), verifyTimeout)
 	defer cancel()
 
-	want := s.appended.Load()
+	// 零写入的实例也要能 Verify（绿）：基线在对账前捕获，此时没有任何
+	// 本实例的 INSERT 干扰计数。
+	if err := s.ensureBaseline(ctx); err != nil {
+		return fmt.Errorf("eventstore: Verify 失败（写入账基线建立失败）: %w", err)
+	}
+	want := s.baseline + s.appended.Load()
 
 	var got, corrupt int64
 	if err := s.pool.QueryRow(ctx, verifyCountSQL, s.publisher, textOrNull(s.runID)).Scan(&got); err != nil {

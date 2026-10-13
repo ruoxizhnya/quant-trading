@@ -535,6 +535,66 @@ func TestVerifyDetectsMissingRow(t *testing.T) {
 	}
 }
 
+// TestVerifySurvivesInstanceRebuild —— K0-P2-3a 验收 ⑤：
+// 构造 store → Append 5 条 → 丢弃实例 → 用同一 (publisher, run_id) 新建
+// 实例 → Verify 仍绿。
+//
+// 这条守的是「写入账不因进程内计数器归零而假红」：旧口径下新实例的
+// appended=0 而库里 5 行在，Verify 恒红——假红灯会训练人忽略 Verify，
+// 比没有 Verify 更糟。红灯只在**真的**丢数据时亮（同用例末段复验）。
+func TestVerifySurvivesInstanceRebuild(t *testing.T) {
+	store, pool, runID := newTestStore(t)
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		if err := store.Append(ctx, msg(msgbus.TopicDataBar, testTS(i), map[string]int{"i": i})); err != nil {
+			t.Fatalf("Append(%d) 失败: %v", i, err)
+		}
+	}
+	if err := store.Verify(); err != nil {
+		t.Fatalf("前置条件：原实例 Verify 应通过，实际 = %v", err)
+	}
+
+	// 丢弃原实例，用同一 (publisher, run_id) 新建——模拟进程重启 / 断点续跑。
+	rebuilt, err := eventstore.NewPGEventStore(pool, testPublisher, runID)
+	if err != nil {
+		t.Fatalf("重建实例失败: %v", err)
+	}
+	if err := rebuilt.Verify(); err != nil {
+		t.Fatalf("实例重建后 Verify 失败（进程内计数器归零导致的假红——K0-P2-3a 要消灭的正是它）: %v", err)
+	}
+
+	// 重建实例继续写，基线+增量口径照常对账。
+	for i := 5; i < 7; i++ {
+		if err := rebuilt.Append(ctx, msg(msgbus.TopicDataBar, testTS(i), map[string]int{"i": i})); err != nil {
+			t.Fatalf("重建实例 Append(%d) 失败: %v", i, err)
+		}
+	}
+	if err := rebuilt.Verify(); err != nil {
+		t.Errorf("重建实例续写 2 条后 Verify 失败（基线+增量对不上）: %v", err)
+	}
+
+	// 红灯腿不能因为口径变化而丢：重建实例删掉一行（含基线内的行）仍须红。
+	delCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	tag, err := pool.Exec(delCtx,
+		`DELETE FROM audit.message_log WHERE ctid IN (
+			SELECT ctid FROM audit.message_log WHERE run_id = $1 LIMIT 1)`, runID)
+	if err != nil {
+		t.Fatalf("造故障（删一行）失败: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("期望删掉 1 行，实际 %d 行", tag.RowsAffected())
+	}
+	err = rebuilt.Verify()
+	if err == nil {
+		t.Fatal("重建实例删一行后 Verify 仍返回 nil——基线口径把真丢数也放过了")
+	}
+	if !errors.Is(err, eventstore.ErrIntegrity) {
+		t.Errorf("Verify = %v, want errors.Is(err, ErrIntegrity)", err)
+	}
+}
+
 // ─── 构造函数边界 ──────────────────────────────────────────────────
 
 // TestNewPGEventStoreValidatesInputs 构造期就把话说清楚，别等到某次 Publish
