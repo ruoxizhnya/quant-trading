@@ -163,7 +163,7 @@ type SignalProvider interface {
 
 | # | 问题 | 关闭时机 | 状态 |
 |---|---|---|---|
-| 1 | 双跑对齐容差阈值（分指标） | 阶段 2 实验（K15） | 未决 |
+| 1 | 双跑对齐容差阈值（分指标） | 阶段 2 实验（K15） | ✅ 已关闭（K15 实测定，见 [k15-dualrun-report.md](k15-dualrun-report.md)：total_return/annual ≤0.2%、sharpe/sortino/calmar ≤0.05、maxDD ≤0.5%、total_trades ≤5% 相对、win_rate 不设硬阈；K15-R1 修掉费用链路疑点后可收紧） |
 | 2 | 侧车通道选型（HTTP vs gRPC vs Redis Streams） | K13 | ✅ 已关闭（见 §8.1） |
 | 3 | Parquet 导出复权口径与 `ohlcv_daily_qfq` 映射 | K13 | ✅ 已关闭（见 §8.2） |
 | 4 | NT 版本锁定 / 升级跟随策略 | 阶段 2 前 | PoC 已钉 `2.0.0rc6`；升级跟随策略未决 |
@@ -218,7 +218,8 @@ type SignalProvider interface {
 | **新股上市初期价格限制** | ❌ | 依赖上市日，样本窗口内无新股；且 Go 侧该分支本身有已知不精确（`PriceLimitInput.TradeDays` 注释） |
 | **集合竞价** | ❌ | catalog 只有日线（`1-DAY-LAST-EXTERNAL`），无分时/竞价数据；「日频目标权重」表达上限之外的撮合机制不建模（设计文档 §3 代价声明） |
 
-**K15 观察项（新增）**：Go 回测撮合路径（`pkg/backtest/execution` → `pkg/execution` CostModel）**只计佣金**（`max(notional×CommissionRate, MinCommission)`），不建模印花税/过户费——这是代码注释里写明的「两侧共同已知口径边界」。而 K14 适配器的 NT fee model 计**全三项**。K15 对齐时该差异必须**显式归因**（是口径边界而非执行机制差异），不得被容差掩盖。
+**K15 观察项（新增，2026-10-13 K15 执行后关闭）**：Go 回测撮合路径（`pkg/backtest/execution` → `pkg/execution` CostModel）**只计佣金**（`max(notional×CommissionRate, MinCommission)`），不建模印花税/过户费——这是代码注释里写明的「两侧共同已知口径边界」。而 K14 适配器的 NT fee model 计**全三项**。K15 对齐时该差异必须**显式归因**（是口径边界而非执行机制差异），不得被容差掩盖。
+**K15 执行结果**：对齐路径选 **Tracker+ComputeFees**（全三项，与 NT `compute_fees` parity fixture 同源），CostModel 口径边界不进入对齐路径（裁决 b，见报告 §4）。实测残留一笔费用微差（NT fills 报告 ≈ 纯佣金，过户费分量未体现）→ 立 **K15-R1** 复查 NT FeeModel 生效链路。
 
 ### 8.4.1 K14-R1 自审收口（2026-10-13）
 

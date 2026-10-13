@@ -150,11 +150,24 @@ type PriceLimitConfig struct {
 	New float64 `mapstructure:"new"`
 }
 
+// SignalWeight is one target-weight signal row on the wire (K15).
+//
+// It mirrors the sidecar's validated row shape ({"symbol","weight","as_of"})
+// and the “quant.external_signals“ consumption semantics: a weight effective
+// from the first bar whose date is >= as_of. Weight is a portfolio-level
+// fraction in [0,1]; the Go dual-run tool and the NT sidecar consume the same
+// rows, which is what makes the two runs comparable at all.
+type SignalWeight struct {
+	Symbol string  `json:"symbol"`
+	Weight float64 `json:"weight"`
+	AsOf   string  `json:"as_of"` // ISO date YYYY-MM-DD
+}
+
 // BacktestRequest represents the API request to start a backtest.
 //
 // K9（RunSpec 冻结）：新增 Kernel / EngineParams 两个内核路由字段。
 // 两者都带 omitempty —— 不带新字段的存量请求序列化结果逐字节不变
-//（钉在 TestRunSpec_LegacyRequestSerializationUnchanged）。
+// （钉在 TestRunSpec_LegacyRequestSerializationUnchanged）。
 type BacktestRequest struct {
 	Strategy       string   `json:"strategy" binding:"required"`
 	StockPool      []string `json:"stock_pool"`
@@ -177,6 +190,12 @@ type BacktestRequest struct {
 	// 生效了（"以为在测 NT 其实在测 Go" 的参数版）。校验入口
 	// ValidateRunSpec()，已知名按内核登记在 engineParamsByKernel。
 	EngineParams map[string]any `json:"engine_params,omitempty"`
+
+	// Signals 是可选的目标权重信号流（K15 双跑对齐）。空 = 未提供：Go 内核
+	// 走既有策略注册表路径，nautilus 侧车走 K14 内置样本流 —— 两侧行为与
+	// K15 之前逐字节一致。校验（weight∈[0,1] finite、as_of ISO 日期、symbol
+	// 非空）在 ValidateRunSpec，违例 400。
+	Signals []SignalWeight `json:"signals,omitempty"`
 }
 
 // BacktestResponse represents the API response for a backtest run.

@@ -159,6 +159,9 @@ def run_backtest(
                     end_date=run_spec.end_date,
                     initial_capital=capital_per_symbol,
                     d_max=run_spec.d_max,
+                    # K15 · caller-supplied target-weight stream (empty → the
+                    # K14 built-in sample stream, unchanged).
+                    signal_rows=run_spec.signals,
                 ),
             )
         results = node.run()
@@ -168,12 +171,24 @@ def run_backtest(
         # drops engine state on completion, so ``dispose_on_completion=False`` is
         # required for this read to work (set above).
         portfolio = _safe_portfolio(node, run_config.id)
+        # K15 · the K14/K13 mapping returns a minimal metric set; the dual-run
+        # alignment needs the full data plane (per-fill trade list + per-day
+        # cash events), which is only extractable while the engine is alive.
+        # All three are read here, inside the same pre-dispose window.
+        fills_report = node.generate_fills_report(run_config.id)
+        account_report = node.generate_account_report(
+            run_config.id, venue=Venue(venue)
+        )
+        closes = _catalog_closes(catalog_path, run_spec.stock_pool, venue)
         return _map_result(
             run_spec,
             run_config.id,
             results[0],
             portfolio=portfolio,
             venue=venue,
+            fills_report=fills_report,
+            account_report=account_report,
+            closes=closes,
         )
     except SidecarError:
         raise
@@ -225,6 +240,9 @@ def _map_result(
     *,
     portfolio: Any = None,
     venue: str = DEFAULT_VENUE,
+    fills_report: Any = None,
+    account_report: Any = None,
+    closes: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     returns = dict(result.stats_returns or {})
     pnls = dict(result.stats_pnls or {})
@@ -248,6 +266,36 @@ def _map_result(
             "cannot be reported (rejected, not folded to 0)"
         )
 
+    # K15 · full data plane for the dual-run alignment. The equity curve is
+    # synthesised from the same primitives the Go tracker uses —
+    # equity(d) = cash(d) + Σ qty(sym,d) × close(sym,d) (tracker.go 的
+    # totalValue = cash + positionsValue) — so the Go diff tool can compare
+    # like with like and attribute every difference to the execution
+    # mechanism, never to a metric-formula drift.
+    equity_curve: list[dict[str, Any]] = []
+    trades: list[dict[str, Any]] = []
+    if status == _STATUS_COMPLETED:
+        equity_curve = synth_equity_curve(
+            run_spec.initial_capital,
+            account_report,
+            fills_report,
+            closes or {},
+            venue=venue,
+            start_date=run_spec.start_date,
+            end_date=run_spec.end_date,
+        )
+        trades = map_trades(fills_report, venue=venue)
+        # A completed run must carry a usable equity curve; a degenerate one
+        # (no account events at all) is a mapping failure, not a flat run.
+        if not equity_curve:
+            status = _STATUS_FAILED
+            error = (
+                "could not synthesise the daily equity curve from account/fill "
+                "reports (rejected, not folded to an empty series)"
+            )
+            equity_curve = []
+            trades = []
+
     payload: dict[str, Any] = {
         "id": result.run_config_id or run_config_id,
         "status": status,
@@ -263,6 +311,9 @@ def _map_result(
         "total_orders": int(result.total_orders),
         "total_positions": int(result.total_positions),
         "iterations": int(result.iterations),
+        # K15 · per-day mark-to-market series and the per-fill trade list.
+        "equity_curve": equity_curve,
+        "trades": trades,
         # Carried only when the run is failed (OBS-01: failed is an outcome).
         "error": error,
         # Raw NT statistics, sanitised for JSON. Carried so K15 can align every
@@ -317,3 +368,200 @@ def _sanitise(stats: dict[str, Any]) -> dict[str, Any]:
         else:
             clean[key] = value
     return clean
+
+
+# ── K15 · data-plane mapping (dual-run alignment) ────────────────────────────
+
+
+def _catalog_closes(catalog_path: str, stock_pool: tuple[str, ...], venue: str) -> dict[str, Any]:
+    """Per-symbol ``{date → close}`` series read from the Parquet catalog.
+
+    The equity synthesis marks positions to the **same close series the NT run
+    consumed**, so the mark price can never be a second, drifting source. The
+    parquet files are read directly (pyarrow) — the same files the NT data
+    loader consumes — because the catalog's object API returns typed Bar
+    objects that are awkward to flatten.
+    """
+    import glob
+    import os
+
+    import pyarrow.parquet as pq
+
+    from .catalog import bar_type_str
+
+    closes: dict[str, Any] = {}
+    for symbol in stock_pool:
+        pattern = os.path.join(
+            str(catalog_path), "data", "bars", f"{bar_type_str(symbol, venue)}", "*.parquet"
+        )
+        files = sorted(glob.glob(pattern))
+        if not files:
+            log.warning("no parquet files for %s under %s", symbol, pattern)
+            continue
+        frames = [pq.read_table(f).to_pandas() for f in files]
+        frame = pd.concat(frames, ignore_index=True)
+        ts = pd.to_datetime(frame["ts_event"], utc=True)
+        frame = frame.assign(_date=ts.dt.date).sort_values("_date")
+        closes[symbol] = frame.groupby("_date")["close"].last()
+    return closes
+
+
+def _symbol_of(value: Any, venue: str) -> str:
+    """InstrumentId or wire string → bare symbol (``"000001.SZ.SIM" → "000001.SZ"``).
+
+    The fills report's ``instrument_id`` column round-trips through pyarrow as
+    a plain ``"symbol.venue"`` string, so both object and string forms end up
+    here; the venue suffix is always stripped to match the catalog's bare
+    symbol keys.
+    """
+    text = str(value)
+    suffix = f".{venue}"
+    if text.endswith(suffix):
+        text = text[: -len(suffix)]
+    return text
+
+
+def synth_equity_curve(
+    initial_capital: float,
+    account_report: Any,
+    fills_report: Any,
+    closes: dict[str, Any],
+    *,
+    venue: str = DEFAULT_VENUE,
+    start_date: str = "",
+    end_date: str = "",
+) -> list[dict[str, Any]]:
+    """Synthesise the daily mark-to-market series the Go tracker records.
+
+    ``equity(d) = cash(d) + Σ_sym qty(sym,d) × close(sym,d)`` — the exact
+    ``totalValue = cash + positionsValue`` notion of ``tracker.go``. Dates are
+    the union of the catalog bar dates (the shared trading calendar) clipped to
+    the run window; on a day with no account event the cash carries forward
+    (no trade → no cash move), and a symbol's close carries forward likewise
+    (suspension → value frozen).
+
+    Returns ``[]`` when either input report is missing — the caller turns that
+    into a ``failed`` run, never into an empty-but-valid curve.
+    """
+    if account_report is None or account_report.empty:
+        return []
+    if not closes:
+        return []
+
+    calendar = sorted({d for series in closes.values() for d in series.index})
+    if start_date:
+        start = pd.Timestamp(start_date, tz="UTC").date()
+        calendar = [d for d in calendar if d >= start]
+    if end_date:
+        end = pd.Timestamp(end_date, tz="UTC").date()
+        calendar = [d for d in calendar if d <= end]
+    if not calendar:
+        return []
+
+    # cash(d): last account event per day, carried forward; starts at capital.
+    cash_by_day: dict[Any, float] = {}
+    cash = float(initial_capital)
+    events = account_report.copy()
+    events["_date"] = pd.to_datetime(events.index, utc=True).date
+    for day, group in events.groupby("_date", sort=True):
+        cash = float(group["total"].iloc[-1])
+        cash_by_day[day] = cash
+
+    # qty(sym, d): signed fill accumulation per symbol.
+    qty_events: dict[str, list[tuple[Any, float]]] = {}
+    if fills_report is not None and not fills_report.empty:
+        fills = fills_report.copy()
+        fills["_date"] = pd.to_datetime(fills["ts_event"], utc=True).dt.date
+        for _, row in fills.iterrows():
+            side = str(row["order_side"]).upper()
+            signed = float(row["last_qty"]) * (1.0 if side == "BUY" else -1.0)
+            qty_events.setdefault(_symbol_of(row["instrument_id"], venue), []).append(
+                (row["_date"], signed)
+            )
+    for events_list in qty_events.values():
+        events_list.sort(key=lambda pair: pair[0])
+
+    def _pos_qty(symbol: str, day: Any) -> float:
+        return sum(signed for fill_day, signed in qty_events.get(symbol, []) if fill_day <= day)
+
+    def _close(symbol: str, day: Any, last_close: dict[str, float]) -> float | None:
+        series = closes.get(symbol)
+        if series is None:
+            return None
+        # Carry the last known close forward across suspension days.
+        eligible = series[series.index <= day]
+        if len(eligible) == 0:
+            return None
+        return float(eligible.iloc[-1])
+
+    out: list[dict[str, Any]] = []
+    for day in calendar:
+        day_cash = cash_by_day.get(day, cash_by_day.get(_last_key_before(cash_by_day, day)))
+        if day_cash is None:
+            # Days before the first account event: the opening balance applies.
+            day_cash = float(initial_capital)
+        positions = 0.0
+        for symbol, series in closes.items():
+            qty = _pos_qty(symbol, day)
+            if qty == 0:
+                continue
+            px = _close(symbol, day, {})
+            if px is None:
+                px = 0.0
+            positions += qty * px
+        out.append(
+            {
+                "date": day.isoformat(),
+                "equity": round(day_cash + positions, 2),
+                "cash": round(float(day_cash), 2),
+                "positions": round(positions, 2),
+            }
+        )
+    return out
+
+
+def _last_key_before(daily: dict[Any, float], day: Any) -> Any | None:
+    """The latest day in ``daily`` strictly before ``day`` (dict is date-keyed)."""
+    prior = [d for d in daily if d < day]
+    return max(prior) if prior else None
+
+
+def map_trades(fills_report: Any, *, venue: str = DEFAULT_VENUE) -> list[dict[str, Any]]:
+    """Map the NT per-fill report onto the wire trade rows.
+
+    NT's ``AShareFeeModel`` returns the **total** A-share fee as one ``Money``
+    (commission + transfer fee + sell-side stamp tax floored together), so the
+    wire row carries it as ``commission`` with zero-valued components — the Go
+    diff tool compares ``commission + transfer_fee + stamp_tax`` on its side
+    against this total, keeping one number per side.
+    """
+    if fills_report is None or fills_report.empty:
+        return []
+    rows: list[dict[str, Any]] = []
+    fills = fills_report.sort_values("ts_event")
+    for _, row in fills.iterrows():
+        rows.append(
+            {
+                "symbol": _symbol_of(row["instrument_id"], venue),
+                "side": str(row["order_side"]).upper(),
+                "qty": float(row["last_qty"]),
+                "price": float(row["last_px"]),
+                "commission": _parse_money(row["commission"]),
+                "transfer_fee": 0.0,
+                "stamp_tax": 0.0,
+                "ts": pd.Timestamp(row["ts_event"]).isoformat(),
+            }
+        )
+    return rows
+
+
+def _parse_money(value: Any) -> float:
+    """``"12.34 CNY"`` → ``12.34``; non-finite / malformed → 0.0 (never crash a report)."""
+    if value is None:
+        return 0.0
+    try:
+        text = str(value).split(" ")[0]
+        number = float(text)
+    except (ValueError, IndexError):
+        return 0.0
+    return number if math.isfinite(number) else 0.0

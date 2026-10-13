@@ -18,7 +18,7 @@ from nautilus_trader.model import Bar, BarType, InstrumentId, OrderSide
 from nautilus_trader.trading import Strategy
 
 from .errors import SidecarError
-from .signals import sample_signals
+from .signals import SignalStream, sample_signals
 from .weight_replay import DEFAULT_D_MAX, WeightReplay, WeightReplayConfig
 
 #: Default notional-per-run trade size for the demo (shares).
@@ -96,23 +96,30 @@ def build_strategy(
     end_date: str | None = None,
     initial_capital: float = 1_000_000.0,
     d_max: float = DEFAULT_D_MAX,
+    signal_rows: tuple[dict, ...] = (),
 ) -> Strategy:
     """Build the strategy named ``name``.
 
     ``buy_and_hold`` — the K13 demo (fixed-size entry on the first bar).
-    ``weight_replay`` — the K14 adapter, fed a built-in deterministic sample
-    signal stream spanning the run window (50% entry, flat at the window end).
+    ``weight_replay`` — the K14 adapter. When ``signal_rows`` are provided
+    (K15: caller-supplied target-weight stream, mirroring
+    ``quant.external_signals`` row shape), they are consumed verbatim; otherwise
+    the built-in deterministic sample stream spans the run window (50% entry,
+    flat at the window end) — the K14 behaviour, unchanged.
     """
     if name == WEIGHT_REPLAY:
         if not start_date or not end_date:
             raise SidecarError("weight_replay requires start_date and end_date")
         symbol = instrument_id.symbol.value
-        stream = sample_signals(
-            symbol,
-            enter=date.fromisoformat(start_date),
-            exit_on=date.fromisoformat(end_date),
-            entry_weight=0.5,
-        )
+        if signal_rows:
+            stream = SignalStream.from_rows(list(signal_rows))
+        else:
+            stream = sample_signals(
+                symbol,
+                enter=date.fromisoformat(start_date),
+                exit_on=date.fromisoformat(end_date),
+                entry_weight=0.5,
+            )
         return WeightReplay(
             WeightReplayConfig(
                 instrument_id=instrument_id,

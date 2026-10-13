@@ -56,6 +56,7 @@ import (
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	apperrors "github.com/ruoxizhnya/quant-trading/pkg/errors"
 )
 
@@ -120,15 +121,39 @@ func NewRunner(baseURL string, client *http.Client) *Runner {
 // runRequest mirrors the sidecar's RunSpec DTO. Field names intentionally match
 // contracts.BacktestRequest so the mapping is a straight copy.
 type runRequest struct {
-	Strategy       string         `json:"strategy"`
-	StockPool      []string       `json:"stock_pool,omitempty"`
-	IndexCode      string         `json:"index_code,omitempty"`
-	StartDate      string         `json:"start_date"`
-	EndDate        string         `json:"end_date"`
-	InitialCapital float64        `json:"initial_capital,omitempty"`
-	RiskFreeRate   float64        `json:"risk_free_rate,omitempty"`
-	Kernel         string         `json:"kernel"`
-	EngineParams   map[string]any `json:"engine_params,omitempty"`
+	Strategy       string                   `json:"strategy"`
+	StockPool      []string                 `json:"stock_pool,omitempty"`
+	IndexCode      string                   `json:"index_code,omitempty"`
+	StartDate      string                   `json:"start_date"`
+	EndDate        string                   `json:"end_date"`
+	InitialCapital float64                  `json:"initial_capital,omitempty"`
+	RiskFreeRate   float64                  `json:"risk_free_rate,omitempty"`
+	Kernel         string                   `json:"kernel"`
+	EngineParams   map[string]any           `json:"engine_params,omitempty"`
+	Signals        []contracts.SignalWeight `json:"signals,omitempty"`
+}
+
+// equityPoint is one day of the sidecar's synthesised mark-to-market series
+// (K15): the same cash + positions decomposition the Go tracker records.
+type equityPoint struct {
+	Date      string  `json:"date"`
+	Equity    float64 `json:"equity"`
+	Cash      float64 `json:"cash"`
+	Positions float64 `json:"positions"`
+}
+
+// tradeWire is one fill from the sidecar's fills report (K15). NT's fee model
+// returns the A-share fee as one total, so it rides in Commission with the
+// components at zero; the diff tool compares the summed Go fees against it.
+type tradeWire struct {
+	Symbol      string  `json:"symbol"`
+	Side        string  `json:"side"`
+	Qty         float64 `json:"qty"`
+	Price       float64 `json:"price"`
+	Commission  float64 `json:"commission"`
+	TransferFee float64 `json:"transfer_fee"`
+	StampTax    float64 `json:"stamp_tax"`
+	Ts          string  `json:"ts"`
 }
 
 // runResponse is the minimal K13 field set the sidecar returns. K15 replaces
@@ -154,7 +179,10 @@ type runResponse struct {
 	TotalPositions int      `json:"total_positions"`
 	Iterations     int      `json:"iterations"`
 	Timing         *timing  `json:"timing"`
-	Error          string   `json:"error"`
+	// K15 · the full data plane: daily mark-to-market series + per-fill list.
+	EquityCurve []equityPoint `json:"equity_curve"`
+	Trades      []tradeWire   `json:"trades"`
+	Error       string        `json:"error"`
 }
 
 // timing is the sidecar-reported execution breakdown (K13-R1, deadline 五段拆).
@@ -208,6 +236,7 @@ func (r *Runner) RunBacktest(ctx context.Context, req contracts.BacktestRequest)
 		RiskFreeRate:   req.RiskFreeRate,
 		Kernel:         req.EffectiveKernel(),
 		EngineParams:   req.EngineParams,
+		Signals:        req.Signals,
 	})
 	if err != nil {
 		return nil, apperrors.Wrap(err, apperrors.ErrCodeInternal,
@@ -346,14 +375,19 @@ func retryAfterHint(resp *http.Response) string {
 // toResponse maps the sidecar payload onto the frozen response DTO. Fields the
 // sidecar does not report (wire null → nil pointer) are left at their zero value;
 // this is the single explicit place where "not reported" is folded, since
-// BacktestResponse has no null representation. Fields the sidecar does not
-// compute at all are aligned with the Go kernel's metrics in K15.
+// BacktestResponse has no null representation.
+//
+// K15 · the data plane (equity curve / per-fill trades) lands in the existing
+// frozen fields PortfolioValues / Trades — no schema addition. The wire shapes
+// (equityPoint / tradeWire) mirror domain.PortfolioValue / domain.Trade field
+// for field so the dual-run diff can feed both kernels' outputs through the
+// same metrics package.
 func (r *Runner) toResponse(req contracts.BacktestRequest, out runResponse) *contracts.BacktestResponse {
 	status := out.Status
 	if status == "" {
 		status = contracts.StatusCompleted
 	}
-	return &contracts.BacktestResponse{
+	resp := &contracts.BacktestResponse{
 		ID:             out.ID,
 		Status:         status,
 		Strategy:       firstNonEmpty(out.Strategy, req.Strategy),
@@ -365,6 +399,50 @@ func (r *Runner) toResponse(req contracts.BacktestRequest, out runResponse) *con
 		SortinoRatio:   deref(out.SortinoRatio),
 		StockPool:      req.StockPool,
 	}
+	for _, p := range out.EquityCurve {
+		day, err := time.Parse(time.RFC3339, p.Date)
+		if err != nil {
+			// The synthesised dates are bare ISO dates; parse them as such.
+			day, err = time.Parse("2006-01-02", p.Date)
+			if err != nil {
+				continue // a malformed date row is skipped, never fabricated
+			}
+		}
+		resp.PortfolioValues = append(resp.PortfolioValues, domain.PortfolioValue{
+			Date:       day.UTC(),
+			TotalValue: p.Equity,
+			Cash:       p.Cash,
+			Positions:  p.Positions,
+		})
+	}
+	for _, t := range out.Trades {
+		ts, err := time.Parse(time.RFC3339, t.Ts)
+		if err != nil {
+			continue
+		}
+		resp.Trades = append(resp.Trades, domain.Trade{
+			ID:          fmt.Sprintf("nt-%s-%s-%g", t.Symbol, t.Side, t.Qty),
+			Symbol:      t.Symbol,
+			Direction:   tradeDirection(t.Side),
+			Quantity:    t.Qty,
+			Price:       t.Price,
+			Commission:  t.Commission,
+			TransferFee: t.TransferFee,
+			StampTax:    t.StampTax,
+			Timestamp:   ts.UTC(),
+		})
+	}
+	return resp
+}
+
+// tradeDirection maps the sidecar's BUY/SELL fill side onto the domain
+// direction the Go tracker records for the same action: a buy opens/extends a
+// long (DirectionLong), a sell reduces or closes it (DirectionClose).
+func tradeDirection(side string) domain.Direction {
+	if strings.EqualFold(side, "BUY") {
+		return domain.DirectionLong
+	}
+	return domain.DirectionClose
 }
 
 // sidecarError extracts a human-readable reason from a failure body, falling

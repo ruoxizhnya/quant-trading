@@ -46,6 +46,12 @@ class RunSpec:
     risk_free_rate: float = 0.0
     d_max: float = DEFAULT_D_MAX
     engine_params: dict[str, Any] = field(default_factory=dict)
+    #: K15 · optional target-weight signal rows, straight from the caller (the
+    #: Go ``NautilusRunner`` serialises ``contracts.BacktestRequest.Signals``).
+    #: Each row is a validated ``{"symbol", "weight", "as_of"}`` dict. Empty
+    #: tuple = "not provided" → the weight-replay adapter falls back to its
+    #: built-in deterministic sample stream (K14 behaviour, unchanged).
+    signals: tuple[dict[str, Any], ...] = ()
 
     @classmethod
     def from_json(cls, payload: Any) -> "RunSpec":
@@ -95,6 +101,7 @@ class RunSpec:
 
         capital = _parse_capital(payload)
         d_max = _parse_d_max(payload)
+        signals = _parse_signals(payload)
 
         risk_free = payload.get("risk_free_rate") or 0.0
 
@@ -109,6 +116,7 @@ class RunSpec:
             risk_free_rate=float(risk_free),
             d_max=d_max,
             engine_params=dict(params),
+            signals=signals,
         )
 
 
@@ -157,9 +165,56 @@ def _parse_d_max(payload: dict[str, Any]) -> float:
         raise RunSpecError(f"run spec: 'd_max' must be a number, got {raw!r}") from exc
     if not math.isfinite(value) or not 0.0 < value <= 1.0:
         raise RunSpecError(
-            f"run spec: 'd_max' must be a finite fraction in (0, 1], got {raw!r}"
+            f"run spec: 'd_max' must be a finite fraction in (0, 1], got {value!r}"
         )
     return value
+
+
+def _parse_signals(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """Parse and fail-closed-validate the optional ``signals`` rows (K15).
+
+    Each row must be ``{"symbol": str, "weight": float, "as_of": "YYYY-MM-DD"}``:
+    a non-blank symbol, a finite weight in ``[0, 1]``, and an ISO date. Anything
+    else is a caller bug — rejected, not coerced. The same discipline as
+    :class:`sidecar.signals.TargetWeight` ``__post_init__``, applied at the wire
+    so a malformed row can never reach the adapter mid-run.
+    """
+    raw = payload.get("signals")
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise RunSpecError("run spec: 'signals' must be a list of rows")
+    rows: list[dict[str, Any]] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise RunSpecError(f"run spec: signals[{i}] must be an object, got {item!r}")
+        symbol = item.get("symbol")
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise RunSpecError(f"run spec: signals[{i}].symbol must be a non-blank string")
+        weight = item.get("weight")
+        try:
+            weight_f = float(weight)
+        except (TypeError, ValueError) as exc:
+            raise RunSpecError(
+                f"run spec: signals[{i}].weight must be a number, got {weight!r}"
+            ) from exc
+        if not math.isfinite(weight_f) or not 0.0 <= weight_f <= 1.0:
+            raise RunSpecError(
+                f"run spec: signals[{i}].weight must be a finite fraction in [0, 1], got {weight_f!r}"
+            )
+        as_of = item.get("as_of")
+        if not isinstance(as_of, str) or not as_of.strip():
+            raise RunSpecError(f"run spec: signals[{i}].as_of must be an ISO date string")
+        try:
+            _dt.datetime.strptime(as_of.strip(), _DATE_FMT)
+        except ValueError as exc:
+            raise RunSpecError(
+                f"run spec: signals[{i}].as_of must be an ISO date (YYYY-MM-DD), got {as_of!r}"
+            ) from exc
+        rows.append(
+            {"symbol": symbol.strip(), "weight": weight_f, "as_of": as_of.strip()}
+        )
+    return tuple(rows)
 
 
 def _require_str(payload: dict[str, Any], key: str) -> str:

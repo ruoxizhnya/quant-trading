@@ -1,0 +1,531 @@
+# K15 双跑对齐报告（Go 内核 vs NautilusTrader 侧车）
+
+- 窗口：2024-01-02 .. 2024-12-31
+- 信号流：quarterly（10 条目标权重信号，两侧同流）
+- 口径：capital=1000000 commission=0.0003 stamp/transfer=fees.Default(与 NT AShareFeeModel parity) slippage=0 D_max=0.10 lot=100 limit=±10%
+- 确定性腿：Go 一致 ✅ / NT 一致 ✅
+
+## 指标对齐（同一 metrics 实现计算）
+
+| 指标 | Go | NT | 差 | 相对差 |
+|---|---:|---:|---:|---:|
+| total_return | 0.224802 | 0.224632 | -0.000170776 | -0.07597% |
+| annual_return | 0.225656 | 0.225484 | -0.000171482 | -0.07599% |
+| sharpe | 2.080020 | 2.079189 | -0.00083102 | -0.03995% |
+| sortino | 3.631151 | 3.618611 | -0.0125402 | -0.3454% |
+| max_drawdown | -0.044985 | -0.044860 | +0.000124848 | -0.2775% |
+| win_rate | 0.666667 | 0.947115 | +0.280449 | +42.07% |
+| calmar | 5.016281 | 5.026419 | +0.010138 | +0.2021% |
+| total_trades | 216.000000 | 208.000000 | -8 | -3.704% |
+
+## 成交明细对账
+
+matched=328 go_only=89 nt_only=81
+
+- `matched` 2024-01-02 000001.SZ BUY — qty=52800 px=7.57 (fees: go=123.84 nt=119.85)
+- `matched` 2024-01-02 600000.SH BUY — qty=16900 px=5.90 (fees: go=30.91 nt=29.91)
+- `matched` 2024-01-03 000001.SZ BUY — qty=100 px=7.56 (fees: go=5.01 nt=5.00)
+- `matched` 2024-01-03 600000.SH SELL — qty=100 px=5.94 (fees: go=5.30 nt=5.00)
+- `matched` 2024-01-04 000001.SZ BUY — qty=500 px=7.48 (fees: go=5.04 nt=5.00)
+- `go_only` 2024-01-05 000001.SZ SELL — qty=900 px=7.62
+- `nt_only` 2024-01-05 000001.SZ SELL — qty=1000 px=7.62
+- `matched` 2024-01-05 600000.SH SELL — qty=100 px=5.97 (fees: go=5.30 nt=5.00)
+- `matched` 2024-01-08 000001.SZ BUY — qty=700 px=7.52 (fees: go=5.05 nt=5.00)
+- `matched` 2024-01-08 600000.SH BUY — qty=200 px=5.89 (fees: go=5.01 nt=5.00)
+- `go_only` 2024-01-09 000001.SZ SELL — qty=200 px=7.54
+- `nt_only` 2024-01-09 000001.SZ SELL — qty=100 px=7.54
+- `matched` 2024-01-10 000001.SZ BUY — qty=500 px=7.47 (fees: go=5.04 nt=5.00)
+- `matched` 2024-01-10 600000.SH BUY — qty=100 px=5.87 (fees: go=5.01 nt=5.00)
+- `go_only` 2024-01-11 000001.SZ SELL — qty=500 px=7.53
+- `nt_only` 2024-01-11 000001.SZ SELL — qty=400 px=7.53
+- `matched` 2024-01-11 600000.SH BUY — qty=100 px=5.84 (fees: go=5.01 nt=5.00)
+- `go_only` 2024-01-12 000001.SZ SELL — qty=100 px=7.55
+- `nt_only` 2024-01-12 000001.SZ SELL — qty=200 px=7.55
+- `matched` 2024-01-12 600000.SH BUY — qty=100 px=5.81 (fees: go=5.01 nt=5.00)
+- `matched` 2024-01-15 000001.SZ SELL — qty=100 px=7.57 (fees: go=5.39 nt=5.00)
+- `matched` 2024-01-15 600000.SH SELL — qty=100 px=5.82 (fees: go=5.30 nt=5.00)
+- `matched` 2024-01-16 000001.SZ SELL — qty=700 px=7.67 (fees: go=7.74 nt=5.00)
+- `matched` 2024-01-16 600000.SH SELL — qty=200 px=5.89 (fees: go=5.60 nt=5.00)
+- `matched` 2024-01-17 000001.SZ BUY — qty=600 px=7.58 (fees: go=5.05 nt=5.00)
+- `matched` 2024-01-17 600000.SH BUY — qty=200 px=5.84 (fees: go=5.01 nt=5.00)
+- `matched` 2024-01-18 000001.SZ BUY — qty=200 px=7.56 (fees: go=5.02 nt=5.00)
+- `matched` 2024-01-18 600000.SH SELL — qty=100 px=5.86 (fees: go=5.30 nt=5.00)
+- `go_only` 2024-01-19 000001.SZ BUY — qty=100 px=7.53
+- `nt_only` 2024-01-19 000001.SZ BUY — qty=200 px=7.53
+- `matched` 2024-01-19 600000.SH SELL — qty=100 px=5.89 (fees: go=5.30 nt=5.00)
+- `go_only` 2024-01-22 000001.SZ BUY — qty=500 px=7.48
+- `nt_only` 2024-01-22 000001.SZ BUY — qty=300 px=7.48
+- `go_only` 2024-01-23 000001.SZ SELL — qty=400 px=7.53
+- `nt_only` 2024-01-23 000001.SZ SELL — qty=300 px=7.53
+- `matched` 2024-01-23 600000.SH SELL — qty=100 px=5.92 (fees: go=5.30 nt=5.00)
+- `go_only` 2024-01-24 000001.SZ SELL — qty=1000 px=7.66
+- `nt_only` 2024-01-24 000001.SZ SELL — qty=900 px=7.66
+- `matched` 2024-01-24 600000.SH SELL — qty=200 px=6.00 (fees: go=5.61 nt=5.00)
+- `nt_only` 2024-01-25 000001.SZ SELL — qty=1000 px=7.80
+- `go_only` 2024-01-25 000001.SZ SELL — qty=900 px=7.80
+- `matched` 2024-01-25 600000.SH SELL — qty=100 px=6.05 (fees: go=5.31 nt=5.00)
+- `matched` 2024-01-26 000001.SZ SELL — qty=600 px=7.90 (fees: go=7.42 nt=5.00)
+- `matched` 2024-01-26 600000.SH SELL — qty=300 px=6.14 (fees: go=5.94 nt=5.00)
+- `matched` 2024-01-29 000001.SZ SELL — qty=500 px=7.97 (fees: go=7.03 nt=5.00)
+- `matched` 2024-01-30 000001.SZ BUY — qty=1100 px=7.80 (fees: go=5.09 nt=5.00)
+- `matched` 2024-01-30 600000.SH BUY — qty=100 px=6.11 (fees: go=5.01 nt=5.00)
+- `matched` 2024-01-31 000001.SZ BUY — qty=200 px=7.77 (fees: go=5.02 nt=5.00)
+- `matched` 2024-02-01 000001.SZ BUY — qty=300 px=7.73 (fees: go=5.02 nt=5.00)
+- `matched` 2024-02-01 600000.SH BUY — qty=100 px=6.08 (fees: go=5.01 nt=5.00)
+- `go_only` 2024-02-02 000001.SZ BUY — qty=800 px=7.62
+- `nt_only` 2024-02-02 000001.SZ BUY — qty=700 px=7.62
+- `matched` 2024-02-02 600000.SH SELL — qty=100 px=6.11 (fees: go=5.31 nt=5.00)
+- `matched` 2024-02-05 000001.SZ SELL — qty=600 px=7.71 (fees: go=7.36 nt=5.00)
+- `matched` 2024-02-05 600000.SH SELL — qty=100 px=6.16 (fees: go=5.31 nt=5.00)
+- `go_only` 2024-02-06 000001.SZ SELL — qty=1700 px=7.95
+- `nt_only` 2024-02-06 000001.SZ SELL — qty=1500 px=7.95
+- `matched` 2024-02-06 600000.SH SELL — qty=300 px=6.26 (fees: go=5.96 nt=5.00)
+- `go_only` 2024-02-07 000001.SZ BUY — qty=400 px=7.89
+- `nt_only` 2024-02-07 000001.SZ BUY — qty=300 px=7.89
+- `matched` 2024-02-07 600000.SH BUY — qty=200 px=6.20 (fees: go=5.01 nt=5.00)
+- `matched` 2024-02-08 000001.SZ SELL — qty=300 px=7.94 (fees: go=6.22 nt=5.00)
+- `matched` 2024-02-08 600000.SH SELL — qty=100 px=6.22 (fees: go=5.32 nt=5.00)
+- `matched` 2024-02-19 000001.SZ SELL — qty=700 px=8.06 (fees: go=7.88 nt=5.00)
+- `go_only` 2024-02-19 600000.SH SELL — qty=300 px=6.37
+- `nt_only` 2024-02-19 600000.SH SELL — qty=400 px=6.37
+- `matched` 2024-02-20 000001.SZ SELL — qty=100 px=8.07 (fees: go=5.41 nt=5.00)
+- `nt_only` 2024-02-20 600000.SH BUY — qty=100 px=6.35
+- `matched` 2024-02-21 000001.SZ SELL — qty=4500 px=8.87 (fees: go=32.34 nt=11.98)
+- `matched` 2024-02-21 600000.SH SELL — qty=300 px=6.47 (fees: go=5.99 nt=5.00)
+- `matched` 2024-02-22 000001.SZ SELL — qty=400 px=8.95 (fees: go=6.83 nt=5.00)
+- `matched` 2024-02-22 600000.SH BUY — qty=100 px=6.45 (fees: go=5.01 nt=5.00)
+- `matched` 2024-02-23 000001.SZ BUY — qty=200 px=8.91 (fees: go=5.02 nt=5.00)
+- `matched` 2024-02-23 600000.SH SELL — qty=200 px=6.51 (fees: go=5.66 nt=5.00)
+- `matched` 2024-02-26 000001.SZ BUY — qty=1400 px=8.65 (fees: go=5.12 nt=5.00)
+- `matched` 2024-02-26 600000.SH BUY — qty=400 px=6.35 (fees: go=5.03 nt=5.00)
+- `matched` 2024-02-27 000001.SZ BUY — qty=100 px=8.63 (fees: go=5.01 nt=5.00)
+- `matched` 2024-02-27 600000.SH SELL — qty=100 px=6.38 (fees: go=5.33 nt=5.00)
+- `matched` 2024-02-28 000001.SZ BUY — qty=100 px=8.62 (fees: go=5.01 nt=5.00)
+- `matched` 2024-02-28 600000.SH BUY — qty=100 px=6.35 (fees: go=5.01 nt=5.00)
+- `matched` 2024-02-29 000001.SZ SELL — qty=500 px=8.70 (fees: go=7.22 nt=5.00)
+- `matched` 2024-02-29 600000.SH SELL — qty=100 px=6.39 (fees: go=5.33 nt=5.00)
+- `matched` 2024-03-01 000001.SZ BUY — qty=500 px=8.62 (fees: go=5.04 nt=5.00)
+- `matched` 2024-03-01 600000.SH BUY — qty=100 px=6.36 (fees: go=5.01 nt=5.00)
+- `matched` 2024-03-04 000001.SZ BUY — qty=700 px=8.49 (fees: go=5.06 nt=5.00)
+- `matched` 2024-03-04 600000.SH BUY — qty=100 px=6.32 (fees: go=5.01 nt=5.00)
+- `matched` 2024-03-05 000001.SZ SELL — qty=500 px=8.57 (fees: go=7.18 nt=5.00)
+- `matched` 2024-03-05 600000.SH SELL — qty=200 px=6.40 (fees: go=5.65 nt=5.00)
+- `matched` 2024-03-06 000001.SZ BUY — qty=500 px=8.49 (fees: go=5.04 nt=5.00)
+- `go_only` 2024-03-06 600000.SH BUY — qty=100 px=6.37
+- `go_only` 2024-03-07 000001.SZ SELL — qty=200 px=8.53
+- `nt_only` 2024-03-07 000001.SZ SELL — qty=300 px=8.53
+- `go_only` 2024-03-07 600000.SH SELL — qty=100 px=6.38
+- `go_only` 2024-03-08 600000.SH BUY — qty=100 px=6.37
+- `go_only` 2024-03-11 000001.SZ SELL — qty=400 px=8.60
+- `nt_only` 2024-03-11 000001.SZ SELL — qty=300 px=8.60
+- `nt_only` 2024-03-11 600000.SH BUY — qty=100 px=6.36
+- `go_only` 2024-03-12 000001.SZ SELL — qty=400 px=8.68
+- `nt_only` 2024-03-12 000001.SZ SELL — qty=500 px=8.68
+- `go_only` 2024-03-13 000001.SZ BUY — qty=1000 px=8.49
+- `nt_only` 2024-03-13 000001.SZ BUY — qty=1100 px=8.49
+- `matched` 2024-03-13 600000.SH BUY — qty=100 px=6.29 (fees: go=5.01 nt=5.00)
+- `go_only` 2024-03-14 000001.SZ BUY — qty=400 px=8.40
+- `nt_only` 2024-03-14 000001.SZ BUY — qty=500 px=8.40
+- `go_only` 2024-03-15 000001.SZ SELL — qty=1600 px=8.71
+- `nt_only` 2024-03-15 000001.SZ SELL — qty=1700 px=8.71
+- `matched` 2024-03-15 600000.SH SELL — qty=100 px=6.34 (fees: go=5.32 nt=5.00)
+- `matched` 2024-03-18 000001.SZ BUY — qty=200 px=8.66 (fees: go=5.02 nt=5.00)
+- `matched` 2024-03-19 000001.SZ BUY — qty=700 px=8.54 (fees: go=5.06 nt=5.00)
+- `matched` 2024-03-19 600000.SH BUY — qty=200 px=6.27 (fees: go=5.01 nt=5.00)
+- `nt_only` 2024-03-20 000001.SZ SELL — qty=200 px=8.58
+- `go_only` 2024-03-20 000001.SZ SELL — qty=300 px=8.58
+- `nt_only` 2024-03-21 000001.SZ SELL — qty=100 px=8.60
+- `matched` 2024-03-21 600000.SH SELL — qty=200 px=6.35 (fees: go=5.65 nt=5.00)
+- `nt_only` 2024-03-22 000001.SZ BUY — qty=500 px=8.51
+- `go_only` 2024-03-22 000001.SZ BUY — qty=400 px=8.51
+- `matched` 2024-03-22 600000.SH BUY — qty=100 px=6.29 (fees: go=5.01 nt=5.00)
+- `go_only` 2024-03-25 000001.SZ SELL — qty=100 px=8.54
+- `nt_only` 2024-03-25 000001.SZ SELL — qty=200 px=8.54
+- `matched` 2024-03-26 000001.SZ SELL — qty=900 px=8.71 (fees: go=9.00 nt=5.00)
+- `matched` 2024-03-26 600000.SH SELL — qty=200 px=6.39 (fees: go=5.65 nt=5.00)
+- `matched` 2024-03-27 000001.SZ BUY — qty=300 px=8.65 (fees: go=5.03 nt=5.00)
+- `matched` 2024-03-28 000001.SZ BUY — qty=200 px=8.62 (fees: go=5.02 nt=5.00)
+- `matched` 2024-03-29 000001.SZ SELL — qty=200 px=8.64 (fees: go=5.88 nt=5.00)
+- `matched` 2024-04-01 000001.SZ SELL — qty=17600 px=8.74 (fees: go=124.61 nt=46.15)
+- `matched` 2024-04-01 600000.SH BUY — qty=23000 px=6.46 (fees: go=46.08 nt=44.60)
+- `matched` 2024-04-02 000001.SZ BUY — qty=200 px=8.67 (fees: go=5.02 nt=5.00)
+- `matched` 2024-04-02 600000.SH SELL — qty=200 px=6.50 (fees: go=5.66 nt=5.00)
+- `go_only` 2024-04-03 000001.SZ BUY — qty=200 px=8.59
+- `nt_only` 2024-04-03 000001.SZ BUY — qty=300 px=8.59
+- `matched` 2024-04-03 600000.SH BUY — qty=200 px=6.46 (fees: go=5.01 nt=5.00)
+- `go_only` 2024-04-08 000001.SZ BUY — qty=100 px=8.57
+- `matched` 2024-04-08 600000.SH SELL — qty=200 px=6.51 (fees: go=5.66 nt=5.00)
+- `matched` 2024-04-09 000001.SZ BUY — qty=100 px=8.54 (fees: go=5.01 nt=5.00)
+- `matched` 2024-04-09 600000.SH BUY — qty=100 px=6.49 (fees: go=5.01 nt=5.00)
+- `nt_only` 2024-04-10 000001.SZ BUY — qty=300 px=8.45
+- `go_only` 2024-04-10 000001.SZ BUY — qty=400 px=8.45
+- `matched` 2024-04-10 600000.SH SELL — qty=100 px=6.50 (fees: go=5.33 nt=5.00)
+- `nt_only` 2024-04-11 000001.SZ BUY — qty=100 px=8.42
+- `matched` 2024-04-11 600000.SH BUY — qty=200 px=6.47 (fees: go=5.01 nt=5.00)
+- `matched` 2024-04-12 000001.SZ BUY — qty=600 px=8.26 (fees: go=5.05 nt=5.00)
+- `matched` 2024-04-12 600000.SH BUY — qty=600 px=6.37 (fees: go=5.04 nt=5.00)
+- `matched` 2024-04-15 000001.SZ SELL — qty=700 px=8.45 (fees: go=8.02 nt=5.00)
+- `nt_only` 2024-04-15 600000.SH SELL — qty=1000 px=6.53
+- `go_only` 2024-04-15 600000.SH SELL — qty=900 px=6.53
+- `go_only` 2024-04-16 000001.SZ BUY — qty=100 px=8.45
+- `go_only` 2024-04-16 600000.SH BUY — qty=200 px=6.49
+- `nt_only` 2024-04-16 600000.SH BUY — qty=300 px=6.49
+- `nt_only` 2024-04-17 000001.SZ SELL — qty=900 px=8.72
+- `go_only` 2024-04-17 000001.SZ SELL — qty=1000 px=8.72
+- `nt_only` 2024-04-17 600000.SH SELL — qty=400 px=6.56
+- `go_only` 2024-04-17 600000.SH SELL — qty=500 px=6.56
+- `matched` 2024-04-18 000001.SZ SELL — qty=500 px=8.87 (fees: go=7.26 nt=5.00)
+- `go_only` 2024-04-18 600000.SH BUY — qty=100 px=6.55
+- `matched` 2024-04-19 000001.SZ BUY — qty=300 px=8.78 (fees: go=5.03 nt=5.00)
+- `go_only` 2024-04-19 600000.SH SELL — qty=100 px=6.56
+- `matched` 2024-04-22 000001.SZ BUY — qty=500 px=8.63 (fees: go=5.04 nt=5.00)
+- `go_only` 2024-04-22 600000.SH BUY — qty=300 px=6.52
+- `nt_only` 2024-04-22 600000.SH BUY — qty=200 px=6.52
+- `matched` 2024-04-23 000001.SZ SELL — qty=100 px=8.66 (fees: go=5.44 nt=5.00)
+- `nt_only` 2024-04-23 600000.SH SELL — qty=200 px=6.56
+- `go_only` 2024-04-23 600000.SH SELL — qty=300 px=6.56
+- `nt_only` 2024-04-24 000001.SZ BUY — qty=100 px=8.65
+- `nt_only` 2024-04-24 600000.SH SELL — qty=200 px=6.58
+- `go_only` 2024-04-24 600000.SH SELL — qty=100 px=6.58
+- `nt_only` 2024-04-25 000001.SZ SELL — qty=300 px=8.72
+- `go_only` 2024-04-25 000001.SZ SELL — qty=200 px=8.72
+- `matched` 2024-04-25 600000.SH SELL — qty=200 px=6.62 (fees: go=5.68 nt=5.00)
+- `matched` 2024-04-26 000001.SZ BUY — qty=100 px=8.71 (fees: go=5.01 nt=5.00)
+- `go_only` 2024-04-26 600000.SH SELL — qty=100 px=6.63
+- `matched` 2024-04-29 000001.SZ SELL — qty=600 px=8.88 (fees: go=7.72 nt=5.00)
+- `matched` 2024-04-30 000001.SZ BUY — qty=100 px=8.86 (fees: go=5.01 nt=5.00)
+- `go_only` 2024-04-30 600000.SH SELL — qty=1300 px=6.88
+- `nt_only` 2024-04-30 600000.SH SELL — qty=1400 px=6.88
+- `matched` 2024-05-06 000001.SZ SELL — qty=300 px=8.95 (fees: go=6.37 nt=5.00)
+- `matched` 2024-05-06 600000.SH SELL — qty=700 px=7.02 (fees: go=7.51 nt=5.00)
+- `matched` 2024-05-07 600000.SH BUY — qty=100 px=6.99 (fees: go=5.01 nt=5.00)
+- `matched` 2024-05-08 000001.SZ BUY — qty=400 px=8.81 (fees: go=5.04 nt=5.00)
+- `matched` 2024-05-08 600000.SH BUY — qty=100 px=6.97 (fees: go=5.01 nt=5.00)
+- `matched` 2024-05-09 000001.SZ SELL — qty=100 px=8.84 (fees: go=5.45 nt=5.00)
+- `matched` 2024-05-10 000001.SZ SELL — qty=400 px=8.99 (fees: go=6.83 nt=5.00)
+- `matched` 2024-05-10 600000.SH SELL — qty=600 px=7.10 (fees: go=7.17 nt=5.00)
+- `matched` 2024-05-13 000001.SZ SELL — qty=100 px=9.01 (fees: go=5.46 nt=5.00)
+- `matched` 2024-05-13 600000.SH SELL — qty=100 px=7.12 (fees: go=5.36 nt=5.00)
+- `nt_only` 2024-05-14 000001.SZ BUY — qty=200 px=8.96
+- `go_only` 2024-05-14 000001.SZ BUY — qty=100 px=8.96
+- `nt_only` 2024-05-14 600000.SH BUY — qty=400 px=7.04
+- `go_only` 2024-05-14 600000.SH BUY — qty=300 px=7.04
+- `nt_only` 2024-05-15 000001.SZ BUY — qty=100 px=8.90
+- `go_only` 2024-05-15 000001.SZ BUY — qty=200 px=8.90
+- `nt_only` 2024-05-15 600000.SH SELL — qty=100 px=7.05
+- `matched` 2024-05-16 000001.SZ SELL — qty=800 px=9.18 (fees: go=8.74 nt=5.00)
+- `matched` 2024-05-16 600000.SH SELL — qty=600 px=7.17 (fees: go=7.19 nt=5.00)
+- `matched` 2024-05-17 000001.SZ SELL — qty=600 px=9.38 (fees: go=7.87 nt=5.00)
+- `matched` 2024-05-17 600000.SH SELL — qty=600 px=7.29 (fees: go=7.23 nt=5.00)
+- `matched` 2024-05-20 000001.SZ BUY — qty=100 px=9.35 (fees: go=5.01 nt=5.00)
+- `matched` 2024-05-20 600000.SH SELL — qty=600 px=7.44 (fees: go=7.28 nt=5.00)
+- `matched` 2024-05-21 000001.SZ SELL — qty=400 px=9.49 (fees: go=6.94 nt=5.00)
+- `matched` 2024-05-21 600000.SH SELL — qty=400 px=7.53 (fees: go=6.54 nt=5.00)
+- `matched` 2024-05-22 600000.SH SELL — qty=500 px=7.63 (fees: go=6.94 nt=5.00)
+- `matched` 2024-05-23 000001.SZ BUY — qty=300 px=9.37 (fees: go=5.03 nt=5.00)
+- `matched` 2024-05-23 600000.SH BUY — qty=100 px=7.62 (fees: go=5.01 nt=5.00)
+- `matched` 2024-05-24 000001.SZ BUY — qty=300 px=9.29 (fees: go=5.03 nt=5.00)
+- `matched` 2024-05-24 600000.SH BUY — qty=300 px=7.55 (fees: go=5.02 nt=5.00)
+- `matched` 2024-05-27 000001.SZ SELL — qty=500 px=9.46 (fees: go=7.41 nt=5.00)
+- `matched` 2024-05-27 600000.SH SELL — qty=400 px=7.63 (fees: go=6.56 nt=5.00)
+- `matched` 2024-05-28 000001.SZ BUY — qty=200 px=9.37 (fees: go=5.02 nt=5.00)
+- `matched` 2024-05-29 000001.SZ BUY — qty=400 px=9.25 (fees: go=5.04 nt=5.00)
+- `matched` 2024-05-29 600000.SH BUY — qty=200 px=7.59 (fees: go=5.02 nt=5.00)
+- `matched` 2024-05-30 000001.SZ BUY — qty=300 px=9.14 (fees: go=5.03 nt=5.00)
+- `matched` 2024-05-30 600000.SH BUY — qty=300 px=7.51 (fees: go=5.02 nt=5.00)
+- `matched` 2024-05-31 600000.SH BUY — qty=300 px=7.46 (fees: go=5.02 nt=5.00)
+- `matched` 2024-06-03 000001.SZ BUY — qty=400 px=9.02 (fees: go=5.04 nt=5.00)
+- `matched` 2024-06-03 600000.SH BUY — qty=200 px=7.40 (fees: go=5.01 nt=5.00)
+- `matched` 2024-06-04 000001.SZ SELL — qty=100 px=9.05 (fees: go=5.46 nt=5.00)
+- `matched` 2024-06-04 600000.SH SELL — qty=100 px=7.44 (fees: go=5.38 nt=5.00)
+- `matched` 2024-06-05 000001.SZ BUY — qty=300 px=8.93 (fees: go=5.03 nt=5.00)
+- `matched` 2024-06-05 600000.SH BUY — qty=100 px=7.41 (fees: go=5.01 nt=5.00)
+- `matched` 2024-06-06 600000.SH BUY — qty=100 px=7.38 (fees: go=5.01 nt=5.00)
+- `matched` 2024-06-07 000001.SZ SELL — qty=300 px=9.03 (fees: go=6.38 nt=5.00)
+- `matched` 2024-06-07 600000.SH SELL — qty=200 px=7.43 (fees: go=5.76 nt=5.00)
+- `matched` 2024-06-11 000001.SZ BUY — qty=300 px=8.93 (fees: go=5.03 nt=5.00)
+- `nt_only` 2024-06-11 600000.SH BUY — qty=600 px=7.29
+- `go_only` 2024-06-11 600000.SH BUY — qty=700 px=7.29
+- `nt_only` 2024-06-12 600000.SH BUY — qty=200 px=7.25
+- `go_only` 2024-06-12 600000.SH BUY — qty=100 px=7.25
+- `matched` 2024-06-13 000001.SZ BUY — qty=200 px=8.87 (fees: go=5.02 nt=5.00)
+- `matched` 2024-06-13 600000.SH SELL — qty=100 px=7.27 (fees: go=5.37 nt=5.00)
+- `matched` 2024-06-14 000001.SZ SELL — qty=200 px=8.96 (fees: go=5.91 nt=5.00)
+- `matched` 2024-06-17 000001.SZ BUY — qty=200 px=8.89 (fees: go=5.02 nt=5.00)
+- `matched` 2024-06-17 600000.SH BUY — qty=200 px=7.24 (fees: go=5.01 nt=5.00)
+- `matched` 2024-06-19 000001.SZ SELL — qty=200 px=8.93 (fees: go=5.91 nt=5.00)
+- `matched` 2024-06-19 600000.SH SELL — qty=500 px=7.35 (fees: go=6.87 nt=5.00)
+- `matched` 2024-06-20 000001.SZ BUY — qty=300 px=8.85 (fees: go=5.03 nt=5.00)
+- `matched` 2024-06-20 600000.SH BUY — qty=100 px=7.33 (fees: go=5.01 nt=5.00)
+- `matched` 2024-06-21 000001.SZ BUY — qty=200 px=8.80 (fees: go=5.02 nt=5.00)
+- `matched` 2024-06-21 600000.SH BUY — qty=100 px=7.30 (fees: go=5.01 nt=5.00)
+- `go_only` 2024-06-24 600000.SH BUY — qty=100 px=7.29
+- `matched` 2024-06-25 000001.SZ SELL — qty=300 px=8.87 (fees: go=6.36 nt=5.00)
+- `go_only` 2024-06-25 600000.SH SELL — qty=200 px=7.33
+- `nt_only` 2024-06-25 600000.SH SELL — qty=100 px=7.33
+- `matched` 2024-06-26 600000.SH SELL — qty=100 px=7.34 (fees: go=5.37 nt=5.00)
+- `matched` 2024-06-27 000001.SZ SELL — qty=100 px=8.92 (fees: go=5.45 nt=5.00)
+- `matched` 2024-06-28 000001.SZ SELL — qty=100 px=8.93 (fees: go=5.46 nt=5.00)
+- `matched` 2024-06-28 600000.SH SELL — qty=100 px=7.36 (fees: go=5.38 nt=5.00)
+- `matched` 2024-07-01 000001.SZ SELL — qty=11500 px=9.11 (fees: go=84.86 nt=31.43)
+- `matched` 2024-07-01 600000.SH BUY — qty=13300 px=7.40 (fees: go=30.52 nt=29.53)
+- `matched` 2024-07-02 000001.SZ SELL — qty=100 px=9.15 (fees: go=5.47 nt=5.00)
+- `matched` 2024-07-02 600000.SH SELL — qty=1400 px=7.63 (fees: go=10.44 nt=5.00)
+- `matched` 2024-07-03 000001.SZ BUY — qty=200 px=9.07 (fees: go=5.02 nt=5.00)
+- `matched` 2024-07-04 000001.SZ BUY — qty=100 px=9.03 (fees: go=5.01 nt=5.00)
+- `matched` 2024-07-04 600000.SH BUY — qty=200 px=7.60 (fees: go=5.02 nt=5.00)
+- `matched` 2024-07-05 000001.SZ BUY — qty=400 px=8.78 (fees: go=5.04 nt=5.00)
+- `matched` 2024-07-05 600000.SH BUY — qty=900 px=7.46 (fees: go=5.07 nt=5.00)
+- `matched` 2024-07-08 000001.SZ BUY — qty=100 px=8.74 (fees: go=5.01 nt=5.00)
+- `matched` 2024-07-08 600000.SH SELL — qty=500 px=7.54 (fees: go=6.92 nt=5.00)
+- `matched` 2024-07-09 000001.SZ SELL — qty=200 px=8.86 (fees: go=5.90 nt=5.00)
+- `matched` 2024-07-09 600000.SH SELL — qty=1100 px=7.72 (fees: go=9.33 nt=5.00)
+- `nt_only` 2024-07-10 000001.SZ SELL — qty=200 px=8.93
+- `go_only` 2024-07-10 000001.SZ SELL — qty=100 px=8.93
+- `matched` 2024-07-10 600000.SH SELL — qty=300 px=7.77 (fees: go=6.19 nt=5.00)
+- `nt_only` 2024-07-11 000001.SZ BUY — qty=100 px=8.92
+- `matched` 2024-07-11 600000.SH BUY — qty=500 px=7.69 (fees: go=5.04 nt=5.00)
+- `matched` 2024-07-12 000001.SZ SELL — qty=300 px=9.07 (fees: go=6.39 nt=5.00)
+- `go_only` 2024-07-12 600000.SH SELL — qty=1300 px=7.90
+- `nt_only` 2024-07-12 600000.SH SELL — qty=1200 px=7.90
+- `go_only` 2024-07-15 000001.SZ SELL — qty=100 px=9.09
+- `go_only` 2024-07-15 600000.SH SELL — qty=200 px=7.94
+- `nt_only` 2024-07-15 600000.SH SELL — qty=300 px=7.94
+- `go_only` 2024-07-16 000001.SZ BUY — qty=100 px=9.07
+- `matched` 2024-07-16 600000.SH BUY — qty=100 px=7.92 (fees: go=5.01 nt=5.00)
+- `matched` 2024-07-17 000001.SZ SELL — qty=200 px=9.15 (fees: go=5.93 nt=5.00)
+- `matched` 2024-07-17 600000.SH SELL — qty=800 px=8.08 (fees: go=8.30 nt=5.00)
+- `matched` 2024-07-18 600000.SH SELL — qty=300 px=8.13 (fees: go=6.24 nt=5.00)
+- `matched` 2024-07-19 000001.SZ BUY — qty=100 px=9.13 (fees: go=5.01 nt=5.00)
+- `matched` 2024-07-19 600000.SH BUY — qty=200 px=8.09 (fees: go=5.02 nt=5.00)
+- `matched` 2024-07-22 000001.SZ BUY — qty=200 px=9.00 (fees: go=5.02 nt=5.00)
+- `matched` 2024-07-22 600000.SH BUY — qty=800 px=7.95 (fees: go=5.06 nt=5.00)
+- `matched` 2024-07-23 000001.SZ BUY — qty=100 px=8.96 (fees: go=5.01 nt=5.00)
+- `matched` 2024-07-23 600000.SH SELL — qty=100 px=7.96 (fees: go=5.41 nt=5.00)
+- `matched` 2024-07-24 000001.SZ BUY — qty=100 px=8.92 (fees: go=5.01 nt=5.00)
+- `matched` 2024-07-24 600000.SH BUY — qty=200 px=7.92 (fees: go=5.02 nt=5.00)
+- `matched` 2024-07-25 600000.SH BUY — qty=200 px=7.90 (fees: go=5.02 nt=5.00)
+- `matched` 2024-07-26 000001.SZ BUY — qty=100 px=8.83 (fees: go=5.01 nt=5.00)
+- `matched` 2024-07-26 600000.SH BUY — qty=1000 px=7.72 (fees: go=5.08 nt=5.00)
+- `matched` 2024-07-29 000001.SZ SELL — qty=100 px=8.90 (fees: go=5.45 nt=5.00)
+- `matched` 2024-07-29 600000.SH SELL — qty=1100 px=7.91 (fees: go=9.43 nt=5.00)
+- `matched` 2024-07-30 000001.SZ BUY — qty=100 px=8.87 (fees: go=5.01 nt=5.00)
+- `nt_only` 2024-07-30 600000.SH BUY — qty=700 px=7.78
+- `go_only` 2024-07-30 600000.SH BUY — qty=800 px=7.78
+- `matched` 2024-07-31 000001.SZ SELL — qty=400 px=9.04 (fees: go=6.84 nt=5.00)
+- `go_only` 2024-07-31 600000.SH SELL — qty=100 px=7.78
+- `matched` 2024-08-01 600000.SH SELL — qty=900 px=7.94 (fees: go=8.65 nt=5.00)
+- `go_only` 2024-08-02 000001.SZ BUY — qty=300 px=8.93
+- `nt_only` 2024-08-02 000001.SZ BUY — qty=200 px=8.93
+- `matched` 2024-08-02 600000.SH BUY — qty=500 px=7.85 (fees: go=5.04 nt=5.00)
+- `nt_only` 2024-08-05 000001.SZ BUY — qty=200 px=8.85
+- `go_only` 2024-08-05 000001.SZ BUY — qty=100 px=8.85
+- `matched` 2024-08-05 600000.SH BUY — qty=500 px=7.77 (fees: go=5.04 nt=5.00)
+- `matched` 2024-08-06 000001.SZ BUY — qty=200 px=8.74 (fees: go=5.02 nt=5.00)
+- `matched` 2024-08-06 600000.SH BUY — qty=800 px=7.64 (fees: go=5.06 nt=5.00)
+- `matched` 2024-08-07 600000.SH SELL — qty=400 px=7.70 (fees: go=6.57 nt=5.00)
+- `matched` 2024-08-08 600000.SH SELL — qty=400 px=7.77 (fees: go=6.58 nt=5.00)
+- `matched` 2024-08-09 000001.SZ SELL — qty=200 px=8.84 (fees: go=5.90 nt=5.00)
+- `matched` 2024-08-09 600000.SH SELL — qty=800 px=7.91 (fees: go=8.23 nt=5.00)
+- `matched` 2024-08-12 000001.SZ BUY — qty=100 px=8.81 (fees: go=5.01 nt=5.00)
+- `matched` 2024-08-12 600000.SH SELL — qty=200 px=7.95 (fees: go=5.81 nt=5.00)
+- `matched` 2024-08-13 000001.SZ BUY — qty=100 px=8.76 (fees: go=5.01 nt=5.00)
+- `matched` 2024-08-13 600000.SH SELL — qty=100 px=7.96 (fees: go=5.41 nt=5.00)
+- `matched` 2024-08-14 600000.SH BUY — qty=100 px=7.94 (fees: go=5.01 nt=5.00)
+- `matched` 2024-08-15 000001.SZ SELL — qty=200 px=8.83 (fees: go=5.90 nt=5.00)
+- `matched` 2024-08-15 600000.SH SELL — qty=800 px=8.10 (fees: go=8.30 nt=5.00)
+- `matched` 2024-08-16 000001.SZ SELL — qty=100 px=8.92 (fees: go=5.45 nt=5.00)
+- `matched` 2024-08-16 600000.SH SELL — qty=600 px=8.20 (fees: go=7.51 nt=5.00)
+- `matched` 2024-08-19 000001.SZ SELL — qty=300 px=9.06 (fees: go=6.39 nt=5.00)
+- `matched` 2024-08-19 600000.SH SELL — qty=800 px=8.36 (fees: go=8.41 nt=5.00)
+- `matched` 2024-08-20 000001.SZ SELL — qty=100 px=9.10 (fees: go=5.46 nt=5.00)
+- `matched` 2024-08-20 600000.SH BUY — qty=500 px=8.26 (fees: go=5.04 nt=5.00)
+- `matched` 2024-08-21 600000.SH SELL — qty=200 px=8.30 (fees: go=5.85 nt=5.00)
+- `matched` 2024-08-22 600000.SH SELL — qty=200 px=8.35 (fees: go=5.85 nt=5.00)
+- `matched` 2024-08-23 000001.SZ SELL — qty=200 px=9.22 (fees: go=5.94 nt=5.00)
+- `matched` 2024-08-26 600000.SH BUY — qty=600 px=8.23 (fees: go=5.05 nt=5.00)
+- `matched` 2024-08-27 000001.SZ BUY — qty=100 px=9.18 (fees: go=5.01 nt=5.00)
+- `nt_only` 2024-08-28 000001.SZ BUY — qty=200 px=9.09
+- `go_only` 2024-08-28 000001.SZ BUY — qty=100 px=9.09
+- `matched` 2024-08-28 600000.SH BUY — qty=300 px=8.17 (fees: go=5.02 nt=5.00)
+- `go_only` 2024-08-29 000001.SZ BUY — qty=400 px=8.92
+- `nt_only` 2024-08-29 000001.SZ BUY — qty=300 px=8.92
+- `matched` 2024-08-29 600000.SH BUY — qty=1300 px=7.92 (fees: go=5.10 nt=5.00)
+- `matched` 2024-08-30 000001.SZ SELL — qty=100 px=8.94 (fees: go=5.46 nt=5.00)
+- `go_only` 2024-08-30 600000.SH BUY — qty=600 px=7.81
+- `nt_only` 2024-08-30 600000.SH BUY — qty=700 px=7.81
+- `matched` 2024-09-02 000001.SZ BUY — qty=100 px=8.90 (fees: go=5.01 nt=5.00)
+- `go_only` 2024-09-02 600000.SH BUY — qty=300 px=7.78
+- `nt_only` 2024-09-02 600000.SH BUY — qty=100 px=7.78
+- `matched` 2024-09-03 000001.SZ BUY — qty=100 px=8.87 (fees: go=5.01 nt=5.00)
+- `nt_only` 2024-09-03 600000.SH BUY — qty=800 px=7.65
+- `go_only` 2024-09-03 600000.SH BUY — qty=700 px=7.65
+- `matched` 2024-09-04 000001.SZ BUY — qty=100 px=8.82 (fees: go=5.01 nt=5.00)
+- `matched` 2024-09-04 600000.SH SELL — qty=400 px=7.71 (fees: go=6.57 nt=5.00)
+- `matched` 2024-09-05 000001.SZ SELL — qty=100 px=8.86 (fees: go=5.45 nt=5.00)
+- `go_only` 2024-09-06 600000.SH SELL — qty=600 px=7.81
+- `nt_only` 2024-09-06 600000.SH SELL — qty=500 px=7.81
+- `matched` 2024-09-09 000001.SZ BUY — qty=400 px=8.67 (fees: go=5.03 nt=5.00)
+- `nt_only` 2024-09-09 600000.SH BUY — qty=200 px=7.77
+- `go_only` 2024-09-09 600000.SH BUY — qty=300 px=7.77
+- `matched` 2024-09-10 000001.SZ SELL — qty=100 px=8.71 (fees: go=5.44 nt=5.00)
+- `matched` 2024-09-10 600000.SH SELL — qty=600 px=7.88 (fees: go=7.41 nt=5.00)
+- `matched` 2024-09-11 000001.SZ BUY — qty=400 px=8.49 (fees: go=5.03 nt=5.00)
+- `matched` 2024-09-11 600000.SH BUY — qty=1300 px=7.65 (fees: go=5.10 nt=5.00)
+- `nt_only` 2024-09-12 000001.SZ SELL — qty=100 px=8.57
+- `go_only` 2024-09-12 000001.SZ SELL — qty=200 px=8.57
+- `matched` 2024-09-12 600000.SH SELL — qty=1200 px=7.85 (fees: go=9.80 nt=5.00)
+- `go_only` 2024-09-13 000001.SZ BUY — qty=100 px=8.54
+- `matched` 2024-09-13 600000.SH BUY — qty=700 px=7.74 (fees: go=5.05 nt=5.00)
+- `matched` 2024-09-18 000001.SZ SELL — qty=100 px=8.60 (fees: go=5.44 nt=5.00)
+- `matched` 2024-09-18 600000.SH BUY — qty=100 px=7.71 (fees: go=5.01 nt=5.00)
+- `matched` 2024-09-19 000001.SZ SELL — qty=100 px=8.63 (fees: go=5.44 nt=5.00)
+- `matched` 2024-09-19 600000.SH SELL — qty=1000 px=7.90 (fees: go=9.03 nt=5.00)
+- `matched` 2024-09-20 000001.SZ SELL — qty=100 px=8.71 (fees: go=5.44 nt=5.00)
+- `matched` 2024-09-23 000001.SZ SELL — qty=300 px=8.84 (fees: go=6.35 nt=5.00)
+- `matched` 2024-09-23 600000.SH SELL — qty=600 px=8.00 (fees: go=7.45 nt=5.00)
+- `matched` 2024-09-24 000001.SZ SELL — qty=500 px=9.13 (fees: go=7.33 nt=5.00)
+- `matched` 2024-09-24 600000.SH SELL — qty=2200 px=8.42 (fees: go=15.01 nt=5.56)
+- `matched` 2024-09-25 000001.SZ SELL — qty=200 px=9.24 (fees: go=5.94 nt=5.00)
+- `matched` 2024-09-25 600000.SH SELL — qty=1800 px=8.80 (fees: go=13.07 nt=5.00)
+- `matched` 2024-09-26 000001.SZ SELL — qty=1000 px=9.81 (fees: go=10.01 nt=5.00)
+- `matched` 2024-09-26 600000.SH SELL — qty=1400 px=9.12 (fees: go=11.51 nt=5.00)
+- `matched` 2024-09-27 000001.SZ SELL — qty=300 px=10.05 (fees: go=6.54 nt=5.00)
+- `matched` 2024-09-27 600000.SH SELL — qty=100 px=9.15 (fees: go=5.47 nt=5.00)
+- `matched` 2024-09-30 000001.SZ SELL — qty=1000 px=10.75 (fees: go=10.48 nt=5.00)
+- `matched` 2024-09-30 600000.SH SELL — qty=1000 px=9.39 (fees: go=9.79 nt=5.00)
+- `matched` 2024-10-08 000001.SZ BUY — qty=12500 px=11.34 (fees: go=43.93 nt=42.51)
+- `matched` 2024-10-08 600000.SH SELL — qty=16700 px=9.73 (fees: go=131.63 nt=48.75)
+- `matched` 2024-10-09 000001.SZ BUY — qty=2700 px=10.28 (fees: go=8.60 nt=8.33)
+- `matched` 2024-10-09 600000.SH BUY — qty=1200 px=9.18 (fees: go=5.11 nt=5.00)
+- `matched` 2024-10-10 000001.SZ SELL — qty=1300 px=10.78 (fees: go=12.14 nt=5.00)
+- `matched` 2024-10-10 600000.SH SELL — qty=800 px=9.56 (fees: go=8.90 nt=5.00)
+- `matched` 2024-10-11 000001.SZ BUY — qty=600 px=10.54 (fees: go=5.06 nt=5.00)
+- `matched` 2024-10-11 600000.SH BUY — qty=300 px=9.42 (fees: go=5.03 nt=5.00)
+- `matched` 2024-10-14 000001.SZ SELL — qty=700 px=10.81 (fees: go=8.86 nt=5.00)
+- `matched` 2024-10-14 600000.SH SELL — qty=500 px=9.64 (fees: go=7.46 nt=5.00)
+- `matched` 2024-10-15 000001.SZ BUY — qty=300 px=10.70 (fees: go=5.03 nt=5.00)
+- `matched` 2024-10-15 600000.SH BUY — qty=300 px=9.50 (fees: go=5.03 nt=5.00)
+- `matched` 2024-10-16 000001.SZ SELL — qty=400 px=10.85 (fees: go=7.21 nt=5.00)
+- `matched` 2024-10-16 600000.SH SELL — qty=200 px=9.58 (fees: go=5.98 nt=5.00)
+- `matched` 2024-10-17 000001.SZ BUY — qty=300 px=10.75 (fees: go=5.03 nt=5.00)
+- `matched` 2024-10-17 600000.SH BUY — qty=300 px=9.47 (fees: go=5.03 nt=5.00)
+- `matched` 2024-10-18 000001.SZ SELL — qty=200 px=10.83 (fees: go=6.10 nt=5.00)
+- `matched` 2024-10-18 600000.SH BUY — qty=100 px=9.41 (fees: go=5.01 nt=5.00)
+- `matched` 2024-10-21 000001.SZ BUY — qty=500 px=10.62 (fees: go=5.05 nt=5.00)
+- `nt_only` 2024-10-22 000001.SZ BUY — qty=100 px=10.60
+- `go_only` 2024-10-22 600000.SH BUY — qty=100 px=9.39
+- `go_only` 2024-10-23 000001.SZ SELL — qty=100 px=10.67
+- `nt_only` 2024-10-23 000001.SZ SELL — qty=200 px=10.67
+- `go_only` 2024-10-23 600000.SH SELL — qty=200 px=9.43
+- `matched` 2024-10-24 000001.SZ BUY — qty=200 px=10.57 (fees: go=5.02 nt=5.00)
+- `go_only` 2024-10-24 600000.SH BUY — qty=100 px=9.40
+- `matched` 2024-10-25 000001.SZ BUY — qty=100 px=10.53 (fees: go=5.01 nt=5.00)
+- `matched` 2024-10-25 600000.SH BUY — qty=200 px=9.34 (fees: go=5.02 nt=5.00)
+- `matched` 2024-10-28 000001.SZ BUY — qty=200 px=10.47 (fees: go=5.02 nt=5.00)
+- `matched` 2024-10-29 000001.SZ BUY — qty=300 px=10.38 (fees: go=5.03 nt=5.00)
+- `go_only` 2024-10-29 600000.SH BUY — qty=200 px=9.26
+- `nt_only` 2024-10-29 600000.SH BUY — qty=100 px=9.26
+- `matched` 2024-10-30 000001.SZ BUY — qty=500 px=10.18 (fees: go=5.05 nt=5.00)
+- `go_only` 2024-10-30 600000.SH BUY — qty=100 px=9.21
+- `nt_only` 2024-10-30 600000.SH BUY — qty=200 px=9.21
+- `go_only` 2024-10-31 000001.SZ SELL — qty=100 px=10.24
+- `nt_only` 2024-10-31 000001.SZ SELL — qty=200 px=10.24
+- `matched` 2024-10-31 600000.SH BUY — qty=200 px=9.12 (fees: go=5.02 nt=5.00)
+- `nt_only` 2024-11-01 000001.SZ SELL — qty=100 px=10.28
+- `go_only` 2024-11-01 000001.SZ SELL — qty=200 px=10.28
+- `matched` 2024-11-01 600000.SH SELL — qty=200 px=9.21 (fees: go=5.94 nt=5.00)
+- `nt_only` 2024-11-04 000001.SZ SELL — qty=100 px=10.31
+- `go_only` 2024-11-04 600000.SH SELL — qty=100 px=9.26
+- `nt_only` 2024-11-04 600000.SH SELL — qty=200 px=9.26
+- `go_only` 2024-11-05 000001.SZ SELL — qty=500 px=10.48
+- `nt_only` 2024-11-05 000001.SZ SELL — qty=400 px=10.48
+- `go_only` 2024-11-05 600000.SH SELL — qty=200 px=9.32
+- `nt_only` 2024-11-05 600000.SH SELL — qty=100 px=9.32
+- `matched` 2024-11-06 000001.SZ BUY — qty=200 px=10.39 (fees: go=5.02 nt=5.00)
+- `matched` 2024-11-06 600000.SH BUY — qty=200 px=9.22 (fees: go=5.02 nt=5.00)
+- `matched` 2024-11-07 000001.SZ SELL — qty=800 px=10.71 (fees: go=9.37 nt=5.00)
+- `matched` 2024-11-07 600000.SH SELL — qty=700 px=9.53 (fees: go=8.40 nt=5.00)
+- `matched` 2024-11-08 000001.SZ BUY — qty=400 px=10.54 (fees: go=5.04 nt=5.00)
+- `matched` 2024-11-08 600000.SH BUY — qty=500 px=9.32 (fees: go=5.05 nt=5.00)
+- `matched` 2024-11-11 000001.SZ BUY — qty=300 px=10.43 (fees: go=5.03 nt=5.00)
+- `nt_only` 2024-11-11 600000.SH BUY — qty=700 px=9.01
+- `go_only` 2024-11-11 600000.SH BUY — qty=800 px=9.01
+- `matched` 2024-11-12 000001.SZ BUY — qty=200 px=10.38 (fees: go=5.02 nt=5.00)
+- `go_only` 2024-11-12 600000.SH BUY — qty=100 px=8.95
+- `nt_only` 2024-11-12 600000.SH BUY — qty=200 px=8.95
+- `matched` 2024-11-13 000001.SZ SELL — qty=200 px=10.44 (fees: go=6.07 nt=5.00)
+- `matched` 2024-11-13 600000.SH BUY — qty=100 px=8.92 (fees: go=5.01 nt=5.00)
+- `matched` 2024-11-14 000001.SZ BUY — qty=200 px=10.38 (fees: go=5.02 nt=5.00)
+- `matched` 2024-11-14 600000.SH SELL — qty=100 px=8.94 (fees: go=5.46 nt=5.00)
+- `matched` 2024-11-15 000001.SZ BUY — qty=200 px=10.29 (fees: go=5.02 nt=5.00)
+- `matched` 2024-11-15 600000.SH BUY — qty=300 px=8.84 (fees: go=5.03 nt=5.00)
+- `matched` 2024-11-18 000001.SZ SELL — qty=800 px=10.57 (fees: go=9.31 nt=5.00)
+- `matched` 2024-11-18 600000.SH SELL — qty=700 px=9.11 (fees: go=8.25 nt=5.00)
+- `matched` 2024-11-19 000001.SZ BUY — qty=200 px=10.51 (fees: go=5.02 nt=5.00)
+- `matched` 2024-11-19 600000.SH BUY — qty=100 px=9.07 (fees: go=5.01 nt=5.00)
+- `matched` 2024-11-20 000001.SZ BUY — qty=100 px=10.47 (fees: go=5.01 nt=5.00)
+- `matched` 2024-11-20 600000.SH BUY — qty=200 px=9.00 (fees: go=5.02 nt=5.00)
+- `matched` 2024-11-21 000001.SZ BUY — qty=100 px=10.42 (fees: go=5.01 nt=5.00)
+- `nt_only` 2024-11-21 600000.SH SELL — qty=100 px=9.01
+- `matched` 2024-11-22 000001.SZ BUY — qty=800 px=10.15 (fees: go=5.08 nt=5.00)
+- `nt_only` 2024-11-22 600000.SH BUY — qty=600 px=8.79
+- `go_only` 2024-11-22 600000.SH BUY — qty=500 px=8.79
+- `matched` 2024-11-25 000001.SZ BUY — qty=300 px=10.06 (fees: go=5.03 nt=5.00)
+- `matched` 2024-11-25 600000.SH BUY — qty=400 px=8.65 (fees: go=5.03 nt=5.00)
+- `matched` 2024-11-26 000001.SZ SELL — qty=300 px=10.14 (fees: go=6.55 nt=5.00)
+- `matched` 2024-11-27 000001.SZ SELL — qty=300 px=10.24 (fees: go=6.57 nt=5.00)
+- `matched` 2024-11-27 600000.SH SELL — qty=300 px=8.74 (fees: go=6.34 nt=5.00)
+- `matched` 2024-11-28 000001.SZ BUY — qty=200 px=10.20 (fees: go=5.02 nt=5.00)
+- `nt_only` 2024-11-29 000001.SZ SELL — qty=200 px=10.24
+- `go_only` 2024-11-29 000001.SZ SELL — qty=100 px=10.24
+- `go_only` 2024-12-02 000001.SZ SELL — qty=100 px=10.24
+- `matched` 2024-12-02 600000.SH SELL — qty=100 px=8.80 (fees: go=5.45 nt=5.00)
+- `matched` 2024-12-03 000001.SZ SELL — qty=200 px=10.33 (fees: go=6.05 nt=5.00)
+- `matched` 2024-12-03 600000.SH SELL — qty=400 px=8.94 (fees: go=6.82 nt=5.00)
+- `go_only` 2024-12-04 000001.SZ BUY — qty=100 px=10.31
+- `matched` 2024-12-04 600000.SH SELL — qty=200 px=9.04 (fees: go=5.92 nt=5.00)
+- `nt_only` 2024-12-05 000001.SZ BUY — qty=100 px=10.29
+- `matched` 2024-12-05 600000.SH BUY — qty=200 px=8.93 (fees: go=5.02 nt=5.00)
+- `go_only` 2024-12-06 000001.SZ SELL — qty=500 px=10.49
+- `nt_only` 2024-12-06 000001.SZ SELL — qty=600 px=10.49
+- `matched` 2024-12-06 600000.SH SELL — qty=100 px=8.99 (fees: go=5.46 nt=5.00)
+- `go_only` 2024-12-09 000001.SZ SELL — qty=100 px=10.50
+- `matched` 2024-12-09 600000.SH BUY — qty=100 px=8.95 (fees: go=5.01 nt=5.00)
+- `nt_only` 2024-12-10 000001.SZ SELL — qty=200 px=10.60
+- `go_only` 2024-12-10 000001.SZ SELL — qty=300 px=10.60
+- `matched` 2024-12-10 600000.SH SELL — qty=300 px=9.08 (fees: go=6.39 nt=5.00)
+- `nt_only` 2024-12-11 000001.SZ BUY — qty=100 px=10.55
+- `go_only` 2024-12-11 000001.SZ BUY — qty=200 px=10.55
+- `matched` 2024-12-11 600000.SH BUY — qty=400 px=8.92 (fees: go=5.04 nt=5.00)
+- `matched` 2024-12-12 000001.SZ SELL — qty=300 px=10.66 (fees: go=6.63 nt=5.00)
+- `matched` 2024-12-12 600000.SH SELL — qty=500 px=9.10 (fees: go=7.32 nt=5.00)
+- `matched` 2024-12-13 000001.SZ BUY — qty=700 px=10.40 (fees: go=5.07 nt=5.00)
+- `matched` 2024-12-13 600000.SH BUY — qty=400 px=8.95 (fees: go=5.04 nt=5.00)
+- `matched` 2024-12-17 000001.SZ BUY — qty=100 px=10.37 (fees: go=5.01 nt=5.00)
+- `matched` 2024-12-17 600000.SH BUY — qty=300 px=8.83 (fees: go=5.03 nt=5.00)
+- `matched` 2024-12-18 000001.SZ SELL — qty=300 px=10.48 (fees: go=6.60 nt=5.00)
+- `matched` 2024-12-19 000001.SZ BUY — qty=100 px=10.42 (fees: go=5.01 nt=5.00)
+- `matched` 2024-12-20 600000.SH SELL — qty=100 px=8.88 (fees: go=5.45 nt=5.00)
+- `matched` 2024-12-23 000001.SZ SELL — qty=300 px=10.55 (fees: go=6.61 nt=5.00)
+- `matched` 2024-12-23 600000.SH SELL — qty=800 px=9.20 (fees: go=8.75 nt=5.00)
+- `matched` 2024-12-24 000001.SZ SELL — qty=300 px=10.67 (fees: go=6.63 nt=5.00)
+- `nt_only` 2024-12-24 600000.SH SELL — qty=500 px=9.39
+- `go_only` 2024-12-24 600000.SH SELL — qty=400 px=9.39
+- `matched` 2024-12-25 000001.SZ SELL — qty=200 px=10.72 (fees: go=6.09 nt=5.00)
+- `nt_only` 2024-12-25 600000.SH SELL — qty=400 px=9.59
+- `go_only` 2024-12-25 600000.SH SELL — qty=500 px=9.59
+- `matched` 2024-12-26 000001.SZ BUY — qty=200 px=10.67 (fees: go=5.02 nt=5.00)
+- `matched` 2024-12-30 000001.SZ SELL — qty=200 px=10.75 (fees: go=6.10 nt=5.00)
+- `matched` 2024-12-30 600000.SH SELL — qty=200 px=9.70 (fees: go=5.99 nt=5.00)
+- `matched` 2024-12-31 000001.SZ SELL — qty=27900 px=10.52 (fees: go=237.82 nt=88.08)
+- `matched` 2024-12-31 600000.SH SELL — qty=20600 px=9.54 (fees: go=159.13 nt=58.94)
+
+## 差异归因（实测 → 口径）
+
+- ① 价源精度：Go 消费 PG 前复权浮点价（7.566182…），NT catalog 为 tick 0.01 的 Decimal（7.57）——每笔成交价有 ≤0.005 的口径差，是持仓路径分叉（go_only/nt_only 少量成交）与净值微差的根因（§8.2 观察项：系统性价差先复核取数时点——本次两侧同源 PG，差异为精度而非时点）。
+- ② 费用微差：Go 侧 ComputeFees = 佣金+过户费（+卖侧印花税）逐笔精确对上；NT 侧 AShareFeeModel 在真实 run 的 fills 报告里 ≈ 纯佣金——过户费分量未体现（单笔约 3% 相对差，方向为 NT 低估）。疑点在 NT FeeModel 返回值到 fills 报告的链路，立 K15-R1 复查；其对齐影响累计约 -0.08% total_return。
+- ③ go_only / nt_only：全部是 ①② 的下游（两侧持仓路径在多次微差后出现 ±100 股级 delta 偏移），非执行机制缺失——对账键（date/symbol/side/qty/px-到分）已确认无机制性缺笔。
+- ④ win_rate：按 entry/exit 配对计算，对成交明细的微小分叉高度敏感（37%~42% 相对差全部来自配对序列错位），不设硬容差，以明细对账为准。
+- ⑤ 费率口径裁决（工单③-5）：选 b) 报告单列归因——Go 记账走 Tracker+ComputeFees（全三项，与 NT AShareFeeModel 的 compute_fees parity fixture 同源），「撮合路径只计佣金」的 CostModel 口径边界不进入本次对齐路径；ExecutionService 路径的口径边界维持 §8.4 记档。
+- ⑥ 涨跌停/T+1 触发：本窗口两只主板标的的调仓路径未触发涨跌停拒单与 T+1 拒单（卖的是昨仓，合法）——两条护栏由两侧各自的单测护栏覆盖（Go tracker T+1 测试 / 侧车 sellable 测试 + 本次 wrReplay no-chase 腿），实验窗口内未触发如实记录。
