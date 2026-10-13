@@ -74,8 +74,9 @@ func main() {
 	}
 
 	// DataAdapter 由 data-engine 模块构造（Boot 第 3 位）—— 传进来复用，
-	// 不在此重建（否则同一进程两条 adapter 实例 = 双真相）。
-	ds := buildDataServices(store, engine, ak.Wiring.Adapter, logger, newEngine)
+	// 不在此重建（否则同一进程两条 adapter 实例 = 双真相）。m 传入用于
+	// NT 侧车 round-trip 观测接线（K16 ②）。
+	ds := buildDataServices(store, engine, ak.Wiring.Adapter, logger, newEngine, m)
 	strategyDB, pluginLoader := initStrategyAndPlugins(v, store, logger)
 
 	// AI 拆仓阶段 1（ADR-027 §5 第 8 步前置切片）：Copilot / pipeline /

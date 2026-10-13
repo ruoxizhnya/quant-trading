@@ -168,7 +168,7 @@ type SignalProvider interface {
 | 3 | Parquet 导出复权口径与 `ohlcv_daily_qfq` 映射 | K13 | ✅ 已关闭（见 §8.2） |
 | 4 | NT 版本锁定 / 升级跟随策略 | 阶段 2 前 | PoC 已钉 `2.0.0rc6`；升级跟随策略未决 |
 | 5 | ST/新股限制、集合竞价是否进适配器最小规则集 | K14 按双跑需要裁决 | ✅ 已关闭（见 §8.4） |
-| 6 | 侧车部署形态（compose 服务 vs 独立进程）与监控口径 | 决策门后（K16） | 未决 |
+| 6 | 侧车部署形态（compose 服务 vs 独立进程）与监控口径 | 决策门后（K16） | ✅ 已关闭（K16 ② 裁决，见 §8.6：生产 = 宿主独立进程，Docker Desktop 下容器形态「健康检查绿但宿主拒连」实测否决；监控 = `nt_sidecar_calls_total{outcome}` + `nt_sidecar_call_duration_seconds{outcome}`，回退=0 由测试执法） |
 
 ### 8.1 裁决：侧车通道 = HTTP/1.1 + JSON（回环）
 
@@ -262,4 +262,31 @@ K14 交付（`d76cf3d`）自审发现 **1 🔴 + 2 🟠 + 4 🟡**（对照评�
 - **NT Logger.warning 不接受 % 占位参数**（只接受已格式化字符串）。
 - **`generate_account_report(rid, venue=)` 返回 DataFrame 索引 = 事件时刻**，total 列 = 现金（非总权益）；日末现金须按日取最后一事件结转（`synth_equity_curve` 口径）。
 - **fills 的 symbol 带 `.SIM` venue 后缀**，与 catalog closes key 不匹配时会静默算出恒 0 持仓——`_symbol_of(value, venue)` 剥后缀（K15 实测踩坑）。
+
+### 8.6 裁决：侧车部署形态与监控口径（K16 ②，2026-10-13）
+
+**部署形态：生产 = 宿主同机独立进程（`python -m sidecar`）；compose 容器 = Linux 专属可选样例。**
+
+| 形态 | D5 回环约束 | Go 侧可达性 | 实测结论 |
+|---|---|---|---|
+| 宿主独立进程 | ✅ 原生满足（bind 127.0.0.1） | ✅ `http://127.0.0.1:9100` 直达 | ✅ **生产形态**。实测 round trip 200 completed（786ms） |
+| compose + `network_mode: host`（Linux） | ✅ 共享宿主 netns | ✅ | 可用（Dockerfile HEALTHCHECK 覆盖），但引入镜像/挂载运维面，无收益 |
+| compose + `network_mode: host`（**Docker Desktop / Windows**） | ✅ 容器内合规 | ❌ **宿主 127.0.0.1 拒连** | ❌ **不可用**（见下实测） |
+
+- **Docker Desktop 实测证据（2026-10-13，Docker 29.8.0 / compose v5.5.1）**：`network_mode: host` 在 Docker Desktop 下把容器放进的是 **Linux VM 的 netns**，不是 Windows 宿主 netns。实测对照：容器内 `127.0.0.1:9100/healthz` = **200**、容器 `Up (healthy)`（HEALTHCHECK 照常绿），但 Windows 宿主 `127.0.0.1:9100` = **connection refused**。**健康检查绿 ≠ 宿主可达**——Windows 上容器形态会给出「看着全绿、Go 侧却全挂」的假象，故 Windows **禁用容器形态**，直接宿主进程（[docker-compose.nt.yaml](../../../docker-compose.nt.yaml) 注释已标注此限）。
+- **零回退 fail-closed 不受部署形态影响**：停侧车后 `cmd/dualrun` exit=1，错误点名 `kernel "nautilus" unreachable`，绝不静默回退 go 内核（FR-1.3）。
+- **Windows 端口幽灵再次实证**（本工单 K16 ② 也撞到一次）：停掉容器后 9100 仍可能被早前残留的宿主侧车进程监听 ⇒ 「停了还在跑」的诡异现象。收口清单见运维文档（K16 ③）。
+
+**监控口径：两条 NT 侧车指标 + 测试执法的「回退=0」。**
+
+| 验收项 | 落点 | 状态 |
+|---|---|---|
+| 侧车延迟 | `nt_sidecar_call_duration_seconds{outcome}`（Histogram，`pkg/observability/metrics.go`） | ✅ |
+| 侧车失败率 | `nt_sidecar_calls_total{outcome}`（Counter；失败率 = outcome!="ok" 速率占比） | ✅ |
+| 每次 round trip 恰好一条观测 | `nautilus.RunBacktest` named-return defer 统一覆盖全部 return 路径（transport/503/非2xx/空body/解码失败/status=failed/缺指标/成功）；破坏验证：defer 改为只观测成功路径 → 7 条失败腿立刻红 | ✅ |
+| 回退次数=0 断言 | **不是指标是结构属性**：Runner 无任何回退分支，全部失败路径返回 `(nil, err)`（runner_test 的 no-silent-fallback 断言 + dualrun 零回退实测）。监控抓「回退计数」无意义（恒 0），故由**测试执法**而非指标 | ✅ |
+| 观测接线 | `nautilus.NewObservedRunner(url, client, observer)`；observer = `observability.Metrics`（隐式实现 `nautilus.RunObserver` 消费方窄接口，编译期断言在 `cmd/analysis/setup.go`；nautilus 不反向依赖 observability） | ✅ |
+| 真侧车实测 | `TestRunObserver_LiveSidecarSmoke`（`NT_SIDECAR_URL` 门控，CI skip）：真 round trip 恰好一条观测，失败记 `unavailable`、成功记 `ok`（实测 786ms） | ✅ |
+
+- **outcome 封闭词表** `ok / unavailable / timeout / internal`（对齐 `pkg/errors` 错误码族，未知码 fail-closed 折叠为 internal）——标签基数有界，告警规则可直接按 outcome 键控（K16 ⑤ 接线）。
 

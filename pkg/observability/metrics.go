@@ -12,6 +12,13 @@
 // Plus a request_id (X-Request-ID header) that is generated for
 // inbound requests and propagated to outbound HTTP calls so log
 // lines can be correlated end-to-end across services.
+//
+// K16 ② · 侧车 round-trip 观测（NautilusTrader 双内核）：另注册两条
+// NT 侧车专用指标 —— nt_sidecar_calls_total{outcome}（成败计数，失败率 =
+// outcome!="ok" 的速率占比）与 nt_sidecar_call_duration_seconds{outcome}
+// （延迟分布）。ObserveNTCall 隐式实现 nautilus.RunObserver（消费方定义的
+// 窄接口；编译期断言在装配侧 cmd/analysis/setup.go）。outcome 取值封闭为
+// ok/unavailable/timeout/internal，与 pkg/errors 错误码族对齐，标签基数有界。
 package observability
 
 import (
@@ -35,6 +42,11 @@ type Metrics struct {
 	HTTPRequests     *prometheus.CounterVec
 	LLMTokens        *prometheus.CounterVec
 	CacheHitRatio    *prometheus.GaugeVec
+
+	// K16 ② · NT 侧车 round-trip 观测（outcome 取值封闭：ok/unavailable/
+	// timeout/internal，与 pkg/errors 错误码族对齐）。
+	NTCallCount    *prometheus.CounterVec
+	NTCallDuration *prometheus.HistogramVec
 
 	registry *prometheus.Registry
 }
@@ -71,20 +83,33 @@ func NewMetrics() *Metrics {
 			Help: "Rolling cache hit ratio in [0,1], labeled by cache kind (factor, ohlcv, sync_job, etc.).",
 		}, []string{"kind"}),
 
+		NTCallCount: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "nt_sidecar_calls_total",
+			Help: "Count of NT sidecar round trips, labeled by outcome (ok/unavailable/timeout/internal). Failure rate = rate(outcome!=\"ok\") share.",
+		}, []string{"outcome"}),
+
+		NTCallDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "nt_sidecar_call_duration_seconds",
+			Help:    "Duration of NT sidecar round trips, labeled by outcome.",
+			Buckets: prometheus.ExponentialBuckets(0.05, 2, 12), // 50ms .. ~200s，与 backtest_duration 同桶口径
+		}, []string{"outcome"}),
+
 		registry: prometheus.NewRegistry(),
 	}
 }
 
-// Register attaches the four core metrics to the underlying registry.
-// The constructor above does not auto-register so that tests can
-// inspect / re-create metrics; production code MUST call Register
-// before exposing /metrics.
+// Register attaches the four core metrics (plus the K16 ② NT sidecar
+// pair) to the underlying registry. The constructor above does not
+// auto-register so that tests can inspect / re-create metrics;
+// production code MUST call Register before exposing /metrics.
 func (m *Metrics) Register() {
 	m.registry.MustRegister(
 		m.BacktestDuration,
 		m.HTTPRequests,
 		m.LLMTokens,
 		m.CacheHitRatio,
+		m.NTCallCount,
+		m.NTCallDuration,
 	)
 }
 
@@ -140,4 +165,25 @@ func (m *Metrics) SetCacheHitRatio(kind string, ratio float64) {
 		ratio = 1
 	}
 	m.CacheHitRatio.WithLabelValues(kind).Set(ratio)
+}
+
+// ObserveNTCall records one NT sidecar round trip (K16 ②). It implicitly
+// satisfies the consumer-defined port nautilus.RunObserver — the compile-time
+// assertion lives at the assembly site (cmd/analysis/setup.go) so this package
+// keeps no dependency on pkg/backtest/nautilus.
+//
+// outcome 是封闭词表（ok/unavailable/timeout/internal，见
+// nautilus.RunObserver）；label 透传不再校验 —— 校验点在生产者侧
+// （nautilus.outcomeFor 对未知错误码 fail-closed 折叠为 internal），
+// 这里不重复一道双真相。
+func (m *Metrics) ObserveNTCall(outcome string, d time.Duration) {
+	if m == nil {
+		return
+	}
+	if m.NTCallCount != nil {
+		m.NTCallCount.WithLabelValues(outcome).Inc()
+	}
+	if m.NTCallDuration != nil {
+		m.NTCallDuration.WithLabelValues(outcome).Observe(d.Seconds())
+	}
 }

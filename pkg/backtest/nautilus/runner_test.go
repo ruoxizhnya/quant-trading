@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -449,4 +450,173 @@ func TestRunner_ParsesSidecarTiming(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, "nt-run-1", resp.ID)
+}
+
+// ── K16 ② · round-trip observation ───────────────────────────────────────────
+//
+// 一次 round trip 恰好一条观测（named-return defer 覆盖全部 return 路径），
+// outcome 与错误码族一致。破坏验证（开发期实测）：把 defer 覆盖改成只在
+// 成功路径观测 → TestRunObserver_OneObservationPerCall 的失败腿立刻红（已还原）。
+
+// fakeObserver records every observation the runner reports.
+type fakeObserver struct {
+	mu   sync.Mutex
+	obs  []string
+	durs []time.Duration
+}
+
+func (f *fakeObserver) ObserveNTCall(outcome string, d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.obs = append(f.obs, outcome)
+	f.durs = append(f.durs, d)
+}
+
+func (f *fakeObserver) snapshot() ([]string, []time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.obs...), append([]time.Duration(nil), f.durs...)
+}
+
+// Each return path yields exactly one observation with the right outcome.
+func TestRunObserver_OneObservationPerCall(t *testing.T) {
+	cases := []struct {
+		name        string
+		status      int
+		body        string
+		deadlineMS  int // >0 → caller deadline before the stub answers
+		wantOutcome string
+	}{
+		{
+			name:        "成功 completed → ok",
+			status:      http.StatusOK,
+			body:        `{"id":"x","status":"completed","total_return":0.01}`,
+			wantOutcome: OutcomeOK,
+		},
+		{
+			name:        "503 内核忙 → unavailable",
+			status:      http.StatusServiceUnavailable,
+			body:        `{"error":"busy"}`,
+			wantOutcome: OutcomeUnavailable,
+		},
+		{
+			name:        "500 非 2xx → unavailable",
+			status:      http.StatusInternalServerError,
+			body:        `{"error":"boom"}`,
+			wantOutcome: OutcomeUnavailable,
+		},
+		{
+			name:        "2xx 空 body → unavailable",
+			status:      http.StatusOK,
+			body:        "",
+			wantOutcome: OutcomeUnavailable,
+		},
+		{
+			name:        "2xx 不可解码 → internal",
+			status:      http.StatusOK,
+			body:        "not-json{{",
+			wantOutcome: OutcomeInternal,
+		},
+		{
+			name:        "status=failed → unavailable",
+			status:      http.StatusOK,
+			body:        `{"id":"x","status":"failed","error":"engine blew up"}`,
+			wantOutcome: OutcomeUnavailable,
+		},
+		{
+			name:        "缺 total_return 契约违背 → internal",
+			status:      http.StatusOK,
+			body:        `{"id":"x","status":"completed"}`,
+			wantOutcome: OutcomeInternal,
+		},
+		{
+			name:        "调用方 deadline → timeout",
+			status:      http.StatusOK,
+			body:        `{"id":"x","status":"completed","total_return":0}`,
+			deadlineMS:  20,
+			wantOutcome: OutcomeTimeout,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.deadlineMS > 0 {
+					time.Sleep(200 * time.Millisecond)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			t.Cleanup(srv.Close)
+
+			obs := &fakeObserver{}
+			runner := NewObservedRunner(srv.URL, srv.Client(), obs)
+
+			ctx := context.Background()
+			if tc.deadlineMS > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, time.Duration(tc.deadlineMS)*time.Millisecond)
+				defer cancel()
+			}
+			_, _ = runner.RunBacktest(ctx, sampleRequest())
+
+			got, durs := obs.snapshot()
+			require.Len(t, got, 1, "一次 round trip 必须恰好一条观测")
+			assert.Equal(t, tc.wantOutcome, got[0])
+			require.Len(t, durs, 1)
+			assert.GreaterOrEqual(t, durs[0], time.Duration(0))
+		})
+	}
+}
+
+// A nil observer (the NewRunner default) must not panic and must not
+// change behaviour — observation is never load-bearing.
+func TestRunObserver_NilObserverIsNoop(t *testing.T) {
+	srv, _ := newStubSidecar(t, http.StatusOK, `{"id":"x","status":"completed","total_return":0}`)
+	runner := NewRunner(srv.URL, srv.Client()) // nil observer
+
+	resp, err := runner.RunBacktest(context.Background(), sampleRequest())
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+}
+
+// outcomeFor folds unknown error codes to "internal" — fail-closed label
+// cardinality, never a new unbounded label value.
+func TestOutcomeFor_FoldsUnknownCodesToInternal(t *testing.T) {
+	assert.Equal(t, OutcomeOK, outcomeFor(nil))
+	assert.Equal(t, OutcomeUnavailable, outcomeFor(apperrors.Unavailable("svc", errors.New("x"))))
+	assert.Equal(t, OutcomeTimeout, outcomeFor(apperrors.Timeout("op", errors.New("x"))))
+	assert.Equal(t, OutcomeInternal, outcomeFor(apperrors.New(apperrors.ErrCodeInvalidInput, "x")))
+	assert.Equal(t, OutcomeInternal, outcomeFor(errors.New("bare error")))
+}
+
+// K16 ② 实测断言（真侧车冒烟）：设 NT_SIDECAR_URL 指向运行中的真侧车
+// （compose 容器或宿主进程）时执行——真实 round trip 必须产出恰好一条观测，
+// 且 outcome 与错误一致。CI 无侧车 → skip，不阻断流水线。
+//
+// 运行示例（宿主或 compose 起好侧车后）：
+//
+//	NT_SIDECAR_URL=http://127.0.0.1:9100 go test ./pkg/backtest/nautilus/ -run LiveSidecarSmoke -v
+func TestRunObserver_LiveSidecarSmoke(t *testing.T) {
+	url := os.Getenv("NT_SIDECAR_URL")
+	if url == "" {
+		t.Skip("NT_SIDECAR_URL not set — live sidecar smoke skipped")
+	}
+	obs := &fakeObserver{}
+	runner := NewObservedRunner(url, nil, obs)
+
+	// 结果成败取决于侧车 catalog 是否有数据；冒烟只钉观测语义：
+	// 恰好一条观测，且 outcome 与错误一致（失败不得记 ok）。
+	_, err := runner.RunBacktest(context.Background(), sampleRequest())
+
+	got, durs := obs.snapshot()
+	require.Len(t, got, 1, "真侧车 round trip 必须恰好一条观测")
+	require.Len(t, durs, 1)
+	if err == nil {
+		assert.Equal(t, OutcomeOK, got[0])
+	} else {
+		assert.NotEqual(t, OutcomeOK, got[0], "失败 round trip 不得记 ok")
+	}
+	t.Logf("live round trip: outcome=%s dur=%s err=%v", got[0], durs[0], err)
 }

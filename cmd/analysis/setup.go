@@ -167,6 +167,7 @@ func buildDataServices(
 	dataAdapter *marketdata.DataAdapter,
 	logger zerolog.Logger,
 	newEngine func() (*backtest.Engine, error),
+	m *observability.Metrics,
 ) *dataServices {
 	// K1 切片 3：DataAdapter 由 data-engine 模块构造（Boot 第 3 位）并经
 	// 参数传入 —— 本函数不再自建（同一进程两条 adapter = 双真相）。
@@ -189,10 +190,17 @@ func buildDataServices(
 	// 执行期显式透出为 failed（runner 不吞错）。地址来自 $NT_SIDECAR_URL
 	// （缺省 DefaultURL 127.0.0.1:9100）。开关值非法（打错字）在装配期
 	// 直接报错退出，不静默当关闭。
+	//
+	// K16 ② 监控接线：runner 带 observability.Metrics 观察器——每次侧车
+	// round trip 记 nt_sidecar_calls_total{outcome} + nt_sidecar_call_duration_
+	// seconds{outcome}（延迟/失败率可抓）。编译期断言：Metrics 必须实现
+	// nautilus.RunObserver（消费方定义的窄接口，nautilus 不反向依赖
+	// observability）；nil 指针同样满足接口，故为断言须用具体类型断言。
+	var _ nautilus.RunObserver = (*observability.Metrics)(nil)
 	if ntEnabled, err := nautilus.KernelEnabledFromEnv(); err != nil {
 		logger.Fatal().Err(err).Msg("invalid NT_SIDECAR_ENABLED")
 	} else if ntEnabled {
-		engineRegistry.Register(nautilus.KernelName, nautilus.NewRunner(nautilus.URLFromEnv(), nil))
+		engineRegistry.Register(nautilus.KernelName, nautilus.NewObservedRunner(nautilus.URLFromEnv(), nil, m))
 		logger.Info().Str("url", nautilus.URLFromEnv()).Msg("NT sidecar kernel registered (NT_SIDECAR_ENABLED)")
 	} else {
 		logger.Info().Msg("NT sidecar kernel not registered (production default: go-only; set NT_SIDECAR_ENABLED=1 to opt in)")

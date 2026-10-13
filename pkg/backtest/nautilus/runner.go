@@ -40,6 +40,24 @@
 //
 // The sidecar is a separate OS process reached over loopback only. This client
 // holds no database handle and sends nothing but the RunSpec.
+//
+// # K16 ② · round-trip observation
+//
+// RunBacktest reports every sidecar round trip (success or failure) to an
+// optional RunObserver — a consumer-defined narrow port, so this package does
+// not depend on pkg/observability (observability.Metrics implements the
+// interface implicitly; the compile-time assertion lives at the assembly site,
+// cmd/analysis/setup.go). Observation is uniformly attached via a defer on a
+// named return, so every return path — transport error, 503, non-2xx, empty
+// body, decode failure, status="failed", missing metric, success — is counted
+// exactly once. The outcome vocabulary mirrors pkg/errors codes
+// (ok / unavailable / timeout / internal) so alert rules can key off it
+// directly and label cardinality stays bounded.
+//
+// 「回退次数=0」不是一条指标而是结构属性：本 Runner 没有任何回退分支——
+// 全部失败路径返回 (nil, err)（runner_test 的 no-silent-fallback 断言），
+// 因此"回退计数"恒等于 0，由测试执法而非监控抓数（详见
+// docs/design/kernel/kernel-pluggable-nt-ready.md §8 表第 6 项）。
 package nautilus
 
 import (
@@ -131,10 +149,32 @@ func KernelEnabledFromEnv() (bool, error) {
 	}
 }
 
+// Round-trip outcome vocabulary reported to RunObserver (K16 ②). The values
+// mirror pkg/errors codes so alert rules keying off AppError.Code stay
+// consistent with the metrics label; "ok" is the one non-error outcome.
+const (
+	OutcomeOK          = "ok"
+	OutcomeUnavailable = "unavailable"
+	OutcomeTimeout     = "timeout"
+	OutcomeInternal    = "internal"
+)
+
+// RunObserver receives one observation per sidecar round trip (K16 ②).
+// A nil observer is a no-op — observation must never fail a run.
+//
+// 消费方定义窄接口（consumer-defined port）：本包不认识 pkg/observability，
+// observability.Metrics 隐式实现本接口（编译期断言在装配侧 cmd/analysis/setup.go）。
+type RunObserver interface {
+	// ObserveNTCall records one round trip: d is the wall-clock duration of
+	// RunBacktest; outcome is one of the Outcome* constants.
+	ObserveNTCall(outcome string, d time.Duration)
+}
+
 // Runner executes backtests through the NT sidecar over HTTP.
 type Runner struct {
-	baseURL string
-	client  *http.Client
+	baseURL  string
+	client   *http.Client
+	observer RunObserver // optional; nil means no observation
 }
 
 // compile-time assertion: Runner is what the K10 registry accepts.
@@ -142,14 +182,22 @@ var _ contracts.EngineRunner = (*Runner)(nil)
 
 // NewRunner builds a Runner for baseURL. A nil client selects one with
 // defaultTimeout — pass a client only to override transport or timeout
-// behaviour (tests inject httptest's client).
+// behaviour (tests inject httptest's client). No round-trip observation
+// (see NewObservedRunner).
 func NewRunner(baseURL string, client *http.Client) *Runner {
+	return NewObservedRunner(baseURL, client, nil)
+}
+
+// NewObservedRunner is NewRunner plus a round-trip observer (K16 ②).
+// A nil observer is a no-op — observation must never affect behaviour.
+func NewObservedRunner(baseURL string, client *http.Client, observer RunObserver) *Runner {
 	if client == nil {
 		client = &http.Client{Timeout: defaultTimeout}
 	}
 	return &Runner{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  client,
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		client:   client,
+		observer: observer,
 	}
 }
 
@@ -260,7 +308,17 @@ func (p phaseTimings) String() string {
 //   - sidecar 503 → UNAVAILABLE, message explicitly marks the kernel "busy"
 //   - context deadline exceeded     → TIMEOUT (504), attributed to Call+Queue
 //   - undecodable or empty 2xx body → INTERNAL (500) / UNAVAILABLE
-func (r *Runner) RunBacktest(ctx context.Context, req contracts.BacktestRequest) (*contracts.BacktestResponse, error) {
+//
+// K16 ② · 一次 round trip 一条观测（named-return defer 统一覆盖全部 return
+// 路径，成功/失败各计一次；outcome 取自 pkg/errors 的错误码族）。
+func (r *Runner) RunBacktest(ctx context.Context, req contracts.BacktestRequest) (outResp *contracts.BacktestResponse, outErr error) {
+	callStart := time.Now()
+	defer func() {
+		if r.observer != nil {
+			r.observer.ObserveNTCall(outcomeFor(outErr), time.Since(callStart))
+		}
+	}()
+
 	body, err := json.Marshal(runRequest{
 		Strategy:       req.Strategy,
 		StockPool:      req.StockPool,
@@ -373,6 +431,29 @@ func (r *Runner) RunBacktest(ctx context.Context, req contracts.BacktestRequest)
 	}
 
 	return r.toResponse(req, out), nil
+}
+
+// outcomeFor maps a RunBacktest error onto the RunObserver outcome
+// vocabulary (K16 ②). All RunBacktest failures are *apperrors.AppError;
+// anything outside the known code set is folded to "internal" so the label
+// cardinality stays bounded (fail-closed on unknown codes — never a new
+// unbounded label value).
+func outcomeFor(err error) string {
+	if err == nil {
+		return OutcomeOK
+	}
+	var appErr *apperrors.AppError
+	if errors.As(err, &appErr) {
+		switch appErr.Code {
+		case apperrors.ErrCodeUnavailable:
+			return OutcomeUnavailable
+		case apperrors.ErrCodeTimeout:
+			return OutcomeTimeout
+		case apperrors.ErrCodeInternal:
+			return OutcomeInternal
+		}
+	}
+	return OutcomeInternal
 }
 
 // transportError classifies a failed round trip. context.DeadlineExceeded is the
