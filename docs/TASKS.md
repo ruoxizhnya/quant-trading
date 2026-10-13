@@ -349,6 +349,22 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：① A 项：2 标的 end-to-end 断言**两腿都有仓位**，且不再出现「腿被拒但报 completed」；② B 项：注入一次拒单 → 断言不重复提交、`_traded_today` 只计成交；③ C 项：`cap=105` 场景断言提交量为整手（100）；④ D 项：测试读 `submitted` 字段而非字符串；⑤ E/F/G 项：结论（含「维持现状」的裁决）落设计文档 §8.4。**破坏验证**：还原 B 的回执记账 → 重复提交腿红；还原 C 的整手取整 → 105 股腿红。
 - **⑥ 边界**：只碰 `nt-sidecar/`（以及 `pkg/backtest/nautilus/` 里对应的测试），一个 commit。
 
+### K14-R1-R1 · 回执记账的两处复查（2026-10-13 K14-R1 自审立单）✅ 完成（2026-10-13）
+
+> 来源：K14-R1 交付后的自审——用探针实测「fill 回调是否真到达 handler」时发现的两点。
+
+- **① 目标**：给「成交喂参与率预算」补**正证据**测试腿；把「在途子单不预留预算」的口径记档。
+- **② 现状**：
+  - **R1（🟡 测试缺口，正证据缺失）**：K14-R1 对 B 的验收只有**反证**（注入拒单 → `_traded_today == 0`）。**没有**任何腿证明「正常成交后 `_traded_today` 按成交累加」。探针实测：`on_order_filled` 确实被调用且量正确（两次 50,000），**但**若将来 NT 的 `OrderFilled` 属性名漂移（`last_qty` 改名等），handler 会抛异常而 **NT 会吞掉回调异常只记 ERROR 日志**——`_traded_today` 恒 0 ⇒ 参与率 cap 与 T+1 可售量**静默失效**，而现有全部测试仍绿（现有 cap 腿是单日单 bar，traded 恒 0 也能过）。
+  - **R2（🟡 口径记档）**：`_traded_today` 改「已成交」口径后，`_participation_remaining` 只减 `_traded_today`、**不预留在途（`_pending`）子单**。实测当前 NT bar 撮合语义下 order 在同一 bar 内即结清（submit → fill 相邻），故**不可达超额**；但该依赖未写进注释，未来换撮合模型（或引入跨 bar 未结清）时会成为静默超额点。
+- **③ 要求**：
+  1. **R1**：新增正证据腿——**同一日内两根分钟 bar**（volume=1,000/bar，`d_max=0.10` ⇒ cap=100）：首根提交 100 并成交；第二根 `_participation_remaining` 必须已被成交消耗 ⇒ 决策为 `participation cap reached`、**当日总提交仅 1 笔**。若 fill 未喂预算（回调抛错/属性漂移），第二根会再提交 100 ⇒ 本腿红。
+  2. **R2**：在 `_participation_remaining` 注释里写明「只减已成交、不预留在途」的口径与「同 bar 结清」的前提（改撮合模型需重估）。
+- **④ 约束与非目标**：不改参与率口径（本单只补测试与注释）；不改回执记账逻辑本身。
+- **⑤ 验收**：新腿绿；破坏腿——把 `on_order_filled` 的 `self._traded_today += qty` 注释掉 → 新腿红（当日变成 2 笔提交）；Python 全套绿。
+- **⑥ 边界**：只碰 `nt-sidecar/`；一个 commit。
+- **⑦ 收口记录（2026-10-13）**：新增 `TradedBudgetFedByFillsTest.test_fills_consume_the_daily_participation_budget`（同日两根分钟 bar，cap=100：首根提交并成交 100，第二根判「cap 已达」，当日仅 1 笔）；`_participation_remaining` 补 R2 口径注释。实测结论：fill 回调**确实到达** handler 且**同 bar 结清**（探针：submit→fill 相邻），故 R2 只需记档、不必改法——新腿同时是该前提的回归护栏。破坏腿：注释掉 `self._traded_today += qty` → 新腿红（`1 != 2`，当日 2 笔，实测）。Python 全套 44 绿。
+
 ### K15 · 结果映射 + 双跑对齐实验（阶段 2，前置：K14）
 
 - **① 目标**：NT 报告 → ResultSpec 映射层落地；产出**同信号流、双内核**的对齐报告（逐指标 diff、差异归因可读），容差阈值实测确定并回写设计文档。
@@ -600,6 +616,18 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **⑤ 验收**：R1——三种不可解析输入的测试腿绿 + 全坏响应 fail-loud 腿红→还原；R2——非标量 Params 用例绿（改前 panic → 改后不 panic）+ 破坏腿；全量 `go test ./...` 绿。
 - **⑥ 边界**：core 仓一个 atomic commit（`fix(data): P2-1-R3 …`）；`pkg/data/macro.go` + `pkg/data/macro_test.go` + `pkg/data/tushare.go`（仅新增函数，不改既有）+ 台账。
 
+### P2-1-R3-R1 · `fieldToFloat` 成为死代码（2026-10-13 P2-1-R3 自审立单）✅ 完成（2026-10-13）
+
+> 来源：P2-1-R3 交付后的自审——全仓 grep 核查「④/⑥ 的『行情/链路另有消费方』前提」。
+
+- **① 目标**：处置 `fieldToFloat` 的孤立死代码，避免后续 normalize 误拾「静默折 0」助手。
+- **② 现状（已证）**：P2-2-R3 侧删掉 `tushareCellFloat`（静默折 0 的 ETF weight 路径）后，`fieldToFloat` **全仓零调用点**（`grep -rn fieldToFloat --include=*.go` 仅命中其定义）。即 P2-1-R3 ④/⑥ 所依据的「不改既有的共享签名，波及行情/链路消费方」**前提不成立**：它的**唯一**调用者一直是 `tushareCellFloat`，而该助手本身也是静默折 0 的同一类反模式。留着它 = 未来写 normalize 的人 grep 到「一个现成的 float 助手」再犯 P2-10 教训。
+- **③ 要求**：删除 `fieldToFloat`（保留 `fieldToStr`——`tushareCell` 仍在用；`tushareFloatOK` 是可判定失败的替代）；在 `tushareFloatOK` 注释里把「fieldToFloat 的既有签名不动」改为「已随 P2-2-R3 删除，见本单」。
+- **④ 约束与非目标**：不动 `fieldToStr`；不改 `tushareFloatOK` 语义；不新增函数。
+- **⑤ 验收**：`go build ./...` + 全量 `go test ./...` 绿（零引用删除，行为零变化——以 build/测试为证）。破坏腿不适用（纯删死代码）。
+- **⑥ 边界**：core 仓一个 commit；`pkg/data/tushare.go` + 台账。
+- **⑦ 收口记录（2026-10-13）**：`fieldToFloat` 已删（`go build ./...` + 全量 `go test ./...` 绿证零行为变化）；`tushareFloatOK` 注释改为「曾与 fieldToFloat/tushareCellFloat 并存，后两者已随 P2-2-R3 删除」。`fieldToStr` 保留（`tushareCell` 在用）。
+
 ### P2-2-R3 · 产业链层复检发现（2 项，2026-10-13 自审立单）✅ 完成（2026-10-13）
 
 > 来源：同上（2026-10-13 P2 数据线 4 commit 复检，P2-1-R3 的姊妹单）。判定：产业链面 2 项（1 🟠 + 1 🟡）。
@@ -614,6 +642,18 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 约束与非目标**：不动 `sw_industry_tree` / `industry_vitality` / `etf_constituent` 三表；不动口径①「仅当前成员」语义本身（本单只补闸门 / 计数 / 测试）；不改 P2-2-R2 收口记录的事实部分（只可加交叉引用）。
 - **⑤ 验收**：R1——闸门 / 告警测试腿红→还原绿 + 真库重导不受影响（`801010.SI` 仍 104 行）；R2——新用例绿；全量 `go test ./...` 绿。
 - **⑥ 边界**：core 仓一个 atomic commit（`fix(data): P2-2-R3 …`）；`pkg/data/supply_chain.go` + 其测试 + 台账。
+
+### P2-2-R3-R1 · ETF 成分行跳行无计数/日志（2026-10-13 P2-2-R3 自审立单）✅ 完成（2026-10-13）
+
+> 来源：P2-2-R3 交付后的自审——对照本仓两条数据线的「跳行必须可观测」纪律复查 ETF 面。
+
+- **① 目标**：让 ETF 成分行的跳过可观测——口径与宏观侧（`SkippedBadValue` + `logMacroSkipped`）和申万侧（`filtered` 计数进错文案）一致。
+- **② 现状（🟠）**：P2-2-R3 把 ETF weight 的「空 / 不可解析 / 非有限」改为**跳过该行**（不编 0，与 P2-1-R3 R1 对齐），但 `normalizeETFPortfolio` 只返回 `rows`，**没有任何跳过计数或日志**。后果：**部分**成分行静默消失（无信号）——`len(rows)==0` 的全跳场景有闸门兜住，但「10 行里 3 行 weight 为空」这种**部分**丢失完全无声，K60 消费方拿到残缺成分表却看不到任何证据。这正是本档 P2 线反复要治的「静默丢数据」，只是从「全过滤」缩到了「部分过滤」。
+- **③ 要求**：`normalizeETFPortfolio` 增返回「跳过行数」（weight 空 / 不可解析 / 非有限三类合计）；`FetchETFPortfolio` 在 `skipped > 0` 时记 Info 日志（`etf` / `rows` / `skipped`），并把该数纳入全跳闸门的报错文案。
+- **④ 约束与非目标**：不动 `etf_constituent` 表结构与唯一键；不改 weight 跳过口径本身（本单只补可观测）；不引入 logger 到 normalize（保持纯函数）。
+- **⑤ 验收**：`TestNormalizeETFPortfolio_SkipsUnparseableWeight` 增断言（跳过计数 == 3）；新增「部分跳行记日志 / 全跳闸门文案带计数」断言；全量 `go test ./...` 绿。
+- **⑥ 边界**：core 仓一个 commit；`pkg/data/supply_chain.go` + 其测试 + 台账。
+- **⑦ 收口记录（2026-10-13）**：`normalizeETFPortfolio` 增返回 `weightSkipped`；`FetchETFPortfolio` 在 `weightSkipped > 0` 时记 Info（`skipped_bad_weight`），全跳闸门文案带该计数。测试：`SkipsUnparseableWeight` 增 `skipped == 3` 断言 + 新增 `TestFetchETFPortfolio_LogsPartialWeightSkips`（同包注入 client.logger，避开全局 logger）。破坏腿：把返回计数改成 0 → 计数腿与日志腿均红（实测）。**注**：闸门断言一度写成 `Contains "1 行"`，而该文案里行数总量那处也是「1 行」→ 断言失效；已收紧为 `"不可解析 1 行"` 并用同一破坏腿复验。
 
 ---
 

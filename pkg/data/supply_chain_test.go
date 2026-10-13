@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -246,7 +248,7 @@ func TestNormalizeETFPortfolio_MapsFieldsAndPITFallback(t *testing.T) {
 	["510300.SH","","","600000.SH",100.0,10.0,1.00]
 ]}}`)
 
-	rows, err := normalizeETFPortfolio(resp, "510300.SH", SupplyChainSourceTushare, time.Now().UTC())
+	rows, _, err := normalizeETFPortfolio(resp, "510300.SH", SupplyChainSourceTushare, time.Now().UTC())
 	require.NoError(t, err)
 	require.Len(t, rows, 3, "end_date 与 ann_date 都缺的行跳过（PIT 身份不完整）")
 
@@ -260,13 +262,14 @@ func TestNormalizeETFPortfolio_MapsFieldsAndPITFallback(t *testing.T) {
 
 func TestNormalizeETFPortfolio_RejectsMissingSymbol(t *testing.T) {
 	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["ts_code","end_date"],"items":[["510300.SH","20260630"]]}}`)
-	_, err := normalizeETFPortfolio(resp, "510300.SH", SupplyChainSourceTushare, time.Now().UTC())
+	_, _, err := normalizeETFPortfolio(resp, "510300.SH", SupplyChainSourceTushare, time.Now().UTC())
 	require.Error(t, err)
 }
 
 // TestNormalizeETFPortfolio_SkipsUnparseableWeight 是 P2-2-R3 R2 的专项确认：
 // weight 列在但该行不可解析 / 非有限 / 为空 → 跳过该行（不编 0，口径与
-// P2-1-R3 R1 对齐）；可解析的行照常入库。
+// P2-1-R3 R1 对齐）；可解析的行照常入库。P2-2-R3-R1：跳过行数必须回报
+// （可观测，不再静默丢行）。
 func TestNormalizeETFPortfolio_SkipsUnparseableWeight(t *testing.T) {
 	resp := decodeTushareBody(t, `{"code":0,"msg":"","data":{"fields":["ts_code","end_date","symbol","stk_mkv_ratio"],"items":[
 	["510300.SH","20260630","600519.SH",5.23],
@@ -274,9 +277,10 @@ func TestNormalizeETFPortfolio_SkipsUnparseableWeight(t *testing.T) {
 	["510300.SH","20260630","601318.SH",true],
 	["510300.SH","20260630","600000.SH",null]
 ]}}`)
-	rows, err := normalizeETFPortfolio(resp, "510300.SH", SupplyChainSourceTushare, time.Now().UTC())
+	rows, skipped, err := normalizeETFPortfolio(resp, "510300.SH", SupplyChainSourceTushare, time.Now().UTC())
 	require.NoError(t, err)
 	require.Len(t, rows, 1, "不可解析 / 非标量 / 空的 weight 行全部跳过（不编 0）")
+	require.Equal(t, 3, skipped, "P2-2-R3-R1：跳过行数必须如实回报（N/A / bool / null 三行）")
 	require.Equal(t, "600519.SH", rows[0].Symbol)
 	require.InDelta(t, 5.23, rows[0].Weight, 1e-12)
 }
@@ -363,7 +367,30 @@ func TestFetchETFPortfolio_FailsLoudWhenAllSkipped(t *testing.T) {
 	require.Error(t, err, "有行但全被跳过必须 fail-loud")
 	require.Nil(t, rows)
 	require.Contains(t, err.Error(), "全部被跳过")
+	require.Contains(t, err.Error(), "不可解析 1 行", "P2-2-R3-R1：闸门文案须带上被跳过的 weight 行数（不能只靠行数总量那处 %d）")
 	require.Empty(t, store.etf, "错误路径不许落库")
+}
+
+// TestFetchETFPortfolio_LogsPartialWeightSkips 钉住 P2-2-R3-R1：**部分**行
+// 因 weight 缺失/不可解析被跳过时留一条可审计的日志（不再无声丢行）。
+func TestFetchETFPortfolio_LogsPartialWeightSkips(t *testing.T) {
+	body := `{"code":0,"msg":"","data":{"fields":["ts_code","end_date","symbol","stk_mkv_ratio"],"items":[
+		["510300.SH","20260630","600519.SH",5.23],
+		["510300.SH","20260630","000001.SZ","N/A"]
+	]}}`
+	store := &recordingSupplyChainStore{}
+	client := newSupplyChainTestClient(stubTushare(t, body, 200), store)
+	logBuf := &bytes.Buffer{}
+	client.logger = zerolog.New(logBuf) // 同包可直接注入，避免动全局 logger
+
+	rows, err := client.FetchETFPortfolio(context.Background(), "510300.SH", "")
+	require.NoError(t, err, "部分跳行不是错误（合法行照常入库）")
+	require.Len(t, rows, 1)
+	require.Len(t, store.etf, 1, "可解析的行照常落库")
+
+	logs := logBuf.String()
+	assert.Contains(t, logs, "skipped_bad_weight", "部分跳行必须留痕（键名与宏观侧同纪律）")
+	assert.Contains(t, logs, "skipped during normalize")
 }
 
 // TestFetchSWIndustryClassify_PropagatesCallError HTTP 层与信封层失败同样传播。

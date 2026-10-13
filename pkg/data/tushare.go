@@ -104,23 +104,6 @@ type TushareData struct {
 	Items  [][]any  `json:"items"`
 }
 
-// fieldToFloat safely converts an interface{} to float64.
-func fieldToFloat(v any) float64 {
-	switch val := v.(type) {
-	case float64:
-		return val
-	case int:
-		return float64(val)
-	case int64:
-		return float64(val)
-	case string:
-		f, _ := strconv.ParseFloat(val, 64)
-		return f
-	default:
-		return 0
-	}
-}
-
 // fieldToStr safely converts an interface{} to string.
 func fieldToStr(v any) string {
 	if s, ok := v.(string); ok {
@@ -129,11 +112,14 @@ func fieldToStr(v any) string {
 	return ""
 }
 
-// tushareFloatOK 是 fieldToFloat 的「可判定失败」变体：显式报告一个值能否
-// 解析为**有限** float64。fieldToFloat 对不可解析/非标量的值静默折 0，其既有
-// 签名与共享行为不变（波及行情/链路消费方，另案评估）；normalize 层用本函数
-// 区分「数值未发布（nil）」与「非 nil 但形状变故（"N/A"/"13,42"/"--"/bool/数组）」，
-// 后者静默折 0 等于编数据（P2-10 教训、P2-1-R3 R1）。
+// tushareFloatOK 是「可判定失败」的数值解析器：显式报告一个值能否解析为
+// **有限** float64。normalize 层用它区分「数值未发布（nil）」与「非 nil 但
+// 形状变故（"N/A"/"13,42"/"--"/bool/数组）」，后者静默折 0 等于编数据
+// （P2-10 教训、P2-1-R3 R1）。
+//
+// P2-1-R3-R1：曾与「静默折 0」的 fieldToFloat / tushareCellFloat 并存，后两者
+// 已随 P2-2-R3 一并删除（其唯一调用链就是同一反模式，留住只会被后人误拾）。
+// 需要数值时**一律**走本函数，别再造一个返回零值的简版。
 func tushareFloatOK(v any) (float64, bool) {
 	var f float64
 	switch val := v.(type) {

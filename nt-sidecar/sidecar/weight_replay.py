@@ -264,6 +264,14 @@ class WeightReplay(Strategy):
         self._record(day, target_qty, side_name, f"submitted {qty:g}", submitted=qty)
 
     def _participation_remaining(self, bar: Bar) -> float:
+        """今日参与率预算余量。
+
+        K14-R1-R1 R2 口径记档：只减**已成交**（``_traded_today``），不预留在途
+        （``_pending``）子单。前提是 NT 的 bar 撮合在同一根 bar 内把 order 结清
+        （submit → fill 相邻，实测）；若换撮合模型或引入跨 bar 未结清的在途单，
+        该前提不成立、会出现静默超额——届时需重估（把 ``sum(_pending.values())``
+        也计入预留）。
+        """
         cap = ashare.participation_cap(
             float(bar.volume.as_double()), self.config.d_max
         )

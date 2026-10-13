@@ -306,6 +306,34 @@ def _first_order_qty(run: _Run) -> float:
     )
 
 
+class TradedBudgetFedByFillsTest(unittest.TestCase):
+    """K14-R1-R1 R1 · 成交必须喂当日参与率预算（正证据腿）。"""
+
+    def test_fills_consume_the_daily_participation_budget(self) -> None:
+        # 同一日两根分钟 bar：volume 1,000/bar、d_max 0.10 ⇒ cap = floor(100) = 100。
+        # 首根提交 100 并成交；第二根的预算必须已被成交消耗。若 fill 未喂预算
+        # （回调抛错 / NT 事件属性漂移被吞），第二根会再提交 100 ⇒ 当日 2 笔，本腿红。
+        rows = [
+            ("2024-01-02 01:30:00", 10.0, 1_000),
+            ("2024-01-02 01:31:00", 10.0, 1_000),
+        ]
+        signals = SignalStream([TargetWeight(SYMBOL, 0.5, dt.datetime(2024, 1, 2, 1, 30))])
+        run = _run_replay(bar_type_str=MINUTE_BAR, rows=rows, signals=signals)
+
+        submissions = [d for d in run.strategy.decisions if d.submitted > 0]
+        self.assertEqual(
+            1,
+            len(submissions),
+            f"成交必须消耗当日参与率预算（否则同一日后继 bar 会重复提交）："
+            f"{[(d.side, d.submitted, d.reason) for d in run.strategy.decisions]}",
+        )
+        self.assertEqual(100.0, submissions[0].submitted, "首片 == cap（floor(0.10×1000)）")
+        self.assertTrue(
+            any(d.reason == "participation cap reached" for d in run.strategy.decisions),
+            f"第二根应判「cap 已达」：{[d.reason for d in run.strategy.decisions]}",
+        )
+
+
 class OrderReceiptAccountingTest(unittest.TestCase):
     """K14-R1 B · 拒单被记账且不重复提交；``_traded_today`` 只计成交。"""
 

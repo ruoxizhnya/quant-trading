@@ -154,17 +154,24 @@ func (c *TushareClient) FetchETFPortfolio(ctx context.Context, etfCode, period s
 		return nil, err
 	}
 
-	rows, err := normalizeETFPortfolio(resp, etfCode, SupplyChainSourceTushare, time.Now().UTC())
+	rows, weightSkipped, err := normalizeETFPortfolio(resp, etfCode, SupplyChainSourceTushare, time.Now().UTC())
 	if err != nil {
 		return nil, apperrors.Wrap(err, apperrors.ErrCodeDataQuality,
 			"fund_portfolio 响应形状不符合契约（缺 symbol 列）", "data.FetchETFPortfolio")
 	}
+	// P2-2-R3-R1 · 部分跳转可观测：weight 缺失/不可解析的行被跳过时留痕
+	// （与宏观侧 logMacroSkipped 同纪律——跳过本身可能合法，但必须能被审计）。
+	if weightSkipped > 0 {
+		c.logger.Info().Str("etf", etfCode).Int("rows", len(rows)).
+			Int("skipped_bad_weight", weightSkipped).
+			Msg("ETF constituent rows skipped during normalize (weight missing/unparseable)")
+	}
 	// P2-2-R3 R1 同款闸门（口径统一）：响应有行却一行都没入表 ⇒ 上游变故
-	// （symbol/obs_date 缺失、weight 不可解析），拒绝以「导入 0 行」伪装成功。
+	// （symbol/obs_date 缺失、weight 为空或不可解析），拒绝以「导入 0 行」伪装成功。
 	if len(resp.Data.Items) > 0 && len(rows) == 0 {
 		return nil, apperrors.New(apperrors.ErrCodeDataQuality, fmt.Sprintf(
-			"ETF %s：fund_portfolio 响应返回 %d 行但全部被跳过（缺 symbol / 缺 obs_date / weight 不可解析）——拒绝以「导入 0 行」伪装成功",
-			etfCode, len(resp.Data.Items)))
+			"ETF %s：fund_portfolio 响应返回 %d 行但全部被跳过（缺 symbol / 缺 obs_date / weight 为空或不可解析 %d 行）——拒绝以「导入 0 行」伪装成功",
+			etfCode, len(resp.Data.Items), weightSkipped))
 	}
 	if len(rows) == 0 {
 		return nil, nil
@@ -340,17 +347,22 @@ func normalizeSWIndustryMembers(resp *TushareResponse, indexCode, source string,
 // stk_mkv_ratio。缺 obs_date 或 symbol 的行跳过（PIT 身份不完整）；
 // weight 列存在但该行为空/不可解析/非有限时同样跳过（内容不完整，不编 0，
 // P2-2-R3 R2 专项确认，口径与 P2-1-R3 R1 对齐）。
-func normalizeETFPortfolio(resp *TushareResponse, etfCode, source string, asOf time.Time) ([]domain.ETFConstituent, error) {
+//
+// 返回值第二项是**因 weight 缺失/不可解析而跳过的行数**（P2-2-R3-R1）——
+// 调用方据此记日志（部分跳转可观测）并在「有行却一行都没入表」时 fail-loud，
+// 口径与宏观侧 SkippedBadValue / 申万侧 filtered 一致。
+func normalizeETFPortfolio(resp *TushareResponse, etfCode, source string, asOf time.Time) ([]domain.ETFConstituent, int, error) {
 	iTsCode := tushareColumnIndex(resp, "ts_code")
 	iSymbol := tushareColumnIndex(resp, "symbol", "con_code")
 	iEnd := tushareColumnIndex(resp, "end_date")
 	iAnn := tushareColumnIndex(resp, "ann_date")
 	iRatio := tushareColumnIndex(resp, "stk_mkv_ratio", "weight")
 	if iSymbol < 0 {
-		return nil, fmt.Errorf("fund_portfolio 响应缺 symbol 列（实际 fields=%v）", resp.Data.Fields)
+		return nil, 0, fmt.Errorf("fund_portfolio 响应缺 symbol 列（实际 fields=%v）", resp.Data.Fields)
 	}
 
 	var rows []domain.ETFConstituent
+	weightSkipped := 0
 	for _, item := range resp.Data.Items {
 		symbol := strings.TrimSpace(tushareCell(item, iSymbol))
 		if symbol == "" {
@@ -372,13 +384,16 @@ func normalizeETFPortfolio(resp *TushareResponse, etfCode, source string, asOf t
 		// 对 obs_date 的「PIT 身份不完整就跳过」同源，也避免把读不到的权重编成
 		// 0（缺失值折 0 等于编数据——P2-10 教训）。列整体缺失（iRatio<0）时该
 		// 响应变体没有权重字段，无从判定，weight 记 0。
+		// P2-2-R3-R1：跳过必须可观测（计数交调用方记日志），不再静默丢行。
 		weight := 0.0
 		if iRatio >= 0 {
 			if iRatio >= len(item) || item[iRatio] == nil {
+				weightSkipped++
 				continue
 			}
 			w, ok := tushareFloatOK(item[iRatio])
 			if !ok {
+				weightSkipped++
 				continue
 			}
 			weight = w
@@ -392,7 +407,7 @@ func normalizeETFPortfolio(resp *TushareResponse, etfCode, source string, asOf t
 			AsOf:    asOf,
 		})
 	}
-	return rows, nil
+	return rows, weightSkipped, nil
 }
 
 // parseTushareDate 解析 tushare 的 YYYYMMDD 日期串；空串/解析失败 → (零值, false)。
