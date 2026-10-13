@@ -140,11 +140,18 @@ func (s *PaperSession) dispatchExecAlgoChildren(ctx context.Context, d time.Time
 			// 当日无 bar（停牌）：不到点，父单剩余子单顺延。
 			continue
 		}
+		// K17-RV4 · 口径 A（2026-10-13 拍板，有意行为）：本报送点**不判 ctx**——
+		// 取消 = 「尽快停」，当日 bar 已真实发生、片已到点即照发；下一交易日的
+		// 日循环顶部（paper_session.go 的 ctx.Err 检查）才中止。**不要**把它当
+		// 缺陷重报而改成「取消即零成交」。回测侧同口径（见
+		// pkg/backtest/exec_algo.go 同名注释），两侧必须一致。
+		// K17-RV1 · OnBar 契约：错误时**已取子单照常交还调用方处置**——因此
+		// err != nil 只降级为诊断信号，**不丢** due（与回测侧 processExecAlgoChildren
+		// 同一修法）。否则父单进度账与报送事实分叉。
 		due, err := s.execAlgo.OnBar(ctx, quoteToBar(q))
 		if err != nil {
 			s.logger.Warn().Err(err).Str("symbol", sym).
-				Msg("paper session: exec-algo OnBar failed, parent slices stall")
-			continue
+				Msg("paper session: exec-algo OnBar reported an error (diagnostic); the due children it returned are still submitted")
 		}
 		for _, dc := range due {
 			if fill := s.submitExecAlgoChild(ctx, d, dc); fill != nil {

@@ -1616,8 +1616,11 @@ Turnover，就是文档与实现静默漂移的标本）。
 | `failed` | 没跑完 | `error` **必填**、`invalid_reasons` 空 |
 
 - `invalid_reasons` 的取值是稳定 Code：`empty_universe` / `zero_trades` /
-  `zero_start_date` / `garbage_metric`（`contracts.CheckValidity`）。无效是**结果属性**
-  不是错误，所以不进 `error` —— `error` 只装真实错误（取不到日历、参数非法等）。
+  `zero_start_date` / `garbage_metric`（`contracts.CheckValidity`），
+  以及 exec-algo 挂载类 `exec_algo_unknown_style`（信号指定的算法名不受支持，
+  校验期拦下）/ `exec_algo_attach_failed`（挂载期失败：父单号重复 / Σ子单量不等 /
+  计划非法）。无效是**结果属性**不是错误，所以不进 `error` —— `error` 只装真实
+  错误（取不到日历、参数非法等）。
 - `invalid` 的指标字段照常给出（如实呈现），但调用方**不得**把它当成功观测。
 - 读路径同源：state → response 的唯一透传点是 `Engine.ResponseFromState`
   （`cmd/analysis.buildResponseFromState` 是其薄包装）。API 读路径与多策略对比

@@ -160,10 +160,19 @@ func (e *Engine) processExecAlgoChildren(
 			// 当日无 bar（停牌 / 跌出票池）：不到点，父单剩余子单顺延。
 			continue
 		}
+		// K17-RV4 · 口径 A（2026-10-13 拍板，有意行为）：本报送点**不判 ctx**——
+		// 取消 = 「尽快停」，当日 bar 已真实发生、片已到点即照发；下一交易日的
+		// 日循环顶部（engine.go 的 ctx.Done 检查）才中止。**不要**把它当缺陷
+		// 重报而改成「取消即零成交」——那会让「已到点成交」消失。paper 侧同
+		// 口径（见 pkg/live/paper_exec_algo.go 同名注释），两侧必须一致。
+		// K17-RV1 · OnBar 契约：错误时**已取子单照常交还调用方处置**。因此
+		// err != nil 只降级为诊断信号，**不丢** due——否则派发器已按 submitted
+		// 计账而实际未报，父单进度账与报送事实再次分叉（R2-R1 要治的病，
+		// 只是从派发器层移到了调用方层）。
 		due, err := d.OnBar(ctx, bars[len(bars)-1])
 		if err != nil {
-			logger.Warn().Err(err).Str("symbol", sym).Msg("exec-algo: OnBar failed, parent slices stall")
-			continue
+			logger.Warn().Err(err).Str("symbol", sym).
+				Msg("exec-algo: OnBar reported an error (diagnostic); the due children it returned are still submitted")
 		}
 		for _, dc := range due {
 			e.executeExecAlgoChild(ctx, state, d, execSvc, dc, bars[len(bars)-1], date, logger)
@@ -337,6 +346,9 @@ func newExecAlgoRunDiag() *execAlgoRunDiag {
 
 // record 记一次挂载失败。每类保留首个样例（诊断点名第一个现场）。
 func (dg *execAlgoRunDiag) record(kind execalgo.AttachFailureKind, parentID string) {
+	if dg == nil { // K17-RV2 · nil 接收者：静默返回（同组 empty/invalidReasonCodes/logSummary 均 nil-safe，唯独 record 曾不是）
+		return
+	}
 	if dg.fails == nil { // 零值可用
 		dg.fails = make(map[execalgo.AttachFailureKind]int)
 		dg.samples = make(map[execalgo.AttachFailureKind]string)

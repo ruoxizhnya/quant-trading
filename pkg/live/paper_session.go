@@ -161,6 +161,12 @@ func NewPaperSession(cfg PaperSessionConfig) (*PaperSession, error) {
 // 返回：按 (Date, Symbol) 排序的成交流。单笔撮合失败（如现金不足、
 // T+1 违规）记日志跳过，不中断整段回放 —— 与 LiveBridge.ExecuteSignals
 // 的「单信号失败不中断后续」一致。
+//
+// 例外（K17-R1，fail-loud）：exec-algo 父单**挂载**失败（未知算法名 /
+// 父单号重复 / Σ子单量不等 / 计划非法）不在此列 —— 它返回显式 error
+// 让 Run 整段失败（rejected, not ignored），因为挂载失败意味着「信号被
+// 拒、交易从结果里消失」，静默跳过会让跑完没人知道少了交易。（回测侧
+// 同判定，只是映射到 invalid_reasons 通道。）
 func (s *PaperSession) Run(ctx context.Context, symbols []string, start, end time.Time, strat strategy.Strategy) ([]PaperFill, error) {
 	if strat == nil {
 		return nil, fmt.Errorf("paper session: nil strategy")

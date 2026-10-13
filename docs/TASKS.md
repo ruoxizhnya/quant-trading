@@ -745,9 +745,9 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | K17-RV1 | 🟠 | OnBar 新契约（错误时已取子单照常交还）与两个调用方错误分支矛盾——err != nil 时 `continue` 把 due 连同错误一起丢弃，而 Dispatcher 已计入 submitted | `pkg/backtest/exec_algo.go:163-166`、`pkg/live/paper_exec_algo.go:143-147` |
 | K17-RV2 | 🟡 | `execAlgoRunDiag.record` 无 nil 接收者防护（同组另三法均有） | `pkg/backtest/exec_algo.go:339` |
 | K17-RV3 | 🟡 | 文档同步欠账：SPEC.md 稳定 Code 清单缺两条新 Code；paper Run 文档注释未提挂载失败 fail-loud；新公开 API 是否入 SPEC 待核对 | `docs/SPEC.md:1618`、`pkg/live/paper_session.go` Run 注释 |
-| K17-RV4 | 🟡 | ctx 取消当日已到点子单仍报送（两侧同构）——**已拍板口径 A（维持现状，补注释）**，待落实现与测试 | 两侧 `processExecAlgoChildren` / `dispatchExecAlgoChildren` |
+| K17-RV4 | 🟡 | ctx 取消当日已到点子单仍报送（两侧同构）——**已拍板口径 A（维持现状，补注释）**，已落实现与测试 | 两侧 `processExecAlgoChildren` / `dispatchExecAlgoChildren` |
 
-#### K17-RV1 · OnBar 错误分支丢弃已取子单——R2-R1 的病移到了调用方层（🟠）
+#### K17-RV1 · OnBar 错误分支丢弃已取子单——R2-R1 的病移到了调用方层（🟠）✅ 完成（2026-10-13）
 
 - **① 目标**：让 `Dispatcher.OnBar` 的「错误时已取子单照常交还调用方处置」契约在调用方落地，消除「submitted 已计、实际未报」的第二次分叉。
 - **② 现状**：R2-R1 改完 OnBar（遍历完全部父单、`errors.Join` 聚合、已取子单随错误一并返回），但两个调用方的错误分支仍是 `if err != nil { Warn; continue }`——把 due 连同错误一起丢掉。派发器侧 `run.submitted += c.Qty` 已记账 ⇒ 父单进度账与报送事实再次不一致，正是 R2-R1 要治的病，只是从派发器层移到了调用方层。
@@ -755,8 +755,9 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 要求**：两侧错误分支改为「Warn 后仍逐笔报送 due」（报送语义与成功路径一致，错误降级为诊断信号，不丢已取子单）；补测试——约束：Engine 的 dispatcher 是 run 内部构造（engine.go runBacktestInternal），接线级注入需最小测试钩子，或断言落在 execalgo 层 + 调用方错误分支静态护栏（二选一，取舍写注释）。
 - **⑤ 验收**：两侧错误分支不再丢弃 due；测试红→还原；全量 `go test ./...` 绿。
 - **⑥ 边界**：不改 OnBar 契约与冻结签名；不动 K17-R1 挂载口径。
+- **⑦ 收口记录（2026-10-13）**：两侧错误分支改为「Warn 后仍逐笔报送 due」。测试取 ④ 的二选一之**「execalgo 层断言 + 调用方静态护栏」**：行为判据沿用 `pkg/execalgo/dispatch_onbar_test.go` 的 `TestDispatcher_OnBarErrorReturnsTakenChildren`；调用方侧新增 AST 形态护栏 `TestCallers_NeverDropOnBarDueChildren`（`pkg/backtest/exec_algo_review_test.go`，扫两侧文件——OnBar 取值后的 `err != nil` 分支不得含 continue/return）。**不**为测试给 Engine 加生产测试缝：该错误路径正常接线不可达（Attach 后 `planState.onBar` 只在「未 Schedule」时报错，而 Attach 已拒绝空父单号）。破坏腿：还原 `continue` → 护栏红（实测）。
 
-#### K17-RV2 · `execAlgoRunDiag.record` 缺 nil 接收者防护（🟡）
+#### K17-RV2 · `execAlgoRunDiag.record` 缺 nil 接收者防护（🟡）✅ 完成（2026-10-13）
 
 - **① 目标**：`record` 与同组 `empty() / invalidReasonCodes() / logSummary()` 的 nil 语义对齐（后三者均 nil-safe，唯独 record 不是）。
 - **② 现状**：`record` 首行 `if dg.fails == nil` 只防**零值结构体**、不防 **nil 指针**——nil 接收者直接 panic。当前两条穿参路径（batch / fallback）都保证非 nil，属未来调用点的隐患。
@@ -764,15 +765,16 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 验收**：nil 调用静默返回；全量绿。
 - **⑤ 边界**：只加防护，不改诊断口径与计数语义。
 
-#### K17-RV3 · 文档同步欠账（🟡）
+#### K17-RV3 · 文档同步欠账（🟡）✅ 完成（2026-10-13）
 
 - **① 目标**：把 R1 引入的可观测面登记进契约文档，消除「代码先行、文档漂移」。
 - **② 现状**：`docs/SPEC.md:1618` 枚举 invalid_reasons 稳定 Code（`empty_universe` / `zero_trades` / ...），缺 `exec_algo_unknown_style` / `exec_algo_attach_failed`；`pkg/live/paper_session.go` Run 的文档注释仍写「单笔撮合失败（如现金不足、T+1 违规）记日志跳过，不中断整段回放」，未提 K17-R1 新语义「exec-algo 挂载失败 → Run 显式 error（rejected, not ignored）」；pkg/execalgo 新公开 API（`IsKnownStyle` / `ClassifyAttachError` / 四 sentinel / `StyleTWAP`·`StyleVWAP` / `AttachFailureKind`）是否需入 SPEC 待核对。
 - **③ 要求**：SPEC.md 补两条 Code（各一句话语义即可）；Run 注释补一句挂载失败 fail-loud；核对新公开 API 是否需入 SPEC 清单。
 - **④ 协调约束**：docs/SPEC.md 当前有并行会话未提交改动——执行时先取最新版再改，避免撞车。
 - **⑤ 验收**：SPEC 与代码枚举一致（grep 两条 Code 可命中）；Run 注释与行为一致。
+- **⑥ 收口记录（2026-10-13）**：SPEC.md 稳定 Code 清单已补 `exec_algo_unknown_style` / `exec_algo_attach_failed`；`pkg/live/paper_session.go` 的 Run 注释已补挂载失败 fail-loud 例外。**公开 API 核对结论：不入 SPEC** —— SPEC 登记的是**结果契约**（响应字段 / status 三值 / 稳定 Code），不枚举内部 Go 包 API；`pkg/execalgo` 的 `IsKnownStyle` / `ClassifyAttachError` / 四 sentinel / `StyleTWAP`·`StyleVWAP` / `AttachFailureKind` 属包内契约，其 wire 可见面就是那两条 Code（已登记）。
 
-#### K17-RV4 · ctx 取消当日已到点子单仍报送——口径已拍板 A（🟡，2026-10-13 若曦裁决）
+#### K17-RV4 · ctx 取消当日已到点子单仍报送——口径已拍板 A（🟡，2026-10-13 若曦裁决）✅ 完成（2026-10-13）
 
 - **① 目标**：按已拍板口径 A 落实现与测试——取消当日已到点未报送的子单**仍照常报送**。
 - **② 现状**：R2-R3 只在**挂载点**判 `ctx.Err`；当日已挂父单的到点子单在 `dispatchExecAlgoChildren` / `processExecAlgoChildren` 报送时不判 ctx（两侧同构）——取消当日仍真实成交，次日循环才中止。
@@ -780,6 +782,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 要求**：两侧报送点补注释写明「取消当日已到点子单仍报送」是**有意行为**（口径 A，2026-10-13 拍板），防止未来被当缺陷重报；补一条测试钉住该行为（取消注入 → 当日已到点子单仍报送）；两侧注释与测试口径必须一致。
 - **⑤ 验收**：注释与测试就位；删除注释或改为判 ctx 时测试红；全量 `go test ./...` 绿。
 - **⑥ 边界**：不改冻结签名；只补注释与测试，不改报送逻辑本身。
+- **⑦ 收口记录（2026-10-13）**：两侧报送点已补「本报送点不判 ctx 是有意行为」注释；测试 `TestExecAlgo_CancelSameDayDueSliceStillSubmitted`（回测侧 `pkg/backtest/exec_algo_review_test.go`，取消注入当日到点片仍报送、末笔日期 == 取消日）+ `TestPaperExecAlgo_CancelSameDayDueSliceStillSubmitted`（paper 侧 `pkg/live/paper_exec_algo_review_test.go`，入场量为对照的 3/5——当日即停会掉到 2/5）。破坏腿：两侧报送前加 `if ctx.Err() != nil { continue }` → 两条腿均红（实测）。
 
 ---
 
