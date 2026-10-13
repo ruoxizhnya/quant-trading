@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../qt-verify"
+		},
+		{
+			"path": "../quant-trading-agent"
+		},
+		{
+			"path": "../quant-trading-docs"
+		},
+		{
+			"path": "../quant-trading-ui"
+		}
+	],
+	"trae": {
+		"workspaceId": "101de395217fe3c6c02ef5fcfe8b4004"
+	},
+	"settings": {}
+}
