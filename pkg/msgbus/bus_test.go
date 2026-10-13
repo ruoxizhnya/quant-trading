@@ -715,7 +715,7 @@ func TestPublishPassesCallerContextToHandlers(t *testing.T) {
 }
 
 // runKey 是 TestPublishPassesCallerContextToHandlers 专用的 ctx key 类型
-//（不导出，避免与别的测试/包的 key 撞车）。
+// （不导出，避免与别的测试/包的 key 撞车）。
 type runKey struct{}
 
 // ─── K0-P2-3 ③：时钟构造期强制 ─────────────────────────────────────

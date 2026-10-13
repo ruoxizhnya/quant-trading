@@ -285,7 +285,7 @@ func (b *SyncBus) Subscribe(topic string, h Handler) error {
 
 // now 取「现在」：一律走注入的 Clock（回测=虚拟时间，实盘=墙钟）。clk 由构造
 // 函数保证非 nil，故这里不再有墙钟兜底——兜底正是 K0-P2-3 要消灭的静默陷阱
-//（见 NewSyncBus 注释）。
+// （见 NewSyncBus 注释）。
 func (b *SyncBus) now() time.Time { return b.clk.Now() }
 
 // Envelope 是基本消息信封。
