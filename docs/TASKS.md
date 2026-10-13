@@ -609,8 +609,8 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
   - **R1（🟠 全过滤静默）**：`FetchSWIndustryMembers`（`pkg/data/supply_chain.go` L111-113 区）`if len(edges) == 0 { return nil, nil }` —— 口径①后「响应有行但**全部段** out_date 非空（被过滤）」与「上游返回 0 行」**同形不可分**，两者都静默成功：无 raw 行数计数、无过滤计数、0 行路径无日志。上游 out_date 空值形态变故（填 `"0"` / `"-"` / `"00000000"`）→ 当前成员被全判历史段 → **静默 0 行入边表**，K60 消费方拿到空产业链而无信号。对比 P2-1-R2 R2 已在宏观层为同类风险立 fail-loud 闸门（`macroAllSkippedError`）——**同仓两条数据线纪律不一致**。
   - **R2（🟡 测试缺口）**：口径①新增的过滤有混合形态用例（`TestNormalizeSWIndustryMembers_SkipsOutOfDateSegments`），但「**全部**段都是历史 → 0 条边」形态**无用例**；`FetchSWIndustryMembers` 的 `len(edges)==0 → nil,nil` 路径亦无测试。另：`normalizeETFPortfolio` 的 `Weight` 走 `tushareCellFloat` → `fieldToFloat` 同 **P2-1-R3 R1** 静默 0 洞（本单做专项确认：weight 不可解析 / 非有限时是否该拒绝该行）。
 - **③ 要求**：
-  1. **R1 先裁决口径（二选一，理由写收口记录）**：① **fail-loud**（`ErrCodeDataQuality`，文案对齐 `macroAllSkippedError`，注明「若确为全部出表属上游数据形态判断，需人工确认」）——推荐（与宏观层纪律统一，防静默错误）；② Warn + 计数（保守，0 行仍返回 nil）。落地：`normalizeSWIndustryMembers` 返回过滤计数（raw 行数 `len(resp.Data.Items)` 调用方已可得），`FetchSWIndustryMembers` 增闸门；「raw == 0」保持 `nil, nil`（真真空合法）。
-  2. **R2**：补 `TestNormalizeSWIndustryMembers_AllSegmentsOutOfDate`（全历史段 → 0 条边）+（若 R1 选 fail-loud）`TestFetchSWIndustryMembers_FailsLoudWhenAllFiltered`；`normalizeETFPortfolio` weight 不可解析 / 非有限的处置确认（口径与 P2-1-R3 R1 对齐）。
+  1. **R1 口径已拍板（2026-10-13 若曦裁决）**：选 **① fail-loud**（`ErrCodeDataQuality`，文案对齐 `macroAllSkippedError`，注明「若确为全部出表属上游数据形态判断，需人工确认」）——与宏观层纪律统一，防静默错误。落地：`normalizeSWIndustryMembers` 返回过滤计数（raw 行数 `len(resp.Data.Items)` 调用方已可得），`FetchSWIndustryMembers` 增闸门；「raw == 0」保持 `nil, nil`（真真空合法）。
+  2. **R2**：补 `TestNormalizeSWIndustryMembers_AllSegmentsOutOfDate`（全历史段 → 0 条边）+ `TestFetchSWIndustryMembers_FailsLoudWhenAllFiltered`（R1 已拍板 fail-loud）；`normalizeETFPortfolio` weight 不可解析 / 非有限的处置确认（口径与 P2-1-R3 R1 对齐）。
 - **④ 约束与非目标**：不动 `sw_industry_tree` / `industry_vitality` / `etf_constituent` 三表；不动口径①「仅当前成员」语义本身（本单只补闸门 / 计数 / 测试）；不改 P2-2-R2 收口记录的事实部分（只可加交叉引用）。
 - **⑤ 验收**：R1——闸门 / 告警测试腿红→还原绿 + 真库重导不受影响（`801010.SI` 仍 104 行）；R2——新用例绿；全量 `go test ./...` 绿。
 - **⑥ 边界**：core 仓一个 atomic commit（`fix(data): P2-2-R3 …`）；`pkg/data/supply_chain.go` + 其测试 + 台账。
@@ -745,7 +745,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | K17-RV1 | 🟠 | OnBar 新契约（错误时已取子单照常交还）与两个调用方错误分支矛盾——err != nil 时 `continue` 把 due 连同错误一起丢弃，而 Dispatcher 已计入 submitted | `pkg/backtest/exec_algo.go:163-166`、`pkg/live/paper_exec_algo.go:143-147` |
 | K17-RV2 | 🟡 | `execAlgoRunDiag.record` 无 nil 接收者防护（同组另三法均有） | `pkg/backtest/exec_algo.go:339` |
 | K17-RV3 | 🟡 | 文档同步欠账：SPEC.md 稳定 Code 清单缺两条新 Code；paper Run 文档注释未提挂载失败 fail-loud；新公开 API 是否入 SPEC 待核对 | `docs/SPEC.md:1618`、`pkg/live/paper_session.go` Run 注释 |
-| K17-RV4 | 🟡 | ctx 取消当日已到点子单仍报送（两侧同构）——「取消当日是否即停报」是口径问题，需拍板 | 两侧 `processExecAlgoChildren` / `dispatchExecAlgoChildren` |
+| K17-RV4 | 🟡 | ctx 取消当日已到点子单仍报送（两侧同构）——**已拍板口径 A（维持现状，补注释）**，待落实现与测试 | 两侧 `processExecAlgoChildren` / `dispatchExecAlgoChildren` |
 
 #### K17-RV1 · OnBar 错误分支丢弃已取子单——R2-R1 的病移到了调用方层（🟠）
 
@@ -772,13 +772,14 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 - **④ 协调约束**：docs/SPEC.md 当前有并行会话未提交改动——执行时先取最新版再改，避免撞车。
 - **⑤ 验收**：SPEC 与代码枚举一致（grep 两条 Code 可命中）；Run 注释与行为一致。
 
-#### K17-RV4 · ctx 取消当日已到点子单仍报送——口径待拍板（🟡，需若曦裁决）
+#### K17-RV4 · ctx 取消当日已到点子单仍报送——口径已拍板 A（🟡，2026-10-13 若曦裁决）
 
-- **① 目标**：裁决「取消发生当日，已到点未报送的子单是否仍报送」。
+- **① 目标**：按已拍板口径 A 落实现与测试——取消当日已到点未报送的子单**仍照常报送**。
 - **② 现状**：R2-R3 只在**挂载点**判 `ctx.Err`；当日已挂父单的到点子单在 `dispatchExecAlgoChildren` / `processExecAlgoChildren` 报送时不判 ctx（两侧同构）——取消当日仍真实成交，次日循环才中止。
-- **③ 两种口径**：A. 维持现状（取消 = 「尽快停」，当日片已到点照发，与「bar 已发生」语义一致，需把该行为写进注释防止未来被当缺陷重报）；B. 报送前判 ctx（取消即刻零成交，最保守）。两者都自洽，差别是「停」的定义。
-- **④ 要求**：若曦拍板后落实现与测试；不拍板不动代码。
-- **⑤ 边界**：不改冻结签名；两侧口径必须一致（与 K17-R1 同一纪律）。
+- **③ 裁决（2026-10-13 若曦拍板）**：**选 A · 维持现状**——取消 = 「尽快停」，当日 bar 已真实发生，片已到点照发，与撮合语义一致；不选 B（报送前判 ctx，取消即刻零成交）。
+- **④ 要求**：两侧报送点补注释写明「取消当日已到点子单仍报送」是**有意行为**（口径 A，2026-10-13 拍板），防止未来被当缺陷重报；补一条测试钉住该行为（取消注入 → 当日已到点子单仍报送）；两侧注释与测试口径必须一致。
+- **⑤ 验收**：注释与测试就位；删除注释或改为判 ctx 时测试红；全量 `go test ./...` 绿。
+- **⑥ 边界**：不改冻结签名；只补注释与测试，不改报送逻辑本身。
 
 ---
 
