@@ -33,7 +33,7 @@ from nautilus_trader.model import Bar, BarType, Price, Quantity
 from nautilus_trader.persistence import ParquetDataCatalog
 
 from sidecar.catalog import bar_type_str, make_equity
-from sidecar.engine import run_backtest
+from sidecar.engine import _map_result, run_backtest
 from sidecar.errors import RunSpecError
 from sidecar.runspec import DEFAULT_INITIAL_CAPITAL, RunSpec
 from sidecar.server import build_server
@@ -196,6 +196,31 @@ class TimingReportTest(unittest.TestCase):
         self.assertGreaterEqual(timing["total_ms"], 0.0)
 
 
+class _StubResult:
+    """Minimal stand-in for an NT run result — only the fields ``_map_result`` reads."""
+
+    run_config_id = "nt-run-stub"
+    stats_returns: dict = {}
+    stats_pnls: dict = {}
+    stats_general: dict = {}
+    total_orders = 1
+    total_positions = 1
+    iterations = 3
+
+
+class MissingEndEquityIsFailedTest(unittest.TestCase):
+    """K13-R1-R1 A (b) · 读不到期末市值净值 ⇒ status=failed，绝不折成 0。"""
+
+    def test_unreadable_equity_yields_failed_not_a_zeroed_success(self) -> None:
+        # portfolio=None models "the engine portfolio could not be read" — the
+        # exact case the pre-fix code folded into completed + total_return=0.
+        payload = _map_result(_runspec(), "nt-run-stub", _StubResult(), portfolio=None)
+
+        self.assertEqual("failed", payload["status"])
+        self.assertIsNone(payload["total_return"], "a missing metric must stay absent, not 0")
+        self.assertIn("total_return", payload["error"])
+
+
 class KeepAliveFramingTest(unittest.TestCase):
     """K13-R1 B · an early-exit 404 must not desync a keep-alive connection."""
 
@@ -241,6 +266,34 @@ class KeepAliveFramingTest(unittest.TestCase):
                 second.status,
                 200,
                 "a kept-alive connection was desynced by the unread 404 body",
+            )
+            self.assertEqual(payload["status"], "ok")
+        finally:
+            conn.close()
+
+    def test_get_with_body_does_not_desync_a_kept_alive_connection(self) -> None:
+        """K13-R1-R1 B · a GET carrying a body must also drain before its 404."""
+        conn = http.client.HTTPConnection(
+            "127.0.0.1", self._server.server_address[1], timeout=30
+        )
+        try:
+            conn.request(
+                "GET",
+                "/no-such-route",
+                body="ignored-by-the-server",
+                headers={"Content-Type": "text/plain"},
+            )
+            first = conn.getresponse()
+            first.read()
+            self.assertEqual(first.status, 404)
+
+            conn.request("GET", "/healthz")
+            second = conn.getresponse()
+            payload = json.loads(second.read())
+            self.assertEqual(
+                second.status,
+                200,
+                "a kept-alive connection was desynced by the unread GET 404 body",
             )
             self.assertEqual(payload["status"], "ok")
         finally:

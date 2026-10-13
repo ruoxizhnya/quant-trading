@@ -144,7 +144,7 @@ func TestRunner_DefaultsKernelToGoWhenUnset(t *testing.T) {
 	// EffectiveKernel resolves an empty Kernel to "go" before the wire payload is
 	// built, so a caller reaching the registry with no kernel still sends an
 	// explicit value on the wire.
-	srv, cap := newStubSidecar(t, http.StatusOK, `{"id":"x","status":"completed"}`)
+	srv, cap := newStubSidecar(t, http.StatusOK, `{"id":"x","status":"completed","total_return":0}`)
 	runner := NewRunner(srv.URL, srv.Client())
 
 	req := sampleRequest()
@@ -294,17 +294,55 @@ func TestRunResponse_DistinguishesNullFromZero(t *testing.T) {
 	assert.InDelta(t, 0.0, *out.SharpeRatio, 1e-12)
 }
 
-// D · toResponse is the single explicit fold: absent → 0 for the frozen DTO.
-func TestRunner_AbsentMetricFoldsToZeroInDTO(t *testing.T) {
+// A · a "completed" run that omits total_return is a contract violation: it must
+// error (naming the kernel), never be folded into a successful TotalReturn=0.
+// (This replaces the K13-R1 test that pinned the fold — that behaviour was the
+// silent-wrong-value bug K13-R1-R1 A closes.)
+func TestRunner_CompletedWithoutTotalReturnSurfacesError(t *testing.T) {
 	srv, _ := newStubSidecar(t, http.StatusOK,
 		`{"id":"nt-run-1","status":"completed","total_return":null,"sharpe_ratio":null}`)
 	runner := NewRunner(srv.URL, srv.Client())
 
 	resp, err := runner.RunBacktest(context.Background(), sampleRequest())
+
+	assert.Nil(t, resp, "a completed run with no total_return must not become a zeroed success")
+	require.Error(t, err)
+	assert.Equal(t, apperrors.ErrCodeInternal, appErrorCode(t, err))
+	assert.Contains(t, err.Error(), KernelName, "the error must name the kernel")
+	assert.Contains(t, err.Error(), "metric not reported")
+}
+
+// Observable metrics other than total_return may still legitimately be absent —
+// only total_return is required for a completed run.
+func TestRunner_CompletedWithTotalReturnAllowsAbsentSecondaryMetrics(t *testing.T) {
+	srv, _ := newStubSidecar(t, http.StatusOK,
+		`{"id":"nt-run-1","status":"completed","total_return":0.0125,"sharpe_ratio":null}`)
+	runner := NewRunner(srv.URL, srv.Client())
+
+	resp, err := runner.RunBacktest(context.Background(), sampleRequest())
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	assert.InDelta(t, 0.0, resp.TotalReturn, 1e-12)
+	assert.InDelta(t, 0.0125, resp.TotalReturn, 1e-9)
 	assert.InDelta(t, 0.0, resp.SharpeRatio, 1e-12)
+}
+
+// C · an oversized response body must be refused, not buffered without bound.
+func TestRunner_OversizedResponseBodySurfacesError(t *testing.T) {
+	old := maxResponseBody
+	maxResponseBody = 128
+	defer func() { maxResponseBody = old }()
+
+	big := `{"id":"x","status":"completed","total_return":0,"padding":"` +
+		strings.Repeat("x", 512) + `"}`
+	srv, _ := newStubSidecar(t, http.StatusOK, big)
+	runner := NewRunner(srv.URL, srv.Client())
+
+	resp, err := runner.RunBacktest(context.Background(), sampleRequest())
+
+	assert.Nil(t, resp, "an oversized body must not be buffered into a response")
+	require.Error(t, err)
+	assert.Equal(t, apperrors.ErrCodeUnavailable, appErrorCode(t, err))
+	assert.Contains(t, err.Error(), "exceeds")
 }
 
 // A 2xx with an empty body carries no result — refuse it, name the kernel.
@@ -380,7 +418,7 @@ func TestPhaseTimingsString(t *testing.T) {
 // The success path parses the sidecar-reported timing (Exec phase).
 func TestRunner_ParsesSidecarTiming(t *testing.T) {
 	srv, _ := newStubSidecar(t, http.StatusOK,
-		`{"id":"nt-run-1","status":"completed","timing":{"queue_ms":1.5,"exec_ms":42.0,"total_ms":44.0}}`)
+		`{"id":"nt-run-1","status":"completed","total_return":0,"timing":{"queue_ms":1.5,"exec_ms":42.0,"total_ms":44.0}}`)
 	runner := NewRunner(srv.URL, srv.Client())
 
 	resp, err := runner.RunBacktest(context.Background(), sampleRequest())

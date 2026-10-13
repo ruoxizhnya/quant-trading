@@ -77,6 +77,12 @@ class _Handler(BaseHTTPRequestHandler):
     # ── routing ───────────────────────────────────────────────────────────────
 
     def do_GET(self) -> None:  # noqa: N802 — stdlib naming
+        # K13-R1-R1 B: neither GET route reads a request body, so a client that
+        # (rarely) sends one would leave the bytes unread and desync a keep-alive
+        # connection — the same failure K13-R1 B fixed for POST's 404 path.
+        # Drain it; if we can't, force the connection closed.
+        if not self._drain_body():
+            self.close_connection = True
         if self.path.split("?", 1)[0] == HEALTH_PATH:
             self._send_json(200, {"status": "ok", "kernel": "nautilus"})
             return

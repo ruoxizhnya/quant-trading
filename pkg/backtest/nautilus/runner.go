@@ -79,6 +79,13 @@ const (
 	maxErrorBody = 4 << 10
 )
 
+// maxResponseBody bounds how much of a (successful) sidecar response body is
+// buffered (K13-R1-R1 C). Generous enough for K15's equity curves / trade
+// detail, but finite so a hostile or faulty sidecar can never balloon the Go
+// process's memory. A var, not a const, only so a test can lower it without
+// materialising a 64 MiB body.
+var maxResponseBody int64 = 64 << 20
+
 // URLFromEnv returns the sidecar base URL: $NT_SIDECAR_URL when set and
 // non-blank, otherwise DefaultURL.
 func URLFromEnv() string {
@@ -224,12 +231,21 @@ func (r *Runner) RunBacktest(ctx context.Context, req contracts.BacktestRequest)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	payload, err := io.ReadAll(resp.Body)
+	// K13-R1-R1 C · bounded read: read one byte past the limit so an oversized
+	// body is detected rather than silently truncated. A hostile/faulty sidecar
+	// must never make the Go process buffer an unbounded response.
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
 	if err != nil {
 		pt.transferProcessMS = msSince(headersAt, time.Now())
 		return nil, apperrors.Unavailable("nautilus sidecar", fmt.Errorf(
 			"kernel %q: read sidecar response body (Transfer+Process phase) [%s]: %w",
 			KernelName, pt, err))
+	}
+	if int64(len(payload)) > maxResponseBody {
+		pt.transferProcessMS = msSince(headersAt, time.Now())
+		return nil, apperrors.Unavailable("nautilus sidecar", fmt.Errorf(
+			"kernel %q: sidecar response body exceeds the %d-byte limit — refusing to buffer an unbounded response (Transfer+Process phase) [%s]",
+			KernelName, maxResponseBody, pt))
 	}
 
 	// A 503 is the canonical "kernel busy" signal (sidecar overloaded, or an
@@ -278,6 +294,18 @@ func (r *Runner) RunBacktest(ctx context.Context, req contracts.BacktestRequest)
 		}
 		return nil, apperrors.Unavailable("nautilus sidecar", fmt.Errorf(
 			"kernel %q failed [%s]: %s", KernelName, pt, msg))
+	}
+
+	// K13-R1-R1 A (a) · 纵深防御：一个 completed 的 run 却缺 total_return 是契约
+	// 违背。绝不能把它折叠成 0 当成成功——那与 K13-R1 A 要治的「像真的错值」
+	// 同类。这里点名 kernel 报错，不静默折叠。（侧车在源头已把这种 run 标
+	// failed；这一道防的是声称 completed 却漏报字段的侧车实现。）
+	if out.Status == "" || out.Status == contracts.StatusCompleted {
+		if out.TotalReturn == nil {
+			return nil, apperrors.Internal(fmt.Errorf(
+				"kernel %q: sidecar reported status=%q but no total_return (metric not reported) — refusing to fold a missing metric into 0 [%s]",
+				KernelName, contracts.StatusCompleted, pt), "nautilus.RunBacktest")
+		}
 	}
 
 	return r.toResponse(req, out), nil

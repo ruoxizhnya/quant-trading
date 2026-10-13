@@ -229,9 +229,21 @@ def _map_result(
     if end_equity is not None and run_spec.initial_capital > 0:
         total_return = (end_equity - run_spec.initial_capital) / run_spec.initial_capital
 
+    # K13-R1-R1 A (b) · 源头兜底：市值口径净值读不到 ⇒ 该 run 是 **failed**，
+    # 不是 ``completed`` + 一个像真的 0。把「读不到的口径」呈现成一个像真的
+    # 数字，正是 K13-R1 A 要治的病；这里让「缺字段」在源头不可能发生。
+    status = _STATUS_COMPLETED
+    error = ""
+    if total_return is None:
+        status = _STATUS_FAILED
+        error = (
+            "could not read end-of-run mark-to-market equity, so total_return "
+            "cannot be reported (rejected, not folded to 0)"
+        )
+
     payload: dict[str, Any] = {
         "id": result.run_config_id or run_config_id,
-        "status": _STATUS_COMPLETED,
+        "status": status,
         "strategy": run_spec.strategy,
         "start_date": run_spec.start_date,
         "end_date": run_spec.end_date,
@@ -244,6 +256,8 @@ def _map_result(
         "total_orders": int(result.total_orders),
         "total_positions": int(result.total_positions),
         "iterations": int(result.iterations),
+        # Carried only when the run is failed (OBS-01: failed is an outcome).
+        "error": error,
         # Raw NT statistics, sanitised for JSON. Carried so K15 can align every
         # metric without re-running, and so the link is provably NT's own output.
         "nt_stats": {

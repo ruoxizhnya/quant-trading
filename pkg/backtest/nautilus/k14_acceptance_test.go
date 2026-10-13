@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -45,11 +46,18 @@ func TestKernelRouting_UnknownKernelFailsClosedNoFallback(t *testing.T) {
 }
 
 func TestAShareFeeParityFixtureMatchesGo(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "nt-sidecar", "tests", "fixtures", "ashare_fees_parity.json")
+	// K13-R1-R1 D · anchor the fixture to this source file (not the process cwd)
+	// and fail (never skip) when it is missing. A gate that silently skips when it
+	// cannot find its input is no gate at all — CI would report green while the
+	// Go/Python fee parity is never actually checked.
+	_, thisFile, _, ok := runtime.Caller(0)
+	require.True(t, ok, "runtime.Caller must resolve the test file path")
+	path := filepath.Join(
+		filepath.Dir(thisFile),
+		"..", "..", "..", "nt-sidecar", "tests", "fixtures", "ashare_fees_parity.json",
+	)
 	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Skipf("parity fixture not present (run from repo root): %v", err)
-	}
+	require.NoError(t, err, "the A-share parity fixture must be present and readable at %s", path)
 
 	type row struct {
 		TradeValue  float64 `json:"trade_value"`
