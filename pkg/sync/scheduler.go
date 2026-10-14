@@ -206,6 +206,13 @@ func (s *Scheduler) ToggleSchedule(ctx context.Context, id int, active bool) err
 		if err := s.scheduleJob(schedule); err != nil {
 			return fmt.Errorf("failed to schedule job: %w", err)
 		}
+	} else {
+		// SYNC-03: the cron entry is gone, so any remaining next_run_at points at a
+		// run that will never happen — the UI would present it as fact. Nil it here so
+		// the single UpdateSyncSchedule below persists is_active=false and next_run_at
+		//=NULL in the same statement (no intermediate state where the row reads
+		// inactive but still carries a schedule).
+		schedule.NextRunAt = nil
 	}
 
 	// Update in database

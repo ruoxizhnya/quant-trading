@@ -214,3 +214,53 @@ func TestToggleScheduleWithoutStartDoesNotFire(t *testing.T) {
 	}, 400*time.Millisecond, 20*time.Millisecond,
 		"未 Start 的调度器居然跑了作业 —— 那本文件的立论（计数不等于在跑）就失效了，须重审")
 }
+
+// TestToggleScheduleOffClearsNextRunAt 是 SYNC-03 的主验收：停用之后，
+// 库里的 next_run_at 必须与 is_active=false **同一次 UPDATE** 一起清掉 ——
+// 它指向的运行永远不会发生，残留就是让界面把幻想当事实展示。
+func TestToggleScheduleOffClearsNextRunAt(t *testing.T) {
+	jobStore := newMockJobStore()
+	sc := tickSchedule("toggle-next-run", true)
+	store := newFakeScheduleStore(sc)
+
+	s := NewScheduler(store, NewQueue(jobStore))
+	s.RegisterJobType("ohlcv", JobTypeOHLCV)
+
+	ctx := context.Background()
+	require.NoError(t, s.ToggleSchedule(ctx, sc.ID, true))
+
+	activated, err := store.GetSyncSchedule(ctx, sc.ID)
+	require.NoError(t, err)
+	require.NotNil(t, activated.NextRunAt, "前置事实：激活后 next_run_at 已落库 —— 没有它本测试测不到清除")
+
+	require.NoError(t, s.ToggleSchedule(ctx, sc.ID, false))
+
+	deactivated, err := store.GetSyncSchedule(ctx, sc.ID)
+	require.NoError(t, err)
+	require.NotNil(t, deactivated, "停用后从 store 读回应仍能拿到该排程")
+	assert.False(t, deactivated.IsActive, "toggle false 后 is_active 必须是 false")
+	assert.Nil(t, deactivated.NextRunAt,
+		"停用后 next_run_at 必须是 NULL —— 残留值指向一个永远不会发生的运行（SYNC-03）")
+
+	// Stats 读 cron entry，本来就空 —— 确认清除语句没有反过来污染它。
+	assert.Empty(t, s.Stats().NextRuns, "停用后 cron entry 应已移除，NextRuns 不该有残留")
+}
+
+// 反向腿：激活路径不能被清除语句误伤 —— toggle true 后 next_run_at 必须还在。
+func TestToggleScheduleOnStillSetsNextRunAt(t *testing.T) {
+	jobStore := newMockJobStore()
+	sc := tickSchedule("toggle-on", false)
+	store := newFakeScheduleStore(sc)
+
+	s := NewScheduler(store, NewQueue(jobStore))
+	s.RegisterJobType("ohlcv", JobTypeOHLCV)
+
+	ctx := context.Background()
+	require.NoError(t, s.ToggleSchedule(ctx, sc.ID, true))
+
+	activated, err := store.GetSyncSchedule(ctx, sc.ID)
+	require.NoError(t, err)
+	assert.True(t, activated.IsActive)
+	assert.NotNil(t, activated.NextRunAt,
+		"激活后 next_run_at 必须落库 —— 清除逻辑若误伤激活路径，界面将无下次运行可展示")
+}
