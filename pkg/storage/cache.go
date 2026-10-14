@@ -428,10 +428,10 @@ func (s *PostgresStore) GetIndexConstituents(ctx context.Context, indexCode stri
 	var results []domain.IndexConstituent
 	for rows.Next() {
 		var (
-			c        domain.IndexConstituent
-			inDate   sql.NullTime
-			outDate  sql.NullTime
-			nullWt   sql.NullFloat64
+			c       domain.IndexConstituent
+			inDate  sql.NullTime
+			outDate sql.NullTime
+			nullWt  sql.NullFloat64
 		)
 		if err := rows.Scan(&c.ID, &c.IndexCode, &c.Symbol, &inDate, &outDate, &nullWt); err != nil {
 			return nil, fmt.Errorf("failed to scan index constituent row: %w", err)

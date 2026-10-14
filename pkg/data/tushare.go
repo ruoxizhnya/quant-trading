@@ -695,6 +695,7 @@ func (c *TushareClient) FetchIndexConstituents(ctx context.Context, indexCode st
 //
 //   - in_date  = 该股票在我们拥有的快照里**最早出现**的那一期
 //     （可证的「至少从这期起在指数内」，不编造更早的纳入日）
+//
 //   - out_date = 不在最新一期 ⇒ 最后出现那一期的**次日**（排他上界）；
 //     仍在最新一期 ⇒ 零值（存 NULL）
 //
@@ -703,6 +704,7 @@ func (c *TushareClient) FetchIndexConstituents(ctx context.Context, indexCode st
 //     若直接写最后出现期当天，则 d = 最后出现期时 `out_date > d` 不成立，
 //     该股票在自己最后出现的那一期反而不在票池里 —— 只在单期出现过的成分股
 //     会永远进不了票池。
+//
 //   - weight   = 最新一期的权重（历史期权重不进表，避免同一只多行）
 //
 // 这样 endDate 落在快照覆盖区间内的回测能拿到当时的真实成分；区间外的（如回测
