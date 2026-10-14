@@ -1,7 +1,7 @@
 # Quant Lab — Agentic Coding Configuration
 
 > **版本**: v3.4 (基于 AGENTS Template v2.0 迁移)
-> **最后更新**: 2026-09-21 (ADR-023/024 全量反映: §1 三角色定位 / §2 三层模型 L1-L3 + 执行载体 / §3 目录归属 / §7 数据归属 / §10 Rule 1 触发表 / §11 表数口径; 详见 [PRODUCT.md](docs/PRODUCT.md))
+> **最后更新**: 2026-09-21 (ADR-023/024 全量反映: §1 三角色定位 / §2 三层模型 L1-L3 + 执行载体 / §3 目录归属 / §7 数据归属 / §10 Rule 1 触发表 / §11 表数口径; 详见 PRODUCT.md（`quant-trading-docs:docs/PRODUCT.md`）)
 > **适用项目**: A-share quantitative research platform (Quant Lab — 单人自托管研究实验室)
 >
 > 本文件为 AI 编码助手提供项目上下文。阅读本文件即可快速理解项目全貌。
@@ -19,7 +19,7 @@
 > | **验证器** | validation subagent | **主动证伪**，被调用、不自主循环；输出概率估计 + 质疑清单 |
 >
 > **AI 是操作员，不是生成器。** 底座是仪器，已存在且可用；缺的是"操作它的人"和"看见他在干什么的窗"。
-> 产品定义见 **[PRODUCT.md](docs/PRODUCT.md)**；架构决策见 **[ADR-023](docs/adr/adr-023-ai-experimenter-lab.md)**（取代 ADR-022/021 —— 两者均为 Proposed 期间即被取代、从未实施，已入 `docs/archive/superseded-adr/`）。
+> 产品定义见 **PRODUCT.md（`quant-trading-docs:docs/PRODUCT.md`）**；架构决策见 **ADR-023（`quant-trading-docs:docs/adr/adr-023-ai-experimenter-lab.md`）**（取代 ADR-022/021 —— 两者均为 Proposed 期间即被取代、从未实施，已入 `docs/archive/superseded-adr/`）。
 >
 > **单人自托管的前提**：多租户 / RBAC / 计费 / 限流 / 高可用都是**纯负担，可砍**。
 
@@ -30,7 +30,7 @@
   AI 编排层（`pkg/ai/loop` 循环控制器 + `experiments` / `factor_hypothesis` 实验日志表）、
   能力层（MCP 工具桥 + `pkg/validation` 五维确定性校验器 + `pkg/ai/causal` 因果维）、
   数据层（行情 / 财务 / 产业链 / 研究洞察）
-- **状态**: 底座核心功能已完成；**执行载体已定型为表达式**（[ADR-024](docs/adr/adr-024-expression-as-execution-target.md)）——
+- **状态**: 底座核心功能已完成；**执行载体已定型为表达式**（ADR-024（`quant-trading-docs:docs/adr/adr-024-expression-as-execution-target.md`））——
   LLM 生成的 Go 代码只是**可审阅 artifact**，不加载、不执行
 - **入口**: `cmd/analysis/main.go` (后端), `cmd/data/main.go` (数据服务), `web/src/main.ts` (前端)
   - `cmd/ai` (AI 服务 :8086) —— **2026-10-09 起 AI 层整体迁往 `quant-trading-agent` 仓**（AI 拆仓，ADR-027 §5 第 8 步前置切片）：`pkg/ai` + `CopilotService` + 四族 AI handler（copilot/pipeline/explore/tools）现在住在 agent 仓；本仓的 analysis-service 对这四族路由做纯反代（`handlers_ai_proxy.go`），前端与 openapi 契约不变。依赖方向单向 agent→core（repoguard 钉住）
@@ -57,7 +57,7 @@
 > (`risk.RiskManager` + `live.MockTrader`). Docker compose service
 > count reduced 7 → 5. Risk endpoints exposed at `/api/risk/*` and
 > execution endpoints at `/api/execution/*` (both with legacy aliases).
-> See [ODR-021](docs/archive/odr/odr-021-p1-15-service-merge-risk-execution.md).
+> See ODR-021（`quant-trading-docs:docs/archive/odr/odr-021-p1-15-service-merge-risk-execution.md`）.
 
 ---
 
@@ -78,7 +78,7 @@ L1  数据层      行情 | 财务 | 产业链图谱 | 研究洞察 | 实验日�
 - **目标是可校准，不是准确**：输出「未来有效的概率 X%」，考核**校准误差**（声称 60% 的应实际命中 50–70%），而非推荐准确率。校准良好的信心才能用于配仓位。
 - **EquityDeep 从「工作面」降为「数据底座」**，拆成两块：**产业链图谱**（公司-环节归属 / 上下游映射 / 传导指标，可当因子）与**研究洞察**（"为什么值得关注"的自然语言，供 AI 生成假设时检索）。纵向深研从「研究的前置步骤」变为「被异常触发的按需动作」。
 
-> 详细定义见 [PRODUCT.md](docs/PRODUCT.md)（顶层产品）→ [ADR-023](docs/adr/adr-023-ai-experimenter-lab.md)（架构决策）。下列服务框图是**当前已实现形态**。
+> 详细定义见 PRODUCT.md（`quant-trading-docs:docs/PRODUCT.md`）（顶层产品）→ ADR-023（`quant-trading-docs:docs/adr/adr-023-ai-experimenter-lab.md`）（架构决策）。下列服务框图是**当前已实现形态**。
 
 **执行载体（ADR-024）**: 一条意图的落地路径固定为
 
@@ -135,19 +135,19 @@ Browser (Vue SPA :5173)
 
 | ADR | 决策 | 核心理由 |
 |-----|------|----------|
-| [ADR-001](docs/adr/adr-001-plugin-loading.md) | 策略插件动态加载 | Hot-swap，无需重启 |
-| [ADR-002](docs/adr/adr-002-timescaledb.md) | TimescaleDB 时序优化 | OHLCV 查询性能 |
-| [ADR-003](docs/adr/adr-003-background-worker.md) | 异步任务队列 | 回测不阻塞 API |
-| [ADR-004](docs/adr/adr-004-scoring-method.md) | 多因子评分框架 | 策略通用化 |
-| [ADR-005](docs/adr/adr-005-strategy-config.md) | 策略配置标准化 | 统一参数接口 |
-| [ADR-014](docs/adr/adr-014-strategy-framework-refactor.md) | 策略框架重构 | 消除重复代码，统一接口 |
-| [ADR-015](docs/adr/adr-015-ai-agent-architecture.md) | AI Agent 量化研究架构 | AI 作为资深量化研究员 |
-| [ADR-021](docs/archive/superseded-adr/adr-021-equitydeep-research-layer.md) | EquityDeep 纵向基本面研究层 | ~~与横截面层正交互补，契约式整合~~ — **Superseded by ADR-023**（Proposed 期间即被取代，从未实施） |
-| [ADR-022](docs/archive/superseded-adr/adr-022-unified-research-platform.md) | ~~统一研究平台 — 单一数据面 + 双对等工作面 + 内容坐标证据 + 飞轮闭环~~ | **Superseded by ADR-023**（同上）。方向部分正确（单一数据面 / 内容坐标证据保留），但两个对等工作面导致**两套编排**，且未触及真正的第一性原理：**AI 的可监督性** |
-| [ADR-023](docs/adr/adr-023-ai-experimenter-lab.md) | **AI 实验员 + 人类监督者实验室** — 三层模型（AI 编排 / 能力 / 数据）+ EquityDeep 降为数据底座 + 挖掘/红队双 agent + **校准优于准确率** | 编排者从 2 个收敛到 1 个；可监督性成为一等需求 |
-| [ADR-024](docs/adr/adr-024-expression-as-execution-target.md) | **策略执行载体是表达式，LLM 生成的代码只是 artifact** — 意图类型 → 确定性默认表达式映射；不做 `plugin.Open` | 起点确定、可审阅、可复现；**自由度在这里是负债** |
+| ADR-001（`quant-trading-docs:docs/adr/adr-001-plugin-loading.md`） | 策略插件动态加载 | Hot-swap，无需重启 |
+| ADR-002（`quant-trading-docs:docs/adr/adr-002-timescaledb.md`） | TimescaleDB 时序优化 | OHLCV 查询性能 |
+| ADR-003（`quant-trading-docs:docs/adr/adr-003-background-worker.md`） | 异步任务队列 | 回测不阻塞 API |
+| ADR-004（`quant-trading-docs:docs/adr/adr-004-scoring-method.md`） | 多因子评分框架 | 策略通用化 |
+| ADR-005（`quant-trading-docs:docs/adr/adr-005-strategy-config.md`） | 策略配置标准化 | 统一参数接口 |
+| ADR-014（`quant-trading-docs:docs/adr/adr-014-strategy-framework-refactor.md`） | 策略框架重构 | 消除重复代码，统一接口 |
+| ADR-015（`quant-trading-docs:docs/adr/adr-015-ai-agent-architecture.md`） | AI Agent 量化研究架构 | AI 作为资深量化研究员 |
+| ADR-021（`quant-trading-docs:docs/archive/superseded-adr/adr-021-equitydeep-research-layer.md`） | EquityDeep 纵向基本面研究层 | ~~与横截面层正交互补，契约式整合~~ — **Superseded by ADR-023**（Proposed 期间即被取代，从未实施） |
+| ADR-022（`quant-trading-docs:docs/archive/superseded-adr/adr-022-unified-research-platform.md`） | ~~统一研究平台 — 单一数据面 + 双对等工作面 + 内容坐标证据 + 飞轮闭环~~ | **Superseded by ADR-023**（同上）。方向部分正确（单一数据面 / 内容坐标证据保留），但两个对等工作面导致**两套编排**，且未触及真正的第一性原理：**AI 的可监督性** |
+| ADR-023（`quant-trading-docs:docs/adr/adr-023-ai-experimenter-lab.md`） | **AI 实验员 + 人类监督者实验室** — 三层模型（AI 编排 / 能力 / 数据）+ EquityDeep 降为数据底座 + 挖掘/红队双 agent + **校准优于准确率** | 编排者从 2 个收敛到 1 个；可监督性成为一等需求 |
+| ADR-024（`quant-trading-docs:docs/adr/adr-024-expression-as-execution-target.md`） | **策略执行载体是表达式，LLM 生成的代码只是 artifact** — 意图类型 → 确定性默认表达式映射；不做 `plugin.Open` | 起点确定、可审阅、可复现；**自由度在这里是负债** |
 
-详见: [ADR.md](docs/ADR.md)（共 24 条 ADR：ADR-001~024）
+详见: ADR.md（`quant-trading-docs:docs/ADR.md`）（共 24 条 ADR：ADR-001~024）
 
 ---
 
@@ -320,7 +320,7 @@ type Strategy interface {
     Cleanup()
 }
 ```
-参见: `pkg/strategy/strategy.go`, [SPEC.md](docs/SPEC.md), [VISION.md](docs/VISION.md)
+参见: `pkg/strategy/strategy.go`, [SPEC.md](docs/SPEC.md), VISION.md（`quant-trading-docs:docs/VISION.md`）
 
 ### Frontend (Vue 3 + TypeScript)
 
@@ -414,7 +414,7 @@ EquityDeep（数据底座，L1 — 非 agent、无独立编排）
 |---------|---------|
 | 设计 | 研究现有架构（[ARCHITECTURE.md](docs/ARCHITECTURE.md)）、查阅 ADR、横向比较方案 |
 | 审计 | 通读相关设计文档、审查变更历史、确认技术规范 |
-| 测试 | 理解需求（[TEST.md](docs/TEST.md)）、分析源码识别边界条件 |
+| 测试 | 理解需求（TEST.md（`quant-trading-docs:docs/TEST.md`））、分析源码识别边界条件 |
 | 实现 | 理解设计文档（[SPEC.md](docs/SPEC.md)）、熟悉编码规范、检查依赖兼容性 |
 | 文档 | 对照源码验证一致性、检查格式规范（ADR/ODR 模板） |
 | 其他 | 无特定要求 |
@@ -567,7 +567,7 @@ EquityDeep（数据底座，L1 — 非 agent、无独立编排）
 - ✅ 在提交后端变更前运行 `go vet ./... && go test ./...`
 - ✅ UI 变更后运行 `npx playwright test`
 - ✅ 更改接口或架构时更新相关文档
-- ✅ 参考 [VISION.md](docs/VISION.md) 进行架构决策时遵循设计原则
+- ✅ 参考 VISION.md（`quant-trading-docs:docs/VISION.md`） 进行架构决策时遵循设计原则
 - ✅ 大对象使用 `shallowRef`（BacktestResult, portfolio_values 数组）
 - ✅ Icon 组件使用 `markRaw()` 包装防止 Vue 响应式警告
 - ✅ 状态更改后访问 DOM refs 前 `await nextTick()`
@@ -737,13 +737,13 @@ AGENTS.md 是活文档。以下情况主动更新：
 
 | 文档 | Purpose | When to Read |
 |------|---------|-------------|
-| **[PRODUCT.md](docs/PRODUCT.md)** | **顶层产品定义** — 一间单人自托管实验室（三角色：实验室主任 / AI 实验员 / 验证器）、三层模型（AI 编排 L3 / 能力 L2 / 数据 L1）、数据归属与不重复存储、证据服务、校准目标 | **任何任务开始前**；判断"这属于哪一层"时 |
-| [VISION.md](docs/VISION.md) | 设计原则（Accuracy First, Hot-Swap 等）、领域模型 | 开始新功能、质疑方法时 |
+| **PRODUCT.md（`quant-trading-docs:docs/PRODUCT.md`）** | **顶层产品定义** — 一间单人自托管实验室（三角色：实验室主任 / AI 实验员 / 验证器）、三层模型（AI 编排 L3 / 能力 L2 / 数据 L1）、数据归属与不重复存储、证据服务、校准目标 | **任何任务开始前**；判断"这属于哪一层"时 |
+| VISION.md（`quant-trading-docs:docs/VISION.md`） | 设计原则（Accuracy First, Hot-Swap 等）、领域模型 | 开始新功能、质疑方法时 |
 | [SPEC.md](docs/SPEC.md) | 技术规格、API 定义、数据模型、Strategy 接口 | 实现端点、编写策略时 |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 服务拓扑、DB schema（**内联 DDL 为唯一真相**，张数以 grep 源码为准，见下方口径）、缓存设计 | 理解系统布局、调试时 |
-| **[ADR-023](docs/adr/adr-023-ai-experimenter-lab.md)** | **架构决策：AI 实验员 + 人类监督者实验室** — 三层模型、EquityDeep 降为数据底座、验证器链（5 确定性 + 1 因果）、拒绝多 agent 投票、**校准优于准确率** | 判断某个组件该放哪一层时 |
-| **[ADR-024](docs/adr/adr-024-expression-as-execution-target.md)** | **执行载体：表达式而非代码** — 意图类型 → 确定性默认表达式；LLM 生成的 Go 代码只是 artifact；不做 `plugin.Open` | 碰策略生成 / 执行链路时 |
-| [archive/RESEARCH-equitydeep-legacy.md](docs/archive/RESEARCH-equitydeep-legacy.md) | **EquityDeep 详案（历史快照）** — Product 设计 + Tech Implementation（契约 C1/C2 + 三桥 B1/B2/B3 + 改造清单 C-1~C-9）；⚠️ 按 [ADR-022](docs/archive/superseded-adr/adr-022-unified-research-platform.md) 写的，**该 ADR 从未实施**（已被 ADR-023 取代），只作设计来历追溯 | 追溯 EquityDeep 设计来历时 |
+| **ADR-023（`quant-trading-docs:docs/adr/adr-023-ai-experimenter-lab.md`）** | **架构决策：AI 实验员 + 人类监督者实验室** — 三层模型、EquityDeep 降为数据底座、验证器链（5 确定性 + 1 因果）、拒绝多 agent 投票、**校准优于准确率** | 判断某个组件该放哪一层时 |
+| **ADR-024（`quant-trading-docs:docs/adr/adr-024-expression-as-execution-target.md`）** | **执行载体：表达式而非代码** — 意图类型 → 确定性默认表达式；LLM 生成的 Go 代码只是 artifact；不做 `plugin.Open` | 碰策略生成 / 执行链路时 |
+| archive/RESEARCH-equitydeep-legacy.md（`quant-trading-docs:docs/archive/RESEARCH-equitydeep-legacy.md`） | **EquityDeep 详案（历史快照）** — Product 设计 + Tech Implementation（契约 C1/C2 + 三桥 B1/B2/B3 + 改造清单 C-1~C-9）；⚠️ 按 ADR-022（`quant-trading-docs:docs/archive/superseded-adr/adr-022-unified-research-platform.md`） 写的，**该 ADR 从未实施**（已被 ADR-023 取代），只作设计来历追溯 | 追溯 EquityDeep 设计来历时 |
 
 > **表数口径（2026-09-21 校准，AUD-14）**: 唯一执行路径是**内联 DDL**
 > （`pkg/storage/postgres.go` 的 `migrate()` 数组，grep `CREATE TABLE IF NOT EXISTS`
@@ -768,27 +768,27 @@ AGENTS.md 是活文档。以下情况主动更新：
 
 | 文档 | Content | Updated When |
 |------|---------|-------------|
-| [ROADMAP.md](docs/ROADMAP.md) | Sprint 进度、Phase 里程碑、状态跟踪 | 规划工作时、检查进度时 |
-| [NEXT_STEPS.md](docs/archive/NEXT_STEPS.md) (archived) | 审查发现、TODO list、行动项（历史） | 代码审查后、规划下一步时（见 TASKS.md） |
-| [TEST.md](docs/TEST.md) | 测试策略、覆盖率目标、T+1/涨跌停规格 | 编写测试、验证正确性时 |
+| ROADMAP.md（`quant-trading-docs:docs/ROADMAP.md`） | Sprint 进度、Phase 里程碑、状态跟踪 | 规划工作时、检查进度时 |
+| NEXT_STEPS.md（`quant-trading-docs:docs/archive/NEXT_STEPS.md`） (archived) | 审查发现、TODO list、行动项（历史） | 代码审查后、规划下一步时（见 TASKS.md） |
+| TEST.md（`quant-trading-docs:docs/TEST.md`） | 测试策略、覆盖率目标、T+1/涨跌停规格 | 编写测试、验证正确性时 |
 
 ### How-to (执行任务)
 
 | 文档 | 用途 |
 |------|------|
-| [E2E_TEST_GUIDE.md](docs/E2E_TEST_GUIDE.md) | E2E 测试指南 |
+| E2E 测试指南 | 见 TEST.md（`quant-trading-docs:docs/TEST.md`）§7.2「E2E Tests — Playwright」——原 `docs/E2E_TEST_GUIDE.md` 系幻影引用，三仓 git 历史从未存在（DOCS-01 收口） |
 | [TASKS.md](docs/TASKS.md) | 统一任务追踪（含 Phase 3 实施任务） |
 | [guides/archive/migration-phase3-to-phase4.md](docs/archive/migration-phase3-to-phase4.md) | Phase 3 → Phase 4 迁移指南 |
 | [archive/benchmark-results.md](docs/archive/benchmark-results.md) | 性能基准测试结果 |
-| **Hermes Agent 集成** (`docs/hermes/`) | **AI 研究层**: `skills/autonomous_factor_mining.md` (自主挖掘 Skill), `config/hermes.yaml` (Agent 配置 + 预算), `e2e-acceptance-test.md` (验收测试), `tools-quant-backtest.yaml` (MCP 工具清单), `prompts/quant-research.md` (研究员 prompt) — 见 [ODR-046](docs/archive/odr/odr-046-hermes-agent-integration-decision.md) |
+| **Hermes Agent 集成** (`docs/hermes/`) | **AI 研究层**: `skills/autonomous_factor_mining.md` (自主挖掘 Skill), `config/hermes.yaml` (Agent 配置 + 预算), `e2e-acceptance-test.md` (验收测试), `tools-quant-backtest.yaml` (MCP 工具清单), `prompts/quant-research.md` (研究员 prompt) — 见 ODR-046（`quant-trading-docs:docs/archive/odr/odr-046-hermes-agent-integration-decision.md`） |
 
 ### Decisions (架构决策)
 
 | 文档 | 内容 |
 |------|------|
-| [ADR.md](docs/ADR.md) + `docs/adr/` + `docs/archive/odr/` | 架构 (ADR) + 运营 (ODR) 决策记录 | 质疑过往决策、理解理由时 |
+| ADR.md（`quant-trading-docs:docs/ADR.md`） + `docs/adr/` + `docs/archive/odr/` | 架构 (ADR) + 运营 (ODR) 决策记录 | 质疑过往决策、理解理由时 |
 
-**Archived** (在 `docs/archive/`): CLEANUP_REPORT.md, DOC_AUDIT_REPORT.md, MIGRATION_REPORT.md, `plans-2026-Q3/` (S7 执行计划 14 件 — 见 [ODR-044](docs/archive/odr/odr-044-s7-plan-archive-and-pattern-extraction.md)) — 见 `docs/archive/README.md`
+**Archived** (在 `docs/archive/`): CLEANUP_REPORT.md, DOC_AUDIT_REPORT.md, MIGRATION_REPORT.md, `plans-2026-Q3/` (S7 执行计划 14 件 — 见 ODR-044（`quant-trading-docs:docs/archive/odr/odr-044-s7-plan-archive-and-pattern-extraction.md`）) — 见 `docs/archive/README.md`
 
 ---
 
@@ -839,12 +839,12 @@ Please continue from where we left off.
 - **关键服务**: Analysis ✅ | Data ✅ | **Sync ✅** | **AI Research ✅ (running)** | Strategy ⏸️ (standby per ADR-012, awaiting Phase 3 D3 activation)
 - **Hermes Agent 集成** (2026-07-02, ODR-046): Phase 1-2 完成 — **21 个 MCP 工具** (`pkg/tools/builtin/`, ODR-057 新增 `research.profile`) + L1-L4 验证门禁 + 自主挖掘 Skill + 预算控制器配置. 前端 AI UI 已弃用 (ODR-045), Hermes 自然语言交互替代. `pkg/ai/agents/` Go-native agents 保留向后兼容但已弃用.
 - **审计状态** (2026-06-29 ODR-043): 4 维度审计完成, 12 Critical / 18 High / 10 Medium 问题点; 5 真实 bug 已识别待修复
-- **架构定位** (2026-09-16, Accepted — [ADR-023](docs/adr/adr-023-ai-experimenter-lab.md) / [ODR-048](docs/archive/odr/odr-048-top-level-product-redefinition.md), 取代 [ADR-022](docs/archive/superseded-adr/adr-022-unified-research-platform.md) / ADR-021): **一间单人自托管实验室** — AI 实验员（唯一编排者，会循环）操作底座，人当实验室主任；EquityDeep 从「工作面」**降为数据底座**（产业链图谱 + 研究洞察），不再是第二个 agent。三层模型见 §2。执行载体见 [ADR-024](docs/adr/adr-024-expression-as-execution-target.md)（表达式，不是 LLM 生成的代码）。
-- **全栈静态审查** (2026-09-21, [ODR-065](docs/archive/odr/odr-065-fullstack-static-review.md)): 24 项发现（5 Critical / 9 High / 6 Medium / 4 Low）。**Critical 5 项与 High 8 项已全部关闭**（AUD-01~13）；Medium/Low 在 [TASKS.md](docs/TASKS.md) 的 AUD-14~29。
+- **架构定位** (2026-09-16, Accepted — ADR-023（`quant-trading-docs:docs/adr/adr-023-ai-experimenter-lab.md`） / ODR-048（`quant-trading-docs:docs/archive/odr/odr-048-top-level-product-redefinition.md`）, 取代 ADR-022（`quant-trading-docs:docs/archive/superseded-adr/adr-022-unified-research-platform.md`） / ADR-021): **一间单人自托管实验室** — AI 实验员（唯一编排者，会循环）操作底座，人当实验室主任；EquityDeep 从「工作面」**降为数据底座**（产业链图谱 + 研究洞察），不再是第二个 agent。三层模型见 §2。执行载体见 ADR-024（`quant-trading-docs:docs/adr/adr-024-expression-as-execution-target.md`）（表达式，不是 LLM 生成的代码）。
+- **全栈静态审查** (2026-09-21, ODR-065（`quant-trading-docs:docs/archive/odr/odr-065-fullstack-static-review.md`）): 24 项发现（5 Critical / 9 High / 6 Medium / 4 Low）。**Critical 5 项与 High 8 项已全部关闭**（AUD-01~13）；Medium/Low 在 [TASKS.md](docs/TASKS.md) 的 AUD-14~29。
 
 ### 任务追踪
 > **Phase 3 任务追踪**: [docs/TASKS.md](docs/TASKS.md)
-> **Phase 4 (AI-Native) 任务追踪**: [docs/archive/tasks-phase-2.md](docs/archive/tasks-phase-2.md)
+> **Phase 4 (AI-Native) 任务追踪**: docs/archive/tasks-phase-2.md（`quant-trading-docs:docs/archive/tasks-phase-2.md`）
 >
 > Phase 3 任务（P0-P3 + 实施任务）在 TASKS.md 中维护。
 > Phase 4 任务（AI Agent + Live Trading）在 archive/tasks-phase-2.md 中维护。
@@ -867,8 +867,8 @@ Please continue from where we left off.
 | **前端 AI 组件已删除** (ODR-045, 2026-07-02) | 9 个组件 P1-13 创建后 S7-P2-7 作为死代码删除; Hermes Agent 自然语言交互替代 (ODR-046). 不要重建 `web/src/components/ai/` — 使用 `pkg/tools/builtin/` MCP 工具层 |
 | `pkg/ai/agents/optimize.go` 不存在 | S10-1 误标 ✅; TPE/遗传算法在 `pkg/ai/search/` 但无 agent 包装层. 新代码用 MCP 工具 `walk_forward_validate` (ODR-046) |
 | **ODR-011 Multi-Source Risks** (CR-48, ODR-012) | See sub-table below |
-| `fundamentals` 与 `stock_fundamentals` 表字段重叠 | **已收口**（[ODR-056](docs/archive/odr/odr-056-fundamentals-table-consolidation.md) / EQD-P3-1，2026-09-15）：迁移 025 将 `fundamentals` 存量按 `symbol → ts_code` 并入 `stock_fundamentals` 后 **DROP 旧表**；4 个 `symbol` 系读写函数已收敛。**基本面数据一律读写 `stock_fundamentals`，不要再引用 `fundamentals` 表** |
-| **基本面深度不足** (`stock_fundamentals` 仅 pe/pb/roe 三标量) | 纵向因子依赖 `fundamentals_detail`（[ADR-023](docs/adr/adr-023-ai-experimenter-lab.md) 数据层 / 原契约 C1）; **表已落地**（[ODR-053](docs/archive/odr/odr-053-p3-fundamentals-detail-table.md) — 逐字段行存 + `ann_date` PIT）, 但**摄取链路未通、表内无数据**（`EQD-P1-2` 待做）; 取数前不要假设深财务字段可用 |
+| `fundamentals` 与 `stock_fundamentals` 表字段重叠 | **已收口**（ODR-056（`quant-trading-docs:docs/archive/odr/odr-056-fundamentals-table-consolidation.md`） / EQD-P3-1，2026-09-15）：迁移 025 将 `fundamentals` 存量按 `symbol → ts_code` 并入 `stock_fundamentals` 后 **DROP 旧表**；4 个 `symbol` 系读写函数已收敛。**基本面数据一律读写 `stock_fundamentals`，不要再引用 `fundamentals` 表** |
+| **基本面深度不足** (`stock_fundamentals` 仅 pe/pb/roe 三标量) | 纵向因子依赖 `fundamentals_detail`（ADR-023（`quant-trading-docs:docs/adr/adr-023-ai-experimenter-lab.md`） 数据层 / 原契约 C1）; **表已落地**（ODR-053（`quant-trading-docs:docs/archive/odr/odr-053-p3-fundamentals-detail-table.md`） — 逐字段行存 + `ann_date` PIT）, 但**摄取链路未通、表内无数据**（`EQD-P1-2` 待做）; 取数前不要假设深财务字段可用 |
 
 ### ODR-011 Multi-Source Integration Risks (CR-48, ODR-012)
 
@@ -895,33 +895,33 @@ Please continue from where we left off.
 
 | 需要做什么 | 查看哪里 |
 |-----------|---------|
-| 了解设计原则 | [VISION.md](docs/VISION.md) |
+| 了解设计原则 | VISION.md（`quant-trading-docs:docs/VISION.md`） |
 | 查看 API 定义 | [SPEC.md](docs/SPEC.md) |
 | 理解系统架构 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| 检查测试策略 | [TEST.md](docs/TEST.md) |
-| 查看路线图 | [ROADMAP.md](docs/ROADMAP.md) |
+| 检查测试策略 | TEST.md（`quant-trading-docs:docs/TEST.md`） |
+| 查看路线图 | ROADMAP.md（`quant-trading-docs:docs/ROADMAP.md`） |
 | 了解待办事项 | [TASKS.md](docs/TASKS.md) |
-| 查阅架构决策 | [ADR.md](docs/ADR.md) → `docs/adr/` |
-| 查阅运营决策 | [ADR.md](docs/ADR.md) → `docs/archive/odr/` |
-| **前端设计系统** | **[docs/design/index.md](docs/design/index.md)** |
-| 查看页面设计规范 | [docs/design/pages/](docs/design/pages/) |
-| 查看组件使用规范 | [docs/design/components.md](docs/design/components.md) |
-| 查看视觉规范 | [docs/design/visual.md](docs/design/visual.md) |
-| **AI 研究架构** | **[ADR-015](docs/adr/adr-015-ai-agent-architecture.md)** (Go-native agents, ⚠️ 已弃用) |
-| **实验室定位 / 三层模型** | **[PRODUCT.md](docs/PRODUCT.md)** (顶层定义) → **[ADR-023](docs/adr/adr-023-ai-experimenter-lab.md)** (架构决策, 取代 [ADR-022](docs/archive/superseded-adr/adr-022-unified-research-platform.md) / [ADR-021](docs/archive/superseded-adr/adr-021-equitydeep-research-layer.md)) |
-| **策略执行载体** | **[ADR-024](docs/adr/adr-024-expression-as-execution-target.md)** (表达式, 不是 LLM 生成的代码) |
-| **EquityDeep（数据底座）** | `docs/design/equitydeep/` (上游规格 v1.1) → [archive/RESEARCH-equitydeep-legacy.md](docs/archive/RESEARCH-equitydeep-legacy.md) (历史详案) → **[ODR-047](docs/archive/odr/odr-047-equitydeep-integration-audit.md)** (审计) |
-| **Hermes Agent 集成** (主路径) | **[ODR-046](docs/archive/odr/odr-046-hermes-agent-integration-decision.md)** → `docs/hermes/` (Skill + config + 验收测试) |
-| **Phase 4 实施计划** | **[archive/tasks-phase-2.md](docs/archive/tasks-phase-2.md)** (IMPLEMENTATION_PLAN 已归档) |
-| **Phase 4 任务追踪** | **[archive/tasks-phase-2.md](docs/archive/tasks-phase-2.md)** |
-| 使用本模板 | [AGENTS_TEMPLATE.md](docs/AGENTS_TEMPLATE.md) |
+| 查阅架构决策 | ADR.md（`quant-trading-docs:docs/ADR.md`） → `docs/adr/` |
+| 查阅运营决策 | ADR.md（`quant-trading-docs:docs/ADR.md`） → `docs/archive/odr/` |
+| **前端设计系统** | **docs/design/index.md（`quant-trading-ui:docs/design/index.md`）** |
+| 查看页面设计规范 | docs/design/pages/（`quant-trading-ui:docs/design/pages/`） |
+| 查看组件使用规范 | docs/design/components.md（`quant-trading-ui:docs/design/components.md`） |
+| 查看视觉规范 | docs/design/visual.md（`quant-trading-ui:docs/design/visual.md`） |
+| **AI 研究架构** | **ADR-015（`quant-trading-docs:docs/adr/adr-015-ai-agent-architecture.md`）** (Go-native agents, ⚠️ 已弃用) |
+| **实验室定位 / 三层模型** | **PRODUCT.md（`quant-trading-docs:docs/PRODUCT.md`）** (顶层定义) → **ADR-023（`quant-trading-docs:docs/adr/adr-023-ai-experimenter-lab.md`）** (架构决策, 取代 ADR-022（`quant-trading-docs:docs/archive/superseded-adr/adr-022-unified-research-platform.md`） / ADR-021（`quant-trading-docs:docs/archive/superseded-adr/adr-021-equitydeep-research-layer.md`）) |
+| **策略执行载体** | **ADR-024（`quant-trading-docs:docs/adr/adr-024-expression-as-execution-target.md`）** (表达式, 不是 LLM 生成的代码) |
+| **EquityDeep（数据底座）** | `docs/design/equitydeep/` (上游规格 v1.1) → archive/RESEARCH-equitydeep-legacy.md（`quant-trading-docs:docs/archive/RESEARCH-equitydeep-legacy.md`） (历史详案) → **ODR-047（`quant-trading-docs:docs/archive/odr/odr-047-equitydeep-integration-audit.md`）** (审计) |
+| **Hermes Agent 集成** (主路径) | **ODR-046（`quant-trading-docs:docs/archive/odr/odr-046-hermes-agent-integration-decision.md`）** → `docs/hermes/` (Skill + config + 验收测试) |
+| **Phase 4 实施计划** | **archive/tasks-phase-2.md（`quant-trading-docs:docs/archive/tasks-phase-2.md`）** (IMPLEMENTATION_PLAN 已归档) |
+| **Phase 4 任务追踪** | **archive/tasks-phase-2.md（`quant-trading-docs:docs/archive/tasks-phase-2.md`）** |
+| 使用本模板 | AGENTS_TEMPLATE.md（`quant-trading-docs:docs/AGENTS_TEMPLATE.md`） |
 
 ---
 _Last updated: 2026-10-14_
 _Source: 基于 AGENTS Template v2.0 迁移，融合 quant-trading + Claudeer 最佳实践_
 _Migration ODR: odr-005-agents-md-v3-migration (pending creation)_
-_Unified Platform Update: 顶层产品重定义 ([PRODUCT.md](docs/PRODUCT.md)) + ~~统一研究平台~~ ([ADR-022](docs/archive/superseded-adr/adr-022-unified-research-platform.md), 取代 [ADR-021](docs/archive/superseded-adr/adr-021-equitydeep-research-layer.md)) + 重构记录 ([ODR-048](docs/archive/odr/odr-048-top-level-product-redefinition.md)) — 2026-09-15_
-_ADR-022 Consistency Update: 下游引用收口 (AGENTS/TASKS/ROADMAP/SPEC — [ODR-049](docs/archive/odr/odr-049-adr-022-downstream-consistency.md)) — 2026-09-15_
+_Unified Platform Update: 顶层产品重定义 (PRODUCT.md（`quant-trading-docs:docs/PRODUCT.md`）) + ~~统一研究平台~~ (ADR-022（`quant-trading-docs:docs/archive/superseded-adr/adr-022-unified-research-platform.md`）, 取代 ADR-021（`quant-trading-docs:docs/archive/superseded-adr/adr-021-equitydeep-research-layer.md`）) + 重构记录 (ODR-048（`quant-trading-docs:docs/archive/odr/odr-048-top-level-product-redefinition.md`）) — 2026-09-15_
+_ADR-022 Consistency Update: 下游引用收口 (AGENTS/TASKS/ROADMAP/SPEC — ODR-049（`quant-trading-docs:docs/archive/odr/odr-049-adr-022-downstream-consistency.md`）) — 2026-09-15_
 _ADR-022 Architecture Reflection: AGENTS.md v3.2 → v3.3 — 补齐四层架构 (L0-L3) 视角、双工作面状态、数据归属分区 (A-E)、Evidence API 入口、目录/schema/容器规划标注、Rule 1 触发表 — 2026-09-15_
 _ADR-023/024 Reflection: AGENTS.md v3.3 → v3.4 (AUD-14) — §1 顶层定位改三角色实验室、§2 分层改三层模型 (L1-L3) + 执行载体、§3 目录树校准 (tool.go / docs/archive/odr / 21 工具 / migrations 不执行)、§11 表数口径改「内联 DDL 37 张（唯一执行路径）」、全文 ADR-022 引用收口到 ADR-023/024 — 2026-09-21_
 _Phase 4 Update: AI-Native Evolution architecture documented in ADR-015, archive/tasks-phase-2.md (IMPLEMENTATION_PLAN.md 已归档至 archive/)_

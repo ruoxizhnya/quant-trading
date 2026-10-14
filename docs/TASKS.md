@@ -8,7 +8,7 @@
 
 ## 一、D 系列：大双核 + 数据规范层 + 因子热插拔（ADR-031 决议变更，2026-10-14 立项）
 
-> **设计真相**：quant-trading-docs 仓 [design/data-factor-unification.md](../quant-trading-docs/docs/design/data-factor-unification.md)（ADR-031 附件，下称「蓝图」）+ [adr-031-kernel-pluggable-nt-ready.md](../quant-trading-docs/docs/adr/adr-031-kernel-pluggable-nt-ready.md)「决议变更记录」。开工前先读这两份。⚠️ 相对路径跨仓仅在三仓同布局检出时可解析（见 DOCS-01 排除条件），以「quant-trading-docs 仓 docs/design/data-factor-unification.md」为权威定位。
+> **设计真相**：quant-trading-docs 仓 `docs/design/data-factor-unification.md`（ADR-031 附件，下称「蓝图」）+ `docs/adr/adr-031-kernel-pluggable-nt-ready.md`「决议变更记录」。开工前先读这两份。⚠️ 相对路径跨仓仅在三仓同布局检出时可解析（见 DOCS-01 排除条件），以「quant-trading-docs 仓 docs/design/data-factor-unification.md」为权威定位。
 > **依赖图**：`D1 → D2 → D5`；`D1 → D3 → D4 → D8`；`D1 → D6`（兼 D2）；`D1 → D7`；`D9` 独立。**关键路径**：D1 → D3 → D4 → D8。**开工顺序**：D1 先行 → D2 ∥ D3 → D4 ∥ D5 ∥ D6 ∥ D7 → D8；D9 随时可插。
 > **切片包**：D1 + D2 为同一切片包（D2 不必等 D1 全部完成，D1 的 schema 字段定稿即可开工 D2），但**分单验收**——D1 验翻译正确性，D2 验 fail-closed 拒收，验收方向相反。
 > **文档同步纪律（强制）**：D 系列任何上层设计变更必须同步 SPEC / data flow / schema（DDL）/ ARCHITECTURE.md，不同步 = 变更未完成（蓝图「维护本文件」节）。
@@ -197,10 +197,32 @@
 - **⑤ 验收**：单测断言 `RunBacktest` 返回能区分三值、invalid 时 `InvalidReasons` 非空；真请求 `POST /api/backtest` 确认线上 JSON `status` 与结构体字段一致；`go test -race` 全绿。
 - **⑥ 边界**：只补三值透传（按裁决的 a/b 之一）；前端、pipeline 结构不动。
 
-### DOCS-01 · AGENTS.md 文档指针在文档拆仓后集体失效（🟠）⬜ 待做
+### DOCS-01 · AGENTS.md 文档指针在文档拆仓后集体失效（🟠）✅ 完成（2026-10-14）
 
 - **① 目标**：`AGENTS.md` 里每条 `docs/...` 引用都能在某个工作树命中，且由一条机器断言守住（新增死链当场变红）。
 - **② 上下文**：归档卷 §九（2026-10-14 实测）：core 仓 `AGENTS.md` 共 114 处 `docs/*.md` 引用，**34 个不同目标在本仓不存在**（28 个已迁 quant-trading-docs 仓、3 个已迁 ui 仓、3 个幻影引用——`docs/E2E_TEST_GUIDE.md` 等在三仓 git 历史中从未存在；**抽查补充 2026-10-14**：`guides/nt-sidecar-operations.md` 实际在 quant-trading-docs 仓 `docs/guides/` 下，登记引文写成 core 仓 `guides/` 系笔误，归因时按 docs 仓计）；`docs/archive/odr/` 是空目录而 AGENTS.md §3/§10/§11 仍按「ADR/ODR 都在本仓」描述。归因表（逐目标去向）在归档卷 §九，不双写。
+
+#### 执行记录（裁决 + 证据，2026-10-14）
+
+**三选一 = (b) 显式跨仓措辞。** 每条跨仓死链 `[标签](docs/Y.md)` 改写成 `标签（`quant-trading-docs:docs/Y.md`）`／`（`quant-trading-ui:...`）`——反引号内联代码，非可解析相对链接。
+- 排除 **(a) 转发存根**：在 core `docs/` 造 ~33 个同名占位文件，会与真身（docs/ui 仓）影子分叉，grep 到 core 的 `PRODUCT.md` 会被误信；每迁一份就得补一个存根，维护面随迁出增长。
+- 排除 **(c) 文档归属表**：正文改指单表 ≈ 重排 §11 导航（违 ④「不重排章节」），且守卫仍需逐链解析，收益不比 (b) 大。
+- 硬排除已守：无一条依赖 `../quant-trading-docs/...` 相对路径（三仓不保证同布局检出）。
+
+**守卫 = 扩展既有 `tools/check_doc_links.py`（CI `docs` job 已默认跑），不另起 Go 测试**——避免两套链接守卫各自漂移。改动 = 入口层严格扫描：把仓库根 `AGENTS.md` 纳入扫描，且**入口文档不吃 `MIGRATED_*` 跨仓白名单**（活跃层 `docs/*.md` 维持原白名单行为，不回归）；语义即「入口文档写的每条相对链接必须命中 core」，命中不了即红（空基线零容忍，等价 ui 仓 A-02/A-03 棘轮的满格形态）。
+
+**⑤ 验收逐条：**
+- 首跑抓到 34：扩展守卫后、修复前 `python tools/check_doc_links.py` 报 `AGENTS.md -> …` **70 处 / 34 个不同目标**，与 §九 吻合（清单脚本枚举，非手抄）。
+- 修复后归零：AGENTS.md 贡献 **0** 条坏链，`✓ 未发现坏链`。
+- 破坏验证：临时注入 `[x](docs/__nonexistent_doCS01__.md)` → 守卫当场点名该条变红；还原 → `✓ 未发现坏链`。
+- 幻影清零：真实幻影仅 `docs/E2E_TEST_GUIDE.md` 一条（三仓 git 历史 0 命中），已改指 `quant-trading-docs:docs/TEST.md` §7.2「E2E Tests — Playwright」（内容实际所在），不留悬空。
+
+**对 §九 归因的实测更正**（逐个 `existsSync` 三仓核对）：`docs/archive/RESEARCH-equitydeep-legacy.md` 与 `docs/archive/README.md` **实存于 quant-trading-docs 仓**（拆仓 commit `a5e18e3` 迁过去），非幻影；其中 `archive/README.md` 在 AGENTS.md 是反引号目录散文引用、非 markdown 链接，守卫本就不扫。另 `docs/design/pages/`（§14 速查）是 §九 未列的第 4 条 ui 链接。修复集按归属计：**29 → docs 仓、4 → ui 仓、1 → 幻影**（合计 34）。
+
+**顺带收口**（同守卫扫 `docs/*.md`，且属硬排除模式）：`docs/TASKS.md:11` 两条 `../quant-trading-docs/...` 相对链接改显式仓内路径——该行 ⚠️ 注记本就写「见 DOCS-01 排除条件」，此处闭合。
+
+**登记既有红（非本单引入，HEAD 已红，另立处理，不混入本 commit）**：① 默认档残留 2 条 R1 frontmatter 缺（`docs/ARCHITECTURE.md`、`docs/TASKS.md`）——非指针，越 ⑥「只做指针+守卫」界，留文档元数据单；② `--include-archive` 档残留 8 条死链，全在 `docs/archive/TASKS-2026-10-14-archived.md`（含 `../AGENTS.md` 应为 `../../`）——归档层，④ 仅「许可」修、非本单义务；③ AGENTS.md 尾注「`E2E_TEST_GUIDE.md`/`TEST.md` 还在本仓」与实测不符（`TEST.md` 已迁 docs 仓、`E2E_TEST_GUIDE.md` 从未有）——属版本史散文，§④/⑥ 排除，未动。
+
 - **③ 要求**：先归因（已完成，见归档卷）；再三选一并写理由——**(a)** core `docs/` 放转发存根（每死链一文件，正文只写「已迁 X 仓 yyy.md」）／**(b)** 改显式跨仓措辞（`quant-trading-docs:docs/PRODUCT.md`，不带可解析相对链接）／**(c)** 建「文档归属表」，正文只引该表。**排除条件（硬）**：三仓不保证同布局检出，**任何依赖 `../quant-trading-docs/...` 相对路径的方案先排除**。无论选哪条**必须同时落守卫**：扫 `AGENTS.md`（及 core `docs/*.md`）相对链接，命中不了即红；可抄 ui 仓 A-02/A-03 棘轮基线做法（悬空集合=登记集，双向红）。三条幻影引用要么补出文件、要么从 `AGENTS.md` 删除。
 - **④ 约束与非目标**：不改任何文档正文的判断内容（只处理指针）；不重排 `AGENTS.md` 章节；不改 `docs/archive/` 归档内容（唯一例外是失效相对链接可修——本单在此例外内）；不顺手修「指向仍存在文件」的措辞问题。
 - **⑤ 验收**：守卫默认随检查跑；**首次上线必须当场抓到这 34 条**（抓不到=假护栏，须做「改坏→变红→还原」）；幻影引用清零（补出或删除）；三选一的裁决理由写进工单记录。
@@ -279,6 +301,7 @@
 | **AUD-61 · E2E 测试对齐**（含阶段一前置：61 条 `test.fixme` 登记 + 取红清单） | quant-trading-ui 仓 `docs/TASKS.md` | 2026-10-14 自 core 迁出（迁移指针见归档卷）。⚠️ **阶一已从「测试债」升格为 ODR-067 主干工作流前置**（61 failed/116 passed 全量 e2e 现状，不做则直推 main 红灯与历史解耦），启动时点与 DOCS-01 守卫落地协同 |
 | **NT v2.0.0 正式版升级** | quant-trading-docs 仓 `docs/guides/nt-sidecar-operations.md` 预案 | 唯一外部等待项：正式版发布后按预案收口，**双跑对齐回归为升级验收门**（NT 决策门裁决一） |
 | UI 仓 Stitch 设计稿相关（A-05 等） | quant-trading-ui 仓 `docs/design/stitch_quantlab_ux_redesign/TASKS.md` | 本地栈实测证据全文在其 A-05 节，core 侧只留指针（归档卷 §八） |
+| **A-08 · 数据同步页（作业队列 + 排程 CRUD + worker/scheduler 统计）** | quant-trading-ui 仓 `docs/design/stitch_quantlab_ux_redesign/TASKS.md` A-08 节（六字段实施计划） | 前置 SYNC-01 已 ✅（本文件 §二·补）。⚠️ **A-08 已知诚实缺口，勿在 UI 上假装补上**：`scheduler/stats` 的 `0/0` 有两种成因（调度器启动失败 vs 确实没有 active 排程），后端目前不区分，前端只能显示 0/0——真解要后端把启动失败做成可观测状态（另立，勿在 A-08 里编个「未启用」文案冒充诊断） |
 
 ---
 

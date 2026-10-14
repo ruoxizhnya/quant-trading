@@ -41,6 +41,18 @@ from pathlib import Path
 # 例：[PRODUCT.md](PRODUCT.md) / [ADR](adr/adr-001.md#decision)
 LINK_RE = re.compile(r"\]\((?!https?://|mailto:|#)([^)]+?\.md)(#[^)]*)?\)")
 
+# ─── 入口层严格链接（DOCS-01，2026-10-14）───────────────────────────
+# AGENTS.md 是仓库的**唯一入口文档**，它写的 `docs/xxx.md` 相对链接按「同仓」语义读，
+# 因此**不允许**命中 MIGRATED 白名单——拆仓后仍留在 core 入口里的跨仓相对链接就是坏链，
+# 必须当场红。这里比活跃层 LINK_RE 更宽：除 .md 外，指向目录（`docs/design/pages/`）
+# 等相对路径也一并校验，覆盖 AGENTS.md 全部「引用一个 docs/ 路径」的链接。
+# 活跃层（docs/*.md）维持原 .md-only + 白名单行为，不回归。
+STRICT_LINK_RE = re.compile(r"\]\((?!https?://|mailto:|//|#)([^)\s]+?)(?:\s+\"[^\"]*\")?\)")
+
+# 入口层文档（相对仓库根）。这些文件本身不在 docs/ 下，故 find_markdown_files 扫不到，
+# 需显式纳入并走严格校验。
+ENTRY_FILES = ("AGENTS.md",)
+
 # ─── 跨仓链接豁免（2026-10-09 文档拆仓）──────────────────────────────
 # 拆仓后 core 仓留存的活跃文档（SPEC/TASKS/live-trading）仍引用着已迁到
 # quant-trading-docs / quant-trading-agent / quant-trading-ui 的文档。这些链接
@@ -219,7 +231,7 @@ def check_entry_frontmatter(root: Path) -> list[tuple[Path, list[str]]]:
     return bad
 
 
-def check(root: Path, include_archive: bool) -> list[tuple[Path, str]]:
+def check(root: Path, include_archive: bool, repo_root: Path) -> list[tuple[Path, str]]:
     broken: list[tuple[Path, str]] = []
     root_abs = root.resolve()
     for md in find_markdown_files(root, include_archive):
@@ -239,6 +251,24 @@ def check(root: Path, include_archive: bool) -> list[tuple[Path, str]]:
                 if rel and _is_migrated(rel):
                     continue  # 跨仓链接：目标已迁出，不是坏链
                 broken.append((md, target))
+
+    # 入口层严格校验（DOCS-01）：AGENTS.md 里的相对链接一律须在 core 命中，
+    # 不享 MIGRATED 白名单。命中不了即坏链（先复现拆仓后失效的指针，再据裁决修复）。
+    for name in ENTRY_FILES:
+        md = repo_root / name
+        if not md.is_file():
+            continue
+        try:
+            text = md.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for match in STRICT_LINK_RE.finditer(strip_code(text)):
+            target = match.group(1).split("#")[0]
+            if not target:
+                continue
+            resolved = (md.parent / target).resolve()
+            if not resolved.exists():
+                broken.append((md, match.group(1)))
     return broken
 
 
@@ -261,7 +291,7 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent
 
     files = find_markdown_files(root, args.include_archive)
-    broken = check(root, args.include_archive)
+    broken = check(root, args.include_archive, repo_root)
     missing_paths = check_config_path_refs(root, repo_root, args.include_archive)
     bad_frontmatter = check_entry_frontmatter(root)
 
