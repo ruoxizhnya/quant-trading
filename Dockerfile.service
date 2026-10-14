@@ -24,7 +24,7 @@ COPY . .
 # 所以没人撞到）。
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/data-service ./cmd/data && \
     CGO_ENABLED=0 GOOS=linux go build -o /app/strategy-service ./cmd/strategy && \
-    CGO_ENABLED=0 GOOS=linux go build -o /app/analysis-service ./cmd/analysis \\
+    CGO_ENABLED=0 GOOS=linux go build -o /app/analysis-service ./cmd/analysis
 
 # Final stage
 FROM alpine:3.19
