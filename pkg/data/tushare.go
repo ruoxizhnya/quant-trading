@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -645,6 +646,13 @@ func (c *TushareClient) fieldFloatPtr(item []any, idx int) *float64 {
 }
 
 // FetchIndexConstituents retrieves index constituents from tushare and saves them to DB.
+//
+// DATA-01：此处原请求 fields 为 "index_code,con_code,in_date,out_date"，但
+// index_weight 并无 in_date/out_date 两列 —— Tushare 对不存在的字段静默忽略，
+// 只回 index_code,con_code 两列，于是 normalize 里的 len(item) < 4 把每一行
+// 全部跳过，index_constituents 永远 0 行（2026-10-14 实测）。
+// index_weight 的真实字段是 index_code,con_code,trade_date,weight：
+// 「in/out 日期」不是它给的，只能由多期快照推导，见 normalizeIndexConstituents。
 func (c *TushareClient) FetchIndexConstituents(ctx context.Context, indexCode string, date string) ([]domain.IndexConstituent, error) {
 	params := map[string]interface{}{
 		"index_code": indexCode,
@@ -653,7 +661,7 @@ func (c *TushareClient) FetchIndexConstituents(ctx context.Context, indexCode st
 		params["trade_date"] = date
 	}
 
-	resp, err := c.call(ctx, "index_weight", params, "index_code,con_code,in_date,out_date")
+	resp, err := c.call(ctx, "index_weight", params, "index_code,con_code,trade_date,weight")
 	if err != nil {
 		return nil, err
 	}
@@ -676,43 +684,101 @@ func (c *TushareClient) FetchIndexConstituents(ctx context.Context, indexCode st
 	return constituents, nil
 }
 
-// normalizeIndexConstituents converts tushare index_weight response to domain.IndexConstituent.
-// index_weight fields: index_code, con_code, in_date, out_date
+// normalizeIndexConstituents converts a tushare index_weight response to
+// domain.IndexConstituent.
+//
+// index_weight fields: index_code, con_code, trade_date, weight。
+// 它给的是**定期快照**（沪深300 实测 24 期，20241031~20260930），不是进出日期，
+// 而 index_constituents 以 (symbol, index_code) 为唯一键、用 in_date/out_date
+// 表达区间（GetIndexConstituentsByDate 正是按 `in_date <= d AND (out_date IS NULL
+// OR out_date > d)` 查询）。所以这里按快照推导区间：
+//
+//   - in_date  = 该股票在我们拥有的快照里**最早出现**的那一期
+//     （可证的「至少从这期起在指数内」，不编造更早的纳入日）
+//   - out_date = 不在最新一期 ⇒ 最后出现那一期的**次日**（排他上界）；
+//     仍在最新一期 ⇒ 零值（存 NULL）
+//
+//     out_date 取次日的理由：GetIndexConstituentsByDate 用
+//     `in_date <= d AND (out_date IS NULL OR out_date > d)` 这个**半开区间**判定。
+//     若直接写最后出现期当天，则 d = 最后出现期时 `out_date > d` 不成立，
+//     该股票在自己最后出现的那一期反而不在票池里 —— 只在单期出现过的成分股
+//     会永远进不了票池。
+//   - weight   = 最新一期的权重（历史期权重不进表，避免同一只多行）
+//
+// 这样 endDate 落在快照覆盖区间内的回测能拿到当时的真实成分；区间外的（如回测
+// 2023 年）会展开为空并按既有语义 fail-loud（DATA-01 ③3：真展开仍为空维持 invalid）。
 func (c *TushareClient) normalizeIndexConstituents(resp *TushareResponse, indexCode string) []domain.IndexConstituent {
-	var constituents []domain.IndexConstituent
+	if resp == nil || resp.Data.Items == nil {
+		return nil
+	}
+
+	type snapshot struct {
+		date   time.Time
+		weight float64
+	}
+	history := make(map[string][]snapshot)
+
 	for _, item := range resp.Data.Items {
 		if len(item) < 4 {
 			continue
 		}
-
 		conCode := c.fieldStr(item, 1)
 		if conCode == "" {
 			continue
 		}
+		dateStr := c.fieldStr(item, 2)
+		if dateStr == "" {
+			continue
+		}
+		date, err := time.Parse("20060102", dateStr)
+		if err != nil {
+			continue
+		}
+		history[conCode] = append(history[conCode], snapshot{date: date, weight: c.fieldFloat(item, 3)})
+	}
+	if len(history) == 0 {
+		return nil
+	}
 
-		inDateStr := c.fieldStr(item, 2)
-		outDateStr := c.fieldStr(item, 3)
-
-		var inDate, outDate time.Time
-		if inDateStr != "" {
-			if t, err := time.Parse("20060102", inDateStr); err == nil {
-				inDate = t
+	// 最新一期决定「谁还在指数里」。
+	var latest time.Time
+	for _, snaps := range history {
+		for _, s := range snaps {
+			if s.date.After(latest) {
+				latest = s.date
 			}
 		}
-		if outDateStr != "" {
-			if t, err := time.Parse("20060102", outDateStr); err == nil {
-				outDate = t
+	}
+
+	constituents := make([]domain.IndexConstituent, 0, len(history))
+	for conCode, snaps := range history {
+		first, last := snaps[0].date, snaps[0].date
+		var weight float64
+		for _, s := range snaps {
+			if s.date.Before(first) {
+				first = s.date
+			}
+			if s.date.After(last) {
+				last = s.date
+			}
+			if s.date.Equal(latest) {
+				weight = s.weight
 			}
 		}
-
-		constituents = append(constituents, domain.IndexConstituent{
+		cst := domain.IndexConstituent{
 			IndexCode: indexCode,
 			Symbol:    conCode,
-			InDate:    inDate,
-			OutDate:   outDate,
-			Weight:    0, // index_weight API does not return weight field
-		})
+			InDate:    first,
+			Weight:    weight,
+		}
+		if !last.Equal(latest) {
+			// 排他上界：让该股票在自己最后出现的那一期仍计入票池。
+			cst.OutDate = last.AddDate(0, 0, 1)
+		}
+		constituents = append(constituents, cst)
 	}
+
+	sort.Slice(constituents, func(i, j int) bool { return constituents[i].Symbol < constituents[j].Symbol })
 	return constituents
 }
 

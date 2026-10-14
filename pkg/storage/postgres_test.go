@@ -570,12 +570,18 @@ func TestSaveIndexConstituentBatch_and_GetIndexConstituents(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 
-	indexCode := "000300.SH"
+	// DATA-01：原先这里直接写 "000300.SH" 并断言「表里只有 3 条」。灌入 354 条
+	// 真实沪深300 成分后，这条断言量到的是真数据（357 ≠ 3）—— 它测的其实是
+	// 「真库里有没有别人的数据」，不是 Save/Get 本身。
+	// 沿用本文件 seedIsolatedCalendar 的隔离惯例：用测试专用指数代码，断言
+	// 仍针对自己插入的 3 条（强度不变）。
+	indexCode := "TEST_IDX_CS300.SH"
 	records := []*domain.IndexConstituent{
 		{IndexCode: indexCode, Symbol: "TEST_IC_001.SH", InDate: parseDate("2020-01-02"), OutDate: time.Time{}},
 		{IndexCode: indexCode, Symbol: "TEST_IC_002.SH", InDate: parseDate("2020-01-02"), OutDate: parseDate("2024-12-01")},
 		{IndexCode: indexCode, Symbol: "TEST_IC_003.SH", InDate: parseDate("2021-06-15"), OutDate: time.Time{}},
 	}
+	defer store.DB().Exec(ctx, "DELETE FROM index_constituents WHERE index_code = '"+indexCode+"'")
 
 	err := store.SaveIndexConstituentBatch(ctx, records)
 	require.NoError(t, err)

@@ -63,6 +63,31 @@ func syncIndexConstituentsHandler(tc *data.TushareClient) gin.HandlerFunc {
 	}
 }
 
+// syncSectorsHandler 由 stocks.industry 派生 sectors 与 stock_sector_map。
+// POST /sync/sectors
+//
+// DATA-01：东财板块出口实测 502，板块表改由库内已有的行业字段物化。
+// 不新拉外网数据，因此不需要 Tushare token（token 缺失时照样能灌）。
+func syncSectorsHandler(store *storage.PostgresStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+
+		result, err := data.SyncSectorsFromStocks(ctx, store, time.Now())
+		if err != nil {
+			httpserver.Error(c, http.StatusInternalServerError, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":  "sectors synced successfully",
+			"sectors":  result.Sectors,
+			"mappings": result.Mappings,
+			"skipped":  result.Skipped,
+			"source":   result.Source,
+		})
+	}
+}
+
 type syncStocksRequest struct {
 	Exchange   string `json:"exchange"`
 	ListStatus string `json:"list_status"`

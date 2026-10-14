@@ -553,17 +553,21 @@ func errTradingCalendarNotSynced() error {
 // constituents when an IndexCode is supplied and StockPool is empty.
 func (e *Engine) resolveStockPool(ctx context.Context, req BacktestRequest, startDate time.Time) ([]string, error) {
 	stockPool := req.StockPool
-	if len(stockPool) == 0 && req.IndexCode != "" {
+	// DATA-01：调用方可能传 `csi300` 这类人类写法，库里存的是 `000300.SH`。
+	// 口径翻译在这里做（见 index_alias.go），未命中的原样透传 ⇒ 查不到 ⇒ 空票池 ⇒
+	// 既有 fail-loud 语义接管。
+	indexCode := normalizeIndexCode(req.IndexCode)
+	if len(stockPool) == 0 && indexCode != "" {
 		e.mu.RLock()
 		st := e.store
 		e.mu.RUnlock()
 		if st != nil {
-			constituents, err := st.GetIndexConstituentsByDate(ctx, req.IndexCode, startDate)
+			constituents, err := st.GetIndexConstituentsByDate(ctx, indexCode, startDate)
 			if err != nil {
-				e.logger.Warn().Err(err).Str("index_code", req.IndexCode).Msg("Failed to load index constituents")
+				e.logger.Warn().Err(err).Str("index_code", indexCode).Msg("Failed to load index constituents")
 			} else if len(constituents) > 0 {
 				stockPool = constituents
-				e.logger.Info().Str("index_code", req.IndexCode).Int("constituents", len(constituents)).Msg("Using index constituents as stock pool")
+				e.logger.Info().Str("index_code", indexCode).Int("constituents", len(constituents)).Msg("Using index constituents as stock pool")
 			}
 		}
 	}

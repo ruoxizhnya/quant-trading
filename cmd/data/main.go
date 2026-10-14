@@ -134,6 +134,9 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache storage.C
 	r.GET("/index/:code/constituents", getIndexConstituentsHandler(tc, store))
 	r.POST("/sync/index-constituents/:index_code", syncIndexConstituentsHandler(tc))
 
+	// Sectors（DATA-01）：由 stocks.industry 派生，不走外网
+	r.POST("/sync/sectors", syncSectorsHandler(store))
+
 	// Trading calendar
 	r.GET("/api/v1/trading/calendar", getTradingCalendarHandler(store))
 	r.POST("/sync/calendar", syncCalendarHandler(tc, store))

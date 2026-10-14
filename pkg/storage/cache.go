@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -360,6 +361,10 @@ func (s *PostgresStore) GetDividendsBySymbol(ctx context.Context, symbol string)
 // ── Index Constituents ────────────────────────────────────────────────────────
 
 // SaveIndexConstituentBatch saves multiple index constituent records in a batch.
+//
+// DATA-01：in_date/out_date 经 nullableDate 落库（零值 → NULL）。out_date 为零值
+// 表示「仍在指数内」，若落成 '0001-01-01'，GetIndexConstituentsByDate 的
+// `(out_date IS NULL OR out_date > $2)` 会把每一支都判成已退出，票池恒空。
 // Uses ON CONFLICT to update existing entries (symbol, index_code).
 func (s *PostgresStore) SaveIndexConstituentBatch(ctx context.Context, records []*domain.IndexConstituent) error {
 	if len(records) == 0 {
@@ -381,7 +386,7 @@ func (s *PostgresStore) SaveIndexConstituentBatch(ctx context.Context, records [
 				in_date = EXCLUDED.in_date,
 				out_date = EXCLUDED.out_date,
 				weight = EXCLUDED.weight
-		`, c.IndexCode, c.Symbol, c.InDate, c.OutDate, c.Weight)
+		`, c.IndexCode, c.Symbol, nullableDate(c.InDate), nullableDate(c.OutDate), c.Weight)
 	}
 
 	results := tx.SendBatch(ctx, batch)
@@ -422,9 +427,25 @@ func (s *PostgresStore) GetIndexConstituents(ctx context.Context, indexCode stri
 
 	var results []domain.IndexConstituent
 	for rows.Next() {
-		var c domain.IndexConstituent
-		if err := rows.Scan(&c.ID, &c.IndexCode, &c.Symbol, &c.InDate, &c.OutDate, &c.Weight); err != nil {
+		var (
+			c        domain.IndexConstituent
+			inDate   sql.NullTime
+			outDate  sql.NullTime
+			nullWt   sql.NullFloat64
+		)
+		if err := rows.Scan(&c.ID, &c.IndexCode, &c.Symbol, &inDate, &outDate, &nullWt); err != nil {
 			return nil, fmt.Errorf("failed to scan index constituent row: %w", err)
+		}
+		// DATA-01：in_date/out_date 可空（out_date 为 NULL 表示仍在指数内）。
+		// 直接 Scan 进 time.Time 会在遇到 NULL 时报错，故先接 NullTime 再展开。
+		if inDate.Valid {
+			c.InDate = inDate.Time
+		}
+		if outDate.Valid {
+			c.OutDate = outDate.Time
+		}
+		if nullWt.Valid {
+			c.Weight = nullWt.Float64
 		}
 		results = append(results, c)
 	}
