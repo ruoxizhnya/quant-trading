@@ -24,17 +24,17 @@ const (
 )
 
 type seedBar struct {
-	ts                time.Time
-	open, high, low   float64
-	close             float64
-	volume            int64
-	amount            float64
+	ts              time.Time
+	open, high, low float64
+	close           float64
+	volume          int64
+	amount          float64
 }
 
 func d1SeedMinuteBars() []seedBar {
 	return []seedBar{
 		// 2024-01-02（全日）
-		{cst(2024, 1, 2, 9, 25), 10.00, 10.05, 9.98, 10.02, 5000, 50100},  // 开盘集合竞价 → 09:30 bucket
+		{cst(2024, 1, 2, 9, 25), 10.00, 10.05, 9.98, 10.02, 5000, 50100}, // 开盘集合竞价 → 09:30 bucket
 		{cst(2024, 1, 2, 9, 30), 10.02, 10.08, 10.00, 10.06, 3000, 30200},
 		{cst(2024, 1, 2, 9, 31), 10.06, 10.10, 10.04, 10.09, 2000, 20200},
 		{cst(2024, 1, 2, 11, 15), 10.20, 10.25, 10.18, 10.22, 1000, 10200}, // 11:15 bucket（不跨午休）
@@ -51,7 +51,7 @@ func d1SeedMinuteBars() []seedBar {
 
 func d1SeedDailyBars() []seedBar {
 	return []seedBar{
-		{time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), 10.00, 10.45, 9.98, 10.44, 14500, 146600, },
+		{time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), 10.00, 10.45, 9.98, 10.44, 14500, 146600},
 		{time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC), 11.00, 11.15, 10.95, 11.13, 4300, 47550},
 	}
 }
@@ -131,14 +131,14 @@ func TestRouterSameRouteThreeFrequencies(t *testing.T) {
 	require.Len(t, quarters, 8, "15m 路由：两日共 8 个 bucket（4+4），空 bucket 不零填充")
 
 	type wantBar struct {
-		date                    time.Time
-		open, high, low, close  float64
-		volume                  float64
-		visibleAt               time.Time
+		date                   time.Time
+		open, high, low, close float64
+		volume                 float64
+		visibleAt              time.Time
 	}
 	wants := []wantBar{
 		// 2024-01-02
-		{cst(2024, 1, 2, 9, 30), 10.00, 10.10, 9.98, 10.09, 10000, cst(2024, 1, 2, 9, 45)},  // 含 09:25 竞价
+		{cst(2024, 1, 2, 9, 30), 10.00, 10.10, 9.98, 10.09, 10000, cst(2024, 1, 2, 9, 45)},   // 含 09:25 竞价
 		{cst(2024, 1, 2, 11, 15), 10.20, 10.30, 10.18, 10.28, 2500, cst(2024, 1, 2, 11, 30)}, // 午休断点
 		{cst(2024, 1, 2, 13, 0), 10.30, 10.33, 10.29, 10.31, 1200, cst(2024, 1, 2, 13, 15)},  // 不与上午合并
 		{cst(2024, 1, 2, 14, 45), 10.40, 10.45, 10.38, 10.44, 800, cst(2024, 1, 2, 15, 0)},   // 含 14:57 收盘竞价

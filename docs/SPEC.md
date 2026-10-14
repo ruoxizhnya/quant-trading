@@ -547,8 +547,8 @@ start/end 语义：1d 按交易日闭区间（trade_date BETWEEN）；1m/15m 按
 - **Go 侧直吃规范层**：`pkg/marketdata.Router` 是唯一读路径（见
   「透明路由」）。
 - **NT 侧**（nautilus_trader 内核）：`nt-sidecar/tools/export_bars.py`
-  是第一条实现，经 `nt-sidecar/sidecar/mapping.py` 的映射表把 NT 数据类
-  翻译成规范层字段——**加一种数据类 = 映射加一行**
+  是第一条实现，经 `nt-sidecar/sidecar/mapping.py` 的映射表把规范层行
+  数据翻译成 NT `Bar()` 构造参数——**加一种数据类 = 映射加一行**
   （`nt-sidecar/tests/test_d1_mapping.py` 钉住）。
 - **跨语言字面量契约**：Python `FREQ_1D = "1d"` 等常量与 Go
   `market.Freq1d` 等**逐字相同**，翻译层测试双向钉住（改一侧即红）。

@@ -64,14 +64,14 @@ var canonicalLayerDirs = map[string]string{
 // 不计：pkg/domain/market/types.go、frequency.go、cmd/dualrun/main.go 的
 // 包文档提及属于文档；dualrun 另有一条诊断错误信息命中字面量，单列）。
 var directTableAccessBaseline = map[string]string{
-	"pkg/storage/postgres.go":    "D1 ④约束钦定的 DDL 唯一合法位置（migrationStatements 内联数组）：规范层 schema 的建表语句只加在这里，别处开新表 = 红",
-	"pkg/storage/ohlcv.go":       "遗留日线存取（SaveOHLCV/GetOHLCV）；D1 回归红线对拍的另一半——router_integration_test.go 与它逐字段比对。消费方全部切 Router 后删本条",
-	"pkg/storage/bulk_insert.go": "同步写入路径的表名注册表（DataType→物理表名映射）。属 connector 侧写入，D2 接 connector 契约时收编",
-	"pkg/data/source/adapter.go": "DataTypeOHLCMinute 常量：同步链路的数据类型标识（写路径），非取数路径；随 D2 收编",
-	"pkg/expression/registry.go": "TableOHLCV 常量：表达式层把「日线表」当数据源名引用；表达式层接规范层时收编",
+	"pkg/storage/postgres.go":     "D1 ④约束钦定的 DDL 唯一合法位置（migrationStatements 内联数组）：规范层 schema 的建表语句只加在这里，别处开新表 = 红",
+	"pkg/storage/ohlcv.go":        "遗留日线存取（SaveOHLCV/GetOHLCV）；D1 回归红线对拍的另一半——router_integration_test.go 与它逐字段比对。消费方全部切 Router 后删本条",
+	"pkg/storage/bulk_insert.go":  "同步写入路径的表名注册表（DataType→物理表名映射）。属 connector 侧写入，D2 接 connector 契约时收编",
+	"pkg/data/source/adapter.go":  "DataTypeOHLCMinute 常量：同步链路的数据类型标识（写路径），非取数路径；随 D2 收编",
+	"pkg/expression/registry.go":  "TableOHLCV 常量：表达式层把「日线表」当数据源名引用；表达式层接规范层时收编",
 	"cmd/data/handlers_stocks.go": "遗留 HTTP handler 直查最新收盘价（实时行情 fallback）；切到 Router.Bars 后删本条",
-	"tools/warmcache_bench.go":   "预热压测工具直查 symbol 列表；bench 工具随工具链迁移删本条",
-	"cmd/dualrun/main.go":        "仅启动诊断错误信息提及 ohlcv_daily_qfq（无 SQL）。登记它不是认可取数，而是承认「这里也感知了表名」——消息文案随 dualrun 迁规范层时一并清理",
+	"tools/warmcache_bench.go":    "预热压测工具直查 symbol 列表；bench 工具随工具链迁移删本条",
+	"cmd/dualrun/main.go":         "仅启动诊断错误信息提及 ohlcv_daily_qfq（无 SQL）。登记它不是认可取数，而是承认「这里也感知了表名」——消息文案随 dualrun 迁规范层时一并清理",
 }
 
 // TestNoNewDirectPhysicalTableAccess 是上面两条不变量的执行体。
@@ -88,6 +88,8 @@ func TestNoNewDirectPhysicalTableAccess(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
+			// .workbuddy* 是会话工作区；web/ 下有 vendored 的第三方 Go 包
+			//（如 web/node_modules/flatted/golang）——都不是本仓代码。
 			switch d.Name() {
 			case ".git", ".workbuddy-ai", ".workbuddy", "node_modules", "web", "testdata", "vendor":
 				return fs.SkipDir
