@@ -55,8 +55,22 @@ func main() {
 	applyGinMode(logger)
 
 	router := buildRouter()
-	registerRoutes(router, store, cache, tushareClient, dataCache, buildEquityDeepDictionary(logger))
+	syncHandler := registerRoutes(router, store, cache, tushareClient, dataCache, buildEquityDeepDictionary(logger))
 	registerRegistryRoutes(router, newRegistryHandler(dataSourceRegistry))
+
+	// SYNC-01: the scheduler must be started here. Before this it was constructed and
+	// given its 7 job types, but nothing ever called Start() — so active schedules never
+	// fired and /api/sync/scheduler/stats read 0/0 forever.
+	//
+	// A failure is logged loudly and the service keeps serving: at this point the store is
+	// already reachable (routes are live and loadAndScheduleAll already tolerates a bad
+	// cron row per schedule with a warning), so a store-level read error here would break
+	// HTTP anyway — killing the process for a scheduler that cannot load would turn a
+	// partial failure into a total one. The failure is *not* silent: `startHTTPServer`
+	// below serves, and stats stay truthful at 0 entries / empty next_runs.
+	if err := syncHandler.StartScheduler(); err != nil {
+		logger.Error().Err(err).Msg("sync scheduler disabled: failed to load active schedules — scheduled syncs will NOT run")
+	}
 
 	srv := startHTTPServer(router, logger)
 
@@ -64,6 +78,9 @@ func main() {
 	logger.Info().Str("signal", sig.String()).Msg("Shutdown signal received; beginning graceful drain")
 
 	gracefulShutdown(srv, logger)
+	// Drain order: HTTP first, then the scheduler, so cron cannot create new jobs into a
+	// queue whose workers are already being torn down (store.Close is deferred above).
+	syncHandler.StopScheduler()
 }
 
 // registerRoutes wires every data-service HTTP endpoint to its handler.
@@ -75,7 +92,7 @@ func main() {
 //   - handlers_factor.go      — factor + attribution + IC
 //   - handlers_equitydeep_ingest.go — C-3 equitydeep snapshot ingest door
 //   - sync_handlers.go        — SyncHandler (async job queue + worker pool)
-func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache storage.Cache, tc *data.TushareClient, dc *data.DataCache, equityDeepDict *equitydeep.Dictionary) {
+func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache storage.Cache, tc *data.TushareClient, dc *data.DataCache, equityDeepDict *equitydeep.Dictionary) *SyncHandler {
 	// Health check
 	r.GET("/health", healthHandler(store, cache))
 
@@ -176,4 +193,8 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache storage.C
 	r.GET("/fundamentals/:symbol", getFundamentalsHandler(store))
 	r.GET("/fundamentals/:symbol/history", getFundamentalsHistoryHandler(store))
 	r.POST("/screen", screenStocksHandler(store))
+
+	// Returned so the composition root can drive its lifecycle (SYNC-01: Start/Stop of
+	// the scheduler had no caller while it stayed trapped in here).
+	return syncHandler
 }

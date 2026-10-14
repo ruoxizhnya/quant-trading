@@ -76,6 +76,27 @@ func (h *SyncHandler) StopWorkerPool() {
 	h.workerPool.Stop()
 }
 
+// StartScheduler starts the cron scheduler and loads every **active** schedule from
+// the store. SYNC-01: this had no caller anywhere in the repository — not in
+// production and not in tests — so `sync_schedules` rows with `is_active=true`
+// could never fire and `GET /api/sync/scheduler/stats` was permanently 0/0. A `Start()`
+// that is correct but never invoked is invisible to both the compiler and behaviour
+// tests (a behaviour test calls it itself), which is why
+// `cmd/data/wiring_guard_test.go` guards the *call site*.
+//
+// The error is returned rather than logged-and-swallowed here: the composition root
+// decides the blast radius (see main.go).
+func (h *SyncHandler) StartScheduler() error {
+	return h.scheduler.Start()
+}
+
+// StopScheduler stops the cron scheduler and waits for jobs already dispatched to
+// finish. Called from the shutdown path so the scheduler cannot create new work
+// after HTTP has already drained.
+func (h *SyncHandler) StopScheduler() {
+	h.scheduler.Stop()
+}
+
 // RegisterExecutors registers all job executors.
 func (h *SyncHandler) RegisterExecutors() {
 	h.workerPool.RegisterExecutor(&stocksExecutor{tc: h.tushareClient, store: h.store})
