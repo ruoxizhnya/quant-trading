@@ -868,6 +868,33 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ---
 
+## 八、本地栈拉起 + A-05 前端实测发现（2026-10-14）
+
+起因：给 A-05（六维验证器组件）补浏览器真实数据实测，需要先拉起本地栈。
+`tools/local-stack.sh start` 从头跑了一遍，抓出 4 条**只在 compose 形态下存在**的缺口 ——
+共同根因是「本地一直 `go run`、CI 不构建镜像」，所以编译期不检查的东西从未被跑过。
+前 4 条已修（两个仓的 feature branch，未 push），后 2 条待裁决。
+
+| # | 发现 | 症状 | 状态 |
+|---|---|---|---|
+| 1 | `Dockerfile.service` 末行多了一个 `\\` | Docker 把最后一个反斜杠当行继续，留下字面 `\` 交给 shell ⇒ `go build` 收到额外参数解析成 `/` ⇒ `no Go files in /`，**三个镜像全建不出来**。迷惑性在于 `docker compose ps` 显示三个服务 healthy —— 跑的是这个 typo 落地**之前**构建的旧镜像 | ✅ core `fix/a05-env-stack-startup` |
+| 2 | compose 里 analysis-service 缺 `AI_SERVICE_URL` | `handlers_ai_proxy.go` 的 `ai_service.url` 缺省 `http://localhost:8086`，宿主机直跑恰好命中，容器里那是空地址 ⇒ **copilot / pipeline / explore / tools 四族全 503**，而 ai-service 自身 healthcheck 一直绿。症状是「AI 服务活着但前端全红」 | ✅ core `fix/a05-env-stack-startup` |
+| 3 | agent 仓 `go.mod` 缺 15 条 indirect | 拆仓阶段 2 迁入 `cmd/ai` 时只手工列了直接依赖；`-mod=readonly` 下 import graph 与 go.mod 不平直接拒绝构建 ⇒ ai-service 镜像 build 失败并让整条 `docker compose up` 中断，**连带另外三个服务也起不来** | ✅ agent `fix/a05-env-ai-service-image` |
+| 4 | agent 镜像缺 `wait-for-deps.sh` 与 `config/ai-service.yaml` | 前者 compose entrypoint 引用它 ⇒ exit 2；后者 `cmd/ai/main.go` 按相对路径读，文件留在 core 没迁 ⇒ `logger.Fatal`。两样都经命名上下文 `core` 取，不在 agent 仓复制第二份真相 | ✅ agent `fix/a05-env-ai-service-image` |
+| 5 | **探索主链路只能产出无效回测**：股票池恒为 0 只 | 真跑一轮 `/explore`（run `c46fa2ad`），两次尝试的裁决里都有 blocking「股票池按**今天**的上市名单取（0 只）」，回测 `universe_max_size=0 / zero_trades / garbage_metric` ⇒ `Status=invalid`。后果：六维里统计/经济/冗余/因果**永远未评估**，F5 的可信度输出实际拿不到，AI 实验员在这里等于空转。**这是 G 组后端缺口，不是渲染问题** | 🔴 待裁决 |
+| 6 | 状态轮询要不要进 `RateLimitExemptPaths` | 该表白名单的入选判据写得很窄：「限流它会不会让正常客户端分不清 429 与 401」。`/api/explore/runs/:id` 不满足这条，但实测一次 429 就让观察页永久瞎掉（前端已自救：2.5s + 连续失败才停）。**放开豁免是后端裁决**，前端不擅改护栏 | 🟠 待裁决 |
+
+**给「拉起环境」这条路的通用教训**（与 `Dockerfile.service` 里已记录的那条 `COPY cmd/analysis/static`
+事故同型）：`go build ./...` 与单元测试都不检查 Dockerfile 的 COPY/RUN 目标是否存在，
+`docker compose ps` 的 healthy 也不区分「新镜像」与「上次构建的旧镜像」。
+**判据只能是带 `--build` 的完整 up + 逐服务 HTTP 探针**，也就是 `local-stack.sh` 现在做的事。
+
+证据全文见前端仓
+`quant-trading-ui/docs/design/stitch_quantlab_ux_redesign/TASKS.md` 的 A-05 节
+（屏幕逐项核对表 + 三个前端缺陷及各自的破坏验证）。此处只留指针，不双写。
+
+---
+
 ## 维护本文件
 
 - 新增 task 必须按 [AGENTS.md §8.5](../AGENTS.md) 写全六字段（目标/上下文/要求/约束与非目标/验收/边界）。
