@@ -271,6 +271,13 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 > 背景一句话：A-08（数据同步页）要展示 worker / scheduler 统计，实测发现**后端这条链路是死的**，
 > 于是先修后端再画前端（「前端不去干预后端设计，后端要改就整体改」）。三条派生项见 SYNC-02/03。
 
+> **入库形态警示（2026-10-14）**：本节正文（SYNC-01/02/03 三条工单）由 commit `5ce6a57`
+> （message 只写「D9 国外市场数据源选型调研完成」）**携带入库**，非该单本意——同一工作树有
+> 并发会话在提交，它的 `git add` 扫进了尚未提交的这一节。内容与 HEAD 逐字节一致
+> （`diff <(git show 5ce6a57:docs/TASKS.md) <(git show HEAD:docs/TASKS.md)` 抽不出这一段的差异），
+> **只是归属串了**。SYNC-01 的代码与验收证据在 `65a31a7`（`fix(sync): 调度器接上装配点`），
+> 那才是这一节对应的实现 commit。不 rewrite 历史是刻意的：并发会话正在同一工作树连续提交。
+
 ### SYNC-01 · 调度器全仓零调用方 ⇒ 排程永不触发 ✅ 完成（2026-10-14）
 
 - **① 目标**：data-service 进程启动即把 cron 调度器跑起来，`sync_schedules` 中 `is_active=true` 的排程**真的会触发**；`GET /api/sync/scheduler/stats` 不再是结构上永远 0/0。
