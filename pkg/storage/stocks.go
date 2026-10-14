@@ -149,6 +149,39 @@ func (s *PostgresStore) GetStock(ctx context.Context, symbol string) (*domain.St
 	return &st, nil
 }
 
+// StockStatusCounts 返回票池按 status 的分组计数（DATA-02 的只读拆分通道）。
+//
+// 口径与 `SELECT status, COUNT(*) FROM stocks GROUP BY status` 逐值一致。
+// status 为 NULL 或空串的行折成 "unknown" 一档：这一列是可空的（DDL 只有
+// DEFAULT 'active'，没有 NOT NULL），折成显式键比扫描失败报 500、或者把整行
+// 静默丢掉都更诚实 —— 丢掉一行等于凭空少一只票，正是幸存者偏差的成因。
+//
+// 空表返回空 map 而非 nil，调用方据此序列化出 `{}` 而不是 `null`。
+func (s *PostgresStore) StockStatusCounts(ctx context.Context) (map[string]int64, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT COALESCE(NULLIF(status, ''), 'unknown') AS bucket, COUNT(*)
+		 FROM stocks
+		 GROUP BY COALESCE(NULLIF(status, ''), 'unknown')`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count stocks by status: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]int64)
+	for rows.Next() {
+		var bucket string
+		var count int64
+		if err := rows.Scan(&bucket, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan stock status count: %w", err)
+		}
+		out[bucket] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GetAllStocks returns all stocks from the database.
 func (s *PostgresStore) GetAllStocks(ctx context.Context) ([]domain.Stock, error) {
 	query := `

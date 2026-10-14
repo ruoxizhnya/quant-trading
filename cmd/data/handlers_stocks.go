@@ -85,8 +85,7 @@ func stocksCountHandler(store *storage.PostgresStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 
-		var count int
-		err := store.DB().QueryRow(ctx, "SELECT COUNT(*) FROM stocks").Scan(&count)
+		byStatus, err := store.StockStatusCounts(ctx)
 		if err != nil {
 			httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to count stocks: ")
 			return
@@ -95,12 +94,32 @@ func stocksCountHandler(store *storage.PostgresStore) gin.HandlerFunc {
 		var latestDate *string
 		store.DB().QueryRow(ctx, "SELECT MAX(trade_date) FROM ohlcv_daily_qfq").Scan(&latestDate)
 
-		resp := gin.H{"count": count}
+		resp := stockCountPayload(byStatus)
 		if latestDate != nil {
 			resp["latest_date"] = *latestDate
 		}
 		c.JSON(http.StatusOK, resp)
 	}
+}
+
+// stockCountPayload 把 GROUP BY status 的分组计数摊成 /stocks/count 的响应体（DATA-02）。
+//
+// count 由各档**求和**导出，不是第二次 COUNT(*)：同一趟查询、同一个真相，顺带消掉
+// 「两次查询之间被并发同步改动，于是各档加起来不等于总数」这个窗口 —— 一个写着
+// "含已退市"的总数和一份对不上的拆分，比少一个字段更糟。
+//
+// nil 折成空 map：Go 里 nil map 序列化成 `null`，而前端按对象读，`null` 会被当成
+// "这个字段不存在"而不是"票池是空的"。
+func stockCountPayload(byStatus map[string]int64) gin.H {
+	out := byStatus
+	if out == nil {
+		out = map[string]int64{}
+	}
+	total := int64(0)
+	for _, n := range out {
+		total += n
+	}
+	return gin.H{"count": total, "by_status": out}
 }
 
 func marketIndexHandler(store *storage.PostgresStore) gin.HandlerFunc {
