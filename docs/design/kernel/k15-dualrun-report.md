@@ -2,6 +2,8 @@
 
 > 任务：TASKS.md K15（结果映射 + 双跑对齐实验）。交付 commit 见台账 ⑦ 收口记录。
 > 数据文件：[k15-dualrun-report-bh.md](k15-dualrun-report-bh.md)（买入持有）/ [k15-dualrun-report-quarterly.md](k15-dualrun-report-quarterly.md)（季度调仓）——由 `cmd/dualrun` 自动生成，逐指标 + 逐笔对账 + 归因清单完整可复查。
+>
+> ⚠️ **口径注记（2026-10-14 · DATA-04）**：本文与两份分报告的数值是在 `ohlcv_daily_qfq.volume` 为**「手」**口径下测得的。同日 DATA-04 将该字段统一为**「股」**（×`sharesPerLot`，对齐规范层 schema 的既有声明）——`pkg/backtest/tracker` 的流动性阈值 `volume × 0.1` 与订单量（股）此前存在 **100 倍量纲错配**，修正后成交行为会有变化。本报告作为**当时的实测记录不改**（历史不可改写）；若需按新口径对标具体数值，须重跑 `cmd/dualrun`。**已复验**：DATA-04 后 `go run ./cmd/dualrun -strategy bh -gate` 仍在 K15 阈值内全绿，**对齐结论不受影响**。
 
 ## 1. 实验设置
 

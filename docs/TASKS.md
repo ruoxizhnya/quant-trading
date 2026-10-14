@@ -421,14 +421,28 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 
 - **完成记录（2026-10-14）**：
   - **同步侧**：`pkg/data/tushare.go` 的 `normalizeDailyOHLCV` 按 `sharesPerLot`（一手 = 100 股）换算 + `math.Round`。取整是必须的——真库 **37.3 万行**的 `volume×100` 在 float64 下不是精确整数（最大误差 4.77e-07），不取整会被 `as_quantity` 的 `is_integer()` 判成损坏。
-  - **存量迁移**：`pkg/storage/postgres.go` 的 `migrationStatements()` 加 migration 052（文档副本 `docs/migrations/052_ohlcv_volume_lots_to_shares.sql`）。幂等守卫：×100 **不**幂等，故**不**写逐行 `WHERE volume <> floor(volume)`（真库 **19.24%** 的行本来就是整数「手」，逐行条件会漏掉 → 半股半手的混合表），改为先问一次「还有没有非整数（= 手的小数）」，有才整表换算。真库执行：392.6 万行全表换算（6m20s），结果非整数行 **0**、与备份逐行比对 **0 mismatch**、幂等重跑 no-op。
+  - **存量迁移**：`pkg/storage/postgres.go` 的 `migrationStatements()` 加 migration 052（文档副本 `docs/migrations/052_ohlcv_volume_lots_to_shares.sql`）。×100 **不**幂等，故用**哨兵 + 内容**双守卫：① `data_migrations` 表（本项目首个 DML 迁移标记设施，后续同类迁移复用）记录 052 已执行 ⇒ 此后至多生效一次；② 库里还有非整数（= 手的小数）才值得整表换算（防「清库后用新代码重灌」）。**不**写逐行 `WHERE volume <> floor(volume)`——真库 **19.24%** 的行本来就是整数「手」，逐行条件会漏掉它们 ⇒ 半股半手的混合表。真库执行：392.6 万行全表换算（6m20s），结果非整数行 **0**、与备份逐行比对 **0 mismatch**、幂等重跑 no-op。
+    - **为什么必须加哨兵（审查时发现的设计缺口）**：只靠内容守卫时，其隐含假设是「非整数 ⇒ 仍是手」。迁移完成后若又落入手数据（旧二进制未换 / 手工导入 / 多节点混部），内容守卫会再次成立 ⇒ **整表**再 ×100 ⇒ 已迁移的股数据**静默**变成 ×10000。对照实验（临时表实跑）：初值 `{1.5, 2000, 3.7}` 首次迁移得 `{150, 200000, 370}`；再落一行手值 `9.9` 后跑无哨兵版得 `{990, 15000, 37000, 20000000}`，加哨兵版保持 `{9.9, 150, 370, 200000}`。
   - **导出路径**：`nt-sidecar/tools/export_bars.py` 的 SELECT 改输出规范层列名 `trade_date AS date`（改 SELECT 而非映射表：`date` 是跨语言契约定下的 json tag）；`mapping.py` 的 `as_quantity` 注释更新（单位属规范层，本层只执行整数纪律）。
   - **契约描述**：`docs/SPEC.md` 那句与字段表自相矛盾的「volume 手 → 原样整数（不造股数语义）」改为「取规范层的股」。
   - **实测证据**：真库导出重跑通过（catalog 值 = 库值逐条一致，全整数；旧 catalog `1158366`〔手，截断〕→ 新 `115836645`〔股〕）；`go run ./cmd/dualrun -strategy bh -gate` 输出「对齐门禁通过：全部指标在 K15 阈值内，确定性腿一致，无成交 mismatch」——**D7 登记的导出阻断解除，对拍恢复全绿**。
   - **破坏验证**（三组，均改坏变红、还原变绿、sha256 与基线一致）：① 删 `date` 别名 → 导出 KeyError；② 去 `×sharesPerLot` → 单测红；③ 去 `math.Round` → 单测红。**过程中发现并修正一个假护栏**：③ 首版测试值恰好 ×100 精确、改坏不红；改用真库误差榜前二的值并让用例**自证**（值若恰好精确则测试自身报错），重跑才有效。
   - **对国内线的影响**：volume 整体 ×100，其中两处是**修正既有量纲错位**（`tracker` 流动性阈值偏小 100 倍；`execution` 的 impact 滑点偏高 100 倍，默认 `SlippageModel="fixed"` 故默认不生效）。对拍两内核同源同变，对齐仍在 K15 阈值内。
   - **备份留存**：迁移前的 volume 列留存于 `ohlcv_daily_qfq_bak_052`（最小恢复集，可 `DROP TABLE` 移除；换算可逆：股 ÷ 100 = 手）。
-  - **未决（登记）**：① 日线 fallback 链 mootdx / eastmoney（`cmd/data/registry_init.go` 的 `DataTypeOHLCDaily`）的 vol 单位在项目内**无实测依据**，未改，启用前须实测对齐（现网数据全来自 tushare，不影响）；② `turnover` 的「千元 vs 元」错位（SPEC 声明 CNY，tushare `amount` 单位是千元）另立。
+  - **未决**：同类口径欠账全部转入 **DATA-05**（见下）。
+  - **审查修复（同日，收口前自查）**：① migration 守卫补哨兵（见上）；② `docs/design/kernel/kernel-pluggable-nt-ready.md` §8.2 映射表里的「volume 表内原值取整（tushare 手数口径）直传」与本单口径矛盾 → 更正为「表内原值（**股**）直传」；③ `nt-sidecar/sidecar/native.py` 的 `DEFAULT_TRADE_SIZE` 注释「默认每笔下单**手数**（股）」措辞自相矛盾 → 「默认每笔下单**数量**（股）」；④ `pkg/domain/market/types.go` 的 `Volume` 补单位注释——本单根因正是「没有一处写明这个字段的单位」。
+
+### DATA-05 · 成交量/成交额口径收尾（fallback 源 + 成交额 + 空表） ⬜ 待做
+
+- **① 目标**：把 DATA-04 未覆盖的**同类口径欠账**一次清掉——其余数据源与其余表的 volume/turnover 单位全部明确，并统一到规范层已声明的口径。
+- **② 上下文**（2026-10-14 DATA-04 审查时登记，均为未验证项）：
+  - **fallback 源未验**：日线链是 `tushare → mootdx → eastmoney`（`cmd/data/registry_init.go` 的 `DataTypeOHLCDaily`）。tushare 已在 DATA-04 修好（×`sharesPerLot`）；`mootdx` / `eastmoney` 的 vol 单位**在项目内无实测依据**（TDX 惯例是「手」），DATA-04 **刻意未猜着改**。而 `pkg/data/source/mootdx_adapter.go` 的 schema 已写 `Unit: "share"` —— 又一处「声明 ≠ 实现」的候选（DATA-04 的根因同型）。
+  - **成交额 `turnover` 仍错位**：`docs/SPEC.md` 规范层声明 Turnover 单位 **CNY**，而 tushare `daily` 的 `amount` 单位是**千元**，`normalizeDailyOHLCV` 原样入库（`pkg/data/tushare.go`）。前端 `fmtAmount`（`web/src/utils/format.ts`）按元格式化 ⇒ 显示值偏小 1000 倍。
+  - **三张表 0 行、单位未定**：`ohlcv_minute.volume`(bigint) / `realtime_quote.volume`(bigint) / `global_ohlcv.volume`(float8) 均无数据。`docs/SPEC.md` 规范层 Schema 对 OHLCV 通用声明了「股」，但分钟线那句「原样返回（volume 由表内 BIGINT 承载）」没点明单位，留给读者猜。
+- **③ 要求**：每条**先实测再改**，不许猜——mootdx/eastmoney 取一次真实响应核对 vol 量级（与同 symbol 日线对比）；`turnover` 定死单位后统一「同步侧 + SPEC + 前端格式化」三处；三张空表的单位在 SPEC 规范层 Schema 里写明（哪怕暂时 0 行）。
+- **④ 约束与非目标**：不重复 DATA-04 已完成的日线 volume 部分；不引入第二套口径；`turnover` 变更会动因子与展示数值，须照 DATA-04 做「改坏→红→还原→绿」破坏验证。
+- **⑤ 验收**：每个源/表给出「实测单位 + 换算点 + 落库后抽样比对」三件证据；SPEC 规范层 Schema 的每个数值字段都能回答「单位是什么」；`cmd/dualrun -gate` 回归绿。
+- **⑥ 边界**：只做单位口径；源本身的接入与可靠性问题不在本单。
 
 ---
 

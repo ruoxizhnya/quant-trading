@@ -12,14 +12,18 @@ type OHLCV struct {
 	Symbol string `json:"symbol"`
 	// Date 是 bar 周期起点：1m = 该分钟起点；15m = bucket 起点；
 	// 1d = 交易日零点（UTC，PG DATE 扫描形态）。
-	Date      time.Time `json:"date"`
-	Open      float64   `json:"open"`
-	High      float64   `json:"high"`
-	Low       float64   `json:"low"`
-	Close     float64   `json:"close"`
-	Volume    float64   `json:"volume"`
-	Turnover  float64   `json:"turnover"`
-	TradeDays int       `json:"trade_days"`
+	Date  time.Time `json:"date"`
+	Open  float64   `json:"open"`
+	High  float64   `json:"high"`
+	Low   float64   `json:"low"`
+	Close float64   `json:"close"`
+	// Volume 成交量，单位 **股**（规范层口径，见 docs/SPEC.md「规范层 Schema」）。
+	// 源侧若以「手」计（如 tushare daily 的 vol），须在**同步边界**换算后再入库：
+	// 这里在 2026-10-14（DATA-04）之前存的是「手」而规范层声明「股」，两处不一致
+	// 直接导致 NT 导出路径被 as_quantity 的整数校验拒掉（详见 docs/migrations/052）。
+	Volume    float64 `json:"volume"`
+	Turnover  float64 `json:"turnover"`
+	TradeDays int     `json:"trade_days"`
 	// Frequency 规范层频率（"1m"/"15m"/"1d"）。
 	//
 	// 零值 "" = **未声明**：遗留取数路径不填这个字段，规范层取数路径

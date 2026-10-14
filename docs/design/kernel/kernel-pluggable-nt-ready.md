@@ -192,7 +192,7 @@ type SignalProvider interface {
 | symbol → instrument | `{symbol}.{venue}`（venue 默认 `SIM`），`Equity`、`CNY`、tick `0.01` |
 | bar_type | `{symbol}.{venue}-1-DAY-LAST-EXTERNAL` |
 | 时间戳 | `trade_date` → **UTC 午夜纳秒**，`ts_event = ts_init` |
-| volume | 表内原值取整（tushare 手数口径）直传 |
+| volume | 表内原值（**股**）直传。tushare 的「手」已在同步边界（`pkg/data`）按 `sharesPerLot`(=100) 换算、存量由 migration 052 对齐（DATA-04，2026-10-14）——映射层不做单位换算 |
 
 - **决策**：**原样消费前复权序列**，NT 侧不叠加任何 dividend/split 调整。
 - **理由**：K15 的双跑对齐要求两内核价源同口径。前复权是以最新日为基准重构的历史序列，若 NT 侧再做调整，价差将无法归因到「执行机制差异」这一受控变量上。

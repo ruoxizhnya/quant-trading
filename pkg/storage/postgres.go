@@ -422,6 +422,16 @@ func migrationStatements() []string {
 		// 从此在所有按可用日过滤的查询里消失。存量的这类行必须清成 NULL，
 		// 否则加完列反而会少数据（写入侧已用 nullableDate 堵住新增）。
 		`UPDATE stock_fundamentals SET ann_date = NULL WHERE ann_date < DATE '1900-01-01'`,
+		// ── DML 迁移的一次性标记表 ──
+		//
+		// migrationStatements() 里绝大多数是幂等 DDL（IF NOT EXISTS），每次启动
+		// 重跑等价 no-op。但**变换型 DML**（如 052 的整表 ×100）不幂等，且
+		// 「是否已执行」无法从数据本身可靠推断（见 052 的注释）。故给这类迁移
+		// 一个显式的一次性记录。后续同类迁移**复用本表**，不要另立机制。
+		`CREATE TABLE IF NOT EXISTS data_migrations (
+			name       TEXT PRIMARY KEY,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
 		// Migration 052: 成交量单位统一（手 → 股），对齐规范层 schema
 		//
 		// 背景：tushare daily 的 `vol` 单位是「手」，而规范层 schema 声明的
@@ -431,19 +441,28 @@ func migrationStatements() []string {
 		// （导出路径整条断）。同步侧已改为落股（pkg/data 的 sharesPerLot），
 		// 存量按本迁移对齐 —— 两侧都到位，全链路才真正只有一个口径。
 		//
-		// 幂等：×100 不幂等（重复跑会变 ×10000），所以**不能**把换算写进
-		// 逐行的 WHERE。改为先问一次「库里还有没有非整数（= 手的小数）」，
-		// 有才整表换算一次。这也同时防住「清库后用新代码重灌（已经是股）」
-		// 的场景：那时全表都是整数，IF 不成立，等价 no-op。
+		// 幂等：×100 **不幂等**（重复跑会变 ×10000），所以连「整表换算」这个
+		// 动作本身都不能重复。两道独立保险：
+		//   ① 哨兵（主）：data_migrations 里已有 052 就整个跳过；首次执行后
+		//      无条件写入哨兵，此后 052 至多生效一次。
+		//   ② 内容（辅）：库里还有非整数（= 手的小数）才值得换算 —— 这防住
+		//      「清库后用新代码重灌（已经是股）」的场景（那时全表整数，跳过）。
 		//
-		// 为什么不写成 `UPDATE ... WHERE volume <> floor(volume)`：19% 的
-		// 存量行 volume 本来就是整数「手」，逐行条件会把它们漏掉，结果是
-		// 一张半股半手的混合表 —— 比不迁移更难排查。
+		// 为什么只靠 ② 不够：② 隐含假设「非整数 ⇒ 仍是手」。迁移完成后若又
+		// 落入手数据（旧二进制未换 / 手工导入 / 多节点混部），② 会再次成立 →
+		// **整表**再 ×100 → 已迁移的股数据静默变成 ×10000。哨兵堵住这条路径。
+		//
+		// ② **不能**写成逐行 `WHERE volume <> floor(volume)`：19.24% 的存量行
+		// volume 本来就是整数「手」，逐行条件会漏掉它们，得到一张半股半手的
+		// 混合表 —— 比不迁移更难排查。② 是「整表换算的准入条件」。
 		`DO $$
 		BEGIN
-			IF EXISTS (SELECT 1 FROM ohlcv_daily_qfq WHERE volume <> floor(volume)) THEN
+			IF NOT EXISTS (SELECT 1 FROM data_migrations WHERE name = '052_ohlcv_volume_lots_to_shares')
+			   AND EXISTS (SELECT 1 FROM ohlcv_daily_qfq WHERE volume <> floor(volume)) THEN
 				UPDATE ohlcv_daily_qfq SET volume = round(volume * 100);
 			END IF;
+			INSERT INTO data_migrations (name) VALUES ('052_ohlcv_volume_lots_to_shares')
+				ON CONFLICT (name) DO NOTHING;
 		END $$`,
 		// Migration 032: factor_hypothesis (P2-3 / 因子的因果来源)
 		//

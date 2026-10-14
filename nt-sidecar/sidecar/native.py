@@ -31,7 +31,7 @@ from nautilus_trader.trading import Strategy
 
 from .errors import SidecarError
 
-#: 默认每笔下单手数（股）。
+#: 默认每笔下单数量（股）。
 DEFAULT_TRADE_SIZE = Decimal(1_000)
 
 #: 均线窗默认值：快 5 / 慢 20（日线，约一周 vs 一个月）。

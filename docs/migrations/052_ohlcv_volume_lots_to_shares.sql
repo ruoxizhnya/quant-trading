@@ -22,18 +22,38 @@
 --             （默认 SlippageModel 是 "fixed"，故默认不生效）。
 --         因此历史回测数值**会变**，K15 对拍基线需重跑（已在 TASKS.md 登记）。
 --
--- 安全性: ×100 **不幂等**（重复执行会变 ×10000），所以换算**不能**写进逐行 WHERE。
---         改用 DO 块先问一次「库里还有没有非整数（= 手的小数）」，有才整表换算一次；
---         迁移后全表是整数，IF 不成立，重复启动等价 no-op。
---         不写成 `UPDATE ... WHERE volume <> floor(volume)`：真库 19% 的存量行
+-- 安全性: ×100 **不幂等**（重复执行会变 ×10000），所以连「整表换算」这个动作本身
+--         都不能重复。两道独立保险：
+--           ① 哨兵（主）：data_migrations 里已有 052 就整个跳过；首次执行后无条件
+--              写哨兵，此后 052 至多生效一次。
+--           ② 内容（辅）：库里还有非整数（= 手的小数）才值得换算——这防住「清库后
+--              用新代码重灌（已经是股）」的场景（那时全表整数，跳过）。
+--         **只靠 ② 不够**：② 隐含假设「非整数 ⇒ 仍是手」。迁移完成后若又落入手数据
+--         （旧二进制未换 / 手工导入 / 多节点混部），② 会再次成立 ⇒ 整表再 ×100 ⇒
+--         已迁移的股数据静默变成 ×10000。哨兵堵住这条路径。
+--         对照实验（临时表实跑，2026-10-14）：初值 {1.5, 2000, 3.7} 首次迁移得
+--         {150, 200000, 370}；再落一行手值 9.9 后跑「无哨兵」版得
+--         {990, 15000, 37000, 20000000}（整表再 ×100）；加哨兵版保持
+--         {9.9, 150, 370, 200000}。
+--         ② **不能**写成逐行 `WHERE volume <> floor(volume)`：真库 19.24% 的存量行
 --         volume 本来就是整数「手」，逐行条件会漏掉它们，得到半股半手的混合表。
+--         ② 是「整表换算的准入条件」，不是 UPDATE 的 WHERE。
 --         实测：×100 后真正非整数的行数为 0（最大浮点误差 4.8e-07），故换算无损。
 -- 同源副本: 实际执行路径为 pkg/storage/postgres.go 的 migrationStatements()，本文件为文档副本。
 -- 历史副本不动: 迁移不可改写历史，既有 0xx 文件保持原样。
 
+-- DML 迁移的一次性标记表（本项目首个；后续同类迁移复用它，不要另立机制）。
+CREATE TABLE IF NOT EXISTS data_migrations (
+    name       TEXT PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM ohlcv_daily_qfq WHERE volume <> floor(volume)) THEN
+    IF NOT EXISTS (SELECT 1 FROM data_migrations WHERE name = '052_ohlcv_volume_lots_to_shares')
+       AND EXISTS (SELECT 1 FROM ohlcv_daily_qfq WHERE volume <> floor(volume)) THEN
         UPDATE ohlcv_daily_qfq SET volume = round(volume * 100);
     END IF;
+    INSERT INTO data_migrations (name) VALUES ('052_ohlcv_volume_lots_to_shares')
+        ON CONFLICT (name) DO NOTHING;
 END $$;
