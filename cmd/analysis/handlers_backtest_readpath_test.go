@@ -69,7 +69,7 @@ func getReport(t *testing.T, eng *backtest.Engine, id string) *httptest.Response
 	reg := contracts.NewEngineRegistry()
 	reg.Register(contracts.DefaultKernel, eng)
 	// jobService 传 nil：这两条腿都命中内存读路径，不碰 job 服务。
-	registerBacktestRoutes(r, eng, reg, nil, zerolog.Nop())
+	registerBacktestRoutes(r, eng, reg, nil, nil, zerolog.Nop())
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/backtest/"+id+"/report", nil))

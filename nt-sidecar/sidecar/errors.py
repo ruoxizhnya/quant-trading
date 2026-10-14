@@ -20,3 +20,15 @@ class SidecarError(Exception):
 
 class RunSpecError(SidecarError):
     """The incoming RunSpec is malformed or unsupported (HTTP 400)."""
+
+
+class MarketError(SidecarError):
+    """A market (or market profile) this sidecar does not serve (HTTP 400).
+
+    D7: the sidecar serves one **market profile** per deployment
+    (``--market``). An unknown market must be refused at assembly time, never
+    silently served with another market's rule set — running a US request under
+    the A-share profile would produce a fully plausible-looking receipt computed
+    with the wrong rules, which is exactly the failure mode FR-1.3 forbids for
+    kernels, one level down.
+    """

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest"
+	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/bootstrap"
 	"github.com/ruoxizhnya/quant-trading/pkg/compliance"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
@@ -85,9 +86,23 @@ func main() {
 	// 相应移除 buildCopilot / buildToolsRegistry / 各 adapter 与
 	// gene_pool pools —— 它们现在住在 cmd/ai。
 
+	// D7 市场路由表：配置驱动（`kernel_routing.markets`，如 CN: go / US: nautilus），
+	// 新市场接入 = 加一条配置，不改路由代码（蓝图 §2.1 热转换语义第 2 条）。
+	// 配置节缺失 ⇒ 空表（合法）：不带 market 的存量请求行为不变，带 market 的
+	// 请求在请求处理时被拒（400）。畸形配置（空内核名 / 归一后冲突）在装配期
+	// 直接 Fatal —— 带病配置不该对外提供服务。
+	marketRouter, err := contracts.NewMarketRouter(
+		v.GetStringMapString("kernel_routing.markets"))
+	if err != nil {
+		logger.Fatal().Err(err).Msg("invalid kernel_routing.markets config")
+	}
+	logger.Info().Strs("markets", marketRouter.Markets()).
+		Msg("market routing table assembled (D7) — unregistered markets are refused, never fallen back")
+
 	deps := &ServerDeps{
 		Engine:           engine,
 		EngineRegistry:   ds.EngineRegistry,
+		MarketRouter:     marketRouter,
 		JobService:       ds.JobService,
 		WFEngine:         ds.WFEngine,
 		BatchEngine:      ds.BatchEngine,
@@ -202,7 +217,7 @@ func registerRoutes(router *gin.Engine, deps *ServerDeps) {
 	registerOpenAPIRoutes(router)
 
 	registerProxyRoutes(router, httpClient, deps.Viper, deps.Logger)
-	registerBacktestRoutes(router, deps.Engine, deps.EngineRegistry, deps.JobService, deps.Logger)
+	registerBacktestRoutes(router, deps.Engine, deps.EngineRegistry, deps.JobService, deps.MarketRouter, deps.Logger)
 	registerWalkForwardRoutes(router, deps.WFEngine, deps.Logger)
 	registerBatchRoutes(router, deps.BatchEngine, deps.Logger)
 	registerStrategyRoutes(router, deps.StrategyDB)

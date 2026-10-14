@@ -180,6 +180,23 @@ backtest:
   slippage_rate: 0.0001
   risk_free_rate: 0.03
 
+# D7 · 市场 → 内核 路由表（热转换，蓝图 §2.1）
+#
+# 同步回测端点（POST /api/backtest）接受一个可选的 `market` 字段，在**路由
+# 之前**按本表解析成内核名并写进既有的 RunSpec.kernel 字段 —— 四契约零改动。
+#
+#   market:  带 market 的请求按本表解析；未登记市场 → 400（点名市场 + 已登记
+#            集合），**绝不**回退 go 内核（FR-1.3）。不带 market 的请求原样
+#            走 kernel 字段 / 默认内核，行为与 D7 之前逐字节一致。
+#   新市场:  加一行 + 对应的数据 connector，不改路由代码。
+#   删掉本节: 空表 → 带 market 的请求一律 400，存量请求不受影响。
+#
+# 值必须是已注册的内核名（`go` 恒可用；`nautilus` 需 NT_SIDECAR_ENABLED=1）。
+kernel_routing:
+  markets:
+    CN: go
+    US: nautilus
+
 # Sprint 6 P0-4 (ODR-013): AI Copilot sandbox Stage 1
 #
 # `working_dir` is the directory `go build` runs in when compiling

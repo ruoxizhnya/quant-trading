@@ -31,6 +31,7 @@ from typing import Any
 
 from .engine import DEFAULT_VENUE, run_backtest
 from .errors import RunSpecError, SidecarError
+from .markets import DEFAULT_MARKET, resolve_market
 from .runspec import RunSpec
 
 #: 1 MiB is far above any RunSpec and keeps a hostile client from exhausting memory.
@@ -54,10 +55,18 @@ class _Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address: tuple[str, int], *, catalog_path: Path, venue: str):
+    def __init__(
+        self,
+        address: tuple[str, int],
+        *,
+        catalog_path: Path,
+        venue: str,
+        market: str = DEFAULT_MARKET,
+    ):
         super().__init__(address, _Handler)
         self.catalog_path = catalog_path
         self.venue = venue
+        self.market = market
 
     def handle_error(self, request, client_address) -> None:  # noqa: N802 — stdlib naming
         # A client that closes the socket before reading the response (curl
@@ -132,6 +141,7 @@ class _Handler(BaseHTTPRequestHandler):
                     run_spec,
                     catalog_path=str(server.catalog_path),
                     venue=server.venue,
+                    market=server.market,
                 )
                 finished = time.perf_counter()
         except SidecarError as exc:
@@ -209,23 +219,34 @@ def build_server(
     port: int = 9100,
     catalog_path: str | Path,
     venue: str = DEFAULT_VENUE,
+    market: str = DEFAULT_MARKET,
 ) -> _Server:
-    """Construct the server, refusing any non-loopback bind (ADR-031 D5)."""
+    """Construct the server, refusing any non-loopback bind (ADR-031 D5).
+
+    The **market** is resolved here, at assembly time (D7): an unregistered
+    market makes the process refuse to start rather than serve wrong rules at
+    run time — the same fail-closed shape as ``NT_SIDECAR_ENABLED``'s typo
+    guard, one layer down.
+    """
     if host not in LOOPBACK_HOSTS:
         raise SidecarError(
             f"refusing to bind {host!r}: the sidecar is loopback-only (ADR-031 D5); "
             f"allowed hosts: {sorted(LOOPBACK_HOSTS)}"
         )
+    profile = resolve_market(market)
     path = Path(catalog_path).expanduser().resolve()
-    return _Server((host, port), catalog_path=path, venue=venue)
+    return _Server(
+        (host, port), catalog_path=path, venue=venue, market=profile.market
+    )
 
 
 def serve_forever(server: _Server) -> None:
     log.info(
-        "nt-sidecar listening on http://%s:%d (catalog=%s, venue=%s)",
+        "nt-sidecar listening on http://%s:%d (catalog=%s, venue=%s, market=%s)",
         server.server_address[0],
         server.server_address[1],
         server.catalog_path,
         server.venue,
+        server.market,
     )
     server.serve_forever()

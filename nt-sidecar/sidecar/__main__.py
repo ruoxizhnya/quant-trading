@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .engine import DEFAULT_VENUE
 from .errors import SidecarError
+from .markets import DEFAULT_MARKET, known_markets
 from .server import build_server, serve_forever
 
 DEFAULT_PORT = 9100
@@ -37,6 +38,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--venue", default=DEFAULT_VENUE, help="simulated venue name (default: SIM)")
     parser.add_argument(
+        "--market",
+        default=DEFAULT_MARKET,
+        help="market profile this instance serves: "
+        f"{', '.join(known_markets())} (default: {DEFAULT_MARKET})",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -58,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
             port=args.port,
             catalog_path=args.catalog,
             venue=args.venue,
+            market=args.market,
         )
     except SidecarError as exc:
         print(f"error: {exc}", file=sys.stderr)

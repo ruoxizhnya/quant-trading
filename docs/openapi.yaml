@@ -3516,6 +3516,18 @@ components:
             Unknown / unregistered kernels are rejected with 400 (fail-closed,
             no silent fallback — FR-1.3).
           example: go
+        market:
+          type: string
+          description: >-
+            Market routing key (D7, hot kernel switching). Declaring a market
+            resolves it to a kernel through the configured
+            `kernel_routing.markets` table (e.g. CN -> go, US -> nautilus) and
+            writes the result into `kernel` before routing — the four frozen
+            contracts are untouched by this field. An unregistered market is
+            rejected with 400 naming the market and the registered set, never
+            silently fallen back to the go kernel (FR-1.3). Omitted = existing
+            behaviour (the `kernel` field / the default kernel).
+          example: US
         engine_params:
           type: object
           additionalProperties: true

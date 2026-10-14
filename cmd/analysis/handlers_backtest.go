@@ -18,7 +18,21 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/reporting"
 )
 
-func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, engineRegistry *contracts.EngineRegistry, jobService *backtest.JobService, logger zerolog.Logger) {
+// backtestRequestEnvelope 是同步回测端点的 **API 层** DTO（D7）。
+//
+// 它比冻结的 contracts.BacktestRequest 多一个 `market` 字段，这就是市场名
+// 的入口。**为什么 market 不进 RunSpec**：RunSpec 是四契约之一，字段集是
+// 冻结面（D7 ④ 明文「只用既有 kernel 字段」）。市场在 API 边界解析成内核名
+// 后写进既有的 kernel 字段，路由侧照旧只认 kernel —— 四契约零改动。
+//
+// 空 market 的请求走原路径（`kernel` 照旧，或空 → 默认内核），因此存量请求
+// 行为逐字节不变。
+type backtestRequestEnvelope struct {
+	contracts.BacktestRequest
+	Market string `json:"market"`
+}
+
+func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, engineRegistry *contracts.EngineRegistry, jobService *backtest.JobService, marketRouter *contracts.MarketRouter, logger zerolog.Logger) {
 	api := router.Group("/api/backtest")
 	{
 		api.GET("", func(c *gin.Context) {
@@ -71,8 +85,20 @@ func registerBacktestRoutes(router *gin.Engine, engine *backtest.Engine, engineR
 				return
 			}
 
-			var req backtest.BacktestRequest
-			if json.Unmarshal(bodyBytes, &req) == nil && req.Strategy != "" {
+			var env backtestRequestEnvelope
+			if json.Unmarshal(bodyBytes, &env) == nil && env.Strategy != "" {
+				req := env.BacktestRequest
+				// D7（市场热转换）：market 字段在**路由之前**解析成内核名，
+				// 写进既有的 kernel 字段。未登记市场 → 400 点名（含已登记
+				// 集合），**零静默回退** —— 回退的代价不是报错，而是一份用
+				// 错内核算出来的、看起来完全正常的回执（FR-1.3）。
+				// 未指定 market 的请求原样透传（存量行为不变）。
+				target, routeErr := contracts.ResolveRunTarget(marketRouter, env.Market, req.Kernel)
+				if routeErr != nil {
+					httpserver.Fail(c, http.StatusBadRequest, routeErr.Error())
+					return
+				}
+				req.Kernel = target
 				// K9（RunSpec fail-closed）：engine_params 未知名拒绝而非忽略，
 				// 校验口径在 contracts.ValidateRunSpec（唯一实现）。
 				if err := req.ValidateRunSpec(); err != nil {

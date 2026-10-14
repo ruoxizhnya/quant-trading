@@ -25,12 +25,16 @@ import (
 // K10 added EngineRegistry (kernel routing registry) — assembly-time
 // registration of the default go kernel, Resolve-driven routing for the
 // sync handler / async job / batch paths.
+// D7 added MarketRouter (market → kernel routing table) — the sync
+// handler resolves a request's `market` into the existing `kernel` field
+// before routing; unregistered markets are refused (400), never fallback.
 func TestServerDeps_HasExpectedFields(t *testing.T) {
 	t.Parallel()
 
 	expected := []string{
 		"Engine",
 		"EngineRegistry",
+		"MarketRouter",
 		"JobService",
 		"WFEngine",
 		"BatchEngine",
@@ -87,6 +91,7 @@ func TestServerDeps_FieldsAreTyped(t *testing.T) {
 		// *batch.BatchEngine). The alias targets are the source of truth.
 		"Engine":           "*backtest.Engine",
 		"EngineRegistry":   "*contracts.EngineRegistry",
+		"MarketRouter":     "*contracts.MarketRouter",
 		"JobService":       "*job.JobService",
 		"WFEngine":         "*walkforward.WalkForwardEngine",
 		"BatchEngine":      "*batch.BatchEngine",

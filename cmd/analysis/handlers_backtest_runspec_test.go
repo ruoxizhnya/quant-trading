@@ -34,7 +34,7 @@ func postBacktestRunSpec(t *testing.T, body string) *httptest.ResponseRecorder {
 	reg := contracts.NewEngineRegistry()
 	reg.Register(contracts.DefaultKernel, eng)
 	// jobService 传 nil：这些腿都走旧格式同步分支，不碰 job 服务。
-	registerBacktestRoutes(r, eng, reg, nil, zerolog.Nop())
+	registerBacktestRoutes(r, eng, reg, nil, nil, zerolog.Nop())
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/backtest", strings.NewReader(body))

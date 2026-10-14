@@ -53,8 +53,16 @@ from nautilus_trader.model import (
 )
 
 from . import ashare
+from . import native as native_strategies
 from .catalog import bar_type_str, open_catalog, resolve_instruments
 from .errors import SidecarError
+from .markets import (
+    DEFAULT_MARKET,
+    EXECUTION_NATIVE,
+    FEE_MODEL_ASHARE,
+    MarketProfile,
+    resolve_market,
+)
 from .runspec import RunSpec
 from .strategies import (
     DEFAULT_TRADE_SIZE,
@@ -77,15 +85,23 @@ _SORTINO_KEY = "Sortino Ratio (252 days)"
 log = logging.getLogger("nt-sidecar")
 
 
-def _fee_model_for(strategy: str):
-    """Pick the venue fee model for a strategy (K14).
+def _fee_model_for(profile: MarketProfile, strategy: str):
+    """Pick the venue fee model (K14 / D7).
 
-    The K14 weight-replay adapter charges the **A-share schedule** (stamp tax /
-    transfer fee / minimum commission, :mod:`sidecar.ashare`). The K13
-    buy-and-hold demo keeps the explicit **zero-fee** model — its published
-    evidence numbers (total_return −0.1347 / Sharpe 1.4267) are zero-fee and
-    must not move.
+    ``CN`` (A-share line, unchanged): the K14 weight-replay adapter charges the
+    A-share schedule (stamp tax / transfer fee / minimum commission,
+    :mod:`sidecar.ashare`); the K13 buy-and-hold demo keeps the explicit
+    zero-fee model — its published evidence numbers (total_return −0.1347 /
+    Sharpe 1.4267) are zero-fee and must not move.
+
+    ``US`` (foreign line, D7): NT's **own** fee model, not a hand-rolled
+    A-share-style schedule. It is configured at an explicit zero rate here
+    because the sample run has no fee schedule to speak of — the real US equity
+    schedule arrives with the market data connector (D9 follow-up). Zero is
+    stated, not invented.
     """
+    if profile.fee_model != FEE_MODEL_ASHARE:
+        return MakerTakerFeeModel(maker_rate=Decimal("0"), taker_rate=Decimal("0"))
     if strategy == WEIGHT_REPLAY:
         return ashare.make_fee_model()
     return MakerTakerFeeModel(maker_rate=Decimal("0"), taker_rate=Decimal("0"))
@@ -97,8 +113,17 @@ def run_backtest(
     catalog_path: str,
     venue: str = DEFAULT_VENUE,
     trade_size: Decimal = DEFAULT_TRADE_SIZE,
+    market: str = DEFAULT_MARKET,
 ) -> dict[str, Any]:
-    """Execute one RunSpec and return the minimal ResultSpec-shaped payload."""
+    """Execute one RunSpec and return the minimal ResultSpec-shaped payload.
+
+    ``market`` selects the **market profile** (D7): it is a property of the
+    sidecar deployment (``python -m sidecar --market US``), *not* of the
+    RunSpec — the frozen RunSpec contract is untouched by D7 (the market never
+    travels on the wire). An unregistered market is refused by
+    :func:`sidecar.markets.resolve_market` before anything else happens.
+    """
+    profile = resolve_market(market)
     catalog = open_catalog(catalog_path)
     instruments = resolve_instruments(catalog, run_spec.stock_pool, venue)
 
@@ -107,14 +132,15 @@ def run_backtest(
 
     # K13 runs with an explicit zero-fee model: NautilusTrader requires an
     # explicit fee model on every venue. K14's weight-replay adapter charges the
-    # A-share schedule instead (see ``_fee_model_for``).
+    # A-share schedule instead; D7's native markets use NT's own model
+    # (see ``_fee_model_for``).
     venue_config = BacktestVenueConfig(
         name=venue,
         oms_type=OmsType.NETTING,
         account_type=AccountType.CASH,
-        starting_balances=[f"{int(run_spec.initial_capital)} CNY"],
-        base_currency=Currency.from_str("CNY"),
-        fee_model=_fee_model_for(run_spec.strategy),
+        starting_balances=[f"{int(run_spec.initial_capital)} {profile.currency}"],
+        base_currency=Currency.from_str(profile.currency),
+        fee_model=_fee_model_for(profile, run_spec.strategy),
     )
 
     data_configs = [
@@ -150,19 +176,14 @@ def run_backtest(
         for symbol, instrument in instruments.items():
             node.add_strategy(
                 run_config.id,
-                build_strategy(
-                    run_spec.strategy,
+                _build_strategy_for(
+                    profile,
+                    run_spec,
                     instrument_id=instrument.id,
                     # subscribe_bars takes a BarType, not its string form.
                     bar_type=BarType.from_str(bar_type_str(symbol, venue)),
                     trade_size=trade_size,
-                    start_date=run_spec.start_date,
-                    end_date=run_spec.end_date,
-                    initial_capital=capital_per_symbol,
-                    d_max=run_spec.d_max,
-                    # K15 · caller-supplied target-weight stream (empty → the
-                    # K14 built-in sample stream, unchanged).
-                    signal_rows=run_spec.signals,
+                    capital_per_symbol=capital_per_symbol,
                 ),
             )
         results = node.run()
@@ -200,6 +221,45 @@ def run_backtest(
             node.dispose()
         except Exception:  # noqa: BLE001 — dispose must never mask the real outcome
             pass
+
+
+def _build_strategy_for(
+    profile: MarketProfile,
+    run_spec: RunSpec,
+    *,
+    instrument_id: Any,
+    bar_type: BarType,
+    trade_size: Decimal,
+    capital_per_symbol: float,
+) -> Any:
+    """按市场档案的执行模式造策略（D7 的分派点）。
+
+    ``weight_replay``（CN，逐字不变）：K14 适配器，参数与 K13–K15 时期完全
+    一致——``d_max`` / ``signals`` / 窗口日期照旧传给 ``build_strategy``。
+
+    ``native``（D7 新增）：NT 原生策略，**不传** A 股专属参数（``d_max``
+    参与率上限、权重信号流都是 A 股适配器的东西），国外线不吃这一套。
+    """
+    if profile.execution_mode == EXECUTION_NATIVE:
+        return native_strategies.build_native_strategy(
+            run_spec.strategy,
+            instrument_id=instrument_id,
+            bar_type=bar_type,
+            trade_size=trade_size,
+        )
+    return build_strategy(
+        run_spec.strategy,
+        instrument_id=instrument_id,
+        bar_type=bar_type,
+        trade_size=trade_size,
+        start_date=run_spec.start_date,
+        end_date=run_spec.end_date,
+        initial_capital=capital_per_symbol,
+        d_max=run_spec.d_max,
+        # K15 · caller-supplied target-weight stream (empty → the K14 built-in
+        # sample stream, unchanged).
+        signal_rows=run_spec.signals,
+    )
 
 
 def _safe_portfolio(node: Any, run_config_id: str) -> Any | None:

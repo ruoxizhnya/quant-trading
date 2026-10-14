@@ -39,14 +39,28 @@ def bar_type_str(symbol: str, venue: str) -> str:
     return f"{instrument_id_str(symbol, venue)}-{DAILY_BAR_SUFFIX}"
 
 
-def make_equity(symbol: str, venue: str) -> Equity:
-    """Build the canonical instrument for a symbol (used by the export tool)."""
+def make_equity(
+    symbol: str,
+    venue: str,
+    *,
+    currency: str = BASE_CURRENCY,
+    price_precision: int = PRICE_PRECISION,
+    price_increment: str = PRICE_INCREMENT,
+) -> Equity:
+    """Build the canonical instrument for a symbol (used by the export tool).
+
+    The three keyword arguments default to the A-share values, so every
+    existing call site (K13 ``export_bars``, the K13/K14/K15 tests) keeps its
+    exact behaviour. D7's foreign line passes the **market profile**'s values
+    (e.g. USD for ``market.US``) so a foreign instrument is born with its own
+    currency instead of being stamped ``CNY`` and re-interpreted later.
+    """
     return Equity(
         instrument_id=InstrumentId.from_str(instrument_id_str(symbol, venue)),
         raw_symbol=Symbol(symbol),
-        currency=Currency.from_str(BASE_CURRENCY),
-        price_precision=PRICE_PRECISION,
-        price_increment=Price.from_str(PRICE_INCREMENT),
+        currency=Currency.from_str(currency),
+        price_precision=price_precision,
+        price_increment=Price.from_str(price_increment),
         ts_event=0,
         ts_init=0,
     )

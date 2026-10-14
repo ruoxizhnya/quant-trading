@@ -120,7 +120,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   2. **破坏验证**：回拨分钟可见时间（全日内可见）→ PIT 测试变红；绕过快照直接查 provider → 红线护栏红；均还原绿。
 - **⑥ 边界**：只做策略视野 + 闸门 + 回归；撮合精度、新频率数据接入（D5）另立。
 
-### D7 · NT 原生模式（国外线）⬜ 待做（依赖 D1，可与 D2–D6 并行）
+### D7 · NT 原生模式（国外线）✅ 完成（2026-10-14，依赖 D1）
 
 - **① 目标**：nt-sidecar 支持 NT 原生模式（数据模型 + 订单类型 + 原生执行规则），市场→内核映射配置驱动且 fail-closed；一个最小 NT 原生策略跑通一个国外市场样例 run，回执走外壳（ResultSpec）与国内线同 schema。
 - **② 上下文**：ADR-031 决议变更记录（路线二）+ 蓝图 §2.1 热转换语义、§6「NT 侧原生模式」。现状：nt-sidecar（Python，`nautilus_trader==2.0.0rc6` 钉死，`docker-compose.nt.yaml` + docs 仓 `docs/guides/nt-sidecar-operations.md`）只做 A 股权重回放对拍；RunSpec 的 `kernel` 路由字段与 fail-closed 语义已在（`pkg/backtest/contracts/runspec.go`、路由测试 `pkg/backtest/job/job_kernel_routing_test.go`：未知内核名显式报错不回退）。热转换语义钉死：切换=配置级（市场→内核映射），非 run 级迁移；「国外策略用 NT 原生写」是新增不是重写。
@@ -136,6 +136,48 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   2. **破坏验证**：删掉市场映射配置 → fail-closed 红；把国外 run 的回执 schema 改出差异 → 外壳一致性测试红；均还原绿。
   3. 文档同步：运维/配置说明进 docs 仓 `docs/guides/nt-sidecar-operations.md` + ARCHITECTURE.md 双核段。
 - **⑥ 边界**：只做原生模式 + 映射配置 + 样例 run；国外数据源接入选型（D9）与接入实施、A 股线改造另立。
+- **✅ 完成记录（2026-10-14）**：
+  1. **侧车 · NT 原生模式**：新增 `nt-sidecar/sidecar/markets.py`（市场档案表 `CN`/`US`，
+     词表封闭 + 装配期校验）与 `sidecar/native.py`（最小 NT 原生策略 `native_sma_cross`：
+     LIMIT 进 / MARKET 出，全走 NT 自带订单类型与执行模型，**不施 T+1/涨跌停/整手**）。
+     执行模式由**市场档案**分派（不是看策略名）；`--market` 缺省 `CN` ⇒ 国内对拍线行为
+     逐字不变（Python 套件 77 → 100 条，原 77 条未动）。未登记市场在装配期 `MarketError` 退出。
+  2. **路由 · 配置驱动 fail-closed**：`contracts.MarketRouter` + `ResolveRunTarget`
+     （`pkg/backtest/contracts/marketroute.go`），配置 `kernel_routing.markets`
+     （`CN: go` / `US: nautilus`）。`POST /api/backtest` 的可选 `market` 在**路由之前**解析成
+     内核名写进既有的 `kernel` 字段 —— **四契约零改动**（④「只用既有 `kernel` 字段」）。
+     未登记市场 → 400（点名市场 + 已登记集合 + "no silent fallback"）；market 与 kernel
+     双写不一致 → 400；空配置表合法（删掉配置的效果 = 带市场的请求变红，存量请求不受影响）。
+  3. **外壳共用 · 跨语言机械护栏**：侧车回执字段名必须落在 `contracts.BacktestResponse`
+     的 json tag 集合内；重命名登记为别名表（`equity_curve → portfolio_values`），侧车专属键
+     （`nt_stats` / `total_orders` / `total_positions` / `iterations`）逐条登记**理由**。
+     测试直接读 Go 源码抽字段集（`tests/test_d7_native_mode.py`），国内线/国外线各跑一遍。
+  4. **端到端样例 run（留 run id）**：真侧车（`--market US` + 合成美股 catalog）+ 真
+     NautilusTrader + 真 HTTP 链路（gin handler → EngineRegistry → EngineRunner → 侧车）：
+     `run_id=a27caca6-6839-4fda-ba51-2fd10d341c84`，`trades=4`、`equity_points=60`、
+     `total_return=0.004`，market=US → kernel=nautilus，**go 内核零调用**。
+  5. **破坏验证（两组，均「改坏→红→还原→绿」，还原后 sha256 与基线一致）**：
+     ① 把 `ResolveRunTarget` 的未注册市场分支改成回退 `DefaultKernel` ⇒
+     `TestBacktestPost_UnregisteredMarketFailsClosed` +
+     `...DeletedMarketConfigRefusesMarketButKeepsLegacyPath` 双双红；
+     ② 把侧车回执键 `total_return` 改成 `totalReturn` ⇒ 外壳一致性测试红（点名该键「既不在
+     ResultSpec、也未登记为侧车专属/别名」）。两组还原后均绿。
+  6. **文档同步**：`quant-trading-docs` 仓 `docs/guides/nt-sidecar-operations.md` 新增 §4
+     （两层配置 / 起市场侧车 / 加新市场三步 / 已知阻断），`docs/ARCHITECTURE.md` 双核段逐条标注
+     D7 已实施；core 仓 `docs/openapi.yaml` 的 `BacktestRequest` 增 `market` 字段与 fail-closed 说明。
+  7. **⚠️ 未达标一条（如实登记，非本单缺陷）**：验收 1 的「国内线对拍回归（`cmd/dualrun -gate`）仍绿」
+     —— 该门禁在本单**开工前即为红**（6 项违例）。已实测：开工前后门禁输出**逐字相同**，
+     D7 对国内线零影响。根因是**产物陈旧**：SYNC-01 之后调度器真的会同步底表 ⇒ `ohlcv_daily_qfq`
+     的 qfq 基准移动 + volume 精度变化，而 `nt-sidecar/catalog` 仍是 2026-10-12 的旧产物。
+     **刷新路径当前被 D1 打断**（两处，均在 `b49629e` 引入的导出路径上）：① `export_bars.py` 的
+     SELECT 返回 `trade_date`，翻译层按规范层字段名取 `date`；② `as_quantity` 拒绝非整数成交量，
+     而库里的 volume 是两位小数的「手」。把这两处**临时**补齐后重导 catalog，门禁输出
+     「全部指标在 K15 阈值内，确定性腿一致，无成交 mismatch」——**对齐本身完好**。修法涉及
+     成交量单位的口径裁决（会动国内线数值），④ 约束明令不动国内线，故**未修**，建议另立工单
+     （复现步骤与证据见运维指南 §4.4）。
+  8. **已知未决（登记，不属本单）**：`market` 目前只接在**同步**端点 `POST /api/backtest` 上；
+     异步 job 路径（`CreateJobRequest`）未接市场路由——job 的内核解析发生在 worker 执行期，
+     接入需把路由表带进 worker 装配，属另一次改动。
 
 ### D8 · AI 因子挖掘流水线 + 治理层 ⬜ 待做（依赖 D3、D4；关键路径终点）
 

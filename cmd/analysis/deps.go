@@ -32,6 +32,16 @@ type ServerDeps struct {
 	// 未注册内核 fail-closed，无静默回退（FR-1.3）。
 	EngineRegistry *contracts.EngineRegistry
 
+	// MarketRouter — D7 市场 → 内核 路由表（配置 key `kernel_routing.markets`，
+	// 如 `CN: go` / `US: nautilus`）。同步回测端点在**路由之前**把请求里的
+	// `market` 解析成内核名写进既有的 `kernel` 字段；未登记市场 fail-closed
+	// （400 点名 + 已登记集合），不静默回退 go 内核。
+	//
+	// 允许为 nil（= 未装配路由表）：此时**不带 market** 的存量请求行为不变，
+	// 带 market 的请求在 ResolveRunTarget 处被拒 —— 「删掉映射配置」的效果是
+	// 带市场的请求变红，而不是服务起不来。
+	MarketRouter *contracts.MarketRouter
+
 	// JobService — async backtest job management (POST /backtest).
 	JobService *backtest.JobService
 
