@@ -1440,7 +1440,7 @@ E2E 验收测试 (Phase 2.6) 需要 Hermes + Ollama + 全栈基础设施运行�
 GET  /health                       - Health check
 GET  /stocks                       - List stocks (with filters)
 GET  /stocks/:symbol               - Get single stock
-GET  /stocks/count                 - Get total stock count
+GET  /stocks/count                 - Stock records + status split (DATA-02, 见下方响应形状)
 GET  /market/index                 - Get market index data
      ?symbol=000001.SH&date=2024-01-01
 GET  /ohlcv/:symbol                - Get OHLCV data for symbol
@@ -1462,6 +1462,24 @@ GET  /api/datasource/registry/status    - Snapshot of all adapters and chains
 GET  /api/datasource/registry/health    - Run HealthCheck on every adapter
 GET  /api/datasource/registry/chains    - List configured fallback chains
 ```
+
+#### `GET /stocks/count` 的响应形状（DATA-02，2026-10-14）
+
+```json
+{"count": <总行数>, "by_status": {"<status>": <行数>, "…": 0}}
+```
+
+- `count` **含已退市**，且由各档**求和**导出（同一条 GROUP BY 的产物，不是第二次
+  `COUNT(*)`）—— 所以「各档加起来不等于总数」这个中间态在这条端点上结构上不存在。
+  把 `count` 读成"在市股票数"是错的；要在市数就取 `by_status.active`。
+- `by_status` 逐值等于 `SELECT status, COUNT(*) FROM stocks GROUP BY status`。
+- status 为 NULL 或空串的行折成 `"unknown"` 一档（该列可空：DDL 只有
+  `DEFAULT 'active'`，无 NOT NULL）。这是一档**显式**读数，不是被静默丢弃的行。
+- 票池为空时 `by_status` 序列化成 `{}` 而不是 `null`（前端类型按对象读，
+  `null` 会被当成"字段不存在"而不是"票池是空的"）。
+- `latest_date` 仍可能缺席 —— 那是 **DATA-03** 登记的形状问题，本单不动。
+- 网关 `GET /api/stocks/count` 是**字段透传**（`proxyRequest` 解码成 map 再编码），
+  所以这条形状不需要网关侧改动，也不需要在网关再登记一遍。
 
 ### 2. Strategy Service (port 8082)
 **Responsibilities**:
@@ -1647,7 +1665,8 @@ prefix only** — the no-prefix mirrors are gone (see "Removed" below).
 GET  /api/ohlcv/:symbol           - Get OHLCV data for symbol
      ?start_date=2024-01-01&end_date=2024-12-31
 POST /api/screen                  - Screen stocks by criteria
-GET  /api/stocks/count            - Get stock count
+GET  /api/stocks/count            - Stock count + status split (passthrough;
+                                    形状见 §1「`GET /stocks/count` 的响应形状」)
 GET  /api/market/index            - Get market index data
      ?symbol=000001.SH&date=2024-01-01
 GET  /api/factors/:factor_name    - Read a factor_cache row (citation 五元组，见 §AI 实验员实验室)

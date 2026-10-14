@@ -382,7 +382,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **⑥ 边界**：只改停用路径的字段清理；`last_run_job_id` 等其余残留另立。
 - **完成记录（2026-10-14，`274dad7`）**：修在 [scheduler.go](../pkg/sync/scheduler.go) `ToggleSchedule` 停用分支——置 `schedule.NextRunAt = nil`，由既有的**单条** `UpdateSyncSchedule` 全字段写回落为 NULL，与 `is_active=false` 同一语句、无中间态；结构体与 JSON 字段名未动。单测两条腿（`pkg/sync/scheduler_start_test.go`）：`TestToggleScheduleOffClearsNextRunAt`（含激活前置事实腿，store 读回 `NextRunAt == nil` + `Stats().NextRuns` 为空）+ `TestToggleScheduleOnStillSetsNextRunAt`（反向腿：激活路径不被清除语句误伤）。破坏验证已做（去掉清除语句单测红，还原绿）。**诚实缺口**：活进程 curl 复测未做（本机无 docker 环境），留待有环境时补。
 
-### DATA-02 · 票池状态拆分没有只读通道（幸存者偏差块只能显示空态） ⬜ 待做
+### DATA-02 · 票池状态拆分没有只读通道（幸存者偏差块只能显示空态） ✅ 完成（2026-10-14）
 
 - **① 目标**：SPA 能读到「在市 / 退市」的拆分读数，于是 ui 的幸存者偏差块不必再挂"缺读数通道"，也**不需要在前端自算**。
 - **② 上下文**（2026-10-14 psql + curl 当场复核，数字是当下的不是引用的）：
@@ -394,6 +394,17 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：不改 `stocks` 表结构、不动 `pkg/domain` 契约；不做摄取（本单是**通道**缺口，不是数据缺口）；不让前端自己 `5908 - 339` 之类的客户端重建（同一概念两处真相，AGENTS.md §9 明令禁止）。
 - **⑤ 验收**：`curl` 经网关（:8085）取到拆分，值与 psql 直查一致（active 5569 / delisted 339）；`docs/SPEC.md` 登记该端点；ui 侧把空态换成真数另计一小单（不夹在本单）。**破坏验证**：临时把某只股票的 `delist_date` 置空 → 拆分读数随之变化（证明它是真查不是硬编码），还原后再测一次一致。
 - **⑥ 边界**：只加只读通道；摄取、回填、前端展示均不在本单。
+- **完成记录（2026-10-14）**：
+  - **⚠️ 工单 ⑤ 的破坏验证腿与 ③ 的口径互相矛盾（前提证伪，按 ③ 落地）**：⑤ 写「临时把某只股票的 `delist_date` 置空 → 拆分读数随之变化」，而 ③ 要求读数逐值等于 `group by status`。**按 status 分组的读数对 `delist_date` 结构上不敏感**，这条腿永远不动。2026-10-14 活进程实测坐实：置空 `000003.SZ` 的 `delist_date` 后，网关读数原样 `{"active":5569,"delisted":339}`。要满足 ⑤ 那条腿，就得把口径改成按 `delist_date` 分组 —— 那就不是 ③ 要的数。∴ 破坏验证改用**改判 `status`** 这条腿（同样证明「真查非硬编码」，且与 ③ 同口径），`delist_date` 腿保留为反证记录。
+  - **形状裁决（③「形状由 core 定」）**：选**在既有 `GET /stocks/count` 上加分组字段**，不转发 `/stocks` 列表、不新挂端点。理由：网关 `proxyRequest` 是 map 解码再编码，**新字段天然透传，网关零改动**；转发列表会把 5908 行推到浏览器再聚合 = 正是 ④ 禁止的客户端重建；新端点则多一条面而 SPA 本来就在读 count。响应 `{"count":<总行数>,"by_status":{"active":5569,"delisted":339}}`。
+  - **落点**：`pkg/storage/stocks.go` 新增 `StockStatusCounts`（单条 GROUP BY，NULL/空串折 `"unknown"`，空表返空 map 而非 nil）；`cmd/data/handlers_stocks.go` 新增 `stockCountPayload` 并由它组装响应。**`count` 由各档求和导出**，不再是第二次 `COUNT(*)` —— 同一趟查询、同一个真相，顺带消掉「两次查询之间被并发同步改动，于是各档加起来不等于总数」的窗口。`latest_date` 那行按 ⑥ 不动（属 DATA-03）。
+  - **SQL 写法陷阱（已钉）**：分组表达式若写成 `GROUP BY status`（Postgres 在 GROUP BY 里**优先解析为输入列**，不是输出别名），NULL 行与 `''` 行会出成**两行都叫 unknown** 的分组，Go 侧 map 赋值后者覆盖前者 ⇒ 读数**静默少一只票**。现按 `GROUP BY COALESCE(NULLIF(status,''),'unknown')` 显式重复表达式。破坏验证：把它改回 `GROUP BY status` → `TestStockStatusCounts_FoldsNullAndEmptyIntoOneUnknownBucket` 红（`expected: 2, actual: 1`），还原转绿。
+  - **测试（三层，先红后绿）**：`pkg/storage/stocks_status_test.go` 三条腿（逐值 vs WHERE 独立路径 / NULL+空串折同一档 / 改判状态两档各移动 1）—— 起手 `store.StockStatusCounts undefined` 红，实现后 exit 0；`cmd/data/handlers_stocks_test.go` 两条腿（`stockCountPayload` 纯形状：空表/nil 序列化 `{}` 不是 `null`；HTTP 面逐值 == 库里 GROUP BY 且 `count == Σby_status == COUNT(*)`）—— 起手 `undefined: stockCountPayload` 红，实现后 exit 0。测试内插的探针行用 `t.Cleanup` 删除且断言取**增量**（开发库随时被并发同步改动，绝对值断言会变偶发红）；跑完实测残留 0 行。
+  - **活进程实测**：`docker compose build data-service && up -d data-service` 后 —— psql 直查 `active|5569 / delisted|339`；`:8081/stocks/count` → `{"by_status":{"active":5569,"delisted":339},"count":5908}`；**经网关 `:8085/api/stocks/count` → 同一 body，HTTP 200**（逐值一致）。破坏验证（活进程）：`UPDATE status delisted→active` 一行 → 网关读数变 `{"active":5570,"delisted":338}`、`count` 仍 5908 → 还原 → 复测 5569/339。
+  - **门禁**：`go build ./...` exit 0、`go vet ./cmd/data ./pkg/storage` exit 0、`gofmt -l` 四个改动文件空输出、`go test ./pkg/storage/ -count=1` exit 0。`go test ./cmd/data/` 有 **1 条非本单引入的红**：`TestSyncAllFactorsHandler_ReportsSkipped`（want 5 got 8）—— 加测试前后基线一致（`/tmp/base_cd.txt` 留档），属并行 agent 在途的因子改动，按 ODR-067 登记在案不动。诚实边界：`go test -race` 本机跑不了（无 gcc，CGO_ENABLED=0）。
+  - **⚠️ 本单执行中的一次数据事故（当场恢复，如实登记）**：做上面那条 `delist_date` 反证腿时，我的**还原**语句漏了 `WHERE`（`UPDATE stocks SET delist_date=(子查询)` 无行限定），把**全表 5908 行 `delist_date` 清成 NULL**（原本 339 非空）。`status` 未受影响，但坏的是 P2-4 那条线 —— `GetListingWindows`(`pkg/storage/stocks.go:202`) 读 `delist_date` 做按天池子过滤，全 NULL 等于「没有一只票退过市」，幸存者偏差会被重新引入。恢复路径正是 ADR-023 的「可重建数据靠同一份数据 + `content_hash`」：从 `ingest.raw` 的 `tushare.stock_basic` 16 页原始响应回填 —— 回填前只读核对：归档带 `delist_date` 的 symbol **339** 个、归档有而 stocks 无 **0**、stocks 标 delisted 而归档无 **0**、同一 symbol 跨页取值冲突 **0**，且我记录过改前值的 `000003.SZ`（表内 `2002-06-14`）与归档 `20020614` 逐字一致。回填 `UPDATE 339`（只写 `delist_date` 一列，不动 `status`/`updated_at`），复测九项全绿：非空 339 / active 带日期 0 / delisted 缺日期 0 / `000003.SZ = delisted|2002-06-14` / 总数 5908 / 拆分 5569-339 / 日期跨度 1999-07-12..2026-07-30 / 30 分钟内 `updated_at` 被改的行 0 / 探针残留 0。**教训**：破坏验证的还原腿必须与写腿带**同一个行限定**；无 `WHERE` 的 UPDATE 不该出现在验证脚本里，改用 `UPDATE … WHERE symbol=$1` 的形。
+  - **顺带纠正一处登记**（不改写他人结论，只加指针）：本文件 D3 完成记录「已知边界 ③」称「补全需发明落库 API（`pkg/storage` 无 `SaveIndexConstituents`）」—— 不成立，`(*PostgresStore).SaveIndexConstituentBatch` 在 `pkg/storage/cache.go:369` 已存在且正被 `pkg/data/tushare.go:690` 调用；那次多传的参数已于 `abd9067` 按源码证伪撤销，`cmd/data` 编译恢复。真正的缺口是落库失败只 Warn（见新登记 **DATA-06**）。
+  - **留给下游**：ui 侧把「缺读数通道」空态换成真数（`quant-trading-ui` 的 `components/sync/DataQualityPanel.vue`，A-08 断言 6）按 ⑤ 另计一小单，不夹在本单。
 
 ### DATA-03 · 两条读数形状不一致（`latest_date` 静默缺席 / PIT 历史端点没通道） ⬜ 待做
 
@@ -443,6 +454,19 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：不重复 DATA-04 已完成的日线 volume 部分；不引入第二套口径；`turnover` 变更会动因子与展示数值，须照 DATA-04 做「改坏→红→还原→绿」破坏验证。
 - **⑤ 验收**：每个源/表给出「实测单位 + 换算点 + 落库后抽样比对」三件证据；SPEC 规范层 Schema 的每个数值字段都能回答「单位是什么」；`cmd/dualrun -gate` 回归绿。
 - **⑥ 边界**：只做单位口径；源本身的接入与可靠性问题不在本单。
+
+### DATA-06 · 指数成分股同步：落库失败只 Warn，端点照样回 "synced successfully" ⬜ 待做
+
+- **① 目标**：`POST /sync/index-constituents/:index_code` 在**落库失败时不再报成功**——响应体要么 5xx，要么如实区分「取到 N 条」与「落库 N 条」。
+- **② 上下文**（2026-10-14 做 DATA-02 时顺带 grep，逐行核对非推测）：
+  - `cmd/data/handlers_sync.go:52` 调 `tc.FetchIndexConstituents(...)`，拿到非空切片就回 `{"message":"index constituents synced successfully", "count":N}`；而**落库发生在客户端内部**：`pkg/data/tushare.go:690-692` 调 `c.store.SaveIndexConstituentBatch(...)`，**error 只 `logger.Warn` 后继续**，函数返回 `constituents, nil`。于是「Tushare 取到了、一行都没写进去」与「写成功了」在 HTTP 面上**不可区分**。
+  - 这条路径正是 DATA-01 灌 `index_constituents` 354 行的通道（该单 ⑤ 的破坏验证还依赖「清空成分 ⇒ `resolveStockPool` fail-loud」）——下游对它的信任建立在「它报成功」上。
+  - **同族先例**：SYNC-01（生命周期入口零调用方，编译期与行为测试都看不见）、DATA-03（`Scan` 的 error 被整个丢掉 ⇒ 字段静默缺席）。本单是第三种形状：**接住了 error，但只记日志不改变响应**。
+  - 顺带纠正本文件 D3 完成记录「已知边界 ③」的一处事实错误（不改其结论，只加指针）：该处称「`pkg/storage` 无 `SaveIndexConstituents` API，补全需发明落库 API」——实际 `(*PostgresStore).SaveIndexConstituentBatch` 在 `pkg/storage/cache.go:369` 已存在且正被 `pkg/data/tushare.go:690` 调用。`bdd1949` 多传的那个参数已于 `abd9067` 撤销，`cmd/data` 编译已恢复。
+- **③ 要求**：二选一并写明理由 —— **(a1)** 把落库 error 上抛（`FetchIndexConstituents` 返回该 error，或拆出「取数」与「落库」两个返回值），handler 据此回 5xx；**(a2)** 保持 2xx 但响应体如实标 `persisted` 与 reason。无论选哪种，响应里**「取到 N 条」与「落库 N 条」必须是两个可区分的数**，且失败不得只活在日志里。
+- **④ 约束与非目标**：不改 `SaveIndexConstituentBatch` 的签名与批量语义；不动 `normalizeIndexConstituents` 的 in/out 区间推导（属 DATA-01）；不碰 `stocks` 表；不顺手修 DATA-02/DATA-03；不加新依赖。
+- **⑤ 验收**：行为测试**先红后绿**——经 `TushareStore` 接口注入一个必返回 error 的 stub（生产码不为测试让路），断言 handler 不再回 "synced successfully"（或响应体 `persisted=false` + reason）；反证腿：同一 stub 返回成功时读数照常；活进程一条真实失败路径的 curl 留证；**破坏验证**：把 error 重新吞回 `Warn` ⇒ 新测试红，还原转绿；`go build ./... `+ `go vet` + `gofmt -l` 全绿。
+- **⑥ 边界**：只做这一条静默失败的上抛/如实标注；失败后的**重试与作业状态收敛**（与 sync_jobs 队列的关系）另立。
 
 ---
 
