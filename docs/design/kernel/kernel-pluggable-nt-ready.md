@@ -1,6 +1,6 @@
 # 内核可插拔 + 外围 NT-ready：需求与设计
 
-> **状态**：Accepted / 分阶段实施（阶段 1–2 已授权开工，阶段 3 待决策门，见 §6）
+> **状态**：Accepted / 分阶段实施（阶段 1–2 已完成；阶段 3 决策门已于 2026-10-14 裁决「① 推进生产化」并随 K16 落地，见 ADR-031 D4 裁决记录与 §6）
 > **日期**：2026-10-12
 > **作者**：若曦 × WorkBuddy
 > **定位**：**新需求固化文档**（需求 + 设计细节）。决策理由在 ADR-031（`quant-trading-docs/docs/adr/adr-031-kernel-pluggable-nt-ready.md`），可行性证据在 [nautilus-trader-kernel-evaluation.md](nautilus-trader-kernel-evaluation.md)（下称「调研报告」），模块化内核基础在 [target-architecture-modular-kernel.md](target-architecture-modular-kernel.md)。本文不重复论证，只定义**要什么（需求）**与**怎么落（设计）**。
