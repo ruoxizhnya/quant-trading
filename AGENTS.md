@@ -496,7 +496,7 @@ EquityDeep（数据底座，L1 — 非 agent、无独立编排）
   - [ ] `go test ./... -count=1 -race` 通过（或受影响包的测试通过）
   - [ ] 前端变更：`npm test` + `npm run typecheck`（若可用）通过
   - [ ] commit message 符合格式
-- **分支策略**: 不直接提交到 `main`，使用 feature branch（如 `fix/s7-p0-1-pipeline-nil-runner`）
+- **分支策略（ODR-067，2026-10-14 起）**: 单人自托管维护期**允许直接提交 `main`**。代价是提交前门禁必须自己当闸：受影响包的 `go test` + `go vet` + `gofmt -l` 当场跑过，一个 commit 只做一件事，且**不得把新红当成既有噪声**（见 ui 仓 `docs/TASKS.md` AUD-61 的登记表机制 —— 红必须登记在案，才能区分「我这条提交弄坏的」与「本来就红的」）。**对外贡献（他人开的 PR）与本仓之外的上游（如 `nautilus_trader`）仍走 PR 工作流，不套用本授权。**
 
 #### 规范适用范围
 
@@ -586,7 +586,7 @@ EquityDeep（数据底座，L1 — 非 agent、无独立编排）
 
 ### Never Do（绝对不做）
 - ❌ **绝不在代码中硬编码 API 密钥、密码或凭据**
-- ❌ **绝不直接提交到 `main` 分支** — 使用 PR 工作流
+- ❌ **绝不绕过评审直接推他人贡献的分支** — 单人维护期本仓可直接提交 `main`（前提与补偿门禁见 ODR-067，正文在 `quant-trading-docs` 仓 `docs/archive/odr/`）；上游仓（如 `nautilus_trader`）按各自 `AGENTS.md` 走 PR，不套用本授权
 - ❌ **绝不修改 `node_modules/`, `dist/`, `.env*` 或自动生成的文件**
 - ❌ **绝不使用 `any` 类型且无显式注释说明**
 - ❌ **绝不生成无法解释的代码**
@@ -917,7 +917,7 @@ Please continue from where we left off.
 | 使用本模板 | [AGENTS_TEMPLATE.md](docs/AGENTS_TEMPLATE.md) |
 
 ---
-_Last updated: 2026-10-12_
+_Last updated: 2026-10-14_
 _Source: 基于 AGENTS Template v2.0 迁移，融合 quant-trading + Claudeer 最佳实践_
 _Migration ODR: odr-005-agents-md-v3-migration (pending creation)_
 _Unified Platform Update: 顶层产品重定义 ([PRODUCT.md](docs/PRODUCT.md)) + ~~统一研究平台~~ ([ADR-022](docs/archive/superseded-adr/adr-022-unified-research-platform.md), 取代 [ADR-021](docs/archive/superseded-adr/adr-021-equitydeep-research-layer.md)) + 重构记录 ([ODR-048](docs/archive/odr/odr-048-top-level-product-redefinition.md)) — 2026-09-15_
@@ -926,3 +926,5 @@ _ADR-022 Architecture Reflection: AGENTS.md v3.2 → v3.3 — 补齐四层架构
 _ADR-023/024 Reflection: AGENTS.md v3.3 → v3.4 (AUD-14) — §1 顶层定位改三角色实验室、§2 分层改三层模型 (L1-L3) + 执行载体、§3 目录树校准 (tool.go / docs/archive/odr / 21 工具 / migrations 不执行)、§11 表数口径改「内联 DDL 37 张（唯一执行路径）」、全文 ADR-022 引用收口到 ADR-023/024 — 2026-09-21_
 _Phase 4 Update: AI-Native Evolution architecture documented in ADR-015, archive/tasks-phase-2.md (IMPLEMENTATION_PLAN.md 已归档至 archive/)_
 _ARCHITECTURE.md 建文件纳入（2026-10-12）：docs/ARCHITECTURE.md 建成（§11 导航与 Rule 1 加表/端口触发器的落地目标，原为死链）；§11 表数口径改为「唯一可靠数字 = 当下 grep 结果」（37 张快照退役，历史数字仅作警示）；docs/README.md 文档入口同步登记。_
+_分支约定变更（2026-10-14，ODR-067）：§8.5 规范 3「分支策略」与 §9 Never Do 两处**同步**改判 —— 单人自托管维护期允许直接提交 `main`，补偿门禁写在 §8.5 那条里（提交前测试当场跑 + 一个 commit 一件事 + 新红不得混进既有红）；他人贡献的 PR 与上游仓（`nautilus_trader`）不变。两处一起改是刻意的：本文件刚刚才为「同一个约定写在两处、各改各的」收过一次口（K9 三值口径，见 ui 仓 A-07），不能自己在同一份文档里再犯一次。_
+_⚠️ 顺带记录一处**未修**的既有漂移：本文件大量引用的 `docs/PRODUCT.md`、`docs/ADR.md`、`docs/VISION.md`、`docs/adr/`、`docs/archive/odr/` 在**本仓已不存在**（文档拆仓后落在 `quant-trading-docs`；`docs/archive/odr/` 现存 0 个文件），只有 `docs/TASKS.md`/`SPEC.md`/`ARCHITECTURE.md`/`E2E_TEST_GUIDE.md`/`TEST.md` 还在。链接批量改指向不属本次改动，已在 core `docs/TASKS.md` 登记。_

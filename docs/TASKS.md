@@ -946,6 +946,35 @@ SSE 化留作 P3 待办，不占裁决位。
 
 ---
 
+## 九、ODR-067 改判带来的两条登记（2026-10-14）
+
+### DOCS-01 · AGENTS.md 的文档指针在文档拆仓后集体失效（🟠）
+
+- **① 目标**：`AGENTS.md` 里每条 `docs/...` 引用都能在某个工作树命中，且由一条**机器断言**守住（新增死链当场变红）。
+- **② 上下文**（2026-10-14 实测，非估计）：`AGENTS.md` 共 **114** 处 `docs/*.md` 引用，其中 **34 个不同目标在本仓不存在**。逐个查过去向：
+
+  | 落点 | 目标数 | 代表（括号内为引用处数） |
+  |---|---|---|
+  | 已迁 `quant-trading-docs` 仓 | 28 | `docs/PRODUCT.md`(9) · `docs/VISION.md`(6) · `docs/ADR.md`(6) · `docs/TEST.md`(3) · `docs/adr/adr-023-*`(7) · `docs/adr/adr-024-*`(5) · `docs/archive/superseded-adr/adr-022-*`(5) · `docs/archive/tasks-phase-2.md`(3) · `docs/archive/odr/*`(9 条) · `docs/ROADMAP.md`(2) · `docs/AGENTS_TEMPLATE.md` |
+  | 已迁 `quant-trading-ui` 仓 | 3 | `docs/design/index.md` · `visual.md` · `components.md`（§11「前端设计系统」那行三条全死） |
+  | **三仓历史里从未存在（幻影引用）** | 3 | `docs/E2E_TEST_GUIDE.md`（`git log --all -- <path>` 在 core / docs / ui 均 **0 命中** ⇒ 这个文件从未有过；它承诺的内容实际在 docs 仓 `docs/TEST.md` §7.2「E2E Tests — Playwright」）· `docs/archive/README.md` · `docs/archive/RESEARCH-equitydeep-legacy.md`（后两条按同法复核，命中历史即归上表） |
+
+  本仓 `docs/` 现只剩 `SPEC.md`/`ARCHITECTURE.md`/`TASKS.md`/`migrations/`/`design/kernel/`/`openapi.yaml`/`embed.go`，且 **`docs/archive/odr/` 是空目录（0 个文件）** —— 而 `AGENTS.md` §3 目录树、§10 Rule 2、§11 导航仍按「ADR/ODR 都在本仓」描述。
+- **③ 要求**：先做**归因不改链**（= ② 已完成）；再三选一并在工单里写理由 —— **(a)** core `docs/` 放转发存根（每个死链一个文件，正文只写「已迁 X 仓 yyy.md」）／**(b)** 改显式跨仓措辞（`quant-trading-docs:docs/PRODUCT.md`，不带可解析相对链接）／**(c)** 建一份「文档归属表」，正文只引用该表。**排除条件**：三个仓不保证在同一目录布局下被检出（CI、他人机器），故**任何依赖 `../quant-trading-docs/...` 相对路径的方案先排除** —— 动之前先确认这一条。无论选哪条，**必须同时落守卫**：扫 `AGENTS.md`（及 core `docs/*.md`）的相对链接，命中不了即红；可抄 ui 仓 A-02/A-03 那组「CSS 变量引用完整性」棘轮基线（悬空集合必须等于登记集，双向红）。
+- **④ 约束与非目标**：不改任何文档正文的判断内容（只处理指针）；不重排 `AGENTS.md` 章节；不改 `docs/archive/` 归档内容（AGENTS.md §4 规定归档不可变，**唯一例外正是失效相对链接可修** —— 本工单落在这个例外内）；不顺手修「指向仍存在文件」的措辞问题。
+- **⑤ 验收**：守卫存在且默认随检查跑；**首次上线必须当场抓到这 34 条**（抓不到 = 假护栏，须做「改坏→变红→还原」）；三条幻影引用要么补出文件、要么从 `AGENTS.md` 删除，不留悬空链接。
+- **⑥ 边界**：只做指针 + 守卫；文档内容重写与 `AGENTS.md` 版本史整理另立。
+
+### ODR-067 的补偿依赖（是一条前提，不是工单）
+
+直推 `main` 之后，「这条提交弄坏了」与「本来就坏了」只能靠**红登记在案**来区分。而当日实测
+全量 e2e 是 **61 failed / 116 passed / 2 skipped**（退出码 1）。所以 ui 仓 **AUD-61 阶段一**
+（61 条逐条 `test.fixme` + 登记表一行，并要求「去掉 fixme 必须重新变红」的破坏验证）从
+「测试债清理」升格为**主干工作流的前置条件** —— 不做，直推 main 等于把红灯与提交历史解耦。
+实测分布、四类根因与逐条证据都在 ui 仓 `docs/TASKS.md` 的 AUD-61 节，此处只留指针，不双写。
+
+---
+
 ## 维护本文件
 
 - 新增 task 必须按 [AGENTS.md §8.5](../AGENTS.md) 写全六字段（目标/上下文/要求/约束与非目标/验收/边界）。
