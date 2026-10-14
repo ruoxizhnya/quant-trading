@@ -6,8 +6,8 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 # TASKS — 未完成项
 
-> **只放未完成项**，完成即移入 `archive/`（旧任务文档：[archive/TASKS-2026-10-08-archived.md](archive/TASKS-2026-10-08-archived.md)，含 Sprint 1–8 与 AUD-01~62 记录）。
-> 任务定义遵循 [AGENTS.md §8.5 任务定义规范](../AGENTS.md)——**每个 task 必须让独立 coding agent 不被打扰地完成并自证**（六字段 + 派工三律）。
+> **只放未完成项**，完成即移入 `archive/`（旧任务文档：archive/TASKS-2026-10-08-archived.md（`quant-trading-docs:docs/archive/TASKS-2026-10-08-archived.md`），含 Sprint 1–8 与 AUD-01~62 记录）。
+> 任务定义遵循 [AGENTS.md §8.5 任务定义规范](../../AGENTS.md)——**每个 task 必须让独立 coding agent 不被打扰地完成并自证**（六字段 + 派工三律）。
 >
 > 状态标记：`⬜ 待做` / `🔶 进行中` / `⛔ 阻塞（有未解除前置）` / `✅ 完成（附日期）`
 > 派工三律（每个 task 都适用，见 §8.5.3）：**一 task 一 commit · 护栏必破坏验证 · 要正证据不靠失败**。
@@ -16,7 +16,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ## 一、主线：模块化内核（目标架构）✅ 全部完成（K0–K7，2026-10-08~10）
 
-> 详细蓝图：[design/kernel/target-architecture-modular-kernel.md](design/kernel/target-architecture-modular-kernel.md)（D1–D5 已拍板，2026-10-08）。
+> 详细蓝图：[design/kernel/target-architecture-modular-kernel.md](../design/kernel/target-architecture-modular-kernel.md)（D1–D5 已拍板，2026-10-08）。
 > **依赖主线：K0 → K1 → K2 → {K3, K5, K6, K7}；K4 独立（只依赖 K1 的 exec-engine 挂点）。**
 > K0 是所有并行开发的**硬前提**（契约先行冻结，见蓝图 §5.1）。K0 完成后，K3/K4/K5/K6/K7 可各自交一个独立 agent 并行开发。
 > **本主线已收官，遗留项按 ADR-031 并入新主线（§二）**：K7 遗留①②→K8、OBS-01 遗留①②→K9、K0-P2-1→K11、K1-P2-1~4→K12、K4 遗留（exec-algo 接线）→K17、K5 遗留（告警接线）→K16 ③-⑤。
@@ -193,7 +193,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 ## 二、主线（新）：内核可插拔 + 外围 NT-ready（阶段 1–3，ADR-031）
 
 > **决策**：[ADR-031](https://github.com/ruoxizhnya/quant-trading-docs/blob/main/docs/adr/adr-031-kernel-pluggable-nt-ready.md)（buy vs build：内核降级为可替换执行器，NT 侧车「信号—权重回放适配器」，Go 策略资产零重写）。
-> **需求与设计**：[design/kernel/kernel-pluggable-nt-ready.md](design/kernel/kernel-pluggable-nt-ready.md)（四契约 RunSpec/SignalSpec/ResultSpec/EngineRunner、适配器规则、FR-1~FR-7）。
+> **需求与设计**：[design/kernel/kernel-pluggable-nt-ready.md](../design/kernel/kernel-pluggable-nt-ready.md)（四契约 RunSpec/SignalSpec/ResultSpec/EngineRunner、适配器规则、FR-1~FR-7）。
 > **依赖主线**：阶段 1 = {K8, K9} 并行 → K10；K11 / K12 独立可并行（K12 是阶段 3 前置）。阶段 2 = K13 → K14 → K15（前置 K8–K10）。阶段 3 = K16（前置 K15 + **NT 决策门通过**，见 §五）。K17 独立（K4 遗留收口，不在 NT 阶段链上）✅ 已完成（2026-10-12，`6205c64`；审查遗留 K17-R1 `547564b` / K17-R2 `4aab98c` / RV1–RV4 均已 2026-10-13 收口，K18 `7a3576e`）。
 > **总原则**：阶段 1 全程「默认行为逐字节不变」——不带新字段的存量请求走 Go 内核，数值、语义、API 形状零变化（回归腿钉住）。
 
@@ -367,7 +367,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ### K15 · 结果映射 + 双跑对齐实验（阶段 2，前置：K14）✅ 完成（2026-10-13）
 
-> **⑦ 收口记录（2026-10-13）**：三件套一次交付——① **映射层**：侧车 `engine.py` 的 `_map_result` 扩全数据面（`equity_curve` 日净值合成 = cash(d)+Σ qty×close，与 Go tracker `totalValue` 同构；`trades` 逐笔 fills 映射；status 三值；completed 但曲线合成失败 → failed fail-loud）+ `runspec.py` 的 `signals` wire 解析（fail-closed，与 Go `ValidateRunSpec` 逐字同口径）；Go `runner.go` 数据面落入冻结字段 `PortfolioValues/Trades`（无 schema 新增）。② **对齐工具** `cmd/dualrun`：Go 侧权重回放执行器（`wrreplay.go`，决策规则与 `weight_replay.py` 逐字对拍——恒定名义额分摊 capital/N / 涨跌停不追 / T+1 / 整手 / D_max；撮合记账走 Tracker+ComputeFees 内核既有实现）+ 同一 `metrics.GenerateBacktestResult` 算两侧指标 + 逐指标/逐笔 diff 报告。③ **实验**：2024 全年两标的（主板）× 2 信号流（bh/quarterly），确定性腿两侧 ✅，total_return 差 -0.086%/-0.076%、sharpe 差 ≤0.0023、maxDD 差 ≤0.35%，matched 成交 363/328、无机制性缺笔；报告落 [docs/design/kernel/k15-dualrun-report.md](docs/design/kernel/k15-dualrun-report.md)（+ 两份机器生成数据文件），容差阈值实测回写设计文档 §8 表 1 ✅。**破坏腿实测红**：① wrReplay 整手 round→Round（`1 != 3` 红）② 涨停 no-chase 短路（`1 != 2` 红）③ diff 报告删 NT 一笔成交 → go_only 点名（单测钉住）④ 侧车 equity 合成缺 account 报告 → failed（单测）。**正证据**：Python 59 绿 / Go 全量绿。**归因与遗留**：价源精度（PG 浮点 vs catalog tick）为路径分叉主因；NT fills 费用 ≈ 纯佣金（过户费分量未体现）→ 立 **K15-R1**（复查结论：为对账展示 bug，NT 费用实际全项正确，见 K15-R1 ⑦）；win_rate 配对敏感性如实记档不设硬阈；费率口径裁决 b 项执行（Tracker+ComputeFees 路径，§8.4 记档）。
+> **⑦ 收口记录（2026-10-13）**：三件套一次交付——① **映射层**：侧车 `engine.py` 的 `_map_result` 扩全数据面（`equity_curve` 日净值合成 = cash(d)+Σ qty×close，与 Go tracker `totalValue` 同构；`trades` 逐笔 fills 映射；status 三值；completed 但曲线合成失败 → failed fail-loud）+ `runspec.py` 的 `signals` wire 解析（fail-closed，与 Go `ValidateRunSpec` 逐字同口径）；Go `runner.go` 数据面落入冻结字段 `PortfolioValues/Trades`（无 schema 新增）。② **对齐工具** `cmd/dualrun`：Go 侧权重回放执行器（`wrreplay.go`，决策规则与 `weight_replay.py` 逐字对拍——恒定名义额分摊 capital/N / 涨跌停不追 / T+1 / 整手 / D_max；撮合记账走 Tracker+ComputeFees 内核既有实现）+ 同一 `metrics.GenerateBacktestResult` 算两侧指标 + 逐指标/逐笔 diff 报告。③ **实验**：2024 全年两标的（主板）× 2 信号流（bh/quarterly），确定性腿两侧 ✅，total_return 差 -0.086%/-0.076%、sharpe 差 ≤0.0023、maxDD 差 ≤0.35%，matched 成交 363/328、无机制性缺笔；报告落 [docs/design/kernel/k15-dualrun-report.md](../design/kernel/k15-dualrun-report.md)（+ 两份机器生成数据文件），容差阈值实测回写设计文档 §8 表 1 ✅。**破坏腿实测红**：① wrReplay 整手 round→Round（`1 != 3` 红）② 涨停 no-chase 短路（`1 != 2` 红）③ diff 报告删 NT 一笔成交 → go_only 点名（单测钉住）④ 侧车 equity 合成缺 account 报告 → failed（单测）。**正证据**：Python 59 绿 / Go 全量绿。**归因与遗留**：价源精度（PG 浮点 vs catalog tick）为路径分叉主因；NT fills 费用 ≈ 纯佣金（过户费分量未体现）→ 立 **K15-R1**（复查结论：为对账展示 bug，NT 费用实际全项正确，见 K15-R1 ⑦）；win_rate 配对敏感性如实记档不设硬阈；费率口径裁决 b 项执行（Tracker+ComputeFees 路径，§8.4 记档）。
 
 - **① 目标**：NT 报告 → ResultSpec 映射层落地；产出**同信号流、双内核**的对齐报告（逐指标 diff、差异归因可读），容差阈值实测确定并回写设计文档。
 - **② 上下文**：设计文档 §2.3/FR-6；K5 信号对账方法论（`pkg/live/signal_reconcile.go` 的「同输入对差异归因」思路）；指标口径 `pkg/backtest/metrics/performance.go`（封闭系统日收益）；K4 冲击/费率基线。
@@ -384,7 +384,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 ### K15-R1 · NT fills 费用链路复查（K15 实验发现，2026-10-13 登记）✅ 完成（2026-10-13）
 
 - **① 目标**：定位并修复「NT 侧车 fills 报告的 commission ≈ 纯佣金、过户费分量缺失」的链路疑点，使 NT 侧费用与 `ashare.compute_fees(...).total` 逐笔一致，对齐阈值可收紧到 total_return |Δ| ≤ 0.1%。
-- **② 上下文**：K15 实验（[k15-dualrun-report.md](docs/design/kernel/k15-dualrun-report.md) 归因②）实测：Go 侧每笔费用 = ComputeFees 全三项精确对上（例 7.5662×33000 → 77.40 = 佣金 74.91 + 过户 2.50）；NT 同一笔 fills 报告 commission = 74.91（= 纯佣金，`ashare.make_fee_model` 声明返回 `compute_fees(...).total` 但实际未含过户费）。疑点在 FeeModel 返回的 Money → NT 撮合 → `generate_fills_report` 的 commission 列之间的链路（被覆盖 / 只取部分 / Money 精度截断）。工具：`nt-sidecar/.venv/Scripts/python.exe` + NT 2.0.0rc6 源码（site-packages 内 Rust/PyO3）。
+- **② 上下文**：K15 实验（[k15-dualrun-report.md](../design/kernel/k15-dualrun-report.md) 归因②）实测：Go 侧每笔费用 = ComputeFees 全三项精确对上（例 7.5662×33000 → 77.40 = 佣金 74.91 + 过户 2.50）；NT 同一笔 fills 报告 commission = 74.91（= 纯佣金，`ashare.make_fee_model` 声明返回 `compute_fees(...).total` 但实际未含过户费）。疑点在 FeeModel 返回的 Money → NT 撮合 → `generate_fills_report` 的 commission 列之间的链路（被覆盖 / 只取部分 / Money 精度截断）。工具：`nt-sidecar/.venv/Scripts/python.exe` + NT 2.0.0rc6 源码（site-packages 内 Rust/PyO3）。
 - **③ 要求**：
   1. 最小复现：单笔已知 fill（qty/px 已知）断言 NT fills 报告 commission == `compute_fees(v, is_sell).total`（当前实测不等，差一笔过户费）；
   2. 定位根因（NT FeeModel 覆盖 / fills 报告取值口径 / Money 精度），修复落代码——若根因在 NT 库内部且不可修，则改用**对账层补偿**（Go diff 工具按 is_sell 单侧加回过户费）并在注释与报告里写明是补偿不是修复；
@@ -459,7 +459,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 
 ## 四、OBS 独立工单（未被设计吸收，源自 ADR-030）
 
-> 完整描述见 [ADR-030](adr/adr-030-draft-observed-improvements.md)。按依赖与价值排序，开工前各自按 §8.5 补全六字段。
+> 完整描述见 ADR-030（`quant-trading-docs:docs/adr/adr-030-draft-observed-improvements.md`）。按依赖与价值排序，开工前各自按 §8.5 补全六字段。
 
 | 工单 | 一句话 | 优先级 |
 |---|---|---|
@@ -977,6 +977,6 @@ SSE 化留作 P3 待办，不占裁决位。
 
 ## 维护本文件
 
-- 新增 task 必须按 [AGENTS.md §8.5](../AGENTS.md) 写全六字段（目标/上下文/要求/约束与非目标/验收/边界）。
+- 新增 task 必须按 [AGENTS.md §8.5](../../AGENTS.md) 写全六字段（目标/上下文/要求/约束与非目标/验收/边界）。
 - 完成即标 ✅（附日期）并定期移入 `archive/`；本文件只留未完成项。
 - 大任务（K0–K7）开工前，若六字段不够细，先补细再派工——**独立可运行判据达不到 = task 没写好，不是 agent 的问题**。

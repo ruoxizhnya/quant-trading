@@ -1,3 +1,9 @@
+---
+status: evergreen
+last-verified: 2026-10-12
+verified-by: 文档拆仓后重建 core 文档入口（2026-10-12，见 AGENTS.md 尾注 _ARCHITECTURE.md 建文件纳入_）；R1 frontmatter 由 DOCS-02 补齐
+---
+
 # Quant Lab — 架构总览
 
 > **定位**：A 股量化研究平台（Quant Lab）的服务拓扑、数据归属与存储真相。

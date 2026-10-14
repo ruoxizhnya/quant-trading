@@ -1,3 +1,9 @@
+---
+status: active
+last-verified: 2026-10-14
+verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补齐
+---
+
 # TASKS — 未完成项
 
 > **只放未完成项**，完成即标 ✅（附日期）并移入 `archive/`。旧任务文档（Sprint 1–8、AUD-01~62、K0–K18 内核线、NT 决策门等全部完成记录）：[archive/TASKS-2026-10-14-archived.md](archive/TASKS-2026-10-14-archived.md)（2026-10-14 归档，归档后不可变）。
@@ -204,7 +210,7 @@
 
 #### 执行记录（裁决 + 证据，2026-10-14）
 
-**三选一 = (b) 显式跨仓措辞。** 每条跨仓死链 `[标签](docs/Y.md)` 改写成 `标签（`quant-trading-docs:docs/Y.md`）`／`（`quant-trading-ui:...`）`——反引号内联代码，非可解析相对链接。
+**三选一 = (b) 显式跨仓措辞。** 每条跨仓死链 `[标签](docs/Y.md)` 改写成 标签（`quant-trading-docs:docs/Y.md`）／（`quant-trading-ui:...`）——路径置于反引号内联代码、去掉 `]()` 链接语法，即非可解析相对链接。
 - 排除 **(a) 转发存根**：在 core `docs/` 造 ~33 个同名占位文件，会与真身（docs/ui 仓）影子分叉，grep 到 core 的 `PRODUCT.md` 会被误信；每迁一份就得补一个存根，维护面随迁出增长。
 - 排除 **(c) 文档归属表**：正文改指单表 ≈ 重排 §11 导航（违 ④「不重排章节」），且守卫仍需逐链解析，收益不比 (b) 大。
 - 硬排除已守：无一条依赖 `../quant-trading-docs/...` 相对路径（三仓不保证同布局检出）。
@@ -227,6 +233,19 @@
 - **④ 约束与非目标**：不改任何文档正文的判断内容（只处理指针）；不重排 `AGENTS.md` 章节；不改 `docs/archive/` 归档内容（唯一例外是失效相对链接可修——本单在此例外内）；不顺手修「指向仍存在文件」的措辞问题。
 - **⑤ 验收**：守卫默认随检查跑；**首次上线必须当场抓到这 34 条**（抓不到=假护栏，须做「改坏→变红→还原」）；幻影引用清零（补出或删除）；三选一的裁决理由写进工单记录。
 - **⑥ 边界**：只做指针 + 守卫；文档内容重写与 AGENTS.md 版本史整理另立。
+
+### DOCS-02 · 链接守卫整体转绿（DOCS-01 登记的既有红）✅ 完成（2026-10-14）
+
+- **① 目标**：`python tools/check_doc_links.py`（默认档）与 `--include-archive`（归档档）两档退出码均为 0，CI `docs` job 全绿。
+- **② 上下文**：DOCS-01 落地后守卫剩两类红，**均 HEAD 已红、非 DOCS-01 引入**（⑥ 边界排除、已登记于 DOCS-01 执行记录）：
+  - **(A) 2 份入口层文档缺 R1 frontmatter** — `docs/ARCHITECTURE.md`、`docs/TASKS.md` 缺 `status/last-verified/verified-by`。判据在 `tools/check_doc_links.py::check_entry_frontmatter`，范围由 `docs/README.md` 的链接推导（`SPEC.md` 已有 frontmatter，作格式基准）。
+  - **(B) 8 条死链全在 `docs/archive/TASKS-2026-10-14-archived.md`**（仅 `--include-archive` 触发）：行 10 / 980 `[...](../AGENTS.md)`、行 19 / 196 `[...](design/kernel/*)`、行 370 / 387 `[...](docs/design/kernel/k15-dualrun-report.md)` 系**层级笔误**（真实目标在 core，改 `../../AGENTS.md`、`../design/kernel/*` 即命中）；行 9 `[...](archive/TASKS-2026-10-08-archived.md)`、行 462 `[ADR-030](adr/adr-030-draft-observed-improvements.md)` 系**跨仓引用**（真实目标在 quant-trading-docs 仓）。
+- **③ 要求**：(A) 给 `docs/ARCHITECTURE.md`、`docs/TASKS.md` 顶部补 R1 frontmatter 三字段，日期与 `verified-by` 如实对应最近一次内容对账事件；(B) 5 处层级笔误改成能命中 core 的相对路径；2 处跨仓引用按 DOCS-01 裁决 (b) 改显式 `quant-trading-docs:docs/...` 内联指针（保留原文件名结论）。
+- **④ 约束与非目标**：不改归档正文判断内容（仅修链接指针，落 §4「失效相对链接可修」例外内）；**不动 `check_doc_links.py` 守卫逻辑**（DOCS-01 已定，本单只让数据满足它）；不新增依赖；不碰 config-path 检查与既有 `MIGRATED_*` 白名单。
+- **⑤ 验收**：默认档 `✓ 未发现坏链` + 退出码 0；`--include-archive` 退出码 0；破坏验证——临时把任一层级死链改错 → 对应档变红 → 还原 → 绿；`python -m py_compile tools/check_doc_links.py` 通过。
+- **⑥ 边界**：只做「让既有红归零所需的最小指针 / 元数据修复」；文档内容重写、AGENTS.md 版本史散文（尾注 `E2E_TEST_GUIDE.md`/`TEST.md` 表述）仍另立。
+
+> **收口记录（2026-10-14）**：两档 `python tools/check_doc_links.py`[ `--include-archive`] 均退出码 0、`✓ 未发现坏链` + `✓ 入口层文档都带 R1 frontmatter`。补 `docs/ARCHITECTURE.md`（last-verified 2026-10-12）/`docs/TASKS.md`（2026-10-14）frontmatter；归档 `../AGENTS.md`×2 改 `../../`、`design/kernel/*`×2 与 `docs/design/kernel/k15-*`×2 改对层级（均在 core 命中）、`archive/TASKS-2026-10-08-archived.md`+`ADR-030`×1 各改 (b) 显式跨仓指针。**破坏验证**：临时把一条改回 `../AGENTS.md` → `--include-archive` 报 1 条坏链退出 1 → 还原 → 退出 0 绿。未动守卫逻辑。
 
 ### OPS-01 · 观察页状态轮询 SSE 化 ⬜ 待做（P3，不急）
 
