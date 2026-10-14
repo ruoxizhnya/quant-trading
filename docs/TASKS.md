@@ -247,7 +247,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 
 > **收口记录（2026-10-14）**：两档 `python tools/check_doc_links.py`[ `--include-archive`] 均退出码 0、`✓ 未发现坏链` + `✓ 入口层文档都带 R1 frontmatter`。补 `docs/ARCHITECTURE.md`（last-verified 2026-10-12）/`docs/TASKS.md`（2026-10-14）frontmatter；归档 `../AGENTS.md`×2 改 `../../`、`design/kernel/*`×2 与 `docs/design/kernel/k15-*`×2 改对层级（均在 core 命中）、`archive/TASKS-2026-10-08-archived.md`+`ADR-030`×1 各改 (b) 显式跨仓指针。**破坏验证**：临时把一条改回 `../AGENTS.md` → `--include-archive` 报 1 条坏链退出 1 → 还原 → 退出 0 绿。未动守卫逻辑。
 
-### OPS-01 · 观察页状态轮询 SSE 化 ⬜ 待做（P3，不急）
+### OPS-01 · 观察页状态轮询 SSE 化 ⛔ core 侧关闭（2026-10-14 改判：前提失效，实现移 agent 仓）
 
 - **① 目标**：观察页 run 状态从轮询改为 SSE 推送（或给只读状态端点单列限流预算），消除 429 与真失败混淆的土壤。
 - **② 上下文**：归档卷 §八 6 号裁决（2026-10-14）：`/api/explore/runs/:id` **不进** `RateLimitExemptPaths`（逐字相等匹配机制上做不到 + 判据不满足），真解是 SSE；本仓已有先例 `/api/sync/stream`（前端已接 `EventSource`）。前端已自救（`POLL_MS=2500` + 连续 6 次失败才认断线 + e2e 钉住），本单是后端真解，不急。
@@ -255,6 +255,14 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：不动 `IsRateLimitExempt` 的逐字匹配语义（安全不变量）；不改前端既有自救逻辑的判定阈值；不动限流全局参数。
 - **⑤ 验收**：SSE 通道状态推送测试通过（或限流预算单列测试）；观察页轮询频率显著下降或消失（前端单确认）；回归：`/api/sync/stream` 既有行为不变。
 - **⑥ 边界**：只做观察页状态通道；其他轮询端点另立。
+
+> **core 侧改判关闭（2026-10-14，派工即核查触发，逐条源码核过）—— 前提失效，本单在 core 无法按原样落地：**
+> 1. **explore 已不在 core**：`pkg/ai` / `pkg/tools` 在本仓不存在（AI 拆仓 ADR-027；AGENTS.md §1 明写 copilot/pipeline/explore/tools 四族 handler 现住 `quant-trading-agent` 仓）。core 对 `/api/explore/*` 只做纯反代（`cmd/analysis/handlers_ai_proxy.go:63`）——**既无 explore handler，也无 run 状态数据源**，core 侧 SSE 无从推起。⑤「SSE 通道状态推送测试通过」在 core 不可成立（被测源不在此）。
+> 2. **core 其实已 SSE-safe**：同代理 `handlers_ai_proxy.go:53` `proxy.FlushInterval = -1 // SSE 逐写直通`（文件头注释已点名流式端点直通）。即 agent 仓一旦暴露 `GET /api/explore/runs/:id/stream`，core 现有代理**原样直通、零新增代码**——拆仓时就把「core 侧要做的」做完了。
+> 3. **改判**：实现移 **`quant-trading-agent` 仓另立单**——在 run 状态源处产出 `runs/:id/stream` SSE，形状复用 data-service 先例 `sseProgressHandler`（`cmd/data/sync_handlers.go:761`）；ui 前端接线仍另立（跨仓两段式）。本 core 单**关闭**，保留可追溯指针不删。
+> 4. **不动限流器**：§八 6 号「`/api/explore/runs/:id` 不进 `RateLimitExemptPaths`（逐字匹配做不到 + 判据不满足）」的裁决**继续有效**；本单不因 SSE 触 `IsRateLimitExempt` 语义或全局预算。
+>
+> **顺带纠偏**：本单 ②③⑤ 引用的先例 `/api/sync/stream` 在本仓**不存在**；真实 SSE 先例是 `GET /api/sync/jobs/:id/progress`（在 **data-service**，非 analysis），且它本身是每 2s 轮询 store 再转推 SSE（非 pub/sub）。不影响结论——SSE 省 429 的原理是「N 次轮询请求（前端 `POLL_MS=2500`≈24 req/min/页）→ 1 条长连接只占 1」。
 
 ---
 
