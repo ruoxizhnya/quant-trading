@@ -80,9 +80,12 @@ func TestNormalizeDailyOHLCV_MatchesOfficialExample(t *testing.T) {
 	almost(t, "latest close_qfq", last.Close, 1210.99)
 }
 
-// TestNormalizeDailyOHLCV_VolumeNotAdjusted 成交量不参与复权。
+// TestNormalizeDailyOHLCV_VolumeNotAdjusted 成交量不参与**复权**，但要做**单位换算**。
 // tushare 的 vol/amount 本来就是原始成交量，前复权不改它 —— 如果顺手乘了 scale，
 // 换手率、成交额类因子会整体偏小，而且偏得没有规律（越早越小）。
+//
+// 单位换算另说：tushare 的 vol 单位是「手」，规范层 schema 声明的 volume
+// 单位是「股」（docs/SPEC.md「规范层 Schema」节），故 ×sharesPerLot。
 func TestNormalizeDailyOHLCV_VolumeNotAdjusted(t *testing.T) {
 	resp := dailyResp(dailyItem("20200102", 1128.00, 1145.06, 1116.00, 1130.00, 25271.64, 2856061.0))
 	factors := map[string]float64{"20200102": 7.3186}
@@ -91,8 +94,53 @@ func TestNormalizeDailyOHLCV_VolumeNotAdjusted(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d records, want 1", len(got))
 	}
-	almost(t, "volume", got[0].Volume, 25271.64)
+	// 25271.64 手 → 2527164 股：不复权（不乘 scale），但要换算单位。
+	almost(t, "volume_shares", got[0].Volume, 2527164.0)
+	// amount 是「成交额」不是「成交量」，单位换算不在本单范围（见 TASKS.md 登记）。
 	almost(t, "turnover", got[0].Turnover, 2856061.0)
+}
+
+// TestNormalizeDailyOHLCV_VolumeLotsToSharesRounds 手→股必须取整。
+//
+// 真库实测：392.6 万行里有 **37 万行（约 9.5%）**的 volume×100 在 float64 下
+// **不是精确整数**（最大误差 4.77e-07）。不 round 的话，存进 double precision
+// 的值形如 4152457645.0000005，NT 侧 as_quantity 的 is_integer() 是**精确**
+// 判断，会把这批数据全判成「不是整数」→ 整批损坏 → 导出路径整条断。
+//
+// 下面两个用例取自真库误差榜前二（一个向上偏、一个向下偏）。
+func TestNormalizeDailyOHLCV_VolumeLotsToSharesRounds(t *testing.T) {
+	cases := []struct {
+		name string
+		lots float64
+	}{
+		{"rounds_up", 41524576.45},   // ×100 = 4152457645.0000005（向上偏）
+		{"rounds_down", 40031647.16}, // ×100 = 4003164715.9999995（向下偏）
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// 用例自证：这个值 ×100 必须**确实**不精确，否则本测试测不到取整，
+			// 会悄悄退化成假护栏（改坏 round 也不红）。
+			if tc.lots*sharesPerLot == math.Round(tc.lots*sharesPerLot) {
+				t.Fatalf("用例失效：%v×100 恰好精确，检验不到取整 —— 换一个误差榜上的值", tc.lots)
+			}
+
+			resp := dailyResp(dailyItem("20200102", 100.0, 101.0, 99.0, 100.5, tc.lots, 1.0))
+			factors := map[string]float64{"20200102": 1.0}
+
+			got := qfqTestClient().normalizeDailyOHLCV(resp, "600519.SH", factors)
+			if len(got) != 1 {
+				t.Fatalf("got %d records, want 1", len(got))
+			}
+			want := math.Round(tc.lots * sharesPerLot)
+			if got[0].Volume != want {
+				t.Fatalf("volume = %v, want %v（未取整）", got[0].Volume, want)
+			}
+			if got[0].Volume != float64(int64(got[0].Volume)) {
+				t.Fatalf("volume = %v 不是整数 —— NT 侧 as_quantity 会把整批数据判成损坏",
+					got[0].Volume)
+			}
+		})
+	}
 }
 
 // TestNormalizeDailyOHLCV_MissingFactorSkipsRow 某天取不到因子时**跳过**该行，

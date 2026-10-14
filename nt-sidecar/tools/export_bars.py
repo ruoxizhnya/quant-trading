@@ -53,8 +53,14 @@ from sidecar.mapping import (  # noqa: E402 — import after sys.path tweak
 DEFAULT_DSN = "postgres://postgres:postgres@localhost:5432/quant_trading?sslmode=disable"
 DEFAULT_VENUE = "SIM"
 
+# The translation layer (sidecar.mapping.BAR_FIELD_MAP) addresses columns by
+# **canonical field name** (SPEC.md drift:ohlcv json tags), and the canonical
+# name for the bar's period start is `date` — not the physical column name
+# `trade_date`. Alias it here so the row dict carries the canonical key;
+# before this alias the exporter raised KeyError on every row (the D1 refactor
+# renamed the canonical field but the SELECT kept the physical name).
 QUERY = """
-SELECT symbol, trade_date, open, high, low, close, volume
+SELECT symbol, trade_date AS date, open, high, low, close, volume
 FROM ohlcv_daily_qfq
 WHERE symbol = ANY(%s)
   AND trade_date BETWEEN %s AND %s

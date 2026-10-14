@@ -390,11 +390,22 @@ func (c *TushareClient) fetchAdjFactors(ctx context.Context, symbol string, star
 	return out, nil
 }
 
+// sharesPerLot 是 A 股「一手」的股数。tushare daily 的 `vol` 字段单位是
+// **手**，而规范层 schema 声明的 volume 单位是**股**（docs/SPEC.md
+// 「规范层 Schema」节的 OHLCV 字段表）。两者相差恰好这个倍数。
+const sharesPerLot = 100
+
 // normalizeDailyOHLCV converts a `daily` response into 前复权 (qfq) OHLCV rows.
 //
 // daily fields: ts_code, trade_date, open, high, low, close, vol, amount
-// 四个价格按 qfq 口径换算：raw × 当日因子 / 最新因子。成交量**不**调整 ——
+// 四个价格按 qfq 口径换算：raw × 当日因子 / 最新因子。成交量**不做复权** ——
 // tushare 的 vol/amount 本来就是原始成交量，前复权不改它（stk_factor_pro 亦同）。
+//
+// 但成交量**要做单位换算**：tushare 的 vol 是「手」，规范层要的是「股」，
+// 故 ×sharesPerLot。且必须 round —— vol 是两位小数的「手」，浮点乘 100
+// 会留下 ~1e-7 的表示误差（真库 392 万行实测：×100 后真正非整数的 0 行，
+// 全部是浮点噪声），不 round 的话 NT 侧 as_quantity 的整数校验会把整批
+// 数据判成损坏、导出路径整条断掉。
 //
 // 刻意严格的两处（同 P2-10 的教训：缺失值折成某个默认值 = 编数据）：
 //   - 某天取不到因子 → **跳过这一行**，不补 1.0。补 1.0 等于宣称「这天没除权」，
@@ -454,13 +465,13 @@ func (c *TushareClient) normalizeDailyOHLCV(resp *TushareResponse, symbol string
 		ohlcv := domain.OHLCV{
 			Symbol:    symbol,
 			Date:      t,
-			Open:      c.fieldFloat(item, 2) * scale, // open
-			High:      c.fieldFloat(item, 3) * scale, // high
-			Low:       c.fieldFloat(item, 4) * scale, // low
-			Close:     c.fieldFloat(item, 5) * scale, // close
-			Volume:    c.fieldFloat(item, 6),         // vol（不复权）
-			Turnover:  c.fieldFloat(item, 7),         // amount（不复权）
-			TradeDays: 0,                             // not available from daily
+			Open:      c.fieldFloat(item, 2) * scale,                    // open
+			High:      c.fieldFloat(item, 3) * scale,                    // high
+			Low:       c.fieldFloat(item, 4) * scale,                    // low
+			Close:     c.fieldFloat(item, 5) * scale,                    // close
+			Volume:    math.Round(c.fieldFloat(item, 6) * sharesPerLot), // vol：手 → 股（不复权）
+			Turnover:  c.fieldFloat(item, 7),                            // amount（不复权）
+			TradeDays: 0,                                                // not available from daily
 		}
 		records = append(records, ohlcv)
 	}

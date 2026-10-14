@@ -552,8 +552,10 @@ start/end 语义：1d 按交易日闭区间（trade_date BETWEEN）；1m/15m 按
   （`nt-sidecar/tests/test_d1_mapping.py` 钉住）。
 - **跨语言字面量契约**：Python `FREQ_1D = "1d"` 等常量与 Go
   `market.Freq1d` 等**逐字相同**，翻译层测试双向钉住（改一侧即红）。
-- export_bars 既有换算（不变）：trade_date → UTC 午夜纳秒（与 daily 表
-  DATE 扫描形态一致）；volume 手 → 原样整数（不造股数语义）。
+- export_bars 换算：trade_date → UTC 午夜纳秒（与 daily 表 DATE 扫描形态
+  一致）；volume 取规范层的**「股」**（tushare 的「手」由 pkg/data 同步侧
+  按 sharesPerLot 换算，存量由 migration 052 对齐），导出层只要求它是整数
+  （as_quantity 的整数纪律），不再做单位换算。
 
 ### 护栏（棘轮 + 防漂移）
 

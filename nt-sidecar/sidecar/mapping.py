@@ -71,8 +71,11 @@ def as_price(value: object) -> Price:
 def as_quantity(value: object) -> Quantity:
     """规范层成交量字段 → NT ``Quantity.from_int``。
 
-    手/股语义不在此发明（K13 约定：原样整数）。非整数值（3.5 手、
-    "3000.5"）fail-loud——取整会悄悄改口径，换算属于规范层聚合的事。
+    **单位是「股」——这是规范层的既定口径**（SPEC.md「规范层 Schema」节声明
+    OHLCV.Volume 单位是股；tushare 的「手」在 pkg/data 同步时按 sharesPerLot
+    换算，存量由 migration 052 对齐）。本层不再做任何单位换算，只执行一条
+    纪律：进来的必须是**整数**。非整数值（3.5、「3000.5」）fail-loud ——
+    取整会悄悄改口径，换算属于上游的事，翻译层不悄悄取整。
     """
     if isinstance(value, bool):  # bool 是 int 子类，先挡掉
         raise TypeError(f"mapping: volume 收到 bool {value!r}——数据损坏，拒绝构造")

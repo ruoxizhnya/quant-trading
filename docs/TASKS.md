@@ -407,6 +407,29 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **⑤ 验收**：`curl` 的 body 字段集合与 `docs/SPEC.md` 对该端点的描述**逐条一致**（多一个少一个都算未完成）；前端 `StockCount` 类型与实测一致（不再出现"声明 string 实为 undefined"）；若选 (b1)，加一条路由级断言（照 `cmd/analysis/deps_test.go` 那份路由登记表的做法）。**破坏验证**：把 Scan 错误重新丢弃 → 新加的那条"字段缺失必须可观测"的断言变红，还原转绿。
 - **⑥ 边界**：只处理这两条读数的形状与通道；数据摄取（EQD-P1-2）与票池拆分（DATA-02）各自成单。
 
+### DATA-04 · 成交量单位统一（手 → 股）+ D1 导出路径修复 ✅ 完成（2026-10-14）
+
+- **① 目标**：让 `ohlcv_daily_qfq.volume` 的单位符合规范层 schema **已经声明**的「股」，并打通被 D1 打断的 NT catalog 导出路径（D7 登记的「已知阻断」）。
+- **② 上下文**（2026-10-14 实测，非引用）：
+  - 规范层契约写的**就是**「股」：`docs/SPEC.md` 规范层 Schema 的 OHLCV 字段表 `Volume | float64 | volume | 成交量（股；聚合 bar = 期间合计）`；`pkg/data/source/*_adapter.go` 的 schema 同样写 `Unit: "share"`；前端 `web/src/utils/format.ts` 的 `fmtVolume` 也按股格式化（`fmtVolume(200000000) === '2.0亿'`）。
+  - 但**实现**存的是「手」：`pkg/data/tushare.go` 的 `normalizeDailyOHLCV` 把 tushare `daily` 的 `vol`（单位手）原样写库；真库 392.6 万行里 317.1 万行（80.8%）是带两位小数的「手」——**实现违背了已写明的契约**。
+  - 后果链：`as_quantity` 要求整数 → 小数手 ⇒ fail-loud ⇒ NT 导出整条断（D7 记于 docs 仓 `nt-sidecar-operations.md` §4.4）；同时 `pkg/backtest/tracker` 的流动性阈值 `volume × 0.1` 与订单量（股）**量纲错配**，此前偏小 100 倍。
+- **③ 要求**：口径定死为「股」并一次改干净——同步侧换算 / 存量迁移 / 导出路径修复 / 契约描述对齐；不发明第二种口径。
+- **④ 约束与非目标**：不改 `as_quantity` 的整数纪律（它是对的，是上游给错了）；不改四契约签名；不猜未实测的数据源单位。
+- **⑤ 验收**：非整数行归零 + 与备份逐行比对 0 mismatch + 幂等重跑 no-op + 导出真跑值一致 + 对拍回归绿 + 破坏验证三组。
+- **⑥ 边界**：只做日线 `ohlcv_daily_qfq`（唯一有数据的表）；`turnover`（成交额）是否统一另立；分钟/实时表 0 行不在本单。
+
+- **完成记录（2026-10-14）**：
+  - **同步侧**：`pkg/data/tushare.go` 的 `normalizeDailyOHLCV` 按 `sharesPerLot`（一手 = 100 股）换算 + `math.Round`。取整是必须的——真库 **37.3 万行**的 `volume×100` 在 float64 下不是精确整数（最大误差 4.77e-07），不取整会被 `as_quantity` 的 `is_integer()` 判成损坏。
+  - **存量迁移**：`pkg/storage/postgres.go` 的 `migrationStatements()` 加 migration 052（文档副本 `docs/migrations/052_ohlcv_volume_lots_to_shares.sql`）。幂等守卫：×100 **不**幂等，故**不**写逐行 `WHERE volume <> floor(volume)`（真库 **19.24%** 的行本来就是整数「手」，逐行条件会漏掉 → 半股半手的混合表），改为先问一次「还有没有非整数（= 手的小数）」，有才整表换算。真库执行：392.6 万行全表换算（6m20s），结果非整数行 **0**、与备份逐行比对 **0 mismatch**、幂等重跑 no-op。
+  - **导出路径**：`nt-sidecar/tools/export_bars.py` 的 SELECT 改输出规范层列名 `trade_date AS date`（改 SELECT 而非映射表：`date` 是跨语言契约定下的 json tag）；`mapping.py` 的 `as_quantity` 注释更新（单位属规范层，本层只执行整数纪律）。
+  - **契约描述**：`docs/SPEC.md` 那句与字段表自相矛盾的「volume 手 → 原样整数（不造股数语义）」改为「取规范层的股」。
+  - **实测证据**：真库导出重跑通过（catalog 值 = 库值逐条一致，全整数；旧 catalog `1158366`〔手，截断〕→ 新 `115836645`〔股〕）；`go run ./cmd/dualrun -strategy bh -gate` 输出「对齐门禁通过：全部指标在 K15 阈值内，确定性腿一致，无成交 mismatch」——**D7 登记的导出阻断解除，对拍恢复全绿**。
+  - **破坏验证**（三组，均改坏变红、还原变绿、sha256 与基线一致）：① 删 `date` 别名 → 导出 KeyError；② 去 `×sharesPerLot` → 单测红；③ 去 `math.Round` → 单测红。**过程中发现并修正一个假护栏**：③ 首版测试值恰好 ×100 精确、改坏不红；改用真库误差榜前二的值并让用例**自证**（值若恰好精确则测试自身报错），重跑才有效。
+  - **对国内线的影响**：volume 整体 ×100，其中两处是**修正既有量纲错位**（`tracker` 流动性阈值偏小 100 倍；`execution` 的 impact 滑点偏高 100 倍，默认 `SlippageModel="fixed"` 故默认不生效）。对拍两内核同源同变，对齐仍在 K15 阈值内。
+  - **备份留存**：迁移前的 volume 列留存于 `ohlcv_daily_qfq_bak_052`（最小恢复集，可 `DROP TABLE` 移除；换算可逆：股 ÷ 100 = 手）。
+  - **未决（登记）**：① 日线 fallback 链 mootdx / eastmoney（`cmd/data/registry_init.go` 的 `DataTypeOHLCDaily`）的 vol 单位在项目内**无实测依据**，未改，启用前须实测对齐（现网数据全来自 tushare，不影响）；② `turnover` 的「千元 vs 元」错位（SPEC 声明 CNY，tushare `amount` 单位是千元）另立。
+
 ---
 
 ## 三、跨仓指针（不在本仓，勿双写）

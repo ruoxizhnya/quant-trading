@@ -422,6 +422,29 @@ func migrationStatements() []string {
 		// 从此在所有按可用日过滤的查询里消失。存量的这类行必须清成 NULL，
 		// 否则加完列反而会少数据（写入侧已用 nullableDate 堵住新增）。
 		`UPDATE stock_fundamentals SET ann_date = NULL WHERE ann_date < DATE '1900-01-01'`,
+		// Migration 052: 成交量单位统一（手 → 股），对齐规范层 schema
+		//
+		// 背景：tushare daily 的 `vol` 单位是「手」，而规范层 schema 声明的
+		// volume 单位是「股」（docs/SPEC.md「规范层 Schema」节），两者差 ×100。
+		// 这个矛盾此前一直带着：SPEC 说「股」、库里存「手」、前端 fmtVolume
+		// 按「股」格式化、NT 侧 as_quantity 又因「手」是两位小数而 fail-loud
+		// （导出路径整条断）。同步侧已改为落股（pkg/data 的 sharesPerLot），
+		// 存量按本迁移对齐 —— 两侧都到位，全链路才真正只有一个口径。
+		//
+		// 幂等：×100 不幂等（重复跑会变 ×10000），所以**不能**把换算写进
+		// 逐行的 WHERE。改为先问一次「库里还有没有非整数（= 手的小数）」，
+		// 有才整表换算一次。这也同时防住「清库后用新代码重灌（已经是股）」
+		// 的场景：那时全表都是整数，IF 不成立，等价 no-op。
+		//
+		// 为什么不写成 `UPDATE ... WHERE volume <> floor(volume)`：19% 的
+		// 存量行 volume 本来就是整数「手」，逐行条件会把它们漏掉，结果是
+		// 一张半股半手的混合表 —— 比不迁移更难排查。
+		`DO $$
+		BEGIN
+			IF EXISTS (SELECT 1 FROM ohlcv_daily_qfq WHERE volume <> floor(volume)) THEN
+				UPDATE ohlcv_daily_qfq SET volume = round(volume * 100);
+			END IF;
+		END $$`,
 		// Migration 032: factor_hypothesis (P2-3 / 因子的因果来源)
 		//
 		// 因子的数值存在 factor_cache 里，但**它为什么该有效**此前没有地方记。
