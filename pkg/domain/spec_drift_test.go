@@ -168,6 +168,21 @@ func TestSpecDriftFactorDefinition(t *testing.T) {
 			"没登记——定义 schema 悄悄长了，把字段补进 SPEC 表：%v", goOnly)
 }
 
+// TestSpecDriftFactorRegistration 登记记录骨架双向比对（D4）：SPEC.md 锚点
+// factor_registration 与 domain.FactorRegistration 的 (字段名, json tag)
+// 必须逐字一致——登记 schema 是治理账本的契约（谁/何时/改了什么/为什么
+// 靠这八列留痕），漂移即治理留痕与复现链断裂。
+func TestSpecDriftFactorRegistration(t *testing.T) {
+	spec := parseFactorDefSpecs(t, "factor_registration")
+	specOnly, goOnly := diffFieldSpecs(spec, goFieldSpecs(FactorRegistration{}))
+	assert.Empty(t, specOnly,
+		"domain.FactorRegistration：SPEC.md 锚点 factor_registration 里的这些字段在 Go 类型中"+
+			"不存在（或 json tag 不一致）——文档在描述不存在的登记字段：%v", specOnly)
+	assert.Empty(t, goOnly,
+		"domain.FactorRegistration：Go 类型有这些字段，但 SPEC.md 锚点 factor_registration "+
+			"没登记——登记 schema 悄悄长了，把字段补进 SPEC 表：%v", goOnly)
+}
+
 func TestSpecDriftOHLCV(t *testing.T) {
 	assertNoDrift(t, "market.OHLCV", "ohlcv", market.OHLCV{})
 }

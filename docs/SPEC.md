@@ -674,6 +674,100 @@ FactorComputer.ComputeFactorByName(ctx, name, date)
 
 ---
 
+## 因子注册表治理细则（Factor Registration，D4）
+
+> ADR-031 蓝图 §5.2 三条铁律、§6 协议变更纪律、§9 #3（参考外部门户信号
+> `content_hash` 幂等先例）。D3 把因子定义从代码搬进库（「库里公式」），
+> **D4 定「进库之后的纪律」**：谁在什么时候把哪一版定义接进来、哪一版被
+> 回滚。语义不放松——名册仍是冻结协议，登记不是「写个字符串进库」。
+
+### 登记记录（一条登记 = 定义快照 + 登记人）
+
+<!-- drift:factor_registration -->
+| 字段 | JSON | 含义 |
+|---|---|---|
+| Definition | definition | 登记时的**定义快照**（`FactorDefinition`）。改公式必须新登记一份（新哈希），老快照原样留存——「回滚后老版本仍可复现」的载体，自包含、不依赖别处还留着旧定义对象 |
+| VersionHash | version_hash | 登记的版本指纹（四样之「哈希」）。**记录而非权威**：写入/加载都以 `Definition.VersionHash()` 重新 derive 比对，不符即拒收（与 D3 `factor_definitions.version_hash` 同款纪律） |
+| Registrar | registrar | 登记人（四样之「登记人」）：谁把这一版定义接进来的。非空（纯空白不算） |
+| Status | status | 生命周期态：active（生效，参与新引用解析）/ rolled_back（已回滚） |
+| RegisteredAt | registered_at | 登记时刻（审计「何时」） |
+| RolledBackAt | rolled_back_at | 回滚时刻。仅 Status=rolled_back 时有值 |
+| RolledBackBy | rolled_back_by | 回滚人。仅 Status=rolled_back 时有值 |
+| RollbackReason | rollback_reason | 回滚缘由（审计「为什么」）。仅 Status=rolled_back 时有值 |
+<!-- /drift:factor_registration -->
+
+### 四样齐全（fail-closed，缺一拒收）
+
+一条登记**四样齐全**方可生效：**公式、哈希、登记人、生效日**。
+
+| 四样 | 载体 | 校验 |
+|---|---|---|
+| 公式 | `Definition` 的内核体（leaf/formula 的 `Formula`、code 的 `CodeRef`） | `Definition.Validate()` 逐型校验；pending 态无内核体 → 拒收（`four-required: formula`） |
+| 哈希 | `VersionHash` | 非空且 == `Definition.VersionHash()`（同一算法：canonical JSON 的 SHA-256，见 D3） |
+| 登记人 | `Registrar` | `strings.TrimSpace` 非空 |
+| 生效日 | `Definition.EffectiveFrom` | `YYYY-MM-DD`（由 `Definition.Validate()` 覆盖） |
+
+校验在**两道关卡**共同守住（`pkg/domain/factor_registration.go` 的
+`FactorRegistration.Validate` + Migration 053 的 DB CHECK）：连「绕过写入
+路径直接 INSERT」也被库拒绝（registrar 非空 + 内核体存在 + 状态枚举）。
+
+登记（`pkg/data/factor_governance.go` 的 `RegistrationBook.Register`）在四样
+之外**再过一道 D3 注册表闸门**（公式可解析 / 过 L1 / identifier↔输入字段
+双向相等 / 输入字段 ⊆ 规范层字段词表 / code_ref 已绑定）——登记不是「写个
+字符串进库」，是「这一版定义真的能算」。同一 `(因子名, 版本哈希)` 重复登记
+= 幂等 no-op；改内容必然改哈希 → 新行（`ErrRegistrationDuplicate`）。
+
+### 回滚语义（钉死 —— 可复现性红线）
+
+回滚 = **新引用不再命中该版本，历史回测仍能引到老版本**。两种引用解析：
+
+| 引用 | 入口 | 语义 |
+|---|---|---|
+| 新引用（按名） | `RegistrationBook.ResolveEffective(name)` | 命中该因子最新的 **active** 版本；被回滚的版本不参与。无在册版本 → miss（`ok=false`，不凑默认定义） |
+| 历史引用（按哈希） | `RegistrationBook.ResolvePinned(name, hash)` | 按 `(名, 哈希)` 精确锁定，**无论是否已回滚都命中**——历史回测钉着「当时那一版哈希」跑 |
+
+因此「登记 v1 → 登记 v2（新引用抬到 v2）→ 回滚 v2（新引用回落到 v1，
+钉 v2 的历史引用仍命中）」是可演练、可测试的确定性行为
+（`pkg/data/factor_governance_test.go`）。回滚**不删版本行**，只把该行
+`status` 置 `rolled_back` 并留痕——老定义快照原样在库，复现链不断。
+
+### 审计留痕（谁 / 何时 / 改了什么 / 为什么）
+
+每次登记与回滚各留一条 `RegistrationAuditEntry`（`factor_registration_audit`
+表）：「谁」=`Actor`、「何时」=`At`、「改了什么」=`VersionHash`（内容指纹）
++ `Detail`、「为什么」=`Reason`。登记/回滚缺 actor 一律拒收（审计「谁」不可缺）。
+
+### 演练记录（D4 ⑤1：登记 → 被公式引用 → 回滚）
+
+可执行形态在 `pkg/data/factor_governance_test.go`
+（`TestRegistrationBook_Drill_RegisterReferenceRollback`）：逐步断言等价于
+逐步截图——① 登记 v1（审计 +1，新引用命中 v1）；② 解析出的定义过计算闸门
+（`NewRegistry`，即「被引用」）+ 登记 v2 抬新引用、钉 v1 历史引用仍命中；
+③ 回滚 v2（审计 +1，新引用回落 v1、钉 v2 历史引用仍命中）。
+
+### 护栏与测试
+
+1. **四样拒收**（`pkg/domain/factor_registration_test.go`）：8 例表驱动
+   （缺公式/空公式/空哈希/哈希不符/空登记人/纯空白登记人/空生效日/生效日
+   格式错）+ 未知状态 + 陈旧哈希。
+2. **登记与回滚 fail-closed**：重复登记、回滚未登记/已回滚/缺 actor。
+3. **破坏验证**（`pkg/storage/factor_registration_test.go`）：绕过写入路径
+   直接 INSERT（缺 registrar / 缺内核体 / 未知状态）→ DB CHECK 拒收（护栏
+   红）；走正常写入路径 → 绿。另钉「库行被绕过改坏 → 加载时哈希校验拒载」。
+4. **防漂移测试**（`pkg/domain/spec_drift_test.go`）：上表
+   `factor_registration` 锚点与 `domain.FactorRegistration` 反射比对，双向
+   缺失都红。
+
+### 实现指针
+
+- 治理核心类型与校验：`pkg/domain/factor_registration.go`
+- 进程内账本（登记 / 回滚 / 版本解析）：`pkg/data/factor_governance.go`
+- DB 侧持久化与审计：`pkg/storage/factor_registration.go`
+- DDL：`pkg/storage/postgres.go` Migration 053（`factor_registrations` /
+  `factor_registration_audit`）+ `docs/migrations/053_add_factor_registrations.sql`
+
+---
+
 ## Strategy Interface
 
 > **Canonical definition** — matches [pkg/strategy/interfaces.go](../pkg/strategy/interfaces.go)

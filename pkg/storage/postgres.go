@@ -904,6 +904,46 @@ func migrationStatements() []string {
 	// 改本追加内容或改 MacroSeriesSchemaDDL 任一处 → 测试红）。
 	migrations = append(migrations, MacroSeriesSchemaDDL...)
 
+	// Migration 053: factor_registrations + factor_registration_audit（D4 因子
+	// 注册表治理细则——治理账本）。DDL 记录在 docs/migrations/053。
+	// 与 051 的 factor_definitions（最新投影）互补：本表是治理账本，一条登记
+	// = 一行（factor_name + version_hash 主键），定义快照存 JSONB（回滚后的
+	// 老版本自包含、可复现）。四样齐全的 DB 兜底：registrar 非空 CHECK + 内核体
+	// 存在 CHECK + 状态枚举 CHECK——连「绕过写入路径直接 INSERT」也被库拒绝。
+	migrations = append(migrations, []string{
+		`CREATE TABLE IF NOT EXISTS factor_registrations (
+			factor_name     VARCHAR(64)  NOT NULL,
+			version_hash    CHAR(64)     NOT NULL,
+			definition      JSONB        NOT NULL,
+			registrar       TEXT         NOT NULL,
+			status          VARCHAR(16)  NOT NULL DEFAULT 'active',
+			registered_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+			rolled_back_at  TIMESTAMPTZ,
+			rolled_back_by  TEXT         NOT NULL DEFAULT '',
+			rollback_reason TEXT         NOT NULL DEFAULT '',
+			PRIMARY KEY (factor_name, version_hash),
+			CONSTRAINT factor_registrations_registrar_present CHECK (btrim(registrar) <> ''),
+			CONSTRAINT factor_registrations_status_known CHECK (status IN ('active', 'rolled_back')),
+			CONSTRAINT factor_registrations_kernel_body_present CHECK (
+				COALESCE(definition ->> 'kernel', '') IN ('leaf', 'formula', 'code')
+				AND (COALESCE(definition ->> 'formula', '') <> '' OR COALESCE(definition ->> 'code_ref', '') <> '')
+			)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_factor_registrations_status ON factor_registrations(factor_name, status)`,
+		`CREATE TABLE IF NOT EXISTS factor_registration_audit (
+			id           BIGSERIAL    PRIMARY KEY,
+			factor_name  VARCHAR(64)  NOT NULL,
+			version_hash CHAR(64)     NOT NULL,
+			action       VARCHAR(16)  NOT NULL,
+			actor        TEXT         NOT NULL,
+			reason       TEXT         NOT NULL DEFAULT '',
+			detail       TEXT         NOT NULL DEFAULT '',
+			audited_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+			CONSTRAINT factor_registration_audit_action_known CHECK (action IN ('register', 'rollback'))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_factor_registration_audit_name ON factor_registration_audit(factor_name, audited_at DESC)`,
+	}...)
+
 	return migrations
 }
 
