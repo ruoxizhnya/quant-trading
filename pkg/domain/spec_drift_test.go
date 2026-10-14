@@ -141,6 +141,33 @@ func assertNoDrift(t *testing.T, typeName, anchor string, goType any) {
 			"把字段补进 SPEC 表（字段名 + json tag 必须逐字一致）：%v", typeName, anchor, goOnly)
 }
 
+// parseFactorDefSpecs 解析因子定义骨架表（D3）。列序与三张字段表不同：
+// 定义契约的关键列是 json tag，在第 1 列（第 2 列是含义散文）。
+func parseFactorDefSpecs(t *testing.T, anchor string) []fieldSpec {
+	t.Helper()
+	rows := specTableRows(t, anchor)
+	out := make([]fieldSpec, 0, len(rows))
+	for _, r := range rows {
+		require.GreaterOrEqual(t, len(r), 2, "锚点 %s 的行 %v 列数不足 2", anchor, r)
+		out = append(out, fieldSpec{name: r[0], jsonTag: strings.Split(r[1], ",")[0]})
+	}
+	return out
+}
+
+// TestSpecDriftFactorDefinition 定义骨架双向比对（D3）：SPEC.md 锚点
+// factor_definition 与 domain.FactorDefinition 的 (字段名, json tag)
+// 必须逐字一致——定义 schema 是库里公式的契约，漂移即数值回归破裂。
+func TestSpecDriftFactorDefinition(t *testing.T) {
+	spec := parseFactorDefSpecs(t, "factor_definition")
+	specOnly, goOnly := diffFieldSpecs(spec, goFieldSpecs(FactorDefinition{}))
+	assert.Empty(t, specOnly,
+		"domain.FactorDefinition：SPEC.md 锚点 factor_definition 里的这些字段在 Go 类型中"+
+			"不存在（或 json tag 不一致）——文档在描述不存在的定义字段：%v", specOnly)
+	assert.Empty(t, goOnly,
+		"domain.FactorDefinition：Go 类型有这些字段，但 SPEC.md 锚点 factor_definition "+
+			"没登记——定义 schema 悄悄长了，把字段补进 SPEC 表：%v", goOnly)
+}
+
 func TestSpecDriftOHLCV(t *testing.T) {
 	assertNoDrift(t, "market.OHLCV", "ohlcv", market.OHLCV{})
 }

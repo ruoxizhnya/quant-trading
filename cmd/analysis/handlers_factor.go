@@ -189,24 +189,20 @@ func registerFactorRoutes(router *gin.Engine, factorAttributor *data.FactorAttri
 		})
 
 		factorAPI.GET("/list", func(c *gin.Context) {
-			factors := []string{
-				string(domain.FactorMomentum),
-				string(domain.FactorValue),
-				string(domain.FactorQuality),
-				string(domain.FactorVolatility),
-				string(domain.FactorSize),
-				string(domain.FactorGrowth),
-				// 桥 B1 纵向基本面因子 (EQD-P1-2)：与 ParseFactorType 保持同步，
-				// 否则本接口会漏报已可查询的因子。
-				string(domain.FactorGrossMarginTrend),
-				string(domain.FactorContractLiabilityRatio),
-				string(domain.FactorOCFToNetProfit),
-				string(domain.FactorROEDuPontLeverage),
-				string(domain.FactorInventoryTurnoverDelta),
+			// D3 起因子清单 = 注册表投影（库管理）：新增/停用因子只改
+			// 库里定义，本接口零改动。kernels 字段让调用方区分「可计算」
+			// 与「名册在册、内核待定」（pending）——清单诚实优先。
+			defs := domain.BuiltinFactorDefinitions
+			factors := make([]string, 0, len(defs))
+			kernels := make(map[string]string, len(defs))
+			for _, d := range defs {
+				factors = append(factors, string(d.Name))
+				kernels[string(d.Name)] = string(d.Kernel)
 			}
 			c.JSON(http.StatusOK, gin.H{
 				"total":   len(factors),
 				"factors": factors,
+				"kernels": kernels,
 			})
 		})
 	}

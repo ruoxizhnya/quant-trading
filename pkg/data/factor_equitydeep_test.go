@@ -1132,7 +1132,11 @@ func TestComputeAllFactors_SkipsEmptyVerticalFactors(t *testing.T) {
 	ctx := context.Background()
 
 	wantComputed := []string{"momentum", "value", "quality"}
+	// D3 起注册表库管理：清单 = 库里定义投影。pending 型因子（名册在册、
+	// 内核待定）显式进 Skipped——「没算」必须说出口（AUD-15 同款纪律），
+	// 且与未登记/无数据区分：reason = ErrFactorKernelUndefined。
 	wantSkipped := []string{
+		"size", "volatility", "growth",
 		"gross_margin_trend", "contract_liability_ratio", "ocf_to_net_profit",
 		"roe_dupont_leverage", "inventory_turnover_delta",
 	}
@@ -1164,8 +1168,14 @@ func TestComputeAllFactors_SkipsEmptyVerticalFactors(t *testing.T) {
 				if s.Name != want {
 					t.Errorf("skipped[%d].Name = %q, want %q", i, s.Name, want)
 				}
-				if !errors.Is(s.Reason, ErrNoFundamentalsDetail) {
-					t.Errorf("skipped[%d].Reason = %v, want wrapped %v", i, s.Reason, ErrNoFundamentalsDetail)
+				// 前三个是 pending 型（内核待定），其余是空 fundamentals_detail
+				// 的纵向因子——两类「跳过」理由不同，都必须可判别。
+				wantReason := ErrNoFundamentalsDetail
+				if i < 3 {
+					wantReason = ErrFactorKernelUndefined
+				}
+				if !errors.Is(s.Reason, wantReason) {
+					t.Errorf("skipped[%d].Reason = %v, want wrapped %v", i, s.Reason, wantReason)
 				}
 			}
 		})

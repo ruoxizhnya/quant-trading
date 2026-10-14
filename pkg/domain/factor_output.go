@@ -21,6 +21,18 @@ const (
 	CaliberRaw FactorCaliber = "raw"
 )
 
+// Valid reports whether the caliber is one of the three declared kinds.
+// 未知口径 fail-closed 而不是默认成全 z-score——「默认」正是蓝图 §5.2
+// 要显式化的那个隐含假设。
+func (c FactorCaliber) Valid() bool {
+	switch c {
+	case CaliberZScore, CaliberRank, CaliberRaw:
+		return true
+	default:
+		return false
+	}
+}
+
 // FactorOutput 是规范层**因子产出 schema**（蓝图 §5.2「所有因子一个样」，
 // 策略看到的那一半）。D1 冻结字段形状；因子定义的入库/版本指纹属 D3，
 // 消费属 D6/D8——形状先冻结，后面不许每因子发明一种 schema。

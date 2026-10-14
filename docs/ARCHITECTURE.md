@@ -199,10 +199,75 @@ connector 之外无人感知底层表。字段表 / 频率词表 / 聚合口径 
   1d 路由与遗留 `storage.GetOHLCV` 逐字段对拍（真实 PG 自灌自证，
   DB 不可达 Skip 不 Fail）——改的是取数通道，不是数据。
 
+## 8. 因子定义库数据流（ADR-031 / D3，2026-10-14）
+
+**不变量**：因子定义只认「库里公式」——一份种子定义
+（`pkg/domain/factor_def_seed.go`，编译期常量）+ 一张持久表
+（`factor_definitions`，迁移 051）+ 一个进程内 Registry
+（`pkg/data/factor_registry.go`，构造时定稿、只读）。计算线
+（`ComputeAllFactors` / `ComputeFactorByName`）的因子清单 =
+Registry 投影；**connector 与策略之外无人感知内核分派**。定义
+schema / 内核四态 / 版本哈希纪律的文档真相在
+[SPEC.md「因子定义 Schema」](SPEC.md#因子定义-schemafactor-definitiond3)，
+本节只画数据流与护栏边界。
+
+```
+   ┌─────────────────────────────────────────────────────────┐
+   │ 定义层（库里公式，唯一权威）                                │
+   │  pkg/domain/factor_def_seed.go（种子 11 条，编译期常量）    │
+   │    · 字段：名字/公式/域过滤/输入字段/生效日/口径/前视纪律    │
+   │    · 版本哈希 = SHA-256(canonical 内容)——改公式=新哈希     │
+   └──────────────┬───────────────────────────┬──────────────┘
+                  │ SyncFactorDefinitions     │ NewRegistry（启动装载，
+                  │ （幂等 upsert）            │ 全量 fail-closed 校验）
+                  ▼                           ▼
+   ┌──────────────────────────┐   ┌──────────────────────────┐
+   │ factor_definitions 表     │   │ data.Registry（只读快照） │
+   │ （迁移 051；加载时重新     │   │  · Definition(name)       │
+   │  derive 哈希比对，不符     │   │  · CodeKernel 绑定表      │
+   │  即拒载——fail-closed）   │   │  · FailClosedError 带清单 │
+   └──────────────────────────┘   └────────────┬─────────────┘
+                                               │ 计算分派（按名/按批）
+              ┌────────────────────┬───────────┴────────────┐
+              ▼                    ▼                        ▼
+        leaf / formula          code                    pending
+      表达式引擎现算         Go 出口闭包            不计算，fail-closed
+      （pkg/expression      （CodeRef →             （ErrFactorKernel
+       Formula+Validity，    Compute*Factor）        Undefined，显式
+       域外即缺失）          纵向 5 因子               进 Skipped 报告）
+              └────────────────────┴───────────┬────────────┘
+                                               ▼
+                              factor_cache（PG）+ Redis 双层
+                              产出形状 = D1 FactorOutput（缺失≠0）
+```
+
+护栏（机械判据，全部在 CI 里）：
+
+- **注册表棘轮**（`internal/repoguard/factor_registry_test.go`）：
+  非测试 Go 文件引用 `Compute*Factor` 内核方法（定义/绑定三文件除外）
+  = 绕过 Registry 直调内核 → 红；同一 composite literal 内聚集 ≥3 个
+  名册常量 = 库外重建清单 → 红。基线带裁决理由，只减不增。
+- **数值回归红线**（`pkg/data/factor_formula_test.go`）：公式库版 vs
+  原代码版同输入同输出（momentum/value/quality 三列全等，域过滤与
+  历史不足的缺失语义由 Validity / NaN 复现）。
+- **防漂移**（`pkg/domain/spec_drift_test.go` + 种子词表测试）：
+  SPEC 定义骨架表 ↔ `FactorDefinition` 反射比对；种子字段码 ↔
+  `equitydeep.FieldX` 契约常量逐一比对。
+- **版本可复现**（`pkg/data/factor_registry_test.go` +
+  `pkg/storage/factor_definition_test.go`）：同种子同哈希；
+  库里公式被绕过写入路径改坏 → 加载期哈希比对拦住。
+
+迁移方向：size / volatility / growth 三因子（pending）补计算内核；
+回测预热清单（`pkg/backtest/cache/factor_cache.go`，基线登记）收敛为
+从 Registry 读取（D6）；D4 因子治理细则（登记人/审计/生效日流程）
+在本 Schema 上叠加，不改形状。
+
+---
+
 迁移方向（D2 起）：connector 契约接入 → 消费方逐个切 Router → 棘轮
 基线逐条销号 → 物理表直连归零。
 
 ---
 
-_Last updated: 2026-10-14（新增 §7 规范层数据流，ADR-031 D1；表数口径 42 张为 2026-10-12 实测）_
+_Last updated: 2026-10-14（新增 §7 规范层数据流 ADR-031 D1 + §8 因子定义库数据流 ADR-031 D3；表数口径 42 张为 2026-10-12 实测）_
 _维护规则：服务/端口/schema 分区变更时更新本文件（AGENTS.md Rule 1）；表数不手抄，只给 grep 口径。_

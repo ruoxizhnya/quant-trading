@@ -569,6 +569,98 @@ start/end 语义：1d 按交易日闭区间（trade_date BETWEEN）；1m/15m 按
    表与 Go 常量逐字一致；`bar_kwargs_for_row` 产出与 export_bars 消耗
    自洽。
 
+## 因子定义 Schema（Factor Definition，D3）
+
+> ADR-031 蓝图 §5.2/§6 三期①：因子定义从 Go 代码迁入「库里公式」，因子名
+> 注册表从「代码冻结」改「库管理 + fail-closed」。**语义不放松**：名册
+> 本身仍是冻结协议，变的是定义的存放与分派方式。
+
+### 定义骨架（一个样，三种内核 + pending）
+
+<!-- drift:factor_definition -->
+| 字段 | JSON | 含义 |
+|---|---|---|
+| Name | name | 因子名。必须落在冻结名册（`domain.ParseFactorType`）内——D3 不放开「谁可以是新因子」 |
+| Kernel | kernel | 计算内核：leaf / formula / code / pending |
+| Formula | formula | leaf/formula 型的公式文本（`pkg/expression` DSL）。pending 型为空 |
+| Validity | validity | 可选域过滤公式：与 Formula 同形求值，逐点非零（且非 NaN）才产出分数——输入落在数学定义域外（PE<=0、价格<=0）= 缺失，不是 0 分 |
+| CodeRef | code_ref | code 型的 Go 出口标识（`pkg/data/factor_registry.go` 绑定表）。未知标识 fail-closed |
+| Caliber | caliber | 口径标签：z-score / rank / raw。随分数走，苹果橘子不混用 |
+| InputFields | input_fields | 消耗的规范层字段名（D1 字段词表 / expression fieldRegistry / equitydeep 契约字段码）。pending 型为空 |
+| EffectiveFrom | effective_from | 生效日（YYYY-MM-DD，字符串契约——格式校验在 Go 侧） |
+| Lookahead | lookahead | 前视纪律声明：横截面行情因子 = `trade_date`；纵向财报因子 = `ann_date<=trade_date`（PIT 在 storage 层强制） |
+| Lookback | lookback | 公式型求值窗口（自然日）。code 型留 0 |
+<!-- /drift:factor_definition -->
+
+**产出 schema**（策略看到的那一半）不变，仍是 D1 冻结的 `FactorOutput`：
+因子名 / 日期 / 股票 / 值（`*float64`，nil=缺失）/ 口径 / 频率 / 可见时间点。
+
+### 内核四态
+
+| 态 | 求值路径 | 现状（11 个冻结因子） |
+|---|---|---|
+| leaf | 表达式引擎（字段直取） | quality（`roe`） |
+| formula | 表达式引擎（叶子 + 算子） | momentum（`close / ts_delay(close, 20) - 1`）、value（`1 / pe`） |
+| code | Go 出口（`CodeRef` 绑定闭包） | 纵向 5 因子——单季差分 / TTM 桥接 / 跨期趋势需要财报期坐标，表达引擎的求值模型是日频数字序列、没有「季」维度，**不硬凑公式**（D3 判据） |
+| pending | 不计算，fail-closed 报「已登记未定义」 | size / volatility / growth——名册有名字、计算线从未实现，**不发明数学定义** |
+
+### 版本哈希纪律（可复现的铁律）
+
+- `VersionHash = SHA-256(canonical JSON)`：字段全量进哈希（InputFields
+  排序后），**改公式 = 新哈希天然成立**；方法是派生的，结构体里没有
+  hash 字段——没有可篡改的存储入口。
+- 库里存的哈希（`factor_definitions.version_hash`）写入时以派生值为准，
+  加载时重新 derive 比对：不符即拒绝加载（`pkg/storage/factor_definition.go`，
+  有测试钉住）。
+- 同一次回测全程持同一 `Registry` 快照：定义不可能在计算中途被换掉
+  （`Registry` 构造时定稿、之后只读）。
+
+### 计算分派（registry 驱动）
+
+```
+FactorComputer.ComputeFactorByName(ctx, name, date)
+  → Registry.Definition(name)        未登记 → ErrFactorNotRegistered（带可用清单）
+  → code    → CodeRef 闭包（原 Compute*Factor 方法）
+  → formula → 表达式引擎现算（Formula + Validity）
+  → leaf    → 同上（公式即单 identifier）
+  → pending → ErrFactorKernelUndefined
+```
+
+`ComputeAllFactors` 的因子清单 = 注册表投影（定义序），报告顺序与原
+硬编码列表一致（可观测行为不变）；pending 因子显式进
+`FactorBatchReport.Skipped`——「没算」必须说出口（AUD-15 同款纪律）。
+公式型因子的窗口由定义 Formula 钉死：改窗口 = 改定义 = 新哈希，这是
+版本纪律，不是退化。
+
+### 数值回归红线
+
+公式库版 vs 原代码版**同输入同输出**（`pkg/data/factor_formula_test.go`
+对拍测试）：momentum / value / quality 三因子 raw / z-score / percentile
+三列全等，域过滤（PE>0、ROE>0、两端价格>0）由 Validity 复现，历史不足
+（动量不足 20 根 bar）由 `ts_delay` 窗口不足给 NaN → 缺失复现。
+
+### 护栏（棘轮 + 防漂移）
+
+1. **因子注册表护栏**（`internal/repoguard/factor_registry_test.go`）：
+   非测试 Go 文件引用 `Compute*Factor` 内核方法（定义/绑定表三文件除外）
+   = 绕过 registry 直调内核 → 红；同一 composite literal 内聚集 ≥3 个
+   名册常量 = 库外重建清单 → 红。**只减不增**（基线带裁决理由）。
+2. **种子词表测试**（`pkg/data/factor_registry_test.go`）：种子定义的
+   财报字段码字面量与 `equitydeep.FieldX` 契约常量逐一比对，防漂移。
+3. **防漂移测试**（`pkg/domain/spec_drift_test.go`）：本节目定义骨架表
+   与 `domain.FactorDefinition` 反射比对，双向缺失都红。
+
+### 已知边界（D3 如实登记）
+
+- size / volatility / growth 三因子**无计算线**（全仓无 Compute* 出口、
+  无数学定义）：D3 登记为 pending，不发明定义。查询它们得到的是
+  fail-closed 报错而非静默 0——定义补齐属后续工单。
+- 公式型因子的 universe 规则：全 market 字段 → OHLCV 出现过的股票；
+  全 fundamentals 字段 → 财报快照股票；混源 → 并集（缺侧 NaN → 缺失）。
+  三个公式型因子均不混源。
+- `pkg/backtest/cache/factor_cache.go` 的回测预热清单是存量库外清单
+  （基线登记），收敛到 Registry 读取留待 D6。
+
 ### 已知边界（D1 如实登记）
 
 - 分钟表 `amount` 可空，NULL → Turnover 记 0：字段级缺失唯一折零处，

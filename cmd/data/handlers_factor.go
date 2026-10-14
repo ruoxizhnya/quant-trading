@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/ruoxizhnya/quant-trading/pkg/httpserver"
 	"net/http"
@@ -133,31 +134,15 @@ func syncFactorHandler(fc *data.FactorComputer) gin.HandlerFunc {
 			return
 		}
 
-		factor := domain.FactorType(factorName)
-		var computeErr error
-		switch factor {
-		case domain.FactorMomentum:
-			computeErr = fc.ComputeMomentumFactor(ctx, date, 20)
-		case domain.FactorValue:
-			computeErr = fc.ComputeValueFactor(ctx, date)
-		case domain.FactorQuality:
-			computeErr = fc.ComputeQualityFactor(ctx, date)
-		case domain.FactorGrossMarginTrend:
-			computeErr = fc.ComputeGrossMarginTrendFactor(ctx, date)
-		case domain.FactorContractLiabilityRatio:
-			computeErr = fc.ComputeContractLiabilityRatioFactor(ctx, date)
-		case domain.FactorOCFToNetProfit:
-			computeErr = fc.ComputeOCFToNetProfitFactor(ctx, date)
-		case domain.FactorROEDuPontLeverage:
-			computeErr = fc.ComputeROEDuPontLeverageFactor(ctx, date)
-		case domain.FactorInventoryTurnoverDelta:
-			computeErr = fc.ComputeInventoryTurnoverDeltaFactor(ctx, date)
-		default:
-			httpserver.Failf(c, http.StatusBadRequest, "unsupported factor: %s", factorName)
-			return
-		}
-
+		// D3 起按名分派走注册表（库管理）：因子清单、计算内核、fail-closed
+		// 全部以 registry 为准——本 handler 不再维护硬编码因子 switch。
+		// 未登记 / 内核待定 → 400 + 可用清单（继承既有报错语义）。
+		computeErr := fc.ComputeFactorByName(ctx, domain.FactorType(factorName), date)
 		if computeErr != nil {
+			if errors.Is(computeErr, data.ErrFactorNotRegistered) || errors.Is(computeErr, data.ErrFactorKernelUndefined) {
+				httpserver.Fail(c, http.StatusBadRequest, computeErr.Error())
+				return
+			}
 			httpserver.Error(c, http.StatusInternalServerError, computeErr)
 			return
 		}

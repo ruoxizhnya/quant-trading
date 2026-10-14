@@ -33,15 +33,35 @@ type FactorStore interface {
 type FactorComputer struct {
 	store  FactorStore
 	logger zerolog.Logger
+	// registry 是因子定义的库管理读路径（D3）。计算清单、按名取因子、
+	// 版本指纹全部以它为准——本文件不再维护任何硬编码因子清单。
+	registry *Registry
 }
 
 // NewFactorComputer creates a new FactorComputer.
+//
+// 注册表默认装载内置种子定义（BuiltinFactorDefinitions）。种子是编译期
+// 常量，加载校验失败意味着定义本身写错——开发期错误，立即 panic 好过
+// 带着坏定义上线。运行期要用 DB 定义集覆盖时走 SetRegistry。
 func NewFactorComputer(store FactorStore) *FactorComputer {
 	return &FactorComputer{
-		store:  store,
-		logger: zerolog.Nop(),
+		store:    store,
+		logger:   zerolog.Nop(),
+		registry: mustBuiltinRegistry(),
 	}
 }
+
+// mustBuiltinRegistry 加载内置种子定义（fail-loud）。
+func mustBuiltinRegistry() *Registry {
+	r, err := NewRegistry(domain.BuiltinFactorDefinitions)
+	if err != nil {
+		panic(fmt.Sprintf("builtin factor definitions invalid: %v", err))
+	}
+	return r
+}
+
+// SetRegistry 替换注册表（供 DB 加载的定义集覆盖内置种子，或测试注入）。
+func (f *FactorComputer) SetRegistry(r *Registry) { f.registry = r }
 
 func (f *FactorComputer) SetLogger(l zerolog.Logger) {
 	f.logger = l.With().Str("component", "factor_computer").Logger()
@@ -316,20 +336,62 @@ func (r FactorBatchReport) LogFields() []any {
 // including in the parallel path, where results are re-ordered by list position
 // so the reported cause does not depend on which goroutine happened to finish
 // first.
-func (f *FactorComputer) ComputeAllFactors(ctx context.Context, date time.Time, momentumLookback int, parallel bool) (FactorBatchReport, error) {
-	computations := []struct {
-		name string
-		run  func() error
-	}{
-		{"momentum", func() error { return f.ComputeMomentumFactor(ctx, date, momentumLookback) }},
-		{"value", func() error { return f.ComputeValueFactor(ctx, date) }},
-		{"quality", func() error { return f.ComputeQualityFactor(ctx, date) }},
-		{"gross_margin_trend", func() error { return f.ComputeGrossMarginTrendFactor(ctx, date) }},
-		{"contract_liability_ratio", func() error { return f.ComputeContractLiabilityRatioFactor(ctx, date) }},
-		{"ocf_to_net_profit", func() error { return f.ComputeOCFToNetProfitFactor(ctx, date) }},
-		{"roe_dupont_leverage", func() error { return f.ComputeROEDuPontLeverageFactor(ctx, date) }},
-		{"inventory_turnover_delta", func() error { return f.ComputeInventoryTurnoverDeltaFactor(ctx, date) }},
+// factorComputation 是一条「当日算哪个因子」的清单项。
+type factorComputation struct {
+	name string
+	run  func() error
+}
+
+// registryComputations 按注册表生成当日计算清单——「注册表改库管理」
+// 的落点：因子清单不再是硬编码切片，而是库里定义的投影（D3 ③4）。
+//
+// 分派规则（D3 ③2 计算内核三型）：
+//   - code 型 → Go 出口闭包（CodeRef 绑定，原 Compute*Factor 方法）；
+//   - leaf/formula 型 → 表达式引擎现算。窗口由定义 Formula 钉死
+//     （momentum 的 ts_delay(close, 20)），momentumLookback 参数仅为
+//     兼容旧签名保留——改窗口 = 改定义 = 新版本哈希，这是版本纪律；
+//   - pending 型 → 不进清单（由 ComputeAllFactors 记入 Skipped）。
+func (f *FactorComputer) registryComputations(ctx context.Context, date time.Time, momentumLookback int) []factorComputation {
+	_ = momentumLookback // 公式型窗口由定义 Formula 钉死，见上
+	names := f.registry.Names()
+	computations := make([]factorComputation, 0, len(names))
+	for _, name := range names {
+		def, ok := f.registry.Definition(name)
+		if !ok {
+			continue // Names() 与 Definition() 同源，不可达
+		}
+		switch def.Kernel {
+		case domain.KernelCode:
+			kernel, err := f.registry.CodeKernel(f, name)
+			if err != nil {
+				// 注册表加载期已保证绑定存在；真出现即注册表损坏，
+				// 按 fail-closed 让这一天红，而不是静默跳过。
+				computations = append(computations, factorComputation{
+					name: string(name),
+					run:  func() error { return err },
+				})
+				continue
+			}
+			computations = append(computations, factorComputation{
+				name: string(name),
+				run:  func() error { return kernel(ctx, date) },
+			})
+		case domain.KernelLeaf, domain.KernelFormula:
+			computations = append(computations, factorComputation{
+				name: string(name),
+				run:  func() error { return f.ComputeFormulaFactor(ctx, def, date) },
+			})
+		case domain.KernelPending:
+			// 名册在册、内核待定：不计算。ComputeAllFactors 统一记
+			// Skipped（ErrFactorKernelUndefined），与
+			// ErrNoFundamentalsDetail 的「跳过但上报」同构。
+		}
 	}
+	return computations
+}
+
+func (f *FactorComputer) ComputeAllFactors(ctx context.Context, date time.Time, momentumLookback int, parallel bool) (FactorBatchReport, error) {
+	computations := f.registryComputations(ctx, date, momentumLookback)
 
 	type outcome struct {
 		index int
@@ -368,6 +430,17 @@ func (f *FactorComputer) ComputeAllFactors(ctx context.Context, date time.Time, 
 	}
 
 	report := FactorBatchReport{}
+	// pending 型因子（名册在册、内核待定）显式上报，不静默缺席——
+	// AUD-15 同款纪律：「没算」必须说出口，count 和名字都要在。
+	for _, name := range f.registry.Names() {
+		def, ok := f.registry.Definition(name)
+		if ok && def.Kernel == domain.KernelPending {
+			report.Skipped = append(report.Skipped, SkippedFactor{
+				Name:   string(name),
+				Reason: fmt.Errorf("%w: %q", ErrFactorKernelUndefined, name),
+			})
+		}
+	}
 	for _, o := range outcomes {
 		if o.err == nil {
 			report.Computed = append(report.Computed, o.name)

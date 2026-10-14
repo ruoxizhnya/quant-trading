@@ -1,5 +1,19 @@
 package domain
 
+// ─── 因子名册：兼容薄壳（D3 起降级） ───
+//
+// 本文件的 FactorType 常量曾是因子注册表的「代码冻结」形态。D3 起，
+// 计算注册表的唯一权威是 factor_def_seed.go 的 BuiltinFactorDefinitions
+// （库里公式种子）+ pkg/data.Registry（加载时分派）；名册常量降级为
+// **兼容薄壳**——保留原因（引用面盘点，2026-10-14）：
+//
+//   - pkg/backtest/cache/factor_cache.go：回测预热清单（存量，D6 收敛）；
+//   - pkg/strategy/plugins/multi_factor.go：策略插件逐因子读取；
+//   - pkg/storage、cmd/*：查询/序列化边界按名寻址。
+//
+// 纪律：新增计算因子只加种子定义，不在这里加常量；ParseFactorType 仍是
+// 名册的合法集合判定（种子定义的名字必须落在其内——NewRegistry 校验）。
+
 import (
 	"encoding/json"
 	"time"

@@ -833,6 +833,26 @@ func migrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_strategy_genes_status ON strategy_genes(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_strategy_genes_fitness ON strategy_genes(fitness DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_strategy_genes_type_status ON strategy_genes(strategy_type, status)`,
+
+		// Migration 051: factor_definitions (D3 公式化因子引擎——定义入库)
+		// 「库里公式」的库：定义（名字/公式/输入字段/版本哈希/生效日/口径/
+		// 前视纪律）的持久形态。version_hash 由定义内容派生
+		// (domain.FactorDefinition.VersionHash)，加载时重新 derive 校验——
+		// 库里存的哈希与内容不符即拒绝加载（fail-closed）。
+		`CREATE TABLE IF NOT EXISTS factor_definitions (
+			factor_name    VARCHAR(64) PRIMARY KEY,
+			kernel         VARCHAR(16) NOT NULL,
+			formula        TEXT NOT NULL DEFAULT '',
+			validity       TEXT NOT NULL DEFAULT '',
+			code_ref       VARCHAR(128) NOT NULL DEFAULT '',
+			caliber        VARCHAR(16) NOT NULL,
+			input_fields   TEXT[] NOT NULL DEFAULT '{}',
+			effective_from VARCHAR(10) NOT NULL,
+			lookahead      VARCHAR(64) NOT NULL,
+			lookback       INT NOT NULL DEFAULT 0,
+			version_hash   CHAR(64) NOT NULL,
+			updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
 	}
 
 	// Migration 048: docs/migrations/048_add_external_signals_table.sql
