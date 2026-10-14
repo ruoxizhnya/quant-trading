@@ -277,36 +277,53 @@ type Stock struct {
 ```
 
 ### OHLCV (Candlestick Data)
+
+> **规范层 schema（ADR-031 / D1）**：字段全集、时间语义与聚合口径见
+> [规范层 Schema（Canonical Layer）](#规范层-schemacanonical-layer) 节
+> （防漂移测试钉住字段表）。相对旧定义的变更：**频率是记录自带字段**
+> （Frequency，不靠来源表隐式区分）；每条 bar **自带可见时间点**
+> （VisibleAt，PIT 语义）。
 ```go
 type OHLCV struct {
-    Symbol   string
-    Date     time.Time
-    Open     float64
-    High     float64
-    Low      float64
-    Close    float64
-    Volume   float64
-    Turnover float64 // in CNY
+    Symbol    string
+    Date      time.Time // bar 周期起点：1m=分钟起点；15m=bucket 起点；1d=交易日（UTC 零点）
+    Open      float64
+    High      float64
+    Low       float64
+    Close     float64
+    Volume    float64
+    Turnover  float64   // in CNY
+    TradeDays int
+    Frequency market.Frequency // "1m"/"15m"/"1d"；零值 "" = 未声明（遗留取数路径不填）
+    VisibleAt time.Time         // 可见时间点（PIT）：1m/15m=周期结束；1d=当日 15:00 收盘 CST
+    LimitUp   bool              // 涨停（日线路径有值；聚合 bar 恒 false，不推导）
+    LimitDown bool              // 跌停（同上）
 }
 ```
 
 ### Fundamental Data
+
+> **规范层 schema（ADR-031 / D1）**：数值字段一律 `*float64`——
+> **缺失（nil）与等于 0 是两件不同的事**（PE=0 会被读成"白送的股票"）。
+> 字段全集与时间语义（Date=可用日 / AnnDate=披露日即可见时间点）见
+> [规范层 Schema（Canonical Layer）](#规范层-schemacanonical-layer) 节。
 ```go
 type Fundamental struct {
     Symbol       string
-    Date         time.Time
-    PE           float64  // Price-to-Earnings
-    PB           float64  // Price-to-Book
-    PS           float64  // Price-to-Sales
-    ROE          float64  // Return on Equity (%)
-    ROA          float64  // Return on Assets (%)
-    DebtToEquity float64  // Debt to Equity ratio
-    GrossMargin  float64  // Gross margin (%)
-    NetMargin    float64  // Net profit margin (%)
-    Revenue      float64  // Total revenue
-    NetProfit    float64  // Net profit
-    TotalAssets  float64
-    TotalLiab    float64
+    Date         time.Time  // 可用日：从哪天起这条数据才存在（COALESCE(ann_date, trade_date)）
+    AnnDate      *time.Time // 真实披露日（nil = 未知）；披露日即可见时间点
+    PE           *float64   // Price-to-Earnings；nil = 缺失
+    PB           *float64   // Price-to-Book
+    PS           *float64   // Price-to-Sales
+    ROE          *float64   // Return on Equity (%)
+    ROA          *float64   // Return on Assets (%)
+    DebtToEquity *float64   // Debt to Equity ratio
+    GrossMargin  *float64   // Gross margin (%)
+    NetMargin    *float64   // Net profit margin (%)
+    Revenue      *float64   // Total revenue
+    NetProfit    *float64   // Net profit
+    TotalAssets  *float64
+    TotalLiab    *float64
 }
 ```
 
@@ -318,6 +335,12 @@ type MarketData interface {
     GetStocks(filter StockFilter) ([]Stock, error)
 }
 ```
+
+> **规范层取数入口**：新代码使用 `pkg/marketdata.Router.Bars(ctx, freq,
+> symbol, start, end)`——声明频率（1m/15m/1d）、返回自带 VisibleAt 的
+> bar，不感知底层表。本接口的 GetOHLCV 是遗留路径（无频率声明、无
+> VisibleAt，护栏基线登记在册），消费方按内核迁移时逐个切 Router。
+> 路由与聚合口径见 [规范层 Schema（Canonical Layer）](#规范层-schemacanonical-layer)。
 
 ### Signal
 
@@ -363,6 +386,197 @@ type Portfolio struct {
     DailyReturn float64
 }
 ```
+
+## 规范层 Schema（Canonical Layer）
+
+> **定位**（ADR-031 蓝图 §4，2026-10-14 D1 落定）：全系统数据取用只认
+> 一套规范层 schema——三类字段（OHLCV / Fundamental / FactorOutput），
+> **每条记录自带频率与可见时间点**；connector 之外无人感知底层表
+> （ohlcv_daily_qfq / ohlcv_minute 只归 pkg/marketdata 的 Router 与
+> 登记的遗留基线）。
+>
+> - 本节是**文档真相**；代码真相在 `pkg/domain/market`（OHLCV /
+>   Fundamental / Frequency / 时间语义）、`pkg/domain`（FactorOutput）、
+>   `pkg/marketdata`（Router 透明路由 + 聚合口径）。
+> - **防漂移**：`pkg/domain/spec_drift_test.go` 以反射比对下文三张字段表
+>   与 Go 类型（字段名 + json tag，双向）及频率词表；对不上即红。
+> - **棘轮护栏**：`internal/repoguard/canonical_layer_test.go` 禁止非测试
+>   Go 文件新开直连物理表的路径（只减不增，见下文「护栏」）。
+
+### 频率词表
+
+<!-- drift:frequency -->
+| 频率 | Go 常量 | 取数路径 | 说明 |
+| --- | --- | --- | --- |
+| 1m | market.Freq1m | ohlcv_minute 原样 | 日内 bar；含集合竞价打点（开盘 09:15–09:25 / 收盘 14:57–15:00） |
+| 15m | market.Freq15m | 由 1m 聚合产出（不物化） | 日内 bar；bucket 对齐见「聚合口径」 |
+| 1d | market.Freq1d | ohlcv_daily_qfq（Tushare 前复权） | 日频 bar；唯一进回测的口径 |
+<!-- /drift:frequency -->
+
+**扩展频率 = 四件套同步**：加常量 + Router 路由分支 + 聚合口径 + 本节
+词表，缺一即漂移（测试会红）。**未知频率 fail-loud**：`ParseFrequency`
+报错、`Router.Bars` 拒请求，不静默回退任何「默认」频率——回测里
+「默认」就是泄漏。
+
+### 三类字段（规范层 schema）
+
+三类字段的共同纪律：**缺失 ≠ 0**。无 bar = 缺失（停牌 / 未上市 /
+当日无成交，不零填充）；可空数值字段（`*float64`）nil = 缺失，
+消费前必须显式判空。
+
+#### OHLCV — `market.OHLCV`
+
+<!-- drift:ohlcv -->
+| 字段 | Go 类型 | json tag | 语义 |
+| --- | --- | --- | --- |
+| Symbol | string | symbol | 股票代码，如 "000001.SZ" |
+| Date | time.Time | date | bar 周期起点：1m=分钟起点；15m=bucket 起点；1d=交易日（UTC 零点，PG DATE 扫描形态） |
+| Open | float64 | open | 开盘价（聚合 bar = 首笔开） |
+| High | float64 | high | 最高价（聚合 bar = 期间最高） |
+| Low | float64 | low | 最低价（聚合 bar = 期间最低） |
+| Close | float64 | close | 收盘价（聚合 bar = 末笔收） |
+| Volume | float64 | volume | 成交量（股；聚合 bar = 期间合计） |
+| Turnover | float64 | turnover | 成交额（CNY；聚合 bar = 期间合计）。分钟表 amount 可空，NULL 时记 0——字段级缺失唯一折零处（见「已知边界」） |
+| TradeDays | int | trade_days | 成交日数（日线路径有值；聚合 bar 恒 0，不发明语义） |
+| Frequency | market.Frequency | frequency | 记录自带频率："1m"/"15m"/"1d"；零值 "" = 未声明（遗留取数路径不填，规范层路径必须填） |
+| VisibleAt | time.Time | visible_at | 可见时间点（PIT）：1m/15m = 周期结束时刻；1d = 当日 15:00 收盘（Asia/Shanghai）。零值 = 未声明 |
+| LimitUp | bool | limit_up | 涨停标记（日线路径有值；聚合 bar 恒 false，不推导） |
+| LimitDown | bool | limit_down | 跌停标记（同上） |
+<!-- /drift:ohlcv -->
+
+#### Fundamental — `market.Fundamental`
+
+<!-- drift:fundamental -->
+| 字段 | Go 类型 | json tag | 语义 |
+| --- | --- | --- | --- |
+| Symbol | string | symbol | 股票代码 |
+| Date | time.Time | date | 可用日：从哪天起这条数据才存在（读取侧 COALESCE(ann_date, trade_date)） |
+| AnnDate | *time.Time | ann_date | 真实披露日（nil = 不知道何时披露）。**披露日即可见时间点**，故本类型不设 VisibleAt |
+| PE | *float64 | pe | 市盈率；nil = 缺失（≠ 0） |
+| PB | *float64 | pb | 市净率 |
+| PS | *float64 | ps | 市销率 |
+| ROE | *float64 | roe | 净资产收益率（%） |
+| ROA | *float64 | roa | 总资产收益率（%） |
+| DebtToEquity | *float64 | debt_to_equity | 产权比率 |
+| GrossMargin | *float64 | gross_margin | 毛利率（%） |
+| NetMargin | *float64 | net_margin | 净利率（%） |
+| Revenue | *float64 | revenue | 营业总收入 |
+| NetProfit | *float64 | net_profit | 净利润 |
+| TotalAssets | *float64 | total_assets | 总资产 |
+| TotalLiab | *float64 | total_liab | 总负债 |
+<!-- /drift:fundamental -->
+
+频率为类别级声明：按日消费（1d）；公告驱动的事件语义由 AnnDate 承载
+（connector 侧「事件流」声明属 D2）。
+
+#### FactorOutput — `domain.FactorOutput`
+
+<!-- drift:factor_output -->
+| 字段 | Go 类型 | json tag | 语义 |
+| --- | --- | --- | --- |
+| Factor | string | factor | 因子名（命名空间与 domain.FactorType 冻结清单同域） |
+| Date | time.Time | date | 分数对应日（按日分数序列） |
+| Symbol | string | symbol | 股票代码 |
+| Value | *float64 | value | 分数；nil = 缺失（输入未齐那天不产分，≠ 0） |
+| Caliber | FactorCaliber | caliber | 口径标签随分数走："z-score" / "rank" / "raw"——量纲不同，禁止混用加权 |
+| Frequency | market.Frequency | frequency | 产出序列频率；当前恒为 1d（D6 引入日内特征时扩展） |
+| VisibleAt | time.Time | visible_at | 可见时间点：由输入数据的可见性推导（输入未齐 = 分数不可见） |
+<!-- /drift:factor_output -->
+
+因子定义入库 / 版本指纹属 D3；消费属 D6 / D8——D1 只冻结形状。
+
+### 时间语义（PIT 红线）
+
+蓝图 §4.2：每条数据必须自带「什么时候才可见」，否则即数据泄漏，且
+极难事后发现（回测曲线照样漂亮）。
+
+| 频率 | Date 语义 | VisibleAt 口径 |
+| --- | --- | --- |
+| 1m | 分钟起点 | 周期结束：stamped 10:00 → 10:01 可见 |
+| 15m | bucket 起点 | bucket 结束：stamped 09:30 → 09:45 可见 |
+| 1d | 交易日（UTC 零点） | 当日 15:00 收盘（Asia/Shanghai）——Tushare 日更落库更晚，15:00 是「收盘后可见」的保守口径（不早于真实可见时刻） |
+
+时区：Asia/Shanghai = 固定 +8 偏移（`time.FixedZone`），不依赖运行时
+tzdata——Windows 开发机与精简 CI 容器默认没有 zoneinfo，
+`LoadLocation("Asia/Shanghai")` 会直接失败。
+
+### 透明路由
+
+调用方**声明频率**，不感知存在哪张表：
+
+```go
+Router.Bars(ctx, freq, symbol, start, end) ([]market.OHLCV, error)
+```
+
+| 声明频率 | 取数路径 | 数值口径 |
+| --- | --- | --- |
+| 1d | ohlcv_daily_qfq 直查 | 与遗留 storage.GetOHLCV 逐字段相等（回归红线：集成测试对拍，D1 ③5） |
+| 1m | ohlcv_minute 直查 | 原样返回（volume 由表内 BIGINT 承载；amount → Turnover） |
+| 15m | 1m 直查 + 聚合 | 见「聚合口径」；不物化 |
+| 其他 | **fail-loud 报错** | 拒绝静默回退 |
+
+start/end 语义：1d 按交易日闭区间（trade_date BETWEEN）；1m/15m 按
+时刻闭区间（ts BETWEEN）。
+
+### 聚合口径（1m → 15m / 1d）
+
+**主口径**：开 = 首笔开，高 = 期间最高，低 = 期间最低，收 = 末笔收，
+量 = 期间合计（turnover 同比合计）。
+
+**边界三细则**（蓝图 §9 #2 的归属地，2026-10-14 落定在此）：
+
+1. **午休断点**：15m bucket 按会话内时钟对齐，**不跨午休**。每日 16 个：
+   上午 09:30 / 09:45 / 10:00 / 10:15 / 10:30 / 10:45 / 11:00 / 11:15，
+   下午 13:00 / 13:15 / 13:30 / 13:45 / 14:00 / 14:15 / 14:30 / 14:45。
+2. **集合竞价**：开盘竞价打点（09:15–09:25；实现口径为早于 09:30 的
+   打点）并入首个上午 bucket（09:30，开价取竞价成交价）；收盘竞价打点
+   （14:57–15:00，含 15:00:00 收盘价打点）并入末 bucket（14:45）。
+3. **停牌日**：当日无 1m bar → **不产出**聚合 bar（缺失，不零填充）；
+   半日停牌 → 已覆盖 bucket 照常产出、未覆盖 bucket 缺失。
+
+另外两条硬规则：
+
+- **时段外 bar fail-loud**：早于 09:15、落在午休（11:30–13:00）、晚于
+  15:00 的打点 → 聚合器报错，不静默丢弃（静默丢 bar = 悄悄改口径）。
+- **不发明语义**：聚合 bar 的 TradeDays 恒 0、LimitUp/LimitDown 恒
+  false（前者无消费方，后者需日线参考价，属 D6 按需计算）；1d 聚合的
+  Date 用 UTC 零点，与日线表扫描形态一致，保证两种 1d 口径可比。
+
+### 按内核翻译层
+
+- **Go 侧直吃规范层**：`pkg/marketdata.Router` 是唯一读路径（见
+  「透明路由」）。
+- **NT 侧**（nautilus_trader 内核）：`nt-sidecar/tools/export_bars.py`
+  是第一条实现，经 `nt-sidecar/sidecar/mapping.py` 的映射表把 NT 数据类
+  翻译成规范层字段——**加一种数据类 = 映射加一行**
+  （`nt-sidecar/tests/test_d1_mapping.py` 钉住）。
+- **跨语言字面量契约**：Python `FREQ_1D = "1d"` 等常量与 Go
+  `market.Freq1d` 等**逐字相同**，翻译层测试双向钉住（改一侧即红）。
+- export_bars 既有换算（不变）：trade_date → UTC 午夜纳秒（与 daily 表
+  DATE 扫描形态一致）；volume 手 → 原样整数（不造股数语义）。
+
+### 护栏（棘轮 + 防漂移）
+
+1. **物理表直连棘轮**（`internal/repoguard/canonical_layer_test.go`）：
+   非测试 Go 文件中出现 `ohlcv_daily_qfq` / `ohlcv_minute` 字符串字面量
+   （SQL / DDL / 表名常量）的，只允许 `pkg/marketdata`（Router）与
+   `directTableAccessBaseline` 登记的遗留文件。**只减不增**：新开直连
+   路径 = 红；基线文件被清理 = 红（逼着删条目——白名单不许替已消失的
+   违规打掩护）。
+2. **防漂移测试**（`pkg/domain/spec_drift_test.go`）：上文三张字段表 +
+   频率词表与 Go 类型反射比对，双向缺失都红。
+3. **翻译层测试**（`nt-sidecar/tests/test_d1_mapping.py`）：Python 映射
+   表与 Go 常量逐字一致；`bar_kwargs_for_row` 产出与 export_bars 消耗
+   自洽。
+
+### 已知边界（D1 如实登记）
+
+- 分钟表 `amount` 可空，NULL → Turnover 记 0：字段级缺失唯一折零处，
+  D2 接 connector 契约时收编（bar 级「无 bar = 缺失」不受影响）。
+- 15m 不物化：每次取数实时聚合；分钟表数据量上来后的物化 / 预聚合属
+  后续性能工单，不在 D1 范围。
+- 既有两表明细数据不迁移（D1 ④ 非目标）：迁移 = 消费方逐个切 Router，
+  由棘轮基线逐条销号。
 
 ---
 

@@ -15,6 +15,12 @@ execution mechanics.
 Timestamps: an A-share daily bar has no intraday time, so ``trade_date`` is
 mapped to **midnight UTC** in nanoseconds for both ``ts_event`` and ``ts_init``.
 
+Kernel translation layer (D1 ③3): this tool is the **first consumer** of
+``sidecar.mapping`` — the declarative canonical-layer → NT mapping. It holds
+no per-field translation logic of its own: adding a data class means adding a
+row to ``BAR_FIELD_MAP`` / ``BAR_SUFFIX_BY_FREQ`` in that module (pinned by
+``tests/test_d1_mapping.py``), not editing this loop.
+
 Usage::
 
     python tools/export_bars.py \
@@ -31,20 +37,17 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from decimal import Decimal
 from pathlib import Path
-
-import pandas as pd
 
 # The sidecar package sits next to this script; make it importable when the tool
 # is invoked directly (e.g. `python tools/export_bars.py`).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sidecar.catalog import (  # noqa: E402 — import after sys.path tweak
-    BASE_CURRENCY,
-    PRICE_PRECISION,
-    bar_type_str,
-    make_equity,
+from sidecar.catalog import BASE_CURRENCY, make_equity  # noqa: E402 — import after sys.path tweak
+from sidecar.mapping import (  # noqa: E402 — import after sys.path tweak
+    FREQ_1D,
+    bar_kwargs_for_row,
+    bar_type_for,
 )
 
 DEFAULT_DSN = "postgres://postgres:postgres@localhost:5432/quant_trading?sslmode=disable"
@@ -78,7 +81,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     import psycopg
-    from nautilus_trader.model import Bar, BarType, Price, Quantity
+    from psycopg.rows import dict_row
+    from nautilus_trader.model import Bar, BarType
     from nautilus_trader.persistence import ParquetDataCatalog
 
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
@@ -86,7 +90,10 @@ def main(argv: list[str] | None = None) -> int:
         print("error: --symbols is empty", file=sys.stderr)
         return 2
 
-    with psycopg.connect(args.dsn) as conn, conn.cursor() as cur:
+    # dict_row: the translation layer addresses columns by canonical field
+    # name (SPEC.md drift:ohlcv json tags); positional unpacking would
+    # re-introduce an implicit column-order contract.
+    with psycopg.connect(args.dsn) as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(QUERY, (symbols, args.start, args.end))
         rows = cur.fetchall()
 
@@ -102,22 +109,9 @@ def main(argv: list[str] | None = None) -> int:
     catalog = ParquetDataCatalog(str(out_dir))
 
     by_symbol: dict[str, list] = {symbol: [] for symbol in symbols}
-    for symbol, trade_date, open_, high, low, close, volume in rows:
-        bar_type = BarType.from_str(bar_type_str(symbol, args.venue))
-        ts_ns = _trade_date_to_ns(trade_date)
-        by_symbol.setdefault(symbol, []).append(
-            Bar(
-                bar_type=bar_type,
-                open=Price(float(open_), precision=PRICE_PRECISION),
-                high=Price(float(high), precision=PRICE_PRECISION),
-                low=Price(float(low), precision=PRICE_PRECISION),
-                close=Price(float(close), precision=PRICE_PRECISION),
-                # tushare volume is already in lots (手); keep the integer value as-is.
-                volume=Quantity.from_int(int(volume)),
-                ts_event=ts_ns,
-                ts_init=ts_ns,
-            )
-        )
+    for row in rows:
+        bar_type = BarType.from_str(bar_type_for(row["symbol"], args.venue, FREQ_1D))
+        by_symbol.setdefault(row["symbol"], []).append(Bar(bar_type=bar_type, **bar_kwargs_for_row(row)))
 
     written: dict[str, int] = {}
     for symbol, bars in by_symbol.items():
@@ -137,16 +131,6 @@ def main(argv: list[str] | None = None) -> int:
     for symbol, count in sorted(written.items()):
         print(f"  {symbol}: {count} daily bars ({BASE_CURRENCY} bar; qfq as-is)")
     return 0
-
-
-def _trade_date_to_ns(trade_date: object) -> int:
-    """UTC midnight of a trade date, in nanoseconds."""
-    ts = pd.Timestamp(trade_date)
-    if ts.tzinfo is None:
-        ts = ts.tz_localize("UTC")
-    else:
-        ts = ts.tz_convert("UTC")
-    return int(ts.normalize().value)
 
 
 if __name__ == "__main__":

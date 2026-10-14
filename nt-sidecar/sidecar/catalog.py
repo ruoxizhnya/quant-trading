@@ -17,14 +17,16 @@ from nautilus_trader.model import Currency, Equity, InstrumentId, Price, Symbol
 from nautilus_trader.persistence import ParquetDataCatalog
 
 from .errors import SidecarError
+# 单一真相在翻译层（sidecar.mapping）：bar 后缀表与 Price 构造精度都属于
+# 「规范层 → NT」的翻译契约，catalog 反向 import 并沿用旧名（D1 ③3）。
+from .mapping import BAR_SUFFIX_BY_FREQ, FREQ_1D, PRICE_PRECISION, PRICE_INCREMENT
 
 #: Daily bars are externally aggregated by the export tool, hence ``EXTERNAL``.
-DAILY_BAR_SUFFIX = "1-DAY-LAST-EXTERNAL"
+#: 值来自 sidecar.mapping.BAR_SUFFIX_BY_FREQ（D1 起不再本地定义）。
+DAILY_BAR_SUFFIX = BAR_SUFFIX_BY_FREQ[FREQ_1D]
 
 #: A-share cash equity: CNY, tick size 0.01.
 BASE_CURRENCY = "CNY"
-PRICE_PRECISION = 2
-PRICE_INCREMENT = "0.01"
 
 
 def instrument_id_str(symbol: str, venue: str) -> str:

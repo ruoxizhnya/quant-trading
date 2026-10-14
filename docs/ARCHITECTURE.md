@@ -126,6 +126,7 @@ quant-trading/
 │   ├── data/         # 数据管道（tushare 客户端、因子、产业链导入）
 │   ├── domain/       # 领域模型（market 子包为行情类型权威）
 │   ├── kernel/       # 模块化内核（clock/msgbus/eventstore，K1–K12 线）
+│   ├── marketdata/   # 规范层读路径（Router 透明路由 + 1m→15m/1d 聚合，ADR-031 D1）
 │   ├── live/         # 实盘/纸交易引擎
 │   ├── risk/         # 风控（in-process 并入 analysis）
 │   ├── storage/      # PG/Redis 存储——DDL 唯一真相在 postgres.go
@@ -152,5 +153,56 @@ quant-trading/
 
 ---
 
-_Last updated: 2026-10-12（建文件；表数口径 42 张为当日实测）_
+## 7. 规范层数据流（ADR-031 / D1，2026-10-14）
+
+**不变量**：全系统数据取用只认一套规范层 schema——三类字段（OHLCV /
+Fundamental / FactorOutput），每条记录**自带频率与可见时间点**；
+connector 之外无人感知底层表。字段表 / 频率词表 / 聚合口径 / 时间语义
+的文档真相在 [SPEC.md「规范层 Schema」](SPEC.md#规范层-schemacanonical-layer)，
+本节只画数据流与护栏边界。
+
+```
+                     ┌──────────────────────────────┐
+                     │ 物理表（迁移期共存，登记基线）  │
+                     │  ohlcv_daily_qfq（1d，qfq）    │
+                     │  ohlcv_minute    （1m）        │
+                     └───────────┬──────────────────┘
+                                 │ 唯一被许可直连的读路径
+                     ┌───────────▼──────────────────┐
+                     │ pkg/marketdata.Router.Bars   │ 声明频率 → 透明路由
+                     │  1d → daily 表原样            │ Frequency + VisibleAt
+                     │  1m → minute 表原样           │ 随每条 bar 显式声明
+                     │  15m → 1m 聚合（不物化）      │ 未知频率 fail-loud
+                     └───────────┬──────────────────┘
+                                 │ []market.OHLCV（规范层）
+              ┌──────────────────┼───────────────────┐
+              ▼                  ▼                   ▼
+         Go 内核直吃         NT 侧翻译层            遗留路径（基线登记，
+      （回测/因子/信号）   sidecar/mapping.py      只减不增，逐项销号）
+                          BAR_FIELD_MAP：
+                          加数据类 = 映射加一行；
+                          export_bars 是第一个
+                          消费者（K13 数据流）
+```
+
+护栏（机械判据，全部在 CI 里）：
+
+- **直连棘轮**（`internal/repoguard/canonical_layer_test.go`）：非测试
+  Go 文件里的 `ohlcv_daily_qfq` / `ohlcv_minute` 字符串字面量（SQL /
+  DDL / 表名常量），只允许 `pkg/marketdata` 与 `directTableAccessBaseline`
+  登记的遗留文件；**新开直连 = 红，基线文件被清理 = 逼删条目**
+  （只减不增，白名单不许替已消失的违规打掩护）。
+- **防漂移**（`pkg/domain/spec_drift_test.go`）：SPEC 三类字段表 +
+  频率词表 ↔ Go 类型反射比对（双向）；Python `FREQ_*` ↔ Go `Freq*`
+  逐字钉住（`nt-sidecar/tests/test_d1_mapping.py` 读 Go 源码）。
+- **回归红线**（`pkg/marketdata/router_integration_test.go`）：Router 的
+  1d 路由与遗留 `storage.GetOHLCV` 逐字段对拍（真实 PG 自灌自证，
+  DB 不可达 Skip 不 Fail）——改的是取数通道，不是数据。
+
+迁移方向（D2 起）：connector 契约接入 → 消费方逐个切 Router → 棘轮
+基线逐条销号 → 物理表直连归零。
+
+---
+
+_Last updated: 2026-10-14（新增 §7 规范层数据流，ADR-031 D1；表数口径 42 张为 2026-10-12 实测）_
 _维护规则：服务/端口/schema 分区变更时更新本文件（AGENTS.md Rule 1）；表数不手抄，只给 grep 口径。_

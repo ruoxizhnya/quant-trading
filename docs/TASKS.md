@@ -19,7 +19,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 > **切片包**：D1 + D2 为同一切片包（D2 不必等 D1 全部完成，D1 的 schema 字段定稿即可开工 D2），但**分单验收**——D1 验翻译正确性，D2 验 fail-closed 拒收，验收方向相反。
 > **文档同步纪律（强制）**：D 系列任何上层设计变更必须同步 SPEC / data flow / schema（DDL）/ ARCHITECTURE.md，不同步 = 变更未完成（蓝图「维护本文件」节）。
 
-### D1 · 规范层 schema + 按内核翻译层 + 聚合规则成文 ⬜ 待做（最高优先，无依赖）
+### D1 · 规范层 schema + 按内核翻译层 + 聚合规则成文 ✅ 完成（2026-10-14，最高优先，无依赖）
 
 - **① 目标**：全系统数据取用只认一套「规范层 schema」（频率、时间语义字段自带），connector 之外无人感知底层表；1m→15m→1d 聚合口径含边界细则成文进 SPEC。
 - **② 上下文**：蓝图 §4.1/§4.3。现状：`pkg/domain/market/types.go` 的 `OHLCV` **无频率字段**，频率靠表名隐式区分——日线 `ohlcv_daily_qfq`（`trade_date DATE`，Tushare，唯一进回测）、1 分钟 `ohlcv_minute`（`ts TIMESTAMPTZ`，mootdx，只存着），建表 DDL 在 `pkg/storage/postgres.go` `migrationStatements()`（DDL 唯一真相，加表加列在数组末尾追加 `// Migration 0NN:`）。反例分界经验：`capital_flow` 用 `period` 列混表（小量聚合周期可混，量大/时间语义不同必分表）。NT 翻译第一条实现在 nt-sidecar 的 Parquet 导出映射（export_bars）。**为什么做**：规范层是 D2–D8 共同地基，不做它后面每张单都在流沙上。
@@ -36,6 +36,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   3. **破坏验证**：① 把某字段的 `frequency` 语义改错（如 1m 数据声明 1d）→ 相关测试变红；② 造一条绕过规范层直连 DB 的取数路径 → 被护栏/测试拦住（「不许绕过规范层」必须有执法者，不能只写在文档）；均还原绿。
   4. 文档同步：SPEC.md（schema）、core 仓 `docs/ARCHITECTURE.md`（数据流段）、内核蓝图数据流图如涉及则同步。
 - **⑥ 边界**：只做 schema + 路由 + 翻译层 + 聚合规则成文；connector 声明与拒收（D2）、新频率的策略消费（D6）、新数据类接入（D5）另立。
+- **✅ 完成记录（2026-10-14）**：规范层在 **Go 侧定稿**（`pkg/domain/market`：`Frequency` 类型 + `Freq1m/Freq15m/Freq1d` + `ParseFrequency` fail-loud；`OHLCV` 新增 `Frequency`/`VisibleAt`；`FactorOutput`/`Fundamental` 时间语义注释成文），NT 侧零污染。**透明路由** `pkg/marketdata.Router.Bars(ctx, freq, symbol, start, end)`：1d→`ohlcv_daily_qfq`、1m→`ohlcv_minute`、15m→1m 聚合（不物化）、未知频率 fail-loud；**聚合口径三细则**成文进 SPEC（午休断点 11:30–13:00 拒收时段外 bar、集合竞价并入首/末 bucket、停牌日无 bar=缺失）。**SPEC.md 新增「规范层 Schema」大节**：三类字段表带 `<!-- drift:* -->` 锚点，`pkg/domain/spec_drift_test.go` 反射比对 Go json tag 双向防漂移（4 测试）。**回归**：`router_integration_test.go` 自灌自证与遗留直查逐字段对拍通过（日线数值不变）。**NT 翻译层**第一条实现 `nt-sidecar/sidecar/mapping.py`（`BAR_FIELD_MAP` 声明式映射，加数据类=加一行）+ `export_bars.py` 消费 + `test_d1_mapping.py` 14 测试（含跨语言字面量契约：Python 读 Go 源码正则双向钉住）。**护栏** `internal/repoguard` 棘轮：AST 扫物理表名字面量，`pkg/marketdata` 外非测试文件只减不增（8 个遗留文件带裁决理由登记基线）。**破坏验证两组均「改坏变红、还原变绿」**：① `loadMinute` 频率声明 Freq1m→Freq1d → `TestRouterSameRouteThreeFrequencies` 红；② `pkg/backtest` 造直查 `ohlcv_daily_qfq` 生产文件 → 护栏点名红。文档同步：SPEC.md + ARCHITECTURE.md §7 数据流图。已知边界：`amount` NULL 折零、15m 不物化、不迁移既有两表数据。
 
 ### D2 · connector 注册契约：时间语义 + 频率口径，fail-closed 拒收 ⬜ 待做（与 D1 同一切片包）
 

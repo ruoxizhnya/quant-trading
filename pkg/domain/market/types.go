@@ -2,9 +2,16 @@ package market
 
 import "time"
 
-// OHLCV represents daily candlestick data.
+// OHLCV represents candlestick data at ANY frequency.
+//
+// 频率是**记录自带字段**（ADR-031 蓝图 §4.1），不靠来源表隐式区分：
+// 日线表 ohlcv_daily_qfq 与分钟表 ohlcv_minute 的 bar 共用这一个类型，
+// 由 Frequency 字段声明。规范层取数路径（pkg/marketdata.Router）必须
+// 显式声明；遗留路径（storage.GetOHLCV 等护栏基线登记项）留零值。
 type OHLCV struct {
-	Symbol    string    `json:"symbol"`
+	Symbol string `json:"symbol"`
+	// Date 是 bar 周期起点：1m = 该分钟起点；15m = bucket 起点；
+	// 1d = 交易日零点（UTC，PG DATE 扫描形态）。
 	Date      time.Time `json:"date"`
 	Open      float64   `json:"open"`
 	High      float64   `json:"high"`
@@ -13,6 +20,16 @@ type OHLCV struct {
 	Volume    float64   `json:"volume"`
 	Turnover  float64   `json:"turnover"`
 	TradeDays int       `json:"trade_days"`
+	// Frequency 规范层频率（"1m"/"15m"/"1d"）。
+	//
+	// 零值 "" = **未声明**：遗留取数路径不填这个字段，规范层取数路径
+	// （pkg/marketdata.Router）必须显式填。测试钉住：Router 三条路由
+	// 返回的 bar 必须带正确频率（改错 → 红，D1 破坏验证①）。
+	Frequency Frequency `json:"frequency"`
+	// VisibleAt 可见时间点（PIT 时间语义，蓝图 §4.2）：
+	// 1m = bar 周期结束时刻；15m = bucket 结束时刻；1d = 当日 15:00
+	// 收盘（Asia/Shanghai）。零值 = 未声明（同 Frequency）。
+	VisibleAt time.Time `json:"visible_at"`
 	// LimitUp indicates the stock hit the upper price limit today (涨停)
 	LimitUp bool `json:"limit_up"`
 	// LimitDown indicates the stock hit the lower price limit today (跌停)
@@ -84,6 +101,12 @@ type Dividend struct {
 // 改用指针之前，存储层用 COALESCE(col, 0) 兜底（见 TASKS P2-10）：
 // 库里的 NULL 和真实 0 都被折成 0.0，下游无从分辨。现在 nil 就是"不知道"，
 // 用之前必须显式判空 —— 这层啰嗦正是这个类型存在的理由。
+//
+// 时间语义（规范层三要求之一，D1）：Date = 可用日（从哪天起这条数据才
+// 存在，读取侧 COALESCE(ann_date, trade_date)），AnnDate = 真实披露日。
+// 「何时可见」由这两个字段承载，不需要额外的 VisibleAt 字段——披露日
+// 就是可见时间点。频率为类别级声明：按日消费（1d），公告驱动的事件语义
+// 由 AnnDate 承载（connector 侧「事件流」声明属 D2）。
 type Fundamental struct {
 	Symbol string `json:"symbol"`
 	// Date 是这条记录的**可用日**（P1-4）：读出来时等于
