@@ -146,7 +146,7 @@
   4. 三条命根子逐条验证记录（哈希复现 / 快照防偷看 / 双侧可比）。
 - **⑥ 边界**：只做流水线 + 治理层；挖掘算法调优、因子应用策略（怎么用分）另立。
 
-### D9 · 国外市场数据源选型调研 ⬜ 待做（独立，随时可插）
+### D9 · 国外市场数据源选型调研 ✅ 完成（2026-10-14，独立，随时可插）
 
 - **① 目标**：产出选型报告（归档 quant-trading-docs 仓）：NT 原生数据通道优先 + ≥2 个外部候选对比，给出明确推荐与接入成本估算。
 - **② 上下文**：蓝图 §9 #4（已拍板倾向：NT 原生数据通道优先，另调研）。服务对象：D7 的数据通道与后续国外 connector。
@@ -157,6 +157,7 @@
 - **④ 约束与非目标**：不实现 connector、不签约付费源、不动现有数据链路；报告写进 docs 仓（设计文档归 docs 仓的长效机制）。
 - **⑤ 验收**：报告落档 docs 仓且含四要素（对比表、硬判据筛查记录、推荐、接口需求清单）；结论可直接抄进后续 connector 工单的②上下文。
 - **⑥ 边界**：只调研不实施。
+- **✅ 完成记录（2026-10-14）**：选型报告已落档 **quant-trading-docs 仓 `docs/design/d9-foreign-market-data-source-selection.md`**（跨仓指针不使用可解析相对链接，DOCS-01 排除条件）。四要素齐备（对比表 / 硬判据筛查记录 / 推荐+接入成本 / 接口需求清单 I-01…I-16）；10 个候选项中 **4 项因「时间语义不可声明（值被未来事件重述）」被一票否决**，6 项通过。**主选 Databento**（NT 官方 adapter 通道），**阶段 0 用交易所 crypto（零成本）**供 D7 样例 run；**正式链路必须回灌 D1 规范层**（NT adapter 直连 catalog 仅允许打样/研究态）。后续「国外 connector」工单可直接抄 §0 结论与 §7 清单作为 ②上下文 与 ③要求。
 
 ---
 
@@ -213,6 +214,61 @@
 - **④ 约束与非目标**：不动 `IsRateLimitExempt` 的逐字匹配语义（安全不变量）；不改前端既有自救逻辑的判定阈值；不动限流全局参数。
 - **⑤ 验收**：SSE 通道状态推送测试通过（或限流预算单列测试）；观察页轮询频率显著下降或消失（前端单确认）；回归：`/api/sync/stream` 既有行为不变。
 - **⑥ 边界**：只做观察页状态通道；其他轮询端点另立。
+
+---
+
+## 二·补 · A-08 前置实测新增项（2026-10-14，源自 ui 仓 A-08 依赖面测量）
+
+> 背景一句话：A-08（数据同步页）要展示 worker / scheduler 统计，实测发现**后端这条链路是死的**，
+> 于是先修后端再画前端（「前端不去干预后端设计，后端要改就整体改」）。三条派生项见 SYNC-02/03。
+
+### SYNC-01 · 调度器全仓零调用方 ⇒ 排程永不触发 ✅ 完成（2026-10-14）
+
+- **① 目标**：data-service 进程启动即把 cron 调度器跑起来，`sync_schedules` 中 `is_active=true` 的排程**真的会触发**；`GET /api/sync/scheduler/stats` 不再是结构上永远 0/0。
+- **② 上下文**：
+  - 缺陷形状（2026-10-14 `git grep` 对 HEAD 实测）：`Scheduler.Start()` / `Stop()`（`pkg/sync/scheduler.go:47`、`:61`）**在 `cmd/` 与 `pkg/` 全仓零调用方**——生产没有，测试也没有；同批同步接线的唯一 `.Start()` 是 `cmd/data/sync_handlers.go:71 h.workerPool.Start()`。`SyncHandler` 构造时把 7 种 job type 都注册进了 WorkerPool，调度器却从未被启动。
+  - 后果实测（本地栈，容器 `quant-trading-data-service-1`）：修复前 `GET /api/sync/scheduler/stats` → `{"active_schedules":0,"total_entries":0}`，且无论 toggle 与否都不变。
+  - 「函数写得对但零调用方」这类缺陷**编译期看不见、行为测试也看不见**（行为测试自己会调 `Start()`，于是永远绿）——同族先例见 `cmd/analysis/wiring_guard_test.go`（K1 切片 3），故本次两腿都补。
+- **③ 要求**：
+  1. `SyncHandler` 暴露生命周期入口 `StartScheduler() error` / `StopScheduler()`（与既有 `StartWorkerPool`/`StopWorkerPool` 同一组），`Start` 的 error **返回**而非就地吞掉，由装配点决定爆炸半径。
+  2. `registerRoutes` 返回 `*SyncHandler`，`main()` 在建路由之后、`startHTTPServer` 之前启动调度器；启动失败 **fail-loud 进日志**（`logger.Error().Err(err)`）但不 kill 进程（store 此时已可达，为调度器起不来而让整个 HTTP 挂掉是把局部失败放大成全局）。
+  3. 关闭顺序：先 `gracefulShutdown(srv)` 再 `StopScheduler()`——cron 不能在 worker 正在拆时新建作业。
+  4. 两条守卫腿：行为腿（`pkg/sync/scheduler_start_test.go`）+ 接线腿（`cmd/data/wiring_guard_test.go` 扫 `main.go`/`sync_handlers.go` 的**调用形态**）。
+- **④ 约束与非目标**：不改 `Scheduler`/`ScheduleStore` 接口签名；不动 `loadAndScheduleAll` 的 cron 解析容错（坏行 warn 跳过）；不加新依赖；**不顺手修 SYNC-02/03**（另立）；不改 `docker-compose.yml`。
+- **⑤ 验收**（全部为**真实退出码**，不取管道尾巴）：
+
+  | 判据 | 命令 | 实测 |
+  |---|---|---|
+  | 行为腿绿 | `go test ./pkg/sync/... -count=1` | `ok`，exit 0 |
+  | 接线腿绿 | `go test ./cmd/data/... -count=1` | `ok`，exit 0 |
+  | 全仓构建/静态 | `go build ./...` / `go vet ./...` | exit 0 / exit 0 |
+  | 格式化 | `gofmt -l` 四个改动文件 | 空输出 |
+  | **正证据（活进程）** | `docker compose build data-service && docker compose up -d data-service`，读容器日志 | 三行齐备：`scheduler.go:48 "Starting sync scheduler"` → `:254 "Loaded and scheduled active schedules" count=0` → `:56 "Sync scheduler started"` ⇒ 证明 `main()` 真的走到了这一行 |
+  | **正证据（active 会登记）** | `POST /api/sync/schedules/1/toggle {"active":true}` → `GET /api/sync/scheduler/stats` | `total_entries` **0→1**，`next_runs` 出现 `2026-10-15T09:00:00Z`；再 toggle `false` → 回 `0/0`，`is_active=false` 已还原（现场无残留，未触发任何真同步） |
+  | **破坏验证 (a) 接线腿非空** | 把 `main.go` 的启动块替换成 `_ = syncHandler` | `--- FAIL: TestStartupStartsScheduler … main 未启动调度器 ⇒ 排程永远不会触发（SYNC-01）`；还原后 `git diff` 该文件为空 |
+  | **破坏验证 (b) 行为腿非空** | 在 `pkg/sync/scheduler.go Start()` 里用 `if false {…}` 罩住 `loadAndScheduleAll` | `--- FAIL: TestSchedulerStartFiresActiveSchedule (3.00s) … Start() 之后 3 秒内没有产生任何作业行`；还原后 `git diff pkg/sync/scheduler.go` 为空，全仓 `grep -rn MUTATION cmd pkg` 零命中 |
+
+  - **验收口径是「作业行数」不是计数器**：`ToggleSchedule` 在 `Start()` 之前也会写 `s.entries`，所以 `active_schedules` **在调度器从未启动的状态下同样能变成 1**——只看计数器会被骗。行为腿因此断言 store 里的 job 行；`TestToggleScheduleWithoutStartDoesNotFire` 把这条反证**永久钉成测试**（不调 `Start()`，toggle 后等 400ms 断言零作业行）。
+  - ⚠️ **实测边界（诚实登记）**：`go test -race` 本机**跑不了**（`gcc` 不存在，CGO_ENABLED=0）——本单并发面只有 cron goroutine 与既有 mutex 路径，未获 race 证据；另 `gofmt -l cmd pkg` 有 **8 个存量未格式化文件**（含 `cmd/data/setup.go`，HEAD 即如此），非本次改动，与 AGENTS.md §6「整仓 gofmt 可以当结论用」相矛盾，待单独收口。
+- **⑥ 边界**：`cmd/data/main.go`、`cmd/data/sync_handlers.go`（仅新增两个生命周期方法）、两个新测试文件；调度器内部逻辑与前端零改动（A-08 才动前端）。
+
+### SYNC-02 · `StopWorkerPool` 零调用方：关闭不排空在跑的作业 ⬜ 待做
+
+- **① 目标**：SIGTERM 后 worker pool 优雅停止，正在跑的同步作业要么跑完要么被标记为可重试，而不是随进程一起被掐断。
+- **② 上下文**：SYNC-01 复测时顺带 grep——`cmd/data/sync_handlers.go:75 StopWorkerPool()` 全仓零调用方（`StartWorkerPool` 有，`main.go:138`）。**与 SYNC-01 同族缺陷形状**（生命周期入口存在但没人调），差别只在后果更窄：只影响关闭时的在跑作业，不影响是否触发。
+- **③ 要求**：在 `main()` 关闭序列里接上（顺序须与 SYNC-01 一致：HTTP → scheduler → worker pool）；`WorkerPool.Stop()` 语义若不够（不等待/不标记），先测出来再决定改不改，别在接线单里顺手改语义。
+- **④ 约束与非目标**：不改 `WorkerPool` 公开签名；不动限流/队列参数；不碰 scheduler 逻辑。
+- **⑤ 验收**：接线守卫新增一条断言（`main.go` 含 `syncHandler.StopWorkerPool(`，锚定调用形态）；**破坏验证**：去掉该调用 → 守卫红，还原绿；有条件时用一次真实「跑到一半发 SIGTERM」观察作业终态。
+- **⑥ 边界**：只做关闭接线 + 对应守卫；作业中断后的状态收敛另立。
+
+### SYNC-03 · 停用排程后 `next_run_at` 残留（界面会显示一个不会发生的未来） ⬜ 待做
+
+- **① 目标**：`is_active=false` 的排程不带 `next_run_at`，界面无法把「从未会发生的下次运行」当成事实展示。
+- **② 上下文**：SYNC-01 活进程实测（2026-10-14）：`POST /api/sync/schedules/1/toggle {"active":true}` 后 `next_run_at=2026-10-15T09:00:00Z`；再 toggle `false`，`scheduler/stats` 回到 `0/0`（cron entry 已 `Remove`），但 `GET /api/sync/schedules/1` 仍返回 `is_active:false` **且** `next_run_at:2026-10-15T09:00:00Z`。写点在 `pkg/sync/scheduler.go:278`（`scheduleJob` 设置并持久化），停用分支只 `cron.Remove` + `delete(s.entries)`，未清字段。愿景原则 4「每个数字可被当场质问」在这里答不上来。
+- **③ 要求**：停用路径把 `next_run_at` 置 NULL（与 `is_active` 同一次 UPDATE，避免中间态）；确认 `Stats().NextRuns` 不受影响（它读 cron entry，本来就空）。
+- **④ 约束与非目标**：不改 `SyncSchedule` 结构体与 JSON 字段名（`next_run_at,omitempty` 语义已够）；不改 toggle 的返回体；A-08 前端**先按「inactive 不显示 next_run」防御**，但后端修好后不改前端判据。
+- **⑤ 验收**：单测：toggle false 后 store 读回 `NextRunAt == nil`；活进程复测上表同一条 curl 序列，`next_run_at` 消失；**破坏验证**：还原清除语句 → 单测红。
+- **⑥ 边界**：只改停用路径的字段清理；`last_run_job_id` 等其余残留另立。
 
 ---
 
