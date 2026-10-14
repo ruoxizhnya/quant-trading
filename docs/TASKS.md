@@ -259,7 +259,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 > **core 侧改判关闭（2026-10-14，派工即核查触发，逐条源码核过）—— 前提失效，本单在 core 无法按原样落地：**
 > 1. **explore 已不在 core**：`pkg/ai` / `pkg/tools` 在本仓不存在（AI 拆仓 ADR-027；AGENTS.md §1 明写 copilot/pipeline/explore/tools 四族 handler 现住 `quant-trading-agent` 仓）。core 对 `/api/explore/*` 只做纯反代（`cmd/analysis/handlers_ai_proxy.go:63`）——**既无 explore handler，也无 run 状态数据源**，core 侧 SSE 无从推起。⑤「SSE 通道状态推送测试通过」在 core 不可成立（被测源不在此）。
 > 2. **core 其实已 SSE-safe**：同代理 `handlers_ai_proxy.go:53` `proxy.FlushInterval = -1 // SSE 逐写直通`（文件头注释已点名流式端点直通）。即 agent 仓一旦暴露 `GET /api/explore/runs/:id/stream`，core 现有代理**原样直通、零新增代码**——拆仓时就把「core 侧要做的」做完了。
-> 3. **改判**：实现移 **`quant-trading-agent` 仓另立单**——在 run 状态源处产出 `runs/:id/stream` SSE，形状复用 data-service 先例 `sseProgressHandler`（`cmd/data/sync_handlers.go:761`）；ui 前端接线仍另立（跨仓两段式）。本 core 单**关闭**，保留可追溯指针不删。
+> 3. **改判**：实现移 **`quant-trading-agent` 仓另立单**——**已立 `OPS-01-A`（`quant-trading-agent/docs/TASKS.md`）**：在 run 状态源处产出 `runs/:id/stream` SSE，形状复用 data-service 先例 `sseProgressHandler`（`cmd/data/sync_handlers.go:761`）；ui 前端接线仍另立（跨仓两段式）。本 core 单**关闭**，保留可追溯指针不删。
 > 4. **不动限流器**：§八 6 号「`/api/explore/runs/:id` 不进 `RateLimitExemptPaths`（逐字匹配做不到 + 判据不满足）」的裁决**继续有效**；本单不因 SSE 触 `IsRateLimitExempt` 语义或全局预算。
 >
 > **顺带纠偏**：本单 ②③⑤ 引用的先例 `/api/sync/stream` 在本仓**不存在**；真实 SSE 先例是 `GET /api/sync/jobs/:id/progress`（在 **data-service**，非 analysis），且它本身是每 2s 轮询 store 再转推 SSE（非 pub/sub）。不影响结论——SSE 省 429 的原理是「N 次轮询请求（前端 `POLL_MS=2500`≈24 req/min/页）→ 1 条长连接只占 1」。
