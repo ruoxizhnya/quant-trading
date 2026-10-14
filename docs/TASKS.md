@@ -884,6 +884,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | 5 | 实测看到 `Status=invalid` —— **那是护栏在正常工作，不是新缺口** | 真跑一轮 `/explore`（run `c46fa2ad`），两次尝试的回测都是 `universe_max_size=0 / zero_trades / garbage_metric` ⇒ 被标 `invalid` 而非报成功。**这条本表 §四 已跟踪**（OBS-01 / ADR-030，见 `docs/TASKS.md` 「① 目标：回测/验证在「0 交易 / 空票池」时必须 fail-loud」），我看到的就是它落地的效果。本轮只补一个**机制更正**，见下方「§八 的 5 号条目复查」 | 🔵 已跟踪（OBS-01），本轮补机制 |
 | 6 | 状态轮询要不要进 `RateLimitExemptPaths` | **已裁决：不进**，理由见下方「§八 的 6 号条目裁决」 | ✅ 已裁决（不改豁免表） |
 | 7 | **偏差维把没测过的数字打印成实测结果** | 见下方独立工单 OBS-01-R1 | 🔴 新立 |
+| 8 | **AI 链路把 K9 三值丢在客户端边界上** | 见下方独立工单 OBS-01-R2（A-07 收口时逐字核出） | 🔴 新立 |
 
 **§八 的 5 号条目复查（2026-10-14 当日自查，结论反转）**
 
@@ -914,6 +915,7 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | # | 工单 | 根因（已逐字核对） | 修法 |
 |---|---|---|---|
 | 7 | **OBS-01-R1 · 偏差维输出一个它没量过的数字** | `cmd/ai/handlers_explore.go:50` 设 `PoolSource=PoolSourceCurrent` 但不设 `PoolSize`；`pkg/ai/validation/bias.go:296-303` 无条件把 `in.PoolSize` 插进 blocking 文案 ⇒ 屏幕上出现「股票池按今天的上市名单取（**0 只**）」。0 是零值，不是测量结果。**违反愿景原则 4（每个数字可被当场质问）**：主任若追问「哪来的 0 只」，诚实答案是「没量过」——而这正是 F5 这块组件存在的意义 | 池子规模未知时**不要打印数**，改成不带数量的措辞（`PoolSize<=0` 已有先例：`bias.go:202` 与 `:314` 都按「未测量」分支处理，只有 `PoolSourceCurrent` 这一支漏了）。**注意概率侧没有这个 bug**：`biasProbability` 对 `PoolSourceCurrent` 提前返回 `BiasProbFloor`，不看 `PoolSize`，所以低分是有意为之；错的只有那句话。**非目标**：不借机重构偏差维，不改 `PoolSourceCurrent` 的概率 |
+| 8 | **OBS-01-R2 · AI 链路把 K9 三值丢在客户端边界上** | `pkg/ai/client/backtest_client.go:47` 的 `RunBacktest` 明明**解出了** `BacktestResponse.Status`（同文件 `:43`），返回值却只有 `*domain.BacktestResult` ⇒ 三值在这一步被丢弃；而 `pkg/domain/backtest.go:5-39` 的 `BacktestResult` **没有 `Status` 字段**（只有 `InvalidReasons`，`:38`）。于是任何 AI 侧消费者（Copilot 播报、实验日志、`pkg/ai/loop` 的候选评估）从 payload 里**读不到 completed / invalid / failed**，唯一活下来的信号是 `invalid_reasons`。⚠️ **这不是用户可见的假成功**：`pkg/backtest/engine.go:924` 每次返回前都会跑 `CheckValidity` 并挂上这组 Code（有效 = 空数组），前端 A-07 已把它当判据接住（`web/src/utils/runStatus.ts` 的 `backtestValidityNote`：status 到了按三值，没到就退回 `invalid_reasons` **并把判据说出来**）。登记的是**契约残缺**，不是渲染缺陷 | 两条路，**属 Ask First**（要动 `pkg/domain` 核心类型或 AI 客户端公开签名）：**(a)** `domain.BacktestResult` 加 `Status` 字段，由引擎在 `runBacktestInternal` 末尾按 `contracts.Status*` 常量填；**(b)** `RunBacktest` 改返回一个带 `Status`/`Error` 的小结构（不动 domain）。倾向 (b) —— 三值在现有规格里本来就属于**响应层**（`contracts.go:250-252` 把 Status 与 Error/InvalidReasons 的搭配写在响应语义上），把它塞进"一次运行的指标集合"会让同一个概念有两处真相。**验收**：(1) 新增单测断言 `RunBacktest` 的返回能区分 completed / invalid / failed 三值，且 invalid 时 `InvalidReasons` 非空；(2) 跑一次 `POST /api/backtest` 真请求确认线上 JSON 的 `status` 与结构体字段一致。**非目标**：不改前端（它已自救并有 7 条单测钉住）；不借机重构 pipeline 的结果结构 |
 
 **§八 的 6 号条目裁决（2026-10-14，本轮定）**
 
