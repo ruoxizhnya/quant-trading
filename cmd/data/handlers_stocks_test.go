@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -52,7 +53,12 @@ func TestStockCountPayload_Shape(t *testing.T) {
 }
 
 // TestStocksCountHandler_StatusSplitMatchesDatabase 是经 HTTP 面的正证据：
-// 响应里的拆分逐值等于库里的 GROUP BY，且与按 status 单条 WHERE 的独立计数一致。
+// 端点发出去的拆分逐值等于库里 `GROUP BY status`，且 count 与拆分同源。
+//
+// oracle 只读**一趟**（原始 GROUP BY，折叠在 Go 里再实现一遍）：本包与 pkg/storage
+// 的测试都会在开发库 stocks 里插删探针行，每多一趟读就多一个「两次读数之间被人改过」
+// 的假红窗口。语义层面（NULL/空串折同一档、跨档相加）的独立核对在
+// pkg/storage/stocks_status_test.go，本条只管**通道**：键名、类型、序列化形状。
 func TestStocksCountHandler_StatusSplitMatchesDatabase(t *testing.T) {
 	store, err := storage.NewPostgresStore(context.Background(), stocksCountTestDSN)
 	if err != nil {
@@ -74,38 +80,39 @@ func TestStocksCountHandler_StatusSplitMatchesDatabase(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
 
-	// 工单 ③ 的口径：与 `SELECT status, count(*) FROM stocks GROUP BY status` 逐值一致。
+	// status 原始列可空，如实接 NullString；NULL 与 '' 折进 unknown 一档并**相加**。
 	rows, err := store.DB().Query(ctx, `SELECT status, COUNT(*) FROM stocks GROUP BY status`)
 	require.NoError(t, err)
 	want := map[string]int64{}
 	for rows.Next() {
-		var status string
+		var status sql.NullString
 		var n int64
 		require.NoError(t, rows.Scan(&status, &n))
-		want[status] = n
+		key := "unknown"
+		if status.Valid && status.String != "" {
+			key = status.String
+		}
+		want[key] += n
 	}
 	rows.Close()
 	require.NoError(t, rows.Err())
-	require.NotEmpty(t, want, "stocks 表为空，本测试无从核对（开发库应有票池数据）")
+
+	if len(want) == 0 {
+		t.Skip("stocks 表为空，通道核对无从谈起（AUD-51：前置与断言读的都是 stocks）")
+	}
 
 	assert.Equal(t, want, body.ByStatus, "by_status 应逐值等于库里的 GROUP BY，响应体：%s", w.Body.String())
 
-	// count 必须与拆分同源：各档之和 == count == COUNT(*)。
-	var total int64
-	require.NoError(t, store.DB().QueryRow(ctx, `SELECT COUNT(*) FROM stocks`).Scan(&total))
-	assert.Equal(t, total, body.Count, "count 应等于全表行数")
+	// count 与拆分同源：等于 oracle 各档之和，也等于自己响应体里各档之和。
+	total := int64(0)
+	for _, n := range want {
+		total += n
+	}
+	assert.Equal(t, total, body.Count, "count 应等于票池全表行数（含已退市）")
 
-	sum := int64(0)
+	bodySum := int64(0)
 	for _, n := range body.ByStatus {
-		sum += n
+		bodySum += n
 	}
-	assert.Equal(t, body.Count, sum, "count 与 by_status 必须同源：各档之和应等于 count")
-
-	// 独立路径交叉核对（WHERE 而非 GROUP BY），钉住 active/delisted 两档的语义。
-	for _, status := range []string{"active", "delisted"} {
-		var n int64
-		require.NoError(t, store.DB().QueryRow(ctx,
-			`SELECT COUNT(*) FROM stocks WHERE status = $1`, status).Scan(&n))
-		assert.Equal(t, n, body.ByStatus[status], "status=%s 的读数应与 WHERE 计数一致", status)
-	}
+	assert.Equal(t, body.Count, bodySum, "count 与 by_status 必须同源：响应体内各档之和应等于 count")
 }

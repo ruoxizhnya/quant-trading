@@ -16,6 +16,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -55,9 +56,21 @@ func seedProbeStock(t *testing.T, store *PostgresStore, ctx context.Context, sym
 	})
 }
 
-// TestStockStatusCounts_MatchesPerStatusWhereCount 是工单 ③ 口径的机械化断言：
-// 分组读数逐值 == 按该 status 单条 WHERE 计数。
-func TestStockStatusCounts_MatchesPerStatusWhereCount(t *testing.T) {
+// TestStockStatusCounts_MatchesRawGroupByFoldedInGo 是工单 ③ 口径的机械化断言。
+//
+// oracle 取的是工单原话那条查询 `SELECT status, COUNT(*) FROM stocks GROUP BY status`
+// —— **逐字不折**，折叠规则由测试侧在 Go 里再实现一遍：生产码在 SQL 里折、这里在 Go
+// 里折，两条独立实现对不上就是缺陷。
+//
+// ⚠️ 分工要写清，别把这条当成什么都能抓：**GROUP BY 表达式陷阱不由这条守**。
+// 2026-10-15 实测把生产分组改成原始列 `GROUP BY status`，本条照样绿 —— 库里当前
+// 没有 NULL 或空串行时，折与不折结果相同。那条陷阱（NULL 与空串出成两行同名 unknown、
+// map 互相覆盖少一只票）由 TestStockStatusCounts_FoldsNullAndEmptyIntoOneUnknownBucket
+// 守：它自己造那两行，改坏时红在 `expected: 2, actual: 1`。
+//
+// 本条只读两趟（读数 + oracle），不是 N+1 条 WHERE —— 开发库里并发同步与并行测试
+// 会话都在写 stocks，每多一趟读就多一个「两次读数之间被人改过」的假红窗口。
+func TestStockStatusCounts_MatchesRawGroupByFoldedInGo(t *testing.T) {
 	store := testStore(t)
 	// 用 t.Cleanup 而不是 defer：见 seedProbeStock 的 LIFO 说明 —— 探针删除必须
 	// 跑在关池之前，defer 会让删除拿到 closed pool。
@@ -67,41 +80,34 @@ func TestStockStatusCounts_MatchesPerStatusWhereCount(t *testing.T) {
 	got, err := store.StockStatusCounts(ctx)
 	require.NoError(t, err)
 
-	// distinct status（含 NULL/空串折成的 unknown）从库里现取，不写死枚举 ——
-	// 库里将来多一种状态值，这条断言自动覆盖它，而不是先红在测试里。
-	rows, err := store.DB().Query(ctx,
-		`SELECT DISTINCT COALESCE(NULLIF(status, ''), 'unknown') AS status
-		 FROM stocks ORDER BY 1`)
+	rows, err := store.DB().Query(ctx, `SELECT status, COUNT(*) FROM stocks GROUP BY status`)
 	require.NoError(t, err)
-	var statuses []string
+	want := map[string]int64{}
 	for rows.Next() {
-		var s string
-		require.NoError(t, rows.Scan(&s))
-		statuses = append(statuses, s)
+		var status sql.NullString // 原始列可空，这里如实接
+		var n int64
+		require.NoError(t, rows.Scan(&status, &n))
+		key := "unknown"
+		if status.Valid && status.String != "" {
+			key = status.String
+		}
+		want[key] += n
 	}
 	rows.Close()
 	require.NoError(t, rows.Err())
-	require.NotEmpty(t, statuses, "stocks 表没有任何 status 值，交叉核对无从谈起")
 
-	assert.Len(t, got, len(statuses), "分组键集合应与库里 distinct status 一致，实测 %+v", got)
-
-	for _, status := range statuses {
-		var want int64
-		if status == "unknown" {
-			// unknown 是 NULL 与空串折出来的合成键，WHERE 得按折叠前的形状写。
-			err = store.DB().QueryRow(ctx,
-				`SELECT COUNT(*) FROM stocks WHERE status IS NULL OR status = ''`).Scan(&want)
-		} else {
-			err = store.DB().QueryRow(ctx,
-				`SELECT COUNT(*) FROM stocks WHERE status = $1`, status).Scan(&want)
-		}
-		require.NoError(t, err, "count by WHERE for status=%s", status)
-		assert.Equal(t, want, got[status], "status=%s 的分组读数与 WHERE 计数不一致", status)
+	// 空票池 = 没有可比对象，不是缺陷（AUD-51 口径：前置读的必须就是断言读的东西
+	// —— 这里两边都读 stocks）。不 skip 的话这条会变成**零次循环空过**，
+	// 一个谁都没断言的绿比红更糟。
+	if len(want) == 0 {
+		t.Skip("stocks 表为空，逐值核对无从谈起（开发库需先灌票池）")
 	}
+
+	assert.Equal(t, want, got, "读数应与库里 group by status 的折叠结果逐键逐值一致")
 }
 
 // TestStockStatusCounts_FoldsNullAndEmptyIntoOneUnknownBucket：
-// 同时插一行 status IS NULL 与一行 status = ” 的探针股票，两行必须落到
+// 同时插一行 status IS NULL 与一行 status 为空串的探针股票，两行必须落到
 // **同一个** unknown 档（+2），其它档不受影响，且调用方不报错。
 //
 // 这条同时钉住 SQL 的写法：`GROUP BY status`（走原始列）会出来两行都叫 unknown

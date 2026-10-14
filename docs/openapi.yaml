@@ -2206,15 +2206,40 @@ paths:
   /api/stocks/count:
     get:
       tags: [Data Proxy]
-      summary: Get stock count (proxied)
+      summary: Stock records + status split (proxied)
+      description: >
+        网关是字段透传（proxyRequest 解码成 map 再编码），形状由数据服务定义，
+        见 docs/SPEC.md §1「GET /stocks/count 的响应形状」。
       operationId: getStockCount
       responses:
         '200':
-          description: Stock count
+          description: >
+            count 含已退市记录，且等于 by_status 各档之和 —— 它不是"在市股票数"；
+            要在市数取 by_status.active。
           content:
             application/json:
               schema:
                 type: object
+                required: [count, by_status]
+                properties:
+                  count:
+                    type: integer
+                    format: int64
+                    description: 全表行数（含已退市），由 by_status 各档求和导出，非第二次 COUNT(*)
+                  by_status:
+                    type: object
+                    description: >
+                      逐值等于 SELECT status, COUNT(*) FROM stocks GROUP BY status。
+                      status 为 NULL 或空串的行折成 "unknown" 一档（该列可空）；
+                      票池为空时序列化为 {}，不是 null。
+                    additionalProperties:
+                      type: integer
+                      format: int64
+                  latest_date:
+                    type: string
+                    description: >
+                      行情最新日。**可能缺席** —— handler 丢掉了 Scan 的 error，
+                      这是 DATA-03 登记的形状问题，DATA-02 未修；不要把它当必填读。
 
   /api/market/index:
     get:
