@@ -172,7 +172,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 
 > 来源：[archive/TASKS-2026-10-14-archived.md](archive/TASKS-2026-10-14-archived.md) §八/§九（本地栈实测 + ODR-067 登记），完整证据链在归档卷，此处不双写。
 
-### DATA-01 · 票池三表灌数 + universe 指数展开链路修复 ⬜ 待做
+### DATA-01 · 票池三表灌数 + universe 指数展开链路修复 ✅ 完成（2026-10-14）
 
 - **① 目标**：`index_constituents` / `sectors` / `stock_sector_map` 三表有真实数据，且探索链路的 `universe: csi300` 能展开成真实票池（`explore` 链路不再恒空票池）。
 - **② 上下文**：归档卷 §八复查记录（2026-10-14 实测）：三表各 0 行 ⇒ YAML 默认 `universe: csi300` 解析为空票池；且 core 仓 `pkg/backtest/engine.go:556` `resolveStockPool` 只在 `len(StockPool)==0 && req.IndexCode != ""` 时展开指数，而探索链路（**quant-trading-agent 仓** `pkg/ai/intent/parser.go:117` → `pkg/ai/yaml/generator.go:198` → `pipeline.go:868 parseUniverse` → `cmd/ai/builders.go:47`）把字面量 `"csi300"` 放进 `StockPool`、**从不填 `IndexCode`** ⇒ 展开分支结构上不可达，`"csi300"` 被当成一只股票代码（core 仓 `engine.go:1125` Debug 级丢弃）。**⚠️ 展开链路修复横跨 core（engine）与 quant-trading-agent（parseUniverse/builders）两仓**，跨仓原子提交 core 先行。**光灌数不够，链路也要修**（OBS-01 验收增量）。同步链路存在：`cmd/data/handlers_sync.go` + `pkg/data/tushare.go`（`index_constituents` 相关）。
@@ -183,6 +183,15 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：不改 `CheckValidity` 语义（OBS-01 已完成面不动）；不趁机改验证器；灌数走既有同步链路不写一次性脚本进库。
 - **⑤ 验收**：真库三表行数 > 0（查询留证）；`universe: csi300` 走 `IndexCode` 的单测 + 端到端探索 run 票池非空（留 run id）；**破坏验证**：清空 `index_constituents` 一行 → 展开为空 fail-loud 变红路径可复现，还原绿。
 - **⑥ 边界**：只做三表数据 + universe 展开链路；其他数据缺口（`stock_fundamentals` 0 行等）另立。
+- **✅ 完成记录（2026-10-14，跨仓两段提交 core 先行）**：core `5528010`（+ gofmt `5b1bc52`、误带入他人改动的撤销 `7c8f49f`）；agent 仓 `8622fcc`（+ gofmt `90d120d`）。
+  - **三表实测（真库 PG 17.5，HTTP 端点灌数）**：`index_constituents` 354 行（300 只仍在最新期）、`sectors` 110、`stock_sector_map` 5575；端点 `POST /sync/sectors` → `{"sectors":110,"mappings":5575,"source":"stocks_industry"}`、`POST /sync/index-constituents/000300.SH` → `{"count":354}`，重跑幂等。
+  - **两处代码级根因（逐字核对，非推测）**：① `FetchIndexConstituents` 请求 fields `in_date,out_date` 而 `index_weight` 无此两列 ⇒ Tushare 静默只回两列 ⇒ `len(item)<4` 全跳过 ⇒ 表恒空；② 展开查询是半开区间 `in_date<=d AND (out_date IS NULL OR out_date>d)` ⇒ out_date 零值必须落 NULL（否则 `'0001-01-01'` 判为全退出）、退出日须取最后出现期**次日**（否则只在单期出现过的成分股永远进不了池）。已由多期快照推导 in/out 区间。
+  - **链路修复**：core 新增 `indexCodeAliases`（`csi300→000300.SH` 等，未命中原样透传 ⇒ 既有 fail-loud 接管）；agent 新增 `buildBacktestRequest`/`splitUniverseIndex`（白名单式识别，**只识别不翻译**，宁可漏判也不把真股票误判成指数）。
+  - **端到端实测**：`TestData01_IndexUniverse_EndToEndBacktest`（真库+真引擎）`universe=[csi300]` → **票池规模 301**，6.9s 跑完。
+  - **破坏验证**：`pkg/backtest/universe_expand_integration_test.go` 常驻 —— 清空成分 ⇒ `resolveStockPool` fail-loud 报错且不返回票池；Cleanup 写回 ⇒ 恢复 300 只（改坏→红→还原→绿自动化，不留脏数据）。
+  - **⚠️ 缺口登记（不属本单边界，需裁决）**：`pkg/ai/yaml/generator.go:190-191` 硬编码默认回测区间 **2020-01-01~2024-01-01**，而成分快照只覆盖 **2024-10-31 起** ⇒ explore HTTP run 用默认区间**必然**展开为空并 fail-loud（已跑 run `44c7f22d`、`e1441a23` 留证：`params.universe=["csi300"]` 已正确，倒在区间外）。修默认区间会影响所有新建回测，不属本单。另：现场装配未注册任何策略（引擎日志 `available: []`），回测必然 0 交易 ⇒ `invalid_reasons=[zero_trades,garbage_metric]`，属既有装配状况，另立。
+  - **顺手修（边界内，已标注）**：`cmd/ai/builders.go` 的适配器逐字段手工拷贝时漏了 `UniverseMaxSize`（票池规模）与 `InvalidReasons`，正是「真票池规模进 PoolSize」链路上的一环，与归档卷 §八 #8（OBS-01-R2 同型、位置不同）一并补齐两个字段。
+  - **环境事实**：东财 `push2.eastmoney.com` 实测 **502** ⇒ 板块表既有 eastmoney 链路不可用；Tushare 无个股→行业接口（`stock_industry` 不存在、申万 `index_member` 的 `is_new` 全为 N）⇒ 改由 `stocks.industry`（5908 只全覆盖、110 个细分行业）物化，快照类字段留 NULL 不编造，`source='stocks_industry'` 与东财板块区分。
 
 ### OBS-01-R1 · 偏差维输出一个它没量过的数字 ⬜ 待做
 
