@@ -225,6 +225,26 @@ func TestValidateDeclarations_Rejection(t *testing.T) {
 		}
 		require.NoError(t, validateDeclarations(a))
 	})
+
+	// 财报类数据的披露日锚点在规范层（market.Fundamental.AnnDate），不在
+	// connector wire schema 上——器 schema 里没有 ann_date 也必须放行，
+	// 否则 tushare 财报 connector 会因「锚点不在 schema」被误拒。
+	t.Run("reserved_ann_date_anchor_passes", func(t *testing.T) {
+		a := &declAdapter{
+			AdapterBase: NewAdapterBase("fund", true),
+			types:       []string{"fundamentals"},
+			fields: map[string][]SchemaField{
+				"fundamentals": {{Name: "pe", Type: "float"}},
+			},
+			decls: []ConnectorDeclaration{{
+				DataType:      "fundamentals",
+				TimeSemantics: market.VisibleOnAnnouncementDay,
+				VisibleField:  VisibleFieldAnnDate,
+				Frequency:     market.FreqSpecEvent,
+			}},
+		}
+		require.NoError(t, validateDeclarations(a))
+	})
 }
 
 // TestRegistryRejectsInvalidDeclarations 断言被拒的 adapter 不污染 Registry：

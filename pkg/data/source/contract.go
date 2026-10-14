@@ -23,6 +23,16 @@ import (
 // 而非 DataSchema.Fields，故用该记号而非某个 schema 字段名。
 const VisibleFieldTradeTime = "trade_time"
 
+// VisibleFieldAnnDate 是保留锚点记号：声明可见时间锚点取自规范层
+// `market.Fundamental.AnnDate`（披露日）。docs/SPEC.md 规范层 Fundamental
+// 明确「披露日即可见时间点，故本类型不设 VisibleAt」——所以财报类数据的
+// 锚点是披露日，而不是 DataItem.TradeTime（对财报连接器而言那是**报告期
+// 截止日**，用它当锚点会把前视洞放回来）。
+//
+// 该锚点不落在 connector 的 wire schema 上（DataSchema.Fields 无 ann_date），
+// 由规范层字段承载，故同样列为保留记号。
+const VisibleFieldAnnDate = "ann_date"
+
 // ConnectorDeclaration 是单个数据类型的注册声明。
 type ConnectorDeclaration struct {
 	// DataType 必须是 adapter.SupportedTypes() 的成员。
@@ -112,8 +122,9 @@ func validateVisibleAnchor(a DataSourceAdapter, d ConnectorDeclaration) error {
 		return fmt.Errorf("%w: %s/%s declares time semantics %q but names no visible anchor field (VisibleField)",
 			ErrDeclarationMismatch, a.Name(), d.DataType, d.TimeSemantics)
 	}
-	// 保留记号：OHLCV 类数据的时间锚点由 DataItem.TradeTime 携带，恒存在。
-	if field == VisibleFieldTradeTime {
+	// 保留锚点：规范层已定义其承载者的名字，不需要出现在 connector wire schema。
+	// trade_time → DataItem.TradeTime；ann_date → market.Fundamental.AnnDate。
+	if field == VisibleFieldTradeTime || field == VisibleFieldAnnDate {
 		return nil
 	}
 

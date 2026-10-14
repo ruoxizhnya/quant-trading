@@ -520,8 +520,10 @@ Go 侧词表是唯一真相：`pkg/domain/market`（`TimeSemantics` / `Frequency
 `validateDeclarations`（校验在改状态之前，被拒 adapter 不污染 Registry）。
 
 `VisibleField` 是记录中承载可见时间锚点的字段名：`DataSchema.Fields` 里的
-date/datetime 字段名，或保留记号 `trade_time`（OHLCV 类数据锚点在
-`DataItem.TradeTime`，不在 schema 字段里）。
+date/datetime 字段名，或**保留锚点记号**——`trade_time`（OHLCV 类数据锚点在
+`DataItem.TradeTime`，不在 schema 字段里）、`ann_date`（财报类数据锚点是规范
+层 `market.Fundamental.AnnDate`，披露日即可见时间点，见「规范层 Schema」；
+connector 的 wire schema 与 `Data` map 都不承载它，故列为保留记号）。
 
 **fail-closed 三类拒收**（错误信息点名 adapter + 数据类型 + 缺什么）：
 
@@ -542,8 +544,8 @@ date/datetime 字段名，或保留记号 `trade_time`（OHLCV 类数据锚点�
 | adapter | 数据类型 | 时间语义 | 频率口径 |
 | --- | --- | --- | --- |
 | tushare | `ohlcv_daily` | `after_close` | `daily` |
-| tushare | `fundamentals` | `announcement_day` | `event` |
-| tushare_macro | `macro_series` | `announcement_day` | `event` |
+| tushare | `fundamentals` | `announcement_day`（锚点=`ann_date` 保留记号，**披露日**，非报告期截止日） | `event` |
+| tushare_macro | `macro_series` | `announcement_day`（锚点=`obs_date`，见已知边界④） | `event` |
 | mootdx | `realtime_quote` | `custom`（观察时刻即可见） | `intraday` |
 | mootdx | `ohlcv_minute` | `custom`（bar 周期结束即可见） | `intraday` |
 | mootdx | `ohlcv_daily` | `after_close` | `daily` |
@@ -566,7 +568,15 @@ date/datetime 字段名，或保留记号 `trade_time`（OHLCV 类数据锚点�
 **已知边界（D2 如实登记）**：① `mootdx` 分钟表 `amount` 为 NULL 时
 `Turnover` 记 0 —— 字段级折零由 D2 在契约文档收编（D1 已点名），本单不改
 ETL 行为；② 产业链 fetcher（`pkg/data/supply_chain.go`）不走 Registry，
-其时间语义在此成文登记为已知边界，建 adapter 属 D5。
+其时间语义在此成文登记为已知边界，建 adapter 属 D5；③ `tushare` 财报
+connector 的 wire schema / `Data` map **未透出 `ann_date`** —— 真实披露日
+由底层 `data.TushareClient` 直写 `stock_fundamentals.ann_date`（规范层
+`market.Fundamental.AnnDate` 承载可见语义），故锚点取保留记号 `ann_date`；
+补齐透出链路（让 connector 的 `DataItem` 也带 `ann_date`）属单独立项
+（TASKS D2-R1）；④ `tushare_macro` 的可见锚点声明为 `obs_date`，但
+`obs_date` 是**观测日**（月频取当月首日），真实发布日**晚于**它——声明
+口径对齐 P2-1 既有「obs_date 为 PIT」约定，该缺口（潜在前视）已登记为
+跟进项（TASKS D2-R1），是否改判宏观层 PIT 门不在 D2 范围。
 
 ### 透明路由
 

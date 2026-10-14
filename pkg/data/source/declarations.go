@@ -29,18 +29,26 @@ func (a *TushareAdapter) Declarations() []ConnectorDeclaration {
 			Frequency:     market.FreqSpecDaily,
 		},
 		{
-			// 财报：披露日对齐防前视，AnnDate 承载事件语义。
+			// 财报：披露日对齐防前视。可见时间锚点是**披露日**（规范层
+			// market.Fundamental.AnnDate，SPEC「披露日即可见时间点」），
+			// 不是 DataItem.TradeTime —— 财报连接器的 TradeTime 承载的是
+			// **报告期截止日**（pkg/data/tushare.go normalizeFundamentals
+			// 取 end_date），用它当锚点等于把前视洞放回来。
 			DataType:      DataTypeFundamental,
 			TimeSemantics: market.VisibleOnAnnouncementDay,
-			VisibleField:  VisibleFieldTradeTime, // DataItem.TradeTime = 可用日（披露日）
+			VisibleField:  VisibleFieldAnnDate,
 			Frequency:     market.FreqSpecEvent,
 		},
 	}
 }
 
 // Declarations implements DataSourceAdapter.Declarations.
-// 宏观指标为发布驱动的事件流：obs_date 是观测日，可见时间以发布时间为准，
-// 保守按披露日口径声明。
+// 宏观指标为发布驱动的事件流（发布后方可见）。wire schema 只有 obs_date
+// （**观测日**，月频取当月首日）与 as_of（导入时刻），上游不携带发布日
+// 字段；锚点取 obs_date，对齐 P2-1 既有「obs_date 为 PIT」的口径。
+// 注意：观测日**早于**真实发布日（9 月 CPI 10 月中才发布），此处声明与
+// 真实可见时刻的缺口已登记为跟进项（TASKS D2-R1）——是否改判宏观层 PIT 门
+// 需 P2-1 层裁决，不在 D2 范围。
 func (a *TushareMacroAdapter) Declarations() []ConnectorDeclaration {
 	return []ConnectorDeclaration{
 		{
