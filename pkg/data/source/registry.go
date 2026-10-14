@@ -63,6 +63,11 @@ func NewRegistry() *Registry {
 //
 // If an adapter with the same name is already registered, the new one
 // replaces it. This is useful for hot reload of configuration.
+//
+// Registration is fail-closed on the connector contract (D2, blueprint
+// §4.2): the adapter must declare time semantics + frequency spec for every
+// supported data type. Missing / illegal / schema-contradicting declarations
+// are rejected and nothing is mutated — see validateDeclarations.
 func (r *Registry) Register(a DataSourceAdapter) error {
 	if a == nil {
 		return errors.New("registry: nil adapter")
@@ -70,6 +75,11 @@ func (r *Registry) Register(a DataSourceAdapter) error {
 	name := a.Name()
 	if name == "" {
 		return errors.New("registry: adapter Name() is empty")
+	}
+	// Validate before mutating any state so a rejected adapter leaves the
+	// registry untouched (no partial registration).
+	if err := validateDeclarations(a); err != nil {
+		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

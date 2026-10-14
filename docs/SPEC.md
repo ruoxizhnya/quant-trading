@@ -500,6 +500,74 @@ type Portfolio struct {
 tzdata——Windows 开发机与精简 CI 容器默认没有 zoneinfo，
 `LoadLocation("Asia/Shanghai")` 会直接失败。
 
+### connector 注册契约（时间语义 + 频率口径，D2）
+
+蓝图 §4.2 红线：时间语义漏声明 = 数据泄漏，且回测曲线照样漂亮、事后极难
+发现。因此它不是注释约定，而是**注册期的结构性闸门**——connector 注册时
+必须显式声明下两项，缺失 / 非法 / 与数据形态矛盾一律 fail-closed 拒收，
+不静默放行、不降级、不猜默认值。
+
+| 声明字段 | 枚举 | 说明 |
+| --- | --- | --- |
+| 时间语义 `TimeSemantics` | `announcement_day` / `after_close` / `next_open` / `custom` | 何时可见；`custom` 必须附判定表达 `VisibleExpr` |
+| 频率口径 `FrequencySpec` | `daily` / `intraday` / `event` | 数据源的产出节奏（与记录自带 `Frequency` 是两个正交的轴） |
+
+Go 侧词表是唯一真相：`pkg/domain/market`（`TimeSemantics` / `FrequencySpec`
++ `Parse*` fail-loud，零值 `""` = 未声明、不算合法）。connector 契约在
+`pkg/data/source`：`ConnectorDeclaration`（`DataType` / `TimeSemantics` /
+`VisibleExpr` / `VisibleField` / `Frequency`）+ `DataSourceAdapter.Declarations()`
+（在接口上，新 adapter 漏声明 = 编译错误）+ `Registry.Register` 的
+`validateDeclarations`（校验在改状态之前，被拒 adapter 不污染 Registry）。
+
+`VisibleField` 是记录中承载可见时间锚点的字段名：`DataSchema.Fields` 里的
+date/datetime 字段名，或保留记号 `trade_time`（OHLCV 类数据锚点在
+`DataItem.TradeTime`，不在 schema 字段里）。
+
+**fail-closed 三类拒收**（错误信息点名 adapter + 数据类型 + 缺什么）：
+
+| 类别 | 触发 | 哨兵 |
+| --- | --- | --- |
+| 未声明 | `SupportedTypes` 某成员没有对应声明 | `ErrDeclarationMissing` |
+| 声明非法 | 时间语义/频率口径枚举非法、`custom` 缺表达式、重复声明、声明了未支持的类型 | `ErrDeclarationInvalid` |
+| 形态矛盾 | 可见时间锚点 `VisibleField` 不在该数据类型 schema 里，或其类型不是 date/datetime | `ErrDeclarationMismatch` |
+
+**高危样例（蓝图 §4.2 点名场景）**：市场活跃度 / 拥挤度类数据「收盘后才
+可得」，盘中用当日值即偷看——其声明必须是 `TimeSemantics: after_close`
+（保守口径，不早于真实可见时刻），**不得**声明任何盘中可见语义。D5 接入
+该源时直接照此声明。
+
+**存量 connector 声明一览**（`pkg/data/source/declarations.go`，「声明即登记」；
+新增 connector 必须在此为每个 `SupportedTypes` 成员补声明）：
+
+| adapter | 数据类型 | 时间语义 | 频率口径 |
+| --- | --- | --- | --- |
+| tushare | `ohlcv_daily` | `after_close` | `daily` |
+| tushare | `fundamentals` | `announcement_day` | `event` |
+| tushare_macro | `macro_series` | `announcement_day` | `event` |
+| mootdx | `realtime_quote` | `custom`（观察时刻即可见） | `intraday` |
+| mootdx | `ohlcv_minute` | `custom`（bar 周期结束即可见） | `intraday` |
+| mootdx | `ohlcv_daily` | `after_close` | `daily` |
+| eastmoney | `capital_flow` | `after_close` | `daily` |
+| eastmoney_sectors | `sectors` | `custom`（盘中快照，观察即可见） | `intraday` |
+| eastmoney_sectors | `stock_sector` | `custom`（参考数据，观察即可见） | `event` |
+| eastmoney_toplist | `top_list` / `limit_up_pool` | `after_close` | `daily` |
+| juchao | `announcements` | `announcement_day`（`ann_time`） | `event` |
+| xueqiu | `hot_search` | `custom`（观察时刻即可见） | `intraday` |
+| xueqiu | `news` | `custom`（`publish_time` 即可见） | `event` |
+| alpha_vantage / yahoo_finance | `global_ohlcv` | `after_close` | `daily` |
+
+**护栏与测试**（`pkg/data/source/contract_test.go`）：三类拒收逐条负例、
+全部存量 connector 的声明完整（`SupportedTypes` ⇄ 声明一一对应）且整批
+注册成功、被拒 adapter 不污染 Registry（注册原子性）。**破坏验证（改坏→
+红→还原→绿）**：① 注册一个不声明时间语义的 connector → 拒收且报错点名；
+② 删掉任一 adapter 的某条声明 → 集成测试红；③ 把「收盘后可见」改成词表
+外的「盘中即可见」→ 集成测试红。
+
+**已知边界（D2 如实登记）**：① `mootdx` 分钟表 `amount` 为 NULL 时
+`Turnover` 记 0 —— 字段级折零由 D2 在契约文档收编（D1 已点名），本单不改
+ETL 行为；② 产业链 fetcher（`pkg/data/supply_chain.go`）不走 Registry，
+其时间语义在此成文登记为已知边界，建 adapter 属 D5。
+
 ### 透明路由
 
 调用方**声明频率**，不感知存在哪张表：

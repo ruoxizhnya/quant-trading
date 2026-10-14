@@ -179,6 +179,14 @@ type DataSourceAdapter interface {
 	// Used by the Registry when building fallback chains at startup.
 	SupportedTypes() []string
 
+	// Declarations returns the registration contract for every member of
+	// SupportedTypes(): time semantics (when the data becomes visible) and
+	// frequency spec (see ConnectorDeclaration). Registry.Register rejects
+	// an adapter whose declarations are missing / illegal / contradict the
+	// data schema (fail-closed). Being on the interface makes "forgot to
+	// declare" a compile error for any new adapter.
+	Declarations() []ConnectorDeclaration
+
 	// Schema returns the schema for a given data type.
 	// Returns ErrUnsupported if the data type is not served.
 	Schema(dataType string) (DataSchema, error)

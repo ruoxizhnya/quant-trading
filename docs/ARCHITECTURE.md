@@ -199,6 +199,17 @@ connector 之外无人感知底层表。字段表 / 频率词表 / 聚合口径 
   1d 路由与遗留 `storage.GetOHLCV` 逐字段对拍（真实 PG 自灌自证，
   DB 不可达 Skip 不 Fail）——改的是取数通道，不是数据。
 
+**上游闸门（ADR-031 / D2，2026-10-14）**：规范层「记录自带可见时间点」
+不靠消费方自觉，而是注册期的结构性闸门——connector 注册
+（`pkg/data/source.Registry.Register`）时必须声明**时间语义 + 频率口径**，
+缺失 / 非法 / 与数据形态矛盾一律 fail-closed 拒收（`validateDeclarations`
+三类哨兵 `ErrDeclarationMissing` / `ErrDeclarationInvalid` /
+`ErrDeclarationMismatch`）。语义词表唯一真相在 `pkg/domain/market`
+（`TimeSemantics` / `FrequencySpec`），存量 connector 的声明登记在
+`pkg/data/source/declarations.go`（「声明即登记」）。高危样例：市场活跃度 /
+拥挤度 = `after_close`（收盘后可见，盘中用当日值即偷看）。文档真相见
+SPEC.md「connector 注册契约」节。
+
 ## 8. 因子定义库数据流（ADR-031 / D3，2026-10-14）
 
 **不变量**：因子定义只认「库里公式」——一份种子定义
@@ -264,10 +275,10 @@ schema / 内核四态 / 版本哈希纪律的文档真相在
 
 ---
 
-迁移方向（D2 起）：connector 契约接入 → 消费方逐个切 Router → 棘轮
-基线逐条销号 → 物理表直连归零。
+迁移方向：connector 契约已接入（D2 完成，`validateDeclarations` fail-closed
+闸门生效）→ 消费方逐个切 Router → 棘轮基线逐条销号 → 物理表直连归零。
 
 ---
 
-_Last updated: 2026-10-14（新增 §7 规范层数据流 ADR-031 D1 + §8 因子定义库数据流 ADR-031 D3；表数口径 42 张为 2026-10-12 实测）_
+_Last updated: 2026-10-14（§7 增补 connector 注册契约上游闸门 ADR-031 D2；§7 规范层数据流 ADR-031 D1 + §8 因子定义库数据流 ADR-031 D3；表数口径 42 张为 2026-10-12 实测）_
 _维护规则：服务/端口/schema 分区变更时更新本文件（AGENTS.md Rule 1）；表数不手抄，只给 grep 口径。_

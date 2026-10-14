@@ -74,3 +74,53 @@ func KnownFrequencies() []Frequency {
 	copy(out, knownFrequencies)
 	return out
 }
+
+// FrequencySpec 是 connector 注册契约（D2，蓝图 §4.2）的「频率口径」枚举：
+// 该数据源以什么节奏产出数据。它与记录自带的 Frequency 是两个正交的轴——
+// FrequencySpec 声明「这个源是什么口径」，Frequency 标注「这条记录是什么
+// 频率」（例如 mootdx 源口径为 intraday，产出记录频率为 1m）。
+//
+// 日内数据如何聚合成日频引用 D1 聚合规则（见 docs/SPEC.md 规范层 Schema 节）。
+type FrequencySpec string
+
+const (
+	// FreqSpecDaily 日频：每日一条（日线 bar、资金流、龙虎榜等）。
+	FreqSpecDaily FrequencySpec = "daily"
+	// FreqSpecIntraday 分钟频：日内多条 bar / 快照（1m bar、实时行情）。
+	FreqSpecIntraday FrequencySpec = "intraday"
+	// FreqSpecEvent 事件流：非等间隔的披露 / 发布驱动记录（财报、公告、
+	// 宏观发布、新闻）。事件流的口径由记录自带的可见时间锚点承载。
+	FreqSpecEvent FrequencySpec = "event"
+)
+
+// knownFrequencySpecs 是当前支持的连接器频率口径词表。
+var knownFrequencySpecs = []FrequencySpec{FreqSpecDaily, FreqSpecIntraday, FreqSpecEvent}
+
+// ParseFrequencySpec 解析频率口径字面量；未知值返回错误（fail-loud）。
+func ParseFrequencySpec(s string) (FrequencySpec, error) {
+	f := FrequencySpec(s)
+	if !f.Valid() {
+		return "", fmt.Errorf("market: unknown frequency spec %q (known: daily/intraday/event)", s)
+	}
+	return f, nil
+}
+
+// Valid 报告频率口径是否在词表内。零值 "" 是**未声明**，不算合法口径。
+func (f FrequencySpec) Valid() bool {
+	for _, k := range knownFrequencySpecs {
+		if f == k {
+			return true
+		}
+	}
+	return false
+}
+
+// String 让 FrequencySpec 可直接进日志/错误信息。
+func (f FrequencySpec) String() string { return string(f) }
+
+// KnownFrequencySpecs 返回频率口径词表的拷贝（防调用方改动内部状态）。
+func KnownFrequencySpecs() []FrequencySpec {
+	out := make([]FrequencySpec, len(knownFrequencySpecs))
+	copy(out, knownFrequencySpecs)
+	return out
+}
