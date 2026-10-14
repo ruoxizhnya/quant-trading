@@ -309,7 +309,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   - ⚠️ **实测边界（诚实登记）**：`go test -race` 本机**跑不了**（`gcc` 不存在，CGO_ENABLED=0）——本单并发面只有 cron goroutine 与既有 mutex 路径，未获 race 证据；另 `gofmt -l cmd pkg` 有 **8 个存量未格式化文件**（含 `cmd/data/setup.go`，HEAD 即如此），非本次改动，与 AGENTS.md §6「整仓 gofmt 可以当结论用」相矛盾，待单独收口。
 - **⑥ 边界**：`cmd/data/main.go`、`cmd/data/sync_handlers.go`（仅新增两个生命周期方法）、两个新测试文件；调度器内部逻辑与前端零改动（A-08 才动前端）。
 
-### SYNC-02 · `StopWorkerPool` 零调用方：关闭不排空在跑的作业 ⬜ 待做
+### SYNC-02 · `StopWorkerPool` 零调用方：关闭不排空在跑的作业 ✅ 完成（2026-10-14，commit `fb7cfe0`）
 
 - **① 目标**：SIGTERM 后 worker pool 优雅停止，正在跑的同步作业要么跑完要么被标记为可重试，而不是随进程一起被掐断。
 - **② 上下文**：SYNC-01 复测时顺带 grep——`cmd/data/sync_handlers.go:75 StopWorkerPool()` 全仓零调用方（`StartWorkerPool` 有，`main.go:138`）。**与 SYNC-01 同族缺陷形状**（生命周期入口存在但没人调），差别只在后果更窄：只影响关闭时的在跑作业，不影响是否触发。
@@ -317,8 +317,9 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：不改 `WorkerPool` 公开签名；不动限流/队列参数；不碰 scheduler 逻辑。
 - **⑤ 验收**：接线守卫新增一条断言（`main.go` 含 `syncHandler.StopWorkerPool(`，锚定调用形态）；**破坏验证**：去掉该调用 → 守卫红，还原绿；有条件时用一次真实「跑到一半发 SIGTERM」观察作业终态。
 - **⑥ 边界**：只做关闭接线 + 对应守卫；作业中断后的状态收敛另立。
+- **完成记录（2026-10-14，`fb7cfe0`）**：接线落在 [main.go](../cmd/data/main.go) 关闭序列（HTTP → scheduler → worker pool，`StopScheduler` 之后新增 `syncHandler.StopWorkerPool()`）。**Stop() 语义先测后定**：新增行为测试 `pkg/sync/cancel_test.go::TestWorkerPool_StopCancelsInFlightJob` 钉住真实语义——Stop **不等待**作业跑完，而是经池 ctx 派生的 per-job ctx 取消在跑执行器；行停在 `running`，由下次启动的 `CleanupStaleRunning` 收敛（AUD-50 既有测试覆盖）。语义够用（不悬挂、可恢复），按 ④ 不改签名不改语义，只接线。守卫：`wiring_guard_test.go` 新增 `syncHandler.StopWorkerPool(` 调用断言 **+ 顺序断言**（StopWorkerPool 必须在 StopScheduler 之后）。破坏验证已做（去掉调用守卫红，还原绿）；提交树已用临时 worktree 独立编译验证。**诚实缺口**：真实「跑到一半发 SIGTERM」的活进程观测未做（本机无 docker 环境），留待有环境时补。
 
-### SYNC-03 · 停用排程后 `next_run_at` 残留（界面会显示一个不会发生的未来） ⬜ 待做
+### SYNC-03 · 停用排程后 `next_run_at` 残留（界面会显示一个不会发生的未来） ✅ 完成（2026-10-14，commit `274dad7`）
 
 - **① 目标**：`is_active=false` 的排程不带 `next_run_at`，界面无法把「从未会发生的下次运行」当成事实展示。
 - **② 上下文**：SYNC-01 活进程实测（2026-10-14）：`POST /api/sync/schedules/1/toggle {"active":true}` 后 `next_run_at=2026-10-15T09:00:00Z`；再 toggle `false`，`scheduler/stats` 回到 `0/0`（cron entry 已 `Remove`），但 `GET /api/sync/schedules/1` 仍返回 `is_active:false` **且** `next_run_at:2026-10-15T09:00:00Z`。写点在 `pkg/sync/scheduler.go:278`（`scheduleJob` 设置并持久化），停用分支只 `cron.Remove` + `delete(s.entries)`，未清字段。愿景原则 4「每个数字可被当场质问」在这里答不上来。
@@ -326,6 +327,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：不改 `SyncSchedule` 结构体与 JSON 字段名（`next_run_at,omitempty` 语义已够）；不改 toggle 的返回体；A-08 前端**先按「inactive 不显示 next_run」防御**，但后端修好后不改前端判据。
 - **⑤ 验收**：单测：toggle false 后 store 读回 `NextRunAt == nil`；活进程复测上表同一条 curl 序列，`next_run_at` 消失；**破坏验证**：还原清除语句 → 单测红。
 - **⑥ 边界**：只改停用路径的字段清理；`last_run_job_id` 等其余残留另立。
+- **完成记录（2026-10-14，`274dad7`）**：修在 [scheduler.go](../pkg/sync/scheduler.go) `ToggleSchedule` 停用分支——置 `schedule.NextRunAt = nil`，由既有的**单条** `UpdateSyncSchedule` 全字段写回落为 NULL，与 `is_active=false` 同一语句、无中间态；结构体与 JSON 字段名未动。单测两条腿（`pkg/sync/scheduler_start_test.go`）：`TestToggleScheduleOffClearsNextRunAt`（含激活前置事实腿，store 读回 `NextRunAt == nil` + `Stats().NextRuns` 为空）+ `TestToggleScheduleOnStillSetsNextRunAt`（反向腿：激活路径不被清除语句误伤）。破坏验证已做（去掉清除语句单测红，还原绿）。**诚实缺口**：活进程 curl 复测未做（本机无 docker 环境），留待有环境时补。
 
 ---
 
