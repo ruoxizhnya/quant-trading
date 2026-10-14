@@ -881,8 +881,57 @@ verified-by: 模块化内核任务重构（2026-10-08）—— 旧 TASKS（2427 
 | 2 | compose 里 analysis-service 缺 `AI_SERVICE_URL` | `handlers_ai_proxy.go` 的 `ai_service.url` 缺省 `http://localhost:8086`，宿主机直跑恰好命中，容器里那是空地址 ⇒ **copilot / pipeline / explore / tools 四族全 503**，而 ai-service 自身 healthcheck 一直绿。症状是「AI 服务活着但前端全红」 | ✅ core `fix/a05-env-stack-startup` |
 | 3 | agent 仓 `go.mod` 缺 15 条 indirect | 拆仓阶段 2 迁入 `cmd/ai` 时只手工列了直接依赖；`-mod=readonly` 下 import graph 与 go.mod 不平直接拒绝构建 ⇒ ai-service 镜像 build 失败并让整条 `docker compose up` 中断，**连带另外三个服务也起不来** | ✅ agent `fix/a05-env-ai-service-image` |
 | 4 | agent 镜像缺 `wait-for-deps.sh` 与 `config/ai-service.yaml` | 前者 compose entrypoint 引用它 ⇒ exit 2；后者 `cmd/ai/main.go` 按相对路径读，文件留在 core 没迁 ⇒ `logger.Fatal`。两样都经命名上下文 `core` 取，不在 agent 仓复制第二份真相 | ✅ agent `fix/a05-env-ai-service-image` |
-| 5 | **探索主链路只能产出无效回测**：股票池恒为 0 只 | 真跑一轮 `/explore`（run `c46fa2ad`），两次尝试的裁决里都有 blocking「股票池按**今天**的上市名单取（0 只）」，回测 `universe_max_size=0 / zero_trades / garbage_metric` ⇒ `Status=invalid`。后果：六维里统计/经济/冗余/因果**永远未评估**，F5 的可信度输出实际拿不到，AI 实验员在这里等于空转。**这是 G 组后端缺口，不是渲染问题** | 🔴 待裁决 |
-| 6 | 状态轮询要不要进 `RateLimitExemptPaths` | 该表白名单的入选判据写得很窄：「限流它会不会让正常客户端分不清 429 与 401」。`/api/explore/runs/:id` 不满足这条，但实测一次 429 就让观察页永久瞎掉（前端已自救：2.5s + 连续失败才停）。**放开豁免是后端裁决**，前端不擅改护栏 | 🟠 待裁决 |
+| 5 | 实测看到 `Status=invalid` —— **那是护栏在正常工作，不是新缺口** | 真跑一轮 `/explore`（run `c46fa2ad`），两次尝试的回测都是 `universe_max_size=0 / zero_trades / garbage_metric` ⇒ 被标 `invalid` 而非报成功。**这条本表 §四 已跟踪**（OBS-01 / ADR-030，见 `docs/TASKS.md` 「① 目标：回测/验证在「0 交易 / 空票池」时必须 fail-loud」），我看到的就是它落地的效果。本轮只补一个**机制更正**，见下方「§八 的 5 号条目复查」 | 🔵 已跟踪（OBS-01），本轮补机制 |
+| 6 | 状态轮询要不要进 `RateLimitExemptPaths` | **已裁决：不进**，理由见下方「§八 的 6 号条目裁决」 | ✅ 已裁决（不改豁免表） |
+| 7 | **偏差维把没测过的数字打印成实测结果** | 见下方独立工单 OBS-01-R1 | 🔴 新立 |
+
+**§八 的 5 号条目复查（2026-10-14 当日自查，结论反转）**
+
+登记时我写的是「股票池恒为 0 只，是 G 组新缺口」，并且把裁决里那句
+「股票池按**今天**的上市名单取（0 只）」当成引擎量出来的票池规模。**两句都不准确**，
+逐字读码后更正：
+
+1. **那个「0 只」不是测量值。** `cmd/ai/handlers_explore.go:50` 只设了
+   `PoolSource: PoolSourceCurrent` 而**从不设 `PoolSize`**（只有 `:96` 那条
+   预热成功的路径才 `in.PoolSize = len(windows)`），于是 `bias.go:303` 的
+   `fmt.Sprintf("...（%d 只）...", in.PoolSize)` 打印的是 Go 零值。
+   它既不是引擎的票池规模，也和 `universe_max_size=0` 只是**碰巧同为 0**。
+   ⇒ 这条本身是新缺陷，另立 **OBS-01-R1**（下表）。
+2. **票池为空的根因本表早已登记**（`index_constituents` / `sectors` /
+   `stock_sector_map` 全 0 行 ⇒ YAML 默认 `universe: csi300` 解析为空票池）。
+   今日实测三张表**仍然各 0 行**，缺口没动过。
+3. 本轮新查清的是**它为什么解析为空**：`pkg/backtest/engine.go:556` 的
+   `resolveStockPool` 只在 `len(StockPool)==0 && req.IndexCode != ""` 时才展开指数，
+   而探索链路（`intent/parser.go:117` → `yaml/generator.go:198` →
+   `pipeline.go:868 parseUniverse` → `cmd/ai/builders.go:47`）把字面量
+   `"csi300"` 放进 `StockPool`、**从不填 `IndexCode`** ⇒ 展开分支**结构上不可达**，
+   `"csi300"` 被当成一只股票代码，进不了上市日历（`engine.go:1125` 以
+   **Debug** 级丢弃），票池归零。
+   ⇒ 对 OBS-01 的增量：**光把三张表灌满数据还不够**，还得让 `"csi300"` 走
+   `IndexCode` 而不是 `StockPool`，否则展开分支照样不可达。这是给那张工单的
+   「③ 要求」补的一条验收，不另开工单。
+
+| # | 工单 | 根因（已逐字核对） | 修法 |
+|---|---|---|---|
+| 7 | **OBS-01-R1 · 偏差维输出一个它没量过的数字** | `cmd/ai/handlers_explore.go:50` 设 `PoolSource=PoolSourceCurrent` 但不设 `PoolSize`；`pkg/ai/validation/bias.go:296-303` 无条件把 `in.PoolSize` 插进 blocking 文案 ⇒ 屏幕上出现「股票池按今天的上市名单取（**0 只**）」。0 是零值，不是测量结果。**违反愿景原则 4（每个数字可被当场质问）**：主任若追问「哪来的 0 只」，诚实答案是「没量过」——而这正是 F5 这块组件存在的意义 | 池子规模未知时**不要打印数**，改成不带数量的措辞（`PoolSize<=0` 已有先例：`bias.go:202` 与 `:314` 都按「未测量」分支处理，只有 `PoolSourceCurrent` 这一支漏了）。**注意概率侧没有这个 bug**：`biasProbability` 对 `PoolSourceCurrent` 提前返回 `BiasProbFloor`，不看 `PoolSize`，所以低分是有意为之；错的只有那句话。**非目标**：不借机重构偏差维，不改 `PoolSourceCurrent` 的概率 |
+
+**§八 的 6 号条目裁决（2026-10-14，本轮定）**
+
+**不把 `/api/explore/runs/:id` 加进 `RateLimitExemptPaths`。** 三条理由，第一条是硬事实：
+
+1. **机制上做不到**：`IsRateLimitExempt` 是**逐字相等**匹配（`server.go` 里明写
+   「不做前缀匹配 —— 前缀匹配会让 `/api/auth/status/../login` 这类写法有机会绕过限流」）。
+   而这条路径带 run_id 动态段，逐字表**永远匹配不上**。要放开就得改成前缀匹配，
+   那是拿一条有明确安全理由的不变量去换一个便利 —— 不划算。
+2. **判据本来也不满足**：该表的入选条件是「限流它会不会让正常客户端分不清 429 与 401」。
+   状态轮询 429 了不会把用户弹去登录页，与 `/api/auth/status` 那种「一次 429 毁掉整站」不同级。
+3. **正确的修法在后端另处，且不急**：观察页的真解是 **SSE**（本仓已有先例
+   `/api/sync/stream`，前端也已接 `EventSource`），或给只读状态端点单列预算。
+   两者都是后端设计，不在前端手里改。
+
+前端已在自己那一层自救完毕（`POLL_MS=2500` + 连续 6 次失败才认断线 + 停下时明说
+「屏幕上的是最后一次成功拿到的进展」），并有 e2e 钉住。所以这条**关闭**，
+SSE 化留作 P3 待办，不占裁决位。
 
 **给「拉起环境」这条路的通用教训**（与 `Dockerfile.service` 里已记录的那条 `COPY cmd/analysis/static`
 事故同型）：`go build ./...` 与单元测试都不检查 Dockerfile 的 COPY/RUN 目标是否存在，
