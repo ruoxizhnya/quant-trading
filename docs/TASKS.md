@@ -338,6 +338,31 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **⑥ 边界**：只改停用路径的字段清理；`last_run_job_id` 等其余残留另立。
 - **完成记录（2026-10-14，`274dad7`）**：修在 [scheduler.go](../pkg/sync/scheduler.go) `ToggleSchedule` 停用分支——置 `schedule.NextRunAt = nil`，由既有的**单条** `UpdateSyncSchedule` 全字段写回落为 NULL，与 `is_active=false` 同一语句、无中间态；结构体与 JSON 字段名未动。单测两条腿（`pkg/sync/scheduler_start_test.go`）：`TestToggleScheduleOffClearsNextRunAt`（含激活前置事实腿，store 读回 `NextRunAt == nil` + `Stats().NextRuns` 为空）+ `TestToggleScheduleOnStillSetsNextRunAt`（反向腿：激活路径不被清除语句误伤）。破坏验证已做（去掉清除语句单测红，还原绿）。**诚实缺口**：活进程 curl 复测未做（本机无 docker 环境），留待有环境时补。
 
+### DATA-02 · 票池状态拆分没有只读通道（幸存者偏差块只能显示空态） ⬜ 待做
+
+- **① 目标**：SPA 能读到「在市 / 退市」的拆分读数，于是 ui 的幸存者偏差块不必再挂"缺读数通道"，也**不需要在前端自算**。
+- **② 上下文**（2026-10-14 psql + curl 当场复核，数字是当下的不是引用的）：
+  - 数据侧是干净的：`stocks` 共 **5908** 行，`status=active` 5569 行且 `delist_date` 非空 **0** 条，`status=delisted` 339 行且 `delist_date` 非空 **339** 条，"有摘牌日却仍标 active"的不一致行 **0**。
+  - 存储与领域层也已就位：`pkg/storage/stocks.go:15` 的 `stockColumns` 含 `delist_date`，`pkg/domain/market/types.go:49` 用 `*time.Time` 区分"未知"与"仍在市"（注释就写明"没有这个字段就不可能修幸存者偏差"）。
+  - **缺的只有 HTTP 面**：SPA 能走到的票池读数只有 `GET /api/stocks/count`，而它返回 `{"count":5908}`——这 5908 **含已退市**，把叫"在市股票数"就是假数字（`cmd/data/handlers_stocks.go:84-104`）。带 `status`/`delist_date` 的 `GET /stocks` 列表在数据服务上有（`cmd/data/main.go:113`），但 analysis 网关没有转发它（`cmd/analysis/handlers_proxy.go:101` 只挂了 count 一条）。
+  - ui 侧已按"显式空态 + 指名本工单"落地（`quant-trading-ui` 的 `components/sync/DataQualityPanel.vue`，A-08 断言 6），**没有**造数也没有算比例。
+- **③ 要求**：给一条只读拆分读数。**形状由 core 定**（在既有 count 端点上加分组字段，或转发既有 `/stocks` 列表，或新挂一条只读聚合——三种都行，选哪种不算前端的意见）；只要求该读数与 `select status, count(*) … group by status` 逐值一致。
+- **④ 约束与非目标**：不改 `stocks` 表结构、不动 `pkg/domain` 契约；不做摄取（本单是**通道**缺口，不是数据缺口）；不让前端自己 `5908 - 339` 之类的客户端重建（同一概念两处真相，AGENTS.md §9 明令禁止）。
+- **⑤ 验收**：`curl` 经网关（:8085）取到拆分，值与 psql 直查一致（active 5569 / delisted 339）；`docs/SPEC.md` 登记该端点；ui 侧把空态换成真数另计一小单（不夹在本单）。**破坏验证**：临时把某只股票的 `delist_date` 置空 → 拆分读数随之变化（证明它是真查不是硬编码），还原后再测一次一致。
+- **⑥ 边界**：只加只读通道；摄取、回填、前端展示均不在本单。
+
+### DATA-03 · 两条读数形状不一致（`latest_date` 静默缺席 / PIT 历史端点没通道） ⬜ 待做
+
+- **① 目标**：**声明了就该返回，返回不了就别声明**——把两条端点的契约与实测对齐，PIT 三时刻要么有通道要么明写没有。
+- **② 上下文**（2026-10-14 实测）：
+  - `GET :8081/stocks/count` 实测 body 只有 `{"count":5908}`，**没有** `latest_date`。代码里那条查询在 `cmd/data/handlers_stocks.go:95-101`：`store.DB().QueryRow(ctx, "SELECT MAX(trade_date) FROM ohlcv_daily_qfq").Scan(&latestDate)`，**返回的 error 被整个丢掉**（没接收），扫不上去就 `latestDate == nil`，于是字段静默缺席——失败不响，界面只是少一个数。旁证：同一请求容器日志 `latency` 只有 14–52 ms，而 psql 直查该 `MAX` 冷启 **2.3 s**（`Index Only Scan Backward using idx_ohlcv_trade_date`），说明不是"查了但查得慢/查回空"，而是**这一趟就没成**。
+  - 前端类型 `web/src/types/api.ts:128` 把 `latest_date` 声明为必填 `string`，实测是 `undefined`（当前 SPA 无消费点，`grep latest_date` 在 `web/src` 零命中 ⇒ 还没人踩，但契约已经在说谎）。
+  - PIT 三时刻（财务期末 / 公告披露 / 因子可交易起始）本该来自 `GET /fundamentals/:symbol/history`：该路由在数据服务上存在（`cmd/data/main.go`），**网关没有转发**（实测 `GET :8085/api/fundamentals/000001.SZ/history` → **404**），而直连 :8081 是 200 但 body `{"history":null}`；上游是 `fundamentals_detail` 表**实测 0 行**（摄取链路未通 = 已知项 EQD-P1-2，不在本单）。
+- **③ 要求**：两处各自二选一并写明理由——(a1) 修 `latest_date`：接住 Scan 的 error，失败就**别静默**（要么日志要么显式 null），并让响应与 SPEC 一致；(a2) 或删掉这条查询与该字段，SPEC/前端类型同步去掉。(b1) 把 `/fundamentals/:symbol/history` 经网关暴露给 SPA；或 (b2) 明写它不对 SPA 开放，PIT 读数改走别的面。**注**：选 (b1) 也不等于 PIT 能用，EQD-P1-2 仍是数据前提——通道与数据是两件事，别混着结案。
+- **④ 约束与非目标**：不动 `ResultSpec` 与 `pkg/domain`；不改 `fundamentals_detail` 的摄取（那是 EQD-P1-2）；不在前端用兜底值把缺失"补齐"。
+- **⑤ 验收**：`curl` 的 body 字段集合与 `docs/SPEC.md` 对该端点的描述**逐条一致**（多一个少一个都算未完成）；前端 `StockCount` 类型与实测一致（不再出现"声明 string 实为 undefined"）；若选 (b1)，加一条路由级断言（照 `cmd/analysis/deps_test.go` 那份路由登记表的做法）。**破坏验证**：把 Scan 错误重新丢弃 → 新加的那条"字段缺失必须可观测"的断言变红，还原转绿。
+- **⑥ 边界**：只处理这两条读数的形状与通道；数据摄取（EQD-P1-2）与票池拆分（DATA-02）各自成单。
+
 ---
 
 ## 三、跨仓指针（不在本仓，勿双写）
