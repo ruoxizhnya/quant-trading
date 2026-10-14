@@ -17,7 +17,8 @@ import (
 // 本文件是「库」的进程内形态：BuiltinFactorDefinitions 是 11 个冻结因子
 // 的公式化定义种子（唯一写入口），Registry 是读路径（单一事实源）。
 // DB 侧形态见 pkg/storage/factor_definition.go（factor_definitions 表），
-// 由 SyncFactorDefinitions 幂等 upsert——库与内存同源，哈希防漂移。
+// 由 analysis 服务启动时 SyncFactorDefinitions 幂等 upsert——库与内存
+// 同源，哈希防漂移。
 //
 // 分型依据（D3 ③3 判据）：
 //

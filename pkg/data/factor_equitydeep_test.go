@@ -981,11 +981,11 @@ func TestComputeAllFactors_SequentialAndParallelAgree(t *testing.T) {
 
 	ctx := context.Background()
 	sequential := &eqdMockStore{rows: eqdAllFactorRows()}
-	if _, err := NewFactorComputer(sequential).ComputeAllFactors(ctx, eqdAsOf, 20, false); err != nil {
+	if _, err := NewFactorComputer(sequential).ComputeAllFactors(ctx, eqdAsOf, false); err != nil {
 		t.Fatalf("sequential: unexpected error: %v", err)
 	}
 	parallel := &eqdMockStore{rows: eqdAllFactorRows()}
-	if _, err := NewFactorComputer(parallel).ComputeAllFactors(ctx, eqdAsOf, 20, true); err != nil {
+	if _, err := NewFactorComputer(parallel).ComputeAllFactors(ctx, eqdAsOf, true); err != nil {
 		t.Fatalf("parallel: unexpected error: %v", err)
 	}
 
@@ -1031,7 +1031,7 @@ func TestComputeAllFactors_PropagatesError(t *testing.T) {
 
 	t.Run("sequential reports the first factor in list order", func(t *testing.T) {
 		store := &eqdMockStore{rows: eqdFixtureRows(), detailErr: boom}
-		_, err := NewFactorComputer(store).ComputeAllFactors(ctx, eqdAsOf, 20, false)
+		_, err := NewFactorComputer(store).ComputeAllFactors(ctx, eqdAsOf, false)
 		if !errors.Is(err, boom) {
 			t.Fatalf("err = %v, want wrapped %v", err, boom)
 		}
@@ -1044,7 +1044,7 @@ func TestComputeAllFactors_PropagatesError(t *testing.T) {
 
 	t.Run("parallel reports the same factor as sequential", func(t *testing.T) {
 		store := &eqdMockStore{rows: eqdFixtureRows(), detailErr: boom}
-		_, err := NewFactorComputer(store).ComputeAllFactors(ctx, eqdAsOf, 20, true)
+		_, err := NewFactorComputer(store).ComputeAllFactors(ctx, eqdAsOf, true)
 		if !errors.Is(err, boom) {
 			t.Fatalf("err = %v, want wrapped %v", err, boom)
 		}
@@ -1148,7 +1148,7 @@ func TestComputeAllFactors_SkipsEmptyVerticalFactors(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			store := &eqdMockStore{} // empty fundamentals_detail, nothing else either
-			report, err := NewFactorComputer(store).ComputeAllFactors(ctx, eqdAsOf, 20, parallel)
+			report, err := NewFactorComputer(store).ComputeAllFactors(ctx, eqdAsOf, parallel)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

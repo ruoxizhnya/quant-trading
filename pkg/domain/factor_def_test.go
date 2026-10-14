@@ -45,15 +45,15 @@ func TestFactorDefinition_VersionHash_InputFieldOrderIndependent(t *testing.T) {
 func TestFactorDefinition_VersionHash_ChangesWithEverySkeletonField(t *testing.T) {
 	base := validFormulaDef()
 	mutations := map[string]func(d *FactorDefinition){
-		"name":          func(d *FactorDefinition) { d.Name = FactorValue },
-		"kernel":        func(d *FactorDefinition) { d.Kernel = KernelLeaf },
-		"formula":       func(d *FactorDefinition) { d.Formula = "close / ts_delay(close, 10) - 1" },
-		"code_ref":      func(d *FactorDefinition) { d.CodeRef = "SomeKernel" },
-		"caliber":       func(d *FactorDefinition) { d.Caliber = CaliberRank },
-		"input_fields":  func(d *FactorDefinition) { d.InputFields = []string{"close", "high"} },
-		"effective":     func(d *FactorDefinition) { d.EffectiveFrom = "2026-10-15" },
-		"lookahead":     func(d *FactorDefinition) { d.Lookahead = "ann_date<=trade_date" },
-		"lookback":      func(d *FactorDefinition) { d.Lookback = 60 },
+		"name":         func(d *FactorDefinition) { d.Name = FactorValue },
+		"kernel":       func(d *FactorDefinition) { d.Kernel = KernelLeaf },
+		"formula":      func(d *FactorDefinition) { d.Formula = "close / ts_delay(close, 10) - 1" },
+		"code_ref":     func(d *FactorDefinition) { d.CodeRef = "SomeKernel" },
+		"caliber":      func(d *FactorDefinition) { d.Caliber = CaliberRank },
+		"input_fields": func(d *FactorDefinition) { d.InputFields = []string{"close", "high"} },
+		"effective":    func(d *FactorDefinition) { d.EffectiveFrom = "2026-10-15" },
+		"lookahead":    func(d *FactorDefinition) { d.Lookahead = "ann_date<=trade_date" },
+		"lookback":     func(d *FactorDefinition) { d.Lookback = 60 },
 		"validity":     func(d *FactorDefinition) { d.Validity = "close > 0" },
 	}
 	for field, mutate := range mutations {

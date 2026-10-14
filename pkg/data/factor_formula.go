@@ -218,7 +218,7 @@ func computeFormulaRawValues(ctx context.Context, store FactorStore, def domain.
 		return nil, fmt.Errorf("factor %q: formula does not parse: %w", def.Name, err)
 	}
 	// 求值期再过一次 L1：注册表加载期已校验，这里防的是「定义对象被
-	 // 绕过 NewRegistry 直接构造」的路径。
+	// 绕过 NewRegistry 直接构造」的路径。
 	if err := formulaExpr.Validate(); err != nil {
 		return nil, fmt.Errorf("factor %q: formula fails L1 gate: %w", def.Name, err)
 	}

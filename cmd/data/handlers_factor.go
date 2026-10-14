@@ -175,7 +175,7 @@ func syncAllFactorsHandler(fc *data.FactorComputer) gin.HandlerFunc {
 			return
 		}
 
-		report, err := fc.ComputeAllFactors(ctx, date, 20, true)
+		report, err := fc.ComputeAllFactors(ctx, date, true)
 		if err != nil {
 			httpserver.Error(c, http.StatusInternalServerError, err)
 			return

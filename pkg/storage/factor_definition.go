@@ -11,7 +11,7 @@ import (
 //
 // 与内存注册表（pkg/data.Registry + BuiltinFactorDefinitions）的关系：
 // 种子定义编译进二进制，本表是它的持久投影。写入路径幂等
-// （SyncFactorDefinitions 每次计算前 upsert 当前定义集）；读取路径
+// （SyncFactorDefinitions 在服务启动时 upsert 当前定义集）；读取路径
 // 逐条重新 derive 版本哈希并校验——库里存的哈希与定义内容不符即
 // 拒绝加载（fail-closed）。「同一次回测引用固定版本哈希重现一致」
 // 的承诺由 derive-not-store 保证：哈希没有独立存储入口可被篡改。
@@ -104,7 +104,7 @@ func (s *PostgresStore) LoadFactorDefinitions(ctx context.Context) ([]domain.Fac
 }
 
 // SyncFactorDefinitions 把一组定义 upsert 进库（幂等）。
-// 供计算线启动/每次计算前调用：库里公式与进程内种子保持同源。
+// 供服务启动时调用（cmd/analysis 启动序列）：库里公式与进程内种子保持同源。
 func (s *PostgresStore) SyncFactorDefinitions(ctx context.Context, defs []domain.FactorDefinition) error {
 	return s.SaveFactorDefinitions(ctx, defs)
 }

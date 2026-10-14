@@ -348,11 +348,10 @@ type factorComputation struct {
 // 分派规则（D3 ③2 计算内核三型）：
 //   - code 型 → Go 出口闭包（CodeRef 绑定，原 Compute*Factor 方法）；
 //   - leaf/formula 型 → 表达式引擎现算。窗口由定义 Formula 钉死
-//     （momentum 的 ts_delay(close, 20)），momentumLookback 参数仅为
-//     兼容旧签名保留——改窗口 = 改定义 = 新版本哈希，这是版本纪律；
+//     （momentum 的 ts_delay(close, 20)）：改窗口 = 改定义 = 新版本
+//     哈希（版本纪律），不存在运行时覆盖；
 //   - pending 型 → 不进清单（由 ComputeAllFactors 记入 Skipped）。
-func (f *FactorComputer) registryComputations(ctx context.Context, date time.Time, momentumLookback int) []factorComputation {
-	_ = momentumLookback // 公式型窗口由定义 Formula 钉死，见上
+func (f *FactorComputer) registryComputations(ctx context.Context, date time.Time) []factorComputation {
 	names := f.registry.Names()
 	computations := make([]factorComputation, 0, len(names))
 	for _, name := range names {
@@ -390,8 +389,8 @@ func (f *FactorComputer) registryComputations(ctx context.Context, date time.Tim
 	return computations
 }
 
-func (f *FactorComputer) ComputeAllFactors(ctx context.Context, date time.Time, momentumLookback int, parallel bool) (FactorBatchReport, error) {
-	computations := f.registryComputations(ctx, date, momentumLookback)
+func (f *FactorComputer) ComputeAllFactors(ctx context.Context, date time.Time, parallel bool) (FactorBatchReport, error) {
+	computations := f.registryComputations(ctx, date)
 
 	type outcome struct {
 		index int
@@ -463,7 +462,7 @@ func (f *FactorComputer) ComputeAllFactors(ctx context.Context, date time.Time, 
 // ComputeFactorsForRange computes all factors for every trading day in [startDate, endDate].
 // This is the main entry point for batch pre-computation.
 // Returns the number of dates processed and any error.
-func (f *FactorComputer) ComputeFactorsForRange(ctx context.Context, startDate, endDate time.Time, momentumLookback int) (int, error) {
+func (f *FactorComputer) ComputeFactorsForRange(ctx context.Context, startDate, endDate time.Time) (int, error) {
 	tradingDays, err := f.store.GetTradingDays(ctx, startDate, endDate)
 	if err != nil {
 		return 0, fmt.Errorf("get trading days: %w", err)
@@ -475,7 +474,6 @@ func (f *FactorComputer) ComputeFactorsForRange(ctx context.Context, startDate, 
 		Time("start", startDate).
 		Time("end", endDate).
 		Int("trading_days", len(tradingDays)).
-		Int("momentum_lookback", momentumLookback).
 		Msg("Starting batch factor computation")
 
 	count := 0
@@ -485,7 +483,7 @@ func (f *FactorComputer) ComputeFactorsForRange(ctx context.Context, startDate, 
 			return count, ctx.Err()
 		default:
 		}
-		report, err := f.ComputeAllFactors(ctx, day, momentumLookback, false)
+		report, err := f.ComputeAllFactors(ctx, day, false)
 		if err != nil {
 			f.logger.Warn().Time("date", day).Err(err).Msg("Skipping date due to error")
 			continue

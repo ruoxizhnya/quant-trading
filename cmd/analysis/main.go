@@ -10,6 +10,7 @@ import (
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/contracts"
 	"github.com/ruoxizhnya/quant-trading/pkg/bootstrap"
 	"github.com/ruoxizhnya/quant-trading/pkg/compliance"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain"
 	"github.com/ruoxizhnya/quant-trading/pkg/observability"
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy"
 	_ "github.com/ruoxizhnya/quant-trading/pkg/strategy/plugins"
@@ -37,6 +38,16 @@ func main() {
 
 	// store 在 Boot 前构造：eventstore 模块复用它的 pool（一个进程一个池）。
 	store := initStore(v, logger)
+
+	// D3 因子定义库投影：启动时把内置种子定义幂等 upsert 进
+	// factor_definitions（库与内存同源）。该表是治理/审计的持久投影，
+	// 读路径在内存注册表——投影失败不阻断启动（kill-switch 同款降级），
+	// 但必须吵：投影缺失会让 D4 治理/审计拿到空库。
+	syncCtx, syncCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	if err := store.SyncFactorDefinitions(syncCtx, domain.BuiltinFactorDefinitions); err != nil {
+		logger.Error().Err(err).Msg("factor definitions sync failed; factor_definitions projection may be missing/stale")
+	}
+	syncCancel()
 
 	// ─── 内核接管装配（K1 切片 3）─────────────────────────────────────
 	// engine / riskManager / executionTrader / dataAdapter 的构造与注入
