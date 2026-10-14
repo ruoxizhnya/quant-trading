@@ -173,6 +173,58 @@ func TestWorkerPool_CancelUnknownJobIsFalse(t *testing.T) {
 		"池子里没有这个任务时必须返回 false —— 调用方靠它区分「真打断了」和「只是改了行」")
 }
 
+// TestWorkerPool_StopCancelsInFlightJob 把 Stop() 的真实语义**测出来**（SYNC-02 ③）：
+// Stop 不是「等在跑的作业跑完」，而是取消它们的执行器 —— per-job ctx 派生自池 ctx，
+// 所以池一停，在跑的执行器立刻收到取消信号；行停在 `running`，不做「跑完了」的伪装，
+// 由下次启动的 CleanupStaleRunning 收敛（AUD-50，另有测试覆盖）。
+// 接线决策据此作出：语义够用（不悬挂、可恢复），不改签名、不改语义，只接线 ——
+// 本测试就是那个「先测出来」的证据，将来有人改 Stop 语义时这里会先红。
+func TestWorkerPool_StopCancelsInFlightJob(t *testing.T) {
+	h := newCancelHarness(1)
+	exec := newBlockingExecutor(JobTypeOHLCVAll)
+	h.pool.RegisterExecutor(exec)
+
+	ctx := context.Background()
+	job, err := h.jobService.CreateJob(ctx, JobTypeOHLCVAll, nil)
+	require.NoError(t, err)
+
+	h.pool.Start()
+
+	select {
+	case <-exec.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("执行器从未启动")
+	}
+	require.Eventually(t, func() bool {
+		got, _ := h.store.GetSyncJob(ctx, job.ID)
+		return got != nil && got.Status == JobStatusRunning && got.ProcessedItems > 0
+	}, 5*time.Second, 10*time.Millisecond, "任务应已进入 running 并有进度")
+
+	// Stop 必须返回（不悬挂在在跑作业上），且执行器收到了取消信号。
+	done := make(chan struct{})
+	go func() {
+		h.pool.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop() 没有返回 —— 它在等一个被设计为永不主动结束的作业")
+	}
+	select {
+	case <-exec.stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop() 没有把取消信号传给在跑的执行器 —— 关闭只掐了 worker，作业体还在跑")
+	}
+
+	// 行停在 running：这是「下次启动收敛」语义的另一半，不是缺陷。
+	got, err := h.store.GetSyncJob(ctx, job.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, JobStatusRunning, got.Status,
+		"Stop() 应让行停在 running（由 CleanupStaleRunning 在下次启动收敛），而不是伪造终态")
+}
+
 // pending 的任务没有在飞的执行体，取消不该去打扰 worker pool。
 func TestJobService_CancelPendingJobDoesNotTouchThePool(t *testing.T) {
 	h := newCancelHarness(1)

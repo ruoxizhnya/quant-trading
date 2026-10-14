@@ -15,6 +15,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -37,6 +38,19 @@ func TestStartupStartsScheduler(t *testing.T) {
 		"main 未启动调度器 ⇒ sync_schedules 里 is_active=true 的排程永远不会触发（SYNC-01）")
 	require.Contains(t, mainSrc, "syncHandler.StopScheduler(",
 		"main 未停止调度器 ⇒ 优雅关闭期间 cron 仍可能在 HTTP 已停后新建作业")
+
+	// SYNC-02：worker pool 的 Stop 同样必须有调用方 —— 否则关闭时在跑的
+	// 同步作业随进程一起被掐断，连「下次启动再收敛」的机会都没有。
+	// 顺序约束：HTTP → scheduler → worker pool，StopWorkerPool 必须在
+	// StopScheduler 之后（cron 先停，才不会往正在拆除的队列里塞新作业）。
+	require.Contains(t, mainSrc, "syncHandler.StopWorkerPool(",
+		"main 未停止 worker pool ⇒ 关闭时在跑的同步作业随进程一起被掐断（SYNC-02）")
+	require.Greater(t, strings.Index(mainSrc, "syncHandler.StopScheduler("),
+		strings.LastIndex(mainSrc, "gracefulShutdown("),
+		"关闭顺序被破坏：必须先停 HTTP 再停 scheduler")
+	require.Greater(t, strings.Index(mainSrc, "syncHandler.StopWorkerPool("),
+		strings.Index(mainSrc, "syncHandler.StopScheduler("),
+		"关闭顺序被破坏：必须先停 scheduler 再停 worker pool（SYNC-02）")
 
 	// fail-loud 而非静默：启动失败必须进日志，不能 `_ =` 吞掉。
 	require.Contains(t, mainSrc, "if err := syncHandler.StartScheduler(); err != nil {",

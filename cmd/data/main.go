@@ -79,8 +79,14 @@ func main() {
 
 	gracefulShutdown(srv, logger)
 	// Drain order: HTTP first, then the scheduler, so cron cannot create new jobs into a
-	// queue whose workers are already being torn down (store.Close is deferred above).
+	// queue whose workers are already being torn down; the worker pool goes last
+	// (SYNC-02: its Stop had no caller, so in-flight jobs were simply killed with the
+	// process). Stop() cancels the pool context, which reaches in-flight executors
+	// (per-job ctx derives from the pool ctx); their rows stay `running` and are reaped
+	// by CleanupStaleRunning on the next start (AUD-50), so an interrupted job stays
+	// recoverable instead of silently lost.
 	syncHandler.StopScheduler()
+	syncHandler.StopWorkerPool()
 }
 
 // registerRoutes wires every data-service HTTP endpoint to its handler.
