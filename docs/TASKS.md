@@ -407,6 +407,12 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   - **⚠️ 本单执行中的一次数据事故（当场恢复，如实登记）**：做上面那条 `delist_date` 反证腿时，我的**还原**语句漏了 `WHERE`（`UPDATE stocks SET delist_date=(子查询)` 无行限定），把**全表 5908 行 `delist_date` 清成 NULL**（原本 339 非空）。`status` 未受影响，但坏的是 P2-4 那条线 —— `GetListingWindows`(`pkg/storage/stocks.go:202`) 读 `delist_date` 做按天池子过滤，全 NULL 等于「没有一只票退过市」，幸存者偏差会被重新引入。恢复路径正是 ADR-023 的「可重建数据靠同一份数据 + `content_hash`」：从 `ingest.raw` 的 `tushare.stock_basic` 16 页原始响应回填 —— 回填前只读核对：归档带 `delist_date` 的 symbol **339** 个、归档有而 stocks 无 **0**、stocks 标 delisted 而归档无 **0**、同一 symbol 跨页取值冲突 **0**，且我记录过改前值的 `000003.SZ`（表内 `2002-06-14`）与归档 `20020614` 逐字一致。回填 `UPDATE 339`（只写 `delist_date` 一列，不动 `status`/`updated_at`），复测九项全绿：非空 339 / active 带日期 0 / delisted 缺日期 0 / `000003.SZ = delisted|2002-06-14` / 总数 5908 / 拆分 5569-339 / 日期跨度 1999-07-12..2026-07-30 / 30 分钟内 `updated_at` 被改的行 0 / 探针残留 0。**教训**：破坏验证的还原腿必须与写腿带**同一个行限定**；无 `WHERE` 的 UPDATE 不该出现在验证脚本里，改用 `UPDATE … WHERE symbol=$1` 的形。
   - **顺带纠正一处登记**（不改写他人结论，只加指针）：本文件 D3 完成记录「已知边界 ③」称「补全需发明落库 API（`pkg/storage` 无 `SaveIndexConstituents`）」—— 不成立，`(*PostgresStore).SaveIndexConstituentBatch` 在 `pkg/storage/cache.go:369` 已存在且正被 `pkg/data/tushare.go:690` 调用；那次多传的参数已于 `abd9067` 按源码证伪撤销，`cmd/data` 编译恢复。真正的缺口是落库失败只 Warn（见新登记 **DATA-06**）。
   - **留给下游**：ui 侧把「缺读数通道」空态换成真数（`quant-trading-ui` 的 `components/sync/DataQualityPanel.vue`，A-08 断言 6）按 ⑤ 另计一小单，不夹在本单。
+  - **自审修订（2026-10-15，审自己的 commit 后追加，不改写上面原始记录）**：三处真问题，均已修并复验。
+    1. **契约漏登记**：`docs/openapi.yaml:2206` 的 `/api/stocks/count` 原来只有裸 `type: object`，SPEC 写了形状而机器可读契约没写。已补 schema（`required: [count, by_status]` + `additionalProperties` 整数 + `latest_date` 明写**可能缺席**并指回 DATA-03，避免又造一个"声明了却不返回"）。该文件由 analysis-service `go:embed` 后经 `GET /api/openapi.yaml` 对外供给，改完用 YAML 解析复验属性齐备。
+    2. **两条腿在空库下行为不对**：`pkg/storage` 的交叉核对在空表时是**零次循环空过**（谁都没断言的绿，比红更糟），`cmd/data` 的同一条则 `require.NotEmpty` 直接**假红**（空开发库是环境不是缺陷）。两条都改成 skip，并按 AUD-51 口径注明前置与断言读的是同一张 `stocks`。
+    3. **我自己的测试注释在夸大**：原写「这条同时钉住 GROUP BY 陷阱」。实测证伪 —— 把生产分组改回原始列 `GROUP BY status` 后**这条照样绿**（库里当前没有 NULL/空串行，折与不折同结果）。守那条陷阱的是 `…_FoldsNullAndEmptyIntoOneUnknownBucket`（它自己造那两行，改坏时红在 `expected: 2, actual: 1`）。注释已按实测改成写清分工，护栏不靠叙述自证。
+    - 顺带把 oracle 从 N+1 条 WHERE 收成**单趟** `GROUP BY status` + Go 侧再折叠一次（两条独立实现照样互核，但读数窗口从 5 趟降到 2 趟）—— 开发与测试会话都在写 `stocks`，每多一趟读就多一个「两次读数之间被人改过」的假红窗口。
+    - 复验：`go build ./...` exit 0、`go vet ./cmd/data ./pkg/storage` exit 0、`gofmt -l` 四个文件空输出、五条腿全绿（先红后绿链未变）；改坏的 SQL 已还原，`git diff` 生产码为空、`grep -rn MUTATION cmd pkg` 零命中。
 
 ### DATA-03 · 两条读数形状不一致（`latest_date` 静默缺席 / PIT 历史端点没通道） ⬜ 待做
 
