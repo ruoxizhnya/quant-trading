@@ -189,6 +189,14 @@ services:
       DATA_SERVICE_URL: http://data-service:8081
       # STRATEGY_SERVICE_URL 已随 OBS-11（2026-10-09）删除：策略服务 standby
       # （ADR-012），per-day HTTP 信号 fallback 不复存在。
+      #
+      # AI_SERVICE_URL —— 反代目标（cmd/analysis/handlers_ai_proxy.go 的
+      # ai_service.url）。**这里必须是 compose 服务名而不是 localhost**：
+      # 缺省值 http://localhost:8086 在宿主机直跑（go run）时恰好命中，
+      # 所以在容器形态下一直静默失效 —— copilot / pipeline / explore / tools
+      # 四族全部 503「ai-service unreachable」，而 ai-service 自己健康得很。
+      # 2026-10-14 拉起本地栈时实测到这条，补上。
+      AI_SERVICE_URL: http://ai-service:8086
       # P1-15 (Sprint 6, ODR-021): risk + execution merged into
       # analysis. RISK_SERVICE_URL kept as a legacy fallback only
       # — the engine prefers the in-process risk manager
