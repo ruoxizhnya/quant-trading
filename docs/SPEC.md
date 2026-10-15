@@ -845,6 +845,23 @@ FactorComputer.ComputeFactorByName(ctx, name, date)
 表）：「谁」=`Actor`、「何时」=`At`、「改了什么」=`VersionHash`（内容指纹）
 + `Detail`、「为什么」=`Reason`。登记/回滚缺 actor 一律拒收（审计「谁」不可缺）。
 
+### 并发语义（进程内账本是并发安全类型，REV-03）
+
+`RegistrationBook` 是**可变**账本，与 D3 `Registry` 有别——后者是构造时定稿的
+**不可变快照**（读侧无需加锁），前者写路径直接改索引 map、登记序 slice、审计
+slice，故自持 `sync.RWMutex` 成为**并发安全类型**：
+
+| 路径 | 方法 | 锁 |
+|---|---|---|
+| 写 | `Register` / `Rollback` | `mu.Lock`（整个方法是一个写事务：校验 + 去重 + 落账 + 留痕原子完成） |
+| 读 | `ResolveEffective` / `ResolvePinned` / `Registrations` / `Audit` | `mu.RLock` |
+
+读路径在写事务边界上取到自洽快照——不会看到「map 已写一半、审计还没补」的
+撕裂中间态。锁只护**进程内**账本：签名与治理语义（四样校验、回滚保复现、审计
+字段）均不变；DB 侧落库的并发由调用方事务管理（另立），HTTP 接入面另立。将来
+接「登记 / 回滚」的 HTTP 或后台入口时，并发写不再退化成 map 并发写（panic 或
+静默丢登记与审计留痕）。
+
 ### 演练记录（D4 ⑤1：登记 → 被公式引用 → 回滚）
 
 可执行形态在 `pkg/data/factor_governance_test.go`
@@ -865,6 +882,11 @@ FactorComputer.ComputeFactorByName(ctx, name, date)
 4. **防漂移测试**（`pkg/domain/spec_drift_test.go`）：上表
    `factor_registration` 锚点与 `domain.FactorRegistration` 反射比对，双向
    缺失都红。
+5. **并发语义**（`pkg/data/factor_governance_test.go`，REV-03）：
+   `TestRegistrationBook_ConcurrentRegisterResolveRollback` 在 `-race` 下把写侧
+   （Register/Rollback）与读侧（Resolve*/Registrations/Audit）并发交叠，钉住
+   写侧锁——并发下不撕裂；且同因子双版本并发登记**去重封闭**（恰好 1 成功、
+   其余 `ErrRegistrationDuplicate`），并发回滚同样恰好 1 成功。
 
 ### 实现指针
 
