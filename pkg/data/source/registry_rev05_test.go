@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,7 +27,12 @@ import (
 // 否则测不到目标路径。
 type nilResponseAdapter struct {
 	AdapterBase
-	types      []string
+	types []string
+
+	// Fetch is documented as safe for concurrent use (Registry may call it
+	// from multiple goroutines), so the call counter is mutex-guarded — same
+	// pattern as mockAdapter.callCount.
+	mu         sync.Mutex
 	fetchCalls int
 }
 
@@ -55,8 +61,17 @@ func (a *nilResponseAdapter) Schema(string) (DataSchema, error) { return DataSch
 
 // Fetch 是刻意的契约违背：err == nil 却返回 nil 响应。
 func (a *nilResponseAdapter) Fetch(context.Context, FetchRequest) (*FetchResponse, error) {
+	a.mu.Lock()
 	a.fetchCalls++
+	a.mu.Unlock()
 	return nil, nil
+}
+
+// callCount returns the number of Fetch invocations so far.
+func (a *nilResponseAdapter) callCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.fetchCalls
 }
 
 func (a *nilResponseAdapter) HealthCheck(context.Context) error { return nil }
@@ -85,7 +100,7 @@ func TestRegistry_Fetch_NilNilResponse_FallsThroughToNextAdapter(t *testing.T) {
 	require.NoError(t, err, "a healthy downstream adapter must still satisfy the chain")
 	require.NotNil(t, resp, "Fetch must never return a nil response with a nil error")
 	assert.Equal(t, "good", resp.Source)
-	assert.Equal(t, 1, badNil.fetchCalls, "the (nil, nil) adapter must have been attempted first")
+	assert.Equal(t, 1, badNil.callCount(), "the (nil, nil) adapter must have been attempted first")
 }
 
 // 链上所有 adapter 都返回 (nil, nil)：报错可读、含 "(nil, nil)"、无 "%!w"。

@@ -224,7 +224,7 @@ func (r *Registry) Fetch(ctx context.Context, req FetchRequest) (*FetchResponse,
 		// downstream adapter can still serve. The error names the offender and
 		// survives %w wrapping intact (no "%!w(<nil>)" corruption).
 		if err == nil && resp == nil {
-			log.Printf("[source.Registry] Fetch[%s]: %q returned (nil, nil) — contract violation (err == nil requires non-nil response)", req.DataType, name)
+			log.Printf("[source.Registry] Fetch[%s]: %q failed: adapter returned (nil, nil) — contract violation (err == nil requires non-nil response)", req.DataType, name)
 			lastErr = fmt.Errorf("adapter %q returned (nil, nil) response", name)
 			tried = append(tried, name)
 			continue
