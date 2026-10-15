@@ -2,6 +2,9 @@ package data
 
 import (
 	"errors"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -210,5 +213,146 @@ func TestRegistrationBookFrom_RejectsBadRows(t *testing.T) {
 	// 重复 (name, hash) → 拒。
 	if _, err := NewRegistrationBookFrom([]domain.FactorRegistration{good, good}); !errors.Is(err, ErrRegistrationDuplicate) {
 		t.Fatalf("重复版本应返回 ErrRegistrationDuplicate，got: %v", err)
+	}
+}
+
+// TestRegistrationBook_ConcurrentRegisterResolveRollback 是 REV-03 ⑤(a1) 的
+// 并发语义钉桩：在 `-race` 下把写侧（Register/Rollback）与读侧（Resolve*/
+// Registrations/Audit）并发交叠，锁必须让它们互不撕裂。缺写侧保护即报
+// 「并发写 map / 并发读写 slice」。
+//
+// 两阶段各自把并发度拉满，且断言去重的封闭性（不是「大概率对」）：
+//
+//	阶段 1：同一版本被 N 个 goroutine 并发登记——恰好 1 次成功，其余
+//	       ErrRegistrationDuplicate（去重判在锁内，未加锁即并发写 map）；
+//	阶段 2：同一版本被 N 个 goroutine 并发回滚——恰好 1 次成功，其余
+//	       「已回滚」报错（状态读改在锁内，未加锁即撕裂 status）。
+func TestRegistrationBook_ConcurrentRegisterResolveRollback(t *testing.T) {
+	book := NewRegistrationBook()
+	v1 := momentumV(30)
+	v2 := momentumV(10)
+	hash1 := v1.VersionHash()
+	hash2 := v2.VersionHash()
+
+	const workers = 64
+
+	// 读 goroutine：全程锤四条读路径，与写侧并发交叠（阶段 1/2 期间不停）。
+	stopRead := make(chan struct{})
+	var readers sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-stopRead:
+					return
+				default:
+				}
+				_, _, _ = book.ResolveEffective(domain.FactorMomentum)
+				_, _ = book.ResolvePinned(domain.FactorMomentum, hash1)
+				_, _ = book.ResolvePinned(domain.FactorMomentum, hash2)
+				_ = book.Registrations()
+				_ = book.Audit()
+			}
+		}()
+	}
+
+	// ── 阶段 1：并发登记两版（各 workers 个 goroutine 抢登记同一版）──
+	start := make(chan struct{})
+	var writers sync.WaitGroup
+	var ok1, dup1, ok2, dup2 int32
+	for i := 0; i < workers; i++ {
+		writers.Add(2)
+		go func() {
+			defer writers.Done()
+			<-start
+			if _, err := book.Register(v1, "racer-a", "", at(14)); err == nil {
+				atomic.AddInt32(&ok1, 1)
+			} else if errors.Is(err, ErrRegistrationDuplicate) {
+				atomic.AddInt32(&dup1, 1)
+			} else {
+				t.Errorf("并发登记 v1 意外错误: %v", err)
+			}
+		}()
+		go func() {
+			defer writers.Done()
+			<-start
+			if _, err := book.Register(v2, "racer-b", "", at(15)); err == nil {
+				atomic.AddInt32(&ok2, 1)
+			} else if errors.Is(err, ErrRegistrationDuplicate) {
+				atomic.AddInt32(&dup2, 1)
+			} else {
+				t.Errorf("并发登记 v2 意外错误: %v", err)
+			}
+		}()
+	}
+	close(start)
+	writers.Wait()
+
+	if ok1 != 1 || dup1 != workers-1 {
+		t.Fatalf("v1 并发登记应恰好 1 成功 + %d 去重，got ok=%d dup=%d", workers-1, ok1, dup1)
+	}
+	if ok2 != 1 || dup2 != workers-1 {
+		t.Fatalf("v2 并发登记应恰好 1 成功 + %d 去重，got ok=%d dup=%d", workers-1, ok2, dup2)
+	}
+	if got := len(book.Registrations()); got != 2 {
+		t.Fatalf("并发去重后登记数应恰好 2（v1+v2），got %d", got)
+	}
+	if _, hash, ok := book.ResolveEffective(domain.FactorMomentum); !ok || hash != hash2 {
+		t.Fatalf("两版在册时新引用应命中较新的 v2: ok=%v hash=%s", ok, hash)
+	}
+
+	// ── 阶段 2：并发回滚 v2（唯一成功者置 rolled_back，其余撞「已回滚」）──
+	start2 := make(chan struct{})
+	var roll sync.WaitGroup
+	var okR, alreadyR int32
+	for i := 0; i < workers; i++ {
+		roll.Add(1)
+		go func() {
+			defer roll.Done()
+			<-start2
+			err := book.Rollback(domain.FactorMomentum, hash2, "racer-c", "concurrent rollback", at(16))
+			switch {
+			case err == nil:
+				atomic.AddInt32(&okR, 1)
+			case strings.Contains(err.Error(), "already rolled back"):
+				atomic.AddInt32(&alreadyR, 1)
+			default:
+				t.Errorf("并发回滚 v2 意外错误: %v", err)
+			}
+		}()
+	}
+	close(start2)
+	roll.Wait()
+	close(stopRead)
+	readers.Wait()
+
+	if okR != 1 || alreadyR != workers-1 {
+		t.Fatalf("v2 并发回滚应恰好 1 成功 + %d 已回滚，got ok=%d already=%d", workers-1, okR, alreadyR)
+	}
+
+	// ── 最终态（读路径一致性）：v2 回滚 → 新引用回落 v1，两版历史引用都命中 ──
+	if _, hash, ok := book.ResolveEffective(domain.FactorMomentum); !ok || hash != hash1 {
+		t.Fatalf("v2 回滚后新引用应回落 v1: ok=%v hash=%s", ok, hash)
+	}
+	if _, ok := book.ResolvePinned(domain.FactorMomentum, hash1); !ok {
+		t.Fatal("v1 历史引用仍须命中")
+	}
+	if _, ok := book.ResolvePinned(domain.FactorMomentum, hash2); !ok {
+		t.Fatal("v2 历史引用（虽已回滚）仍须命中——回滚不破坏复现")
+	}
+	audit := book.Audit()
+	if len(audit) != 3 {
+		t.Fatalf("审计应恰好 3 条（register v1 / register v2 / rollback v2），got %d: %+v", len(audit), audit)
+	}
+	var rollbacks int
+	for _, e := range audit {
+		if e.Action == domain.ActionRollback {
+			rollbacks++
+		}
+	}
+	if rollbacks != 1 {
+		t.Fatalf("回滚审计留痕应恰好 1 条（并发去重只写一次），got %d", rollbacks)
 	}
 }

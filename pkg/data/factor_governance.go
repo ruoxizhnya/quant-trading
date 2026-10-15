@@ -3,6 +3,7 @@ package data
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
@@ -30,7 +31,24 @@ import (
 var ErrRegistrationDuplicate = fmt.Errorf("factor version already registered")
 
 // RegistrationBook 是因子登记的进程内账本。
+//
+// 并发安全（REV-03）：它是**可变**账本——Register/Rollback 直接改
+// byNameHash / ordered / audit，故自持 mu 串行化写侧、保护读侧：
+//
+//   - 写路径 Register / Rollback 持写锁（mu.Lock），整个方法是一个写事务；
+//   - 读路径 ResolveEffective / ResolvePinned / Registrations / Audit 持读锁
+//     （mu.RLock），读到的是某一写事务边界上的自洽快照——不会看到「map 已
+//     写一半、audit 还没补」的撕裂中间态。
+//
+// 与 D3 的 Registry 有别：Registry 是构造时定稿的不可变快照，读侧无需加锁；
+// 本账本可变，故必须自持锁。将来接「登记 / 回滚」的 HTTP 或后台入口时，
+// 并发写不再退化成 map 并发写（panic 或静默丢登记与审计留痕）。
+//
+// 注：因含 mu，本类型**不可按值拷贝**（拷贝会复制锁）；一律以 *RegistrationBook
+// 传递——构造入口 NewRegistrationBook / NewRegistrationBookFrom 均返回指针。
 type RegistrationBook struct {
+	mu sync.RWMutex
+	// byNameHash 按 (因子名, 版本哈希) 索引登记记录。
 	byNameHash map[domain.FactorType]map[string]*domain.FactorRegistration
 	// ordered 保持登记顺序（判定「最新在册版本」时同刻按登记序取后者，
 	// 避免 map 遍历的随机性破坏确定性）。
@@ -80,6 +98,8 @@ func NewRegistrationBookFrom(regs []domain.FactorRegistration) (*RegistrationBoo
 // at 为登记时刻（由调用方注入，便于测试与审计留痕复现）；reason 是登记
 // 缘由（审计「为什么」）。
 func (b *RegistrationBook) Register(def domain.FactorDefinition, registrar, reason string, at time.Time) (*domain.FactorRegistration, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	reg := &domain.FactorRegistration{
 		Definition:   def,
 		VersionHash:  def.VersionHash(),
@@ -119,6 +139,8 @@ func (b *RegistrationBook) Register(def domain.FactorDefinition, registrar, reas
 //
 // 找不到版本、已回滚、或缺 actor（审计「谁」）都 fail-closed 报错。
 func (b *RegistrationBook) Rollback(name domain.FactorType, versionHash, actor, reason string, at time.Time) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	byHash := b.byNameHash[name]
 	reg, ok := byHash[versionHash]
 	if !ok {
@@ -153,6 +175,8 @@ func (b *RegistrationBook) Rollback(name domain.FactorType, versionHash, actor, 
 // 返回 (定义, 版本哈希, ok)：哈希随结果返回，便于调用方把「这次引用钉在
 // 哪一版」记进 run（历史复现的依据）。
 func (b *RegistrationBook) ResolveEffective(name domain.FactorType) (domain.FactorDefinition, string, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	var best *domain.FactorRegistration
 	for _, reg := range b.ordered {
 		if reg.Definition.Name != name || reg.Status != domain.RegistrationActive {
@@ -172,6 +196,8 @@ func (b *RegistrationBook) ResolveEffective(name domain.FactorType) (domain.Fact
 // ResolvePinned 解析一个因子的「历史引用」：按版本哈希精确锁定，无论该
 // 版本是否已回滚都能命中——历史回测钉着当时的哈希跑，回滚不许破坏复现。
 func (b *RegistrationBook) ResolvePinned(name domain.FactorType, versionHash string) (domain.FactorDefinition, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	reg, ok := b.byNameHash[name][versionHash]
 	if !ok {
 		return domain.FactorDefinition{}, false
@@ -181,6 +207,8 @@ func (b *RegistrationBook) ResolvePinned(name domain.FactorType, versionHash str
 
 // Registrations 返回登记快照（登记序）。
 func (b *RegistrationBook) Registrations() []domain.FactorRegistration {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	out := make([]domain.FactorRegistration, 0, len(b.ordered))
 	for _, reg := range b.ordered {
 		out = append(out, *reg)
@@ -190,6 +218,8 @@ func (b *RegistrationBook) Registrations() []domain.FactorRegistration {
 
 // Audit 返回审计留痕（登记序）。
 func (b *RegistrationBook) Audit() []domain.RegistrationAuditEntry {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	out := make([]domain.RegistrationAuditEntry, len(b.audit))
 	copy(out, b.audit)
 	return out
