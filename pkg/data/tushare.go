@@ -395,6 +395,17 @@ func (c *TushareClient) fetchAdjFactors(ctx context.Context, symbol string, star
 // 「规范层 Schema」节的 OHLCV 字段表）。两者相差恰好这个倍数。
 const sharesPerLot = 100
 
+// cnyPerAmountUnit 把 tushare daily 的 `amount`（单位**千元**）折成规范层 turnover
+// 的单位 **CNY**（同一份 SPEC 字段表）。2026-10-15 真库 392.6 万行实测：
+// turnover / (volume_股 × close) 中位数 0.0010127（p01 0.000967 / p99 0.001955）
+// —— 比「元」小三个数量级，坐实了千元原样入库。
+//
+// 与 volume 不同，这里**不取整**：×1000 后仍可能留真实小数（源侧 amount 带 3–4 位
+// 小数 = 元以下的精度，真库 max|x−round(x)| = 0.5），而且下游没有整数纪律要求它
+// （NT 导出的 SELECT 不带 turnover）。volume 必须 round 是因为 as_quantity 精确
+// 判整数，turnover 没有这个约束 —— 无约束时不发明精度损失。
+const cnyPerAmountUnit = 1000
+
 // normalizeDailyOHLCV converts a `daily` response into 前复权 (qfq) OHLCV rows.
 //
 // daily fields: ts_code, trade_date, open, high, low, close, vol, amount
@@ -406,6 +417,9 @@ const sharesPerLot = 100
 // 会留下 ~1e-7 的表示误差（真库 392 万行实测：×100 后真正非整数的 0 行，
 // 全部是浮点噪声），不 round 的话 NT 侧 as_quantity 的整数校验会把整批
 // 数据判成损坏、导出路径整条断掉。
+//
+// 成交额同理是**单位**问题而非复权问题：tushare 的 amount 是「千元」，规范层
+// 要 CNY，故 ×cnyPerAmountUnit，且不乘复权 scale（见该常量的实测依据）。
 //
 // 刻意严格的两处（同 P2-10 的教训：缺失值折成某个默认值 = 编数据）：
 //   - 某天取不到因子 → **跳过这一行**，不补 1.0。补 1.0 等于宣称「这天没除权」，
@@ -470,7 +484,7 @@ func (c *TushareClient) normalizeDailyOHLCV(resp *TushareResponse, symbol string
 			Low:       c.fieldFloat(item, 4) * scale,                    // low
 			Close:     c.fieldFloat(item, 5) * scale,                    // close
 			Volume:    math.Round(c.fieldFloat(item, 6) * sharesPerLot), // vol：手 → 股（不复权）
-			Turnover:  c.fieldFloat(item, 7),                            // amount（不复权）
+			Turnover:  c.fieldFloat(item, 7) * cnyPerAmountUnit,         // amount：千元 → CNY（不复权）
 			TradeDays: 0,                                                // not available from daily
 		}
 		records = append(records, ohlcv)

@@ -464,6 +464,44 @@ func migrationStatements() []string {
 			INSERT INTO data_migrations (name) VALUES ('052_ohlcv_volume_lots_to_shares')
 				ON CONFLICT (name) DO NOTHING;
 		END $$`,
+		// Migration 054: 成交额单位统一（千元 → CNY），对齐规范层 schema
+		//
+		// 与 052 同型：SPEC 的 OHLCV 字段表早就写着 turnover = **CNY**，实现却把
+		// tushare daily 的 `amount`（**千元**）原样入库。2026-10-15 真库 392.6 万行
+		// 全量实测 turnover / (volume_股 × close)：中位数 0.0010127、p01 0.000967、
+		// p99 0.001955、max 0.003535 —— 比「元」小三个数量级，千元坐实。
+		// 同步侧已改为落 CNY（pkg/data 的 cnyPerAmountUnit），存量按本迁移对齐。
+		//
+		// **必须排在 052 之后**（本数组按序执行）：准入判据里的 volume 得已经是「股」，
+		// 比值才是那个稳定的 1/1000 量级。
+		//
+		// 幂等：×1000 不幂等，两道保险与 052 同款 ——
+		//   ① 哨兵（主）：data_migrations 里已有 054 就整个跳过；首次执行后无条件写
+		//      哨兵。堵住「迁移完成后又落进千元数据 → 整表再 ×1000」这条静默路径。
+		//   ② 内容（辅）：库里还存在「turnover 明显小于 volume×close」的行，才值得
+		//      整表换算 —— 防住「清库后用新代码重灌（已经是 CNY）」的场景。
+		//
+		// 阈值 0.01 是**实测两头留出的空隙**，不是从判据本身推出来的：千元态的实测
+		// max = 0.003535（阈值下方 2.8 倍），元态的实测 min = 0.0003226×1000 = 0.3226
+		// （阈值上方 32 倍）。要让千元态越过 0.01，得 qfq close 比当日 vwap 低 10 倍
+		// 以上；要让元态掉进 0.01，得高 100 倍 —— 都不是复权价能造出来的形状。
+		// 且 ② 只是准入条件，误判的兜底是 ①。
+		//
+		// 备份：换算前的 turnover 整列留在 ohlcv_daily_qfq_bak_054（最小恢复集，
+		// 可 DROP；换算可逆 —— 元 ÷ 1000 = 千元），只在真正换算的那一次创建。
+		`DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM data_migrations WHERE name = '054_ohlcv_turnover_thousand_cny_to_cny')
+			   AND EXISTS (SELECT 1 FROM ohlcv_daily_qfq
+			               WHERE turnover > 0 AND volume > 0 AND close > 0
+			                 AND turnover < volume * close * 0.01) THEN
+				CREATE TABLE IF NOT EXISTS ohlcv_daily_qfq_bak_054 AS
+					SELECT symbol, trade_date, turnover FROM ohlcv_daily_qfq;
+				UPDATE ohlcv_daily_qfq SET turnover = turnover * 1000;
+			END IF;
+			INSERT INTO data_migrations (name) VALUES ('054_ohlcv_turnover_thousand_cny_to_cny')
+				ON CONFLICT (name) DO NOTHING;
+		END $$`,
 		// Migration 032: factor_hypothesis (P2-3 / 因子的因果来源)
 		//
 		// 因子的数值存在 factor_cache 里，但**它为什么该有效**此前没有地方记。
