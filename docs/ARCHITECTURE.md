@@ -275,10 +275,63 @@ schema / 内核四态 / 版本哈希纪律的文档真相在
 
 ---
 
+## 9. AI 因子挖掘流水线数据流（ADR-031 / D8，2026-10-15）
+
+**不变量**：挖掘产物是**公式文本不是代码**——`pkg/mining` 的 `Proposer` /
+`Evaluator` 把挖掘算法本体（LLM/MCTS/基因池）关在接口之外；公式经沙箱验证、
+治理层检验后按 D4 登记入库，策略按名即用（零代码改动）。挖掘算法本体与
+因子应用策略不在本层。治理语义 / 留痕 schema 的文档真相在
+[SPEC.md「AI 因子挖掘流水线 + 治理层（D8）」](SPEC.md)，
+本节只画数据流与护栏边界。
+
+```
+   Proposer（LLM/MCTS/基因池——接口之外）
+        │ []Candidate（公式文本 + Provenance 来源留痕）
+        ▼
+   ┌───────────────────────────── pkg/mining.Pipeline.Run ────────────────────┐
+   │                                                                          │
+   │  Snapshot（启动前预加载的只读快照，无运行时查询入口——防偷看）             │
+   │      │                                                                    │
+   │      ▼                                                                    │
+   │  (1) Sandbox.Validate：解析 + L1 闸门 + 字段词表 + Validity + 有界求值     │
+   │      │  通过 → Attestation{ContentHash = VersionHash}                     │
+   │      ▼                                                                    │
+   │  (2) 治理层：DetectOverfit（adjP，NumTrials 含失败）+ ValidateOutOfSample  │
+   │      │  任一不过 → 该条拒收（RejectReason），不中断整轮                     │
+   │      ▼                                                                    │
+   │  (3) admit：凭证非空 + 凭证绑定该版本 → data.RegistrationBook.Register     │
+   │      │  → D4 四样齐全入库（factor_registrations）                          │
+   │      ▼                                                                    │
+   │  Record → domain.FactorMiningRecord（挖/测/用全程哈希可追溯审计）           │
+   └──────────────────────────────────┬───────────────────────────────────────┘
+                                      ▼
+   factor_mining_records 表（迁移 054）+ factor_registrations 表（迁移 053）
+                                      │
+                                      ▼
+   策略按名引用：Pipeline.Effective（取最新 active 版本）→ EvaluateOnSnapshot
+```
+
+护栏（机械判据，全部在 CI 里）：
+
+- **拦截点**（`pkg/mining/pipeline_test.go`）：跳过沙箱（凭证缺失）→
+  `ErrSandboxNotRun`；凭证不绑定该版本 → `ErrAttestationMismatch`；两条
+  都在 `admit` 内把关，「反正调用方说验过了」放不进来。
+- **库侧兜底**（Migration 054 DB CHECK）：`admitted ⇒ sandbox_hash = version_hash`、
+  生成器非空、来源枚举、被拒必须写明原因——绕过写入路径直接 INSERT 缺样也被库拒绝。
+- **三条命根子**：版本哈希内容派生（可复现）/ 求值只读快照且缺字段=NaN
+  （防偷看）/ 同公式同快照逐点相等（可比），各有测试钉住。
+- **防漂移**（`pkg/domain/spec_drift_test.go`）：SPEC 留痕表
+  `factor_mining_record` 锚点 ↔ `FactorMiningRecord` 反射双向比对。
+
+迁移方向：真实 `Proposer`（LLM/MCTS）与 `Evaluator`（研究验证 IC）接线；
+挖掘产物只进公式库不进代码库——名册仍是冻结协议，新因子名属协议变更另立。
+
+---
+
 迁移方向：connector 契约已接入（D2 完成，`validateDeclarations` fail-closed
 闸门生效）→ 消费方逐个切 Router → 棘轮基线逐条销号 → 物理表直连归零。
 
 ---
 
-_Last updated: 2026-10-14（§7 增补 connector 注册契约上游闸门 ADR-031 D2；§7 规范层数据流 ADR-031 D1 + §8 因子定义库数据流 ADR-031 D3；表数口径 42 张为 2026-10-12 实测）_
+_Last updated: 2026-10-15（§9 AI 因子挖掘流水线数据流 ADR-031 D8；§7 增补 connector 注册契约上游闸门 ADR-031 D2；§7 规范层数据流 ADR-031 D1 + §8 因子定义库数据流 ADR-031 D3；表数口径 42 张为 2026-10-12 实测）_
 _维护规则：服务/端口/schema 分区变更时更新本文件（AGENTS.md Rule 1）；表数不手抄，只给 grep 口径。_

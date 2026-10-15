@@ -963,6 +963,51 @@ func migrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_factor_registration_audit_name ON factor_registration_audit(factor_name, audited_at DESC)`,
 	}...)
 
+	// Migration 054: factor_mining_records（D8 因子挖掘留痕——治理层审计）。
+	// DDL 记录在 docs/migrations/054。与 053 的登记账本互补：登记账本记
+	// 「谁把哪一版接进来」，本表记「这一版凭什么进库」——来源（谁生成/第几代/
+	// 依据）、沙箱凭证哈希、过拟合与样本外判定。一条 = 一行（factor_name +
+	// version_hash 主键）。DB 兜底 CHECK：生成器非空 + 来源枚举 + 尝试次数为正
+	// + 已入库必须带绑定该版本的沙箱凭证 + 被拒必须写明原因——绕过写入路径
+	// 直接 INSERT 缺样，也被库拒绝（fail-closed）。
+	migrations = append(migrations, []string{
+		`CREATE TABLE IF NOT EXISTS factor_mining_records (
+			factor_name    VARCHAR(64)      NOT NULL,
+			version_hash   CHAR(64)         NOT NULL,
+			source_kind    VARCHAR(32)      NOT NULL,
+			generator      TEXT             NOT NULL,
+			generation     INT              NOT NULL DEFAULT 0,
+			rationale      TEXT             NOT NULL DEFAULT '',
+			num_trials     INT              NOT NULL,
+			failed_trials  INT              NOT NULL DEFAULT 0,
+			sandbox_hash   CHAR(64)         NOT NULL DEFAULT '',
+			admitted       BOOLEAN          NOT NULL DEFAULT FALSE,
+			reject_reason  TEXT             NOT NULL DEFAULT '',
+			overfit_raw_p  DOUBLE PRECISION NOT NULL DEFAULT 0,
+			overfit_adj_p  DOUBLE PRECISION NOT NULL DEFAULT 0,
+			overfit_flag   BOOLEAN          NOT NULL DEFAULT FALSE,
+			oos_in_sample  DOUBLE PRECISION NOT NULL DEFAULT 0,
+			oos_out_sample DOUBLE PRECISION NOT NULL DEFAULT 0,
+			oos_pass       BOOLEAN          NOT NULL DEFAULT FALSE,
+			created_at     TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (factor_name, version_hash),
+			CONSTRAINT factor_mining_records_generator_present CHECK (btrim(generator) <> ''),
+			CONSTRAINT factor_mining_records_source_known CHECK (
+				source_kind IN ('ai_hypothesis', 'literature', 'supply_chain', 'ad_hoc')
+			),
+			CONSTRAINT factor_mining_records_trials_coherent CHECK (
+				num_trials > 0 AND failed_trials >= 0 AND failed_trials <= num_trials
+			),
+			CONSTRAINT factor_mining_records_admitted_attested CHECK (
+				NOT admitted OR sandbox_hash = version_hash
+			),
+			CONSTRAINT factor_mining_records_rejected_reason CHECK (
+				admitted OR btrim(reject_reason) <> ''
+			)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_factor_mining_records_name ON factor_mining_records(factor_name, created_at DESC)`,
+	}...)
+
 	return migrations
 }
 
