@@ -977,7 +977,7 @@ adj = 1 − (1 − raw)^NumTrials  族系误差（试 N 次至少中一次的概
 | CreatedAt | created_at | 留痕创建时刻 |
 <!-- /drift:factor_mining_record -->
 
-校验在**两道关卡**共同守住（`FactorMiningRecord.Validate` + Migration 054 的 DB CHECK）：
+校验在**两道关卡**共同守住（`FactorMiningRecord.Validate` + Migration 055 的 DB CHECK）：
 生成器非空 / 来源枚举 / 尝试次数自洽 / **admitted ⇒ sandbox_hash==version_hash** /
 被拒必须写明原因——连「绕过写入路径直接 INSERT 缺样」也被库拒绝（fail-closed）。
 
@@ -998,8 +998,8 @@ adj = 1 − (1 − raw)^NumTrials  族系误差（试 N 次至少中一次的概
 - 治理层两件：`pkg/mining/governance.go`
 - 留痕类型与校验：`pkg/domain/mining.go`
 - DB 持久化：`pkg/storage/mining.go`
-- DDL：`pkg/storage/postgres.go` Migration 054（`factor_mining_records`）+
-  `docs/migrations/054_add_factor_mining_records.sql`
+- DDL：`pkg/storage/postgres.go` Migration 055（`factor_mining_records`）+
+  `docs/migrations/055_add_factor_mining_records.sql`
 
 ---
 

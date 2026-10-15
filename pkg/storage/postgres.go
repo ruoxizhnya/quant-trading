@@ -963,8 +963,8 @@ func migrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_factor_registration_audit_name ON factor_registration_audit(factor_name, audited_at DESC)`,
 	}...)
 
-	// Migration 054: factor_mining_records（D8 因子挖掘留痕——治理层审计）。
-	// DDL 记录在 docs/migrations/054。与 053 的登记账本互补：登记账本记
+	// Migration 055: factor_mining_records（D8 因子挖掘留痕——治理层审计）。
+	// DDL 记录在 docs/migrations/055。与 053 的登记账本互补：登记账本记
 	// 「谁把哪一版接进来」，本表记「这一版凭什么进库」——来源（谁生成/第几代/
 	// 依据）、沙箱凭证哈希、过拟合与样本外判定。一条 = 一行（factor_name +
 	// version_hash 主键）。DB 兜底 CHECK：生成器非空 + 来源枚举 + 尝试次数为正

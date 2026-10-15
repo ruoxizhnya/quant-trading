@@ -1,4 +1,4 @@
--- Migration 054: factor_mining_records（D8 因子挖掘留痕——治理层审计）
+-- Migration 055: factor_mining_records（D8 因子挖掘留痕——治理层审计）
 --
 -- D3 把因子定义搬进库（051 factor_definitions），D4 定登记治理（053
 -- factor_registrations + 审计）。D8 补上「挖出来那一步」的留痕：一个因子

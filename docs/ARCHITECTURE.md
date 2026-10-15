@@ -305,7 +305,7 @@ schema / 内核四态 / 版本哈希纪律的文档真相在
    │  Record → domain.FactorMiningRecord（挖/测/用全程哈希可追溯审计）           │
    └──────────────────────────────────┬───────────────────────────────────────┘
                                       ▼
-   factor_mining_records 表（迁移 054）+ factor_registrations 表（迁移 053）
+   factor_mining_records 表（迁移 055）+ factor_registrations 表（迁移 053）
                                       │
                                       ▼
    策略按名引用：Pipeline.Effective（取最新 active 版本）→ EvaluateOnSnapshot
@@ -316,7 +316,7 @@ schema / 内核四态 / 版本哈希纪律的文档真相在
 - **拦截点**（`pkg/mining/pipeline_test.go`）：跳过沙箱（凭证缺失）→
   `ErrSandboxNotRun`；凭证不绑定该版本 → `ErrAttestationMismatch`；两条
   都在 `admit` 内把关，「反正调用方说验过了」放不进来。
-- **库侧兜底**（Migration 054 DB CHECK）：`admitted ⇒ sandbox_hash = version_hash`、
+- **库侧兜底**（Migration 055 DB CHECK）：`admitted ⇒ sandbox_hash = version_hash`、
   生成器非空、来源枚举、被拒必须写明原因——绕过写入路径直接 INSERT 缺样也被库拒绝。
 - **三条命根子**：版本哈希内容派生（可复现）/ 求值只读快照且缺字段=NaN
   （防偷看）/ 同公式同快照逐点相等（可比），各有测试钉住。
