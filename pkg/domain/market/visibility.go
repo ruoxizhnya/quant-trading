@@ -36,6 +36,21 @@ func IntradayVisibleAt(barStart time.Time, minutes int) time.Time {
 	return barStart.Add(time.Duration(minutes) * time.Minute)
 }
 
+// VisibleBy 是分钟粒度 PIT 闸门的判定原语（D6）：bar 在 asOf 时刻是否
+// **已可见**。口径 = 记录自带的 VisibleAt 不晚于 asOf —— 10:00 的 1m bar
+// （VisibleAt = 10:01）在 10:00:30 不可见、10:01 可见。
+//
+// 为什么是方法不是工具函数：闸门判据必须与 VisibleAt 的填充口径
+// （DailyVisibleAt / IntradayVisibleAt）同文件同语义，拆到别的文件，
+// 「谁算可见、谁判可见」就会漂移。D6 的日内特征 provider 与闸门测试
+// 都经本方法裁决，改错即红（D6 验收①）。
+//
+// 零值 VisibleAt（未声明）恒判不可见 —— 未声明的可见性是泄漏，不是
+// 「永远可见」。
+func (b OHLCV) VisibleBy(asOf time.Time) bool {
+	return !b.VisibleAt.IsZero() && !b.VisibleAt.After(asOf)
+}
+
 // TimeSemantics 是 connector 注册契约（D2，蓝图 §4.2）的「时间语义」枚举：
 // 该数据源的数据「什么时候才可见」。本文件上面的两个函数回答「怎么算」，
 // 本枚举回答「connector 必须显式声明哪一类」——把防前视从注释提升为

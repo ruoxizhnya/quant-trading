@@ -210,6 +210,31 @@ connector 之外无人感知底层表。字段表 / 频率词表 / 聚合口径 
 拥挤度 = `after_close`（收盘后可见，盘中用当日值即偷看）。文档真相见
 SPEC.md「connector 注册契约」节。
 
+**多频率进策略视野（ADR-031 / D6，2026-10-15）**：回测只吃日线的现状
+延伸到「日频决策 + 引用当日内分钟特征」，通道是**启动前快照 + 契约注入**，
+不是运行时查询：
+
+```
+   RunBacktest 启动前（一次性）
+     warmIntradayIfNeeded（仅 IntradayAware 策略触发）
+       └─ marketdata.Router.Bars(Freq1m, symbol, [start, end+1d) 按 365 天分片)
+            └─ 引擎 L1 快照 map[symbol][]market.OHLCV（ts 升序，Frequency/VisibleAt 已填）
+
+   每个交易日（回放日 D）
+     getSignals → LocalSignalProvider.Signals
+       ├─ 类型断言 IntradayAware ⇒ 注入「绑定回放日」的 provider
+       │    （快照 + D 日边界，二分切当日段；别的交易日取不到）
+       └─ 策略调 IntradayFeature(symbol, "open_momentum_30m", asOf)
+            └─ 闸门：只许 VisibleAt <= asOf 的 bar 进特征（10:00 bar 10:01 可见）
+```
+
+红线与执法：策略运行时禁止直接查 `marketdata.Provider`——`pkg/strategy`
+不许 import `pkg/marketdata`（`internal/repoguard` import 隔离护栏），
+provider 实现无 provider/router/pool 句柄（反射断言）。日频决策时刻 =
+当日收盘（日线 bar 可见点），成交仍走既有日线路径（分钟级撮合另立），
+纯日线策略对整条接线零敏感（回归测试逐点对拍）。契约 / 特征目录 /
+闸门口径的文档真相见 SPEC.md「多频率策略视野」节。
+
 ## 8. 因子定义库数据流（ADR-031 / D3，2026-10-14）
 
 **不变量**：因子定义只认「库里公式」——一份种子定义
@@ -280,5 +305,5 @@ schema / 内核四态 / 版本哈希纪律的文档真相在
 
 ---
 
-_Last updated: 2026-10-14（§7 增补 connector 注册契约上游闸门 ADR-031 D2；§7 规范层数据流 ADR-031 D1 + §8 因子定义库数据流 ADR-031 D3；表数口径 42 张为 2026-10-12 实测）_
+_Last updated: 2026-10-15（§7 增补多频率进策略视野 ADR-031 D6；此前：2026-10-14 §7 增补 connector 注册契约上游闸门 ADR-031 D2；§7 规范层数据流 ADR-031 D1 + §8 因子定义库数据流 ADR-031 D3；表数口径 42 张为 2026-10-12 实测）_
 _维护规则：服务/端口/schema 分区变更时更新本文件（AGENTS.md Rule 1）；表数不手抄，只给 grep 口径。_

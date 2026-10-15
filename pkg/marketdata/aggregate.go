@@ -26,9 +26,10 @@ import (
 //
 // 时段边界按**秒**判定（REV-04，2026-10-15）：整点收盘打点
 // （11:30:00 上午收盘 / 15:00:00 下午收盘）是合法 bar，分别并入
-// 11:15 / 14:45 bucket；边界带秒的打点（11:30:01+ / 15:00:01+）
-// 拒收。分钟粒度判定（hm := Hour*60+Minute）会把 15:00:30 与
-// 15:00:00 混同，静默放宽口径边界。
+// 11:15 / 14:45 bucket；边界带秒/亚秒的打点（11:30:01+ / 15:00:01+，
+// 含 15:00:00.000000001 这类亚秒越界）拒收。分钟粒度判定
+// （hm := Hour*60+Minute）会把 15:00:30 与 15:00:00 混同，静默
+// 放宽口径边界。
 
 // A 股连续竞价时段边界（Asia/Shanghai，分钟计数 0..1440）。
 const (
@@ -219,17 +220,20 @@ func checkInSession(t time.Time) error {
 		if t.Second() == 0 && t.Nanosecond() == 0 {
 			return nil
 		}
-		return fmt.Errorf("marketdata: bar %s 落在午休（11:30–13:00），A 股此时段不成交", t.Format(time.RFC3339))
+		// RFC3339Nano：同 15:00 分支——亚秒越界要能显示纳秒位
+		return fmt.Errorf("marketdata: bar %s 落在午休（11:30–13:00），A 股此时段不成交", t.Format(time.RFC3339Nano))
 	case hm < afternoonOpenMin:
 		return fmt.Errorf("marketdata: bar %s 落在午休（11:30–13:00），A 股此时段不成交", t.Format(time.RFC3339))
 	case hm < afternoonCloseMin:
-		return nil // 13:00–14:59：下午连续竞价
+		return nil // 13:00–14:59：下午连续竞价 + 收盘集合竞价（14:57 起）
 	case hm == afternoonCloseMin:
 		// 15:00:00 收盘价打点合法（并入 14:45 bucket）；15:00:01 起已收盘
 		if t.Second() == 0 && t.Nanosecond() == 0 {
 			return nil
 		}
-		return fmt.Errorf("marketdata: bar %s 晚于 15:00 收盘，不在 A 股交易时段内", t.Format(time.RFC3339))
+		// RFC3339Nano：亚秒越界（15:00:00.000000001）在 RFC3339 下会显示成
+		// 15:00:00，报错自相矛盾；纳秒位保留才能说清「越界在哪」
+		return fmt.Errorf("marketdata: bar %s 晚于 15:00 收盘，不在 A 股交易时段内", t.Format(time.RFC3339Nano))
 	default:
 		return fmt.Errorf("marketdata: bar %s 晚于 15:00 收盘，不在 A 股交易时段内", t.Format(time.RFC3339))
 	}

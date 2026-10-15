@@ -898,6 +898,100 @@ slice，故自持 `sync.RWMutex` 成为**并发安全类型**：
 
 ---
 
+## 多频率策略视野（Intraday Features，D6）
+
+**目标口径**（蓝图 §4.3 裁定 4）：策略在回测中「日频决策 + 引用当日内分钟
+特征」（如开盘半小时动量）；分钟级防偷看闸门按分钟粒度生效（10:00 的
+1 分钟线 10:01 才可见）；**现有纯日线回测结果数值不变**（未声明
+`IntradayAware` 的策略零行为变化——预热跳过、注入被类型断言挡掉）。
+
+### 红线：快照预加载，不许运行时查询
+
+策略运行时**禁止**直接查 `marketdata.Provider`。日内数据与日线同制：
+回测启动前经规范层 `Router.Bars(ctx, Freq1m, …)` 一次取完全区间，存进
+引擎 L1 快照（`map[symbol][]market.OHLCV`，按 ts 升序），回测期间只读。
+结构执法（两道，缺一不可）：
+
+| 执法者 | 判据 | 位置 |
+|---|---|---|
+| import 隔离护栏 | `pkg/strategy` 生产文件不许 import `pkg/marketdata`（AST 扫 import） | `internal/repoguard/strategy_marketdata_isolation_test.go` |
+| provider 无数据通道 | 特征 provider 字段集合 = 快照 + 日期边界，无 provider/router/pool 句柄（反射断言） | `pkg/backtest/intraday_test.go` |
+
+### 供给契约（声明注入，延续 FactorAware / FundamentalAware 范式）
+
+```go
+type IntradayFeatureProvider interface {
+    Features() []string                                                   // 能力声明（目录封闭）
+    IntradayFeature(ctx, symbol, name string, asOf time.Time) (float64, bool) // (值, 此刻是否可得)
+}
+
+type IntradayAware interface {
+    SetIntradayFeatures(provider IntradayFeatureProvider)
+}
+```
+
+- 引擎每个交易日经 `strategy.LocalSignalProvider` 把「**绑定回放日**」的
+  provider 注入 `IntradayAware` 策略；策略未实现该接口 ⇒ 注入被断言挡掉，
+  零成本。
+- `asOf` 是**分钟粒度**的回放时刻（不是日）：特征只许由
+  `VisibleAt <= asOf` 的 bar 算出（判定原语 `market.OHLCV.VisibleBy`）。
+- `ok=false` = 「此刻还没有这个特征」（窗口未闭合 / 当日无数据 / 停牌
+  半日），**不是 0**——缺失≠0，把「还没有」读成 0 会让策略对着凭空捏造的
+  数值排序。
+- 按日绑定（day-scoped）：provider 只暴露**回放日当日**的分钟 bar
+  （二分切片），快照里别的交易日的 bar 策略取不到——「启动前快照」与
+  「不许偷看别的日子」两道红线的交点。
+
+### 日内特征目录（封闭词表，扩展 = 加名 + 加实现 + 同步本节 + 手算样本测试）
+
+| 特征名 | 口径 | 1m 输入 | 15m 输入（D1 聚合） | 可得条件 |
+|---|---|---|---|---|
+| `open_momentum_30m` | 开盘半小时动量 = 窗口末 bar 收 / 窗口首 bar 开 − 1 | `close(09:59)/open(09:30)−1` | `09:45 bucket 收 / 09:30 bucket 开 − 1` | ① **窗口闭合**：存在周期跨过 10:00 的 bar（1m = 09:59，VisibleAt 10:00；15m = 09:45 bucket，VisibleAt 10:00）——半日停牌/数据断档 ⇒ 半窗，不给残缺样本；② **已可见**：首、末 bar 的 `VisibleAt` 都不晚于 asOf |
+
+窗口 = 当日 09:30–10:00（Asia/Shanghai）；集合竞价打点（09:15–09:25 成交）
+在窗口外，特征的「开」取 09:30 首笔连续竞价 bar 的开盘价，不是竞价成交价。
+首 bar 开盘价非正 ⇒ 不可得（数据异常不当成 0 动量）。
+
+### 对拍口径（多频率输入进双核翻译点）
+
+按 D1 聚合规则（开=首笔开、收=末笔收），`open_momentum_30m` 在 1m 与
+15m 两条输入上算出**同一个数**——对拍测试
+（`TestSnapshotIntradayProvider_FeatureParity_1m_vs_15m`）钉住该相等性，
+且两路都等于手算样本（10.50/10.00−1 = 0.05）。NT 侧翻译点由 D1 的
+`BAR_FIELD_MAP` 映射测试覆盖（D6 不新增频率接入）。
+
+### 取数区间（实现口径，坑已埋）
+
+引擎的 `start/end` 是 **UTC 零点的交易日**，而 1m 路由按 `ts BETWEEN`
+取数——直接传会把当日 09:30 CST（= 01:30 UTC）之后的全部分钟 bar 挡在
+门外。预热路径把区间展开为 `[start, end+1d)`，并按 365 自然日分片
+（Router 日内跨度上限 366 天，REV-01；末片上界退 1ns 把半开区间映射到
+闭区间 BETWEEN）。
+
+### 护栏与测试
+
+| 测试 | 钉住什么 |
+|---|---|
+| `pkg/domain/market/visibility_test.go` | 闸门判定原语：10:00 bar 在 10:00:30 不可见、10:01 可见；15m bucket / 日线同构；零值 VisibleAt 恒不可见 |
+| `pkg/backtest/intraday_test.go` | 手算样本；特征可用性在窗口闭合时刻翻转；半窗/空数据/目录外名 = 不可得；按日绑定不泄漏别的交易日；1m/15m 对拍；样例策略回测（买入价 = 收盘含滑点、强平在末日）；纯日线策略对 D6 接线逐点不敏感；预热三「不」；provider 无运行时数据通道 |
+| `internal/repoguard/strategy_marketdata_isolation_test.go` | 红线：策略包不许 import 规范层取数包（破坏验证腿②） |
+| `pkg/backtest/intraday_test.go`（DB 集成，skip-if-unreachable） | 真 PG + 真 Router 自灌自证：31 根种子 bar 的快照内容、频率声明、VisibleAt 口径、端到端特征值 |
+
+### 已知边界（D6 如实登记）
+
+1. **分钟级撮合不在本单**：日频决策的成交价仍是当日收盘（含滑点），日内
+   择时执行另立工单（蓝图 §4.3 裁定 4 后半句）。
+2. **15m 不物化**（D1 裁定）：快照只预载 1m；特征计算对 15m 输入同构
+   （对拍测试证明），但生产预热不单独灌 15m。
+3. **快照内存**：全区间 1m 预载的单标的上限约 8.4MB（REV-01 实测口径），
+   大票池 × 长区间的内存峰值由调用方的切片/分次策略管理（预热内部已按
+   365 天分片，但快照本体是全量）。多年分钟视野的场景需要更细的窗口化，
+   属后续治理项。
+4. **`amount` NULL 折零**（D1 已登记）：分钟表 turnover 缺失记 0，不影响
+   本单特征（只用价格）。
+
+---
+
 ## Strategy Interface
 
 > **Canonical definition** — matches [pkg/strategy/interfaces.go](../pkg/strategy/interfaces.go)

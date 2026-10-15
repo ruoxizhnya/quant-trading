@@ -118,7 +118,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   3. 样板记录：从「挂源」到「因子出分」的端到端步骤留档（后续一源一单的模板）。
 - **⑥ 边界**：只做样板全链路；第二个源、AI 挖掘消费（D8）另立。
 
-### D6 · 多频率进回测策略视野 ⬜ 待做（依赖 D1、D2）
+### D6 · 多频率进回测策略视野 ✅ 完成（2026-10-15，依赖 D1、D2）
 
 - **① 目标**：策略在回测中可「日频决策 + 引用当日内分钟特征」（如开盘半小时动量），分钟级防偷看闸门按分钟粒度生效，现有纯日线回测结果不变。
 - **② 上下文**：蓝图 §4.3 裁定 4、§9 #6（已拍板：前者先行，分钟级撮合另立）。现状：回测只吃日线，1 分钟数据「只存着」。红线：策略运行时**禁止**直接查 `marketdata.Provider`，所有数据回测启动前快照预加载进 Scope（可复现 / 防前视 / 双核输入一致）。分钟级 PIT 语义：10:00 的 1 分钟线 10:01 才可见。
@@ -133,6 +133,62 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   1. 机械判据：「日频决策 + 日内特征」样例策略回测测试通过；日线回归对拍通过；分钟 PIT 闸门测试（10:00 bar 在 10:00:30 不可见、10:01 可见）通过。
   2. **破坏验证**：回拨分钟可见时间（全日内可见）→ PIT 测试变红；绕过快照直接查 provider → 红线护栏红；均还原绿。
 - **⑥ 边界**：只做策略视野 + 闸门 + 回归；撮合精度、新频率数据接入（D5）另立。
+- **✅ 完成记录（2026-10-15）**：
+  1. **契约（声明注入，延续老范式）**：`pkg/strategy/intraday.go` 新增
+     `IntradayFeatureProvider`（`Features()` 能力声明 + `IntradayFeature(ctx, symbol,
+     name, asOf)` 分钟粒度取特征，`ok=false` = 此刻还没有，**不是 0**）与可选能力接口
+     `IntradayAware`（范式同 `FactorAware`/`FundamentalAware`，GenerateSignals 签名零改动）。
+     `LocalSignalProvider` 加 `SetIntradayProvider` + Signals() 内类型断言注入（nil 供给不注入，
+     策略用到特征明确失败）。
+  2. **闸门（分钟粒度 PIT）**：判定原语 `pkg/domain/market` 的 `OHLCV.VisibleBy(asOf)`
+     （VisibleAt 不晚于 asOf；零值恒不可见——未声明的可见性是泄漏）。10:00 的 1m bar
+     （VisibleAt 10:01）在 10:00:30 不可见、10:01 可见，`visibility_test.go` 逐条钉死
+     （含 15m bucket / 日线同构与边界前 1ns）。
+  3. **快照预加载（红线执行）**：`pkg/backtest/intraday.go`——`warmIntradayIfNeeded`
+     仅对 `IntradayAware` 策略触发（纯日线策略零成本，回归红线）；经 `Router.Bars(Freq1m)`
+     取数，**取数区间展开为 [start, end+1d)**（引擎 start/end 是 UTC 零点交易日，直接传
+     1m 路由会把当日 09:30 CST 之后的 bar 全部挡在门外——自灌自证测试当场抓到的缺口），
+     按 365 自然日分片（Router 跨度上限 366 天，REV-01；末片退 1ns 映射半开区间），
+     逐 symbol 顺序取（峰值内存确定）。快照 = `map[symbol][]domain.OHLCV`（ts 升序），
+     回测期间只读；`SetIntradaySnapshot` 给测试/无 Router 场景留直注门（范式同
+     SetFundamentals）。
+  4. **按日绑定 provider**：`snapshotIntradayProvider` 持快照 + 回放日边界，二分切当日段
+     （每 symbol 每天 O(log n)，不线性扫全史）；特征目录封闭（`open_momentum_30m` =
+     窗口末收/窗口首开−1，1m 与 15m 按 D1 聚合规则同值——对拍锚点）；可得条件双闸：
+     **窗口闭合**（存在周期跨过 10:00 的 bar，半日停牌/断档 ⇒ 半窗不给残缺样本）+
+     **已可见**（首末 bar VisibleAt ≤ asOf）。`TestSnapshotIntradayProvider_NoRuntimeDataChannel`
+     反射断言字段集合 = 快照 + 日期边界（无 provider/router/pool 句柄）。
+  5. **样例策略回测**：测试策略「日频决策 + 开盘半小时动量」（特征 > 阈值买入，
+     strength = 特征值；无供给明确失败不当 0）跑通 `RunBacktest`：01-02 特征手算
+     +0.05 ⇒ 收盘 10.50 含滑点成交、末日强平，`TotalTrades`=1（往返口径）、
+     fills=2，策略侧按日记录的特征值与手算一致（01-03 −0.03 不买、01-04 停牌无信号）。
+  6. **对拍与回归**：`TestSnapshotIntradayProvider_FeatureParity_1m_vs_15m`——1m 直取与
+     15m 聚合（D1 口径）两条输入算出同一特征值且等于手算样本 0.05，15m 可见性与 1m
+     同构（09:45 bucket VisibleAt = 10:00）；`TestEngine_DailyOnlyBacktest_UnchangedWithIntradayWiring`——
+     纯日线 momentum 在「无 D6 装配」与「快照+Router 全挂」两种装配下收益/笔数/equity
+     curve 逐点相等。DB 集成（真 PG + 真 Router 自灌自证自清理，不可达 Skip）：31 根种子
+     bar 的快照内容、频率声明、VisibleAt 口径（09:30→09:31、10:00→10:01）、端到端特征值。
+  7. **红线护栏（结构执法）**：`internal/repoguard/strategy_marketdata_isolation_test.go`——
+     AST 扫 `pkg/strategy` 生产文件 import，命中 `pkg/marketdata` 即红（点名文件 + import 行）。
+     与 D1 的 `canonical_layer` 护栏分工：那个守「不许直连物理表」（数据从哪来），这个守
+     「策略运行时不许摸取数包」（数据怎么到策略手里）。
+  8. **破坏验证两组，均「改坏→红→还原→绿」**：① `VisibleBy` 改成「有 VisibleAt 即可见」
+     （回拨分钟可见时间 = 全日内可见）⇒ 闸门测试红（含验收原句子例 10:00:30）、provider
+     特征测试红；还原后 sha256 与基线一致、复绿。② `pkg/strategy` 造 import marketdata 的
+     生产文件 ⇒ 红线护栏红（点名违规文件）；删除后复绿，工作树无残留（git status 复核）。
+  9. **文档同步**：SPEC.md 新增「多频率策略视野（Intraday Features，D6）」大节（红线 +
+     契约 + 特征目录表 + 对拍口径 + 取数区间坑 + 护栏测试表 + 已知边界）；ARCHITECTURE.md
+     §7 增补 D6 数据流图与红线执法；本节登记。
+  10. **既有红登记（ODR-067 纪律，stash 证伪非本单造成）**：`cmd/data`
+      `TestSyncAllFactorsHandler_ReportsSkipped`（skipped=8 want 5：D3 的 size/volatility/
+      growth pending 态 + fundamentals_detail 空表）与 `pkg/data`
+      `TestAdjustmentBasis_QfqLookAheadLeaksIntoBacktest`（库内复权因子与重建口径 2/20 只
+      不一致）在**不含本单改动**的干净基线上同样红（stash -u 复跑确认）——数据/预期漂移类
+      既有红，登记在案，不冒充本单噪声也不冒充本单修复。
+  11. **已知边界**：① 分钟级撮合不在本单（日频决策成交价 = 当日收盘含滑点，日内择时执行
+      另立）；② 15m 不物化（D1 裁定，快照只预载 1m，特征对 15m 输入同构有对拍证明）；
+      ③ 全区间 1m 快照的单标的内存上限约 8.4MB（REV-01 实测口径），大票池 × 长区间的
+      窗口化属后续治理项；④ 分钟表 `amount` NULL 折零（D1 已登记）不影响本单特征。
 
 ### D7 · NT 原生模式（国外线）✅ 完成（2026-10-14，依赖 D1）
 
@@ -537,7 +593,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **⑥ 边界**：只做进程内账本的并发语义；DB 侧落库的并发/事务、HTTP 接入面另立。
 - **完成记录（2026-10-15，`abf0af3` + `d891567`）**：选 **(a1) 加 `sync.RWMutex`**——理由：本账本是**可变类型**，将来接 HTTP/后台「登记 / 回滚」入口即并发写；加锁让类型自成并发安全类型，契合本项目「并发访问共享资源须正确加锁」的约定，且保持签名与治理语义不变（比 (a2) 只写文档更彻底地消除 race 隐患）。实现在 [factor_governance.go](../pkg/data/factor_governance.go)：`RegistrationBook` 增 `mu sync.RWMutex`，写路径 `Register`/`Rollback` 持写锁（整方法为一个写事务：校验 + 去重 + 落账 + 留痕原子完成），读路径 `ResolveEffective`/`ResolvePinned`/`Registrations`/`Audit` 持读锁；类型注释明示并发语义并注明「因含锁不可按值拷贝」（构造入口均返回指针，无值拷贝调用点）。新增 `TestRegistrationBook_ConcurrentRegisterResolveRollback`（[factor_governance_test.go](../pkg/data/factor_governance_test.go)）：64×2 并发登记 v1/v2 + 8 读 goroutine 全程交叠 + 64 并发回滚；去重封闭——同因子双版本并发登记恰好 1 成功、其余 `ErrRegistrationDuplicate`，并发回滚恰好 1 成功，最终审计恰 3 条（register×2 + rollback×1）。**验证**：本机无 gcc（`-race` 需 cgo + gcc），`-race` 腿改在 `golang:1.25-alpine` 容器内跑（容器内 `apk add gcc musl-dev`）——`go test -race ./pkg/data/ -run TestRegistrationBook` 5 例全绿；**破坏验证**：去掉全部 `Lock`/`RLock` → `-race` 报多处 `WARNING: DATA RACE`（红），还原 → 绿。`gofmt -l` 空、`go build ./...`、`go vet ./pkg/data/`、`go test ./internal/...`（repoguard）干净；D4 既有测试（`pkg/data` 演练 4 例 + `pkg/domain` 表驱动）全绿。SPEC 同步：D4 治理细则新增「### 并发语义（进程内账本是并发安全类型，REV-03）」小节 + 护栏清单第 5 条。**自审补丁（`d891567`）**：复审本次改动时发现测试自身有缺陷——阶段 1 的 `t.Fatalf` 若提前退出，8 个读 goroutine 会一直忙等到整个测试二进制退出，可能拖慢/干扰同批其它测试；改为启动读 goroutine 后立即注册 `t.Cleanup`（`close(stopRead)` + `readers.Wait()`）收束，成功与失败两条路径都干净，忙等窗口顺带覆盖到最终态断言（`-race` 下读写交叠更充分），并重跑容器 `-race` 复验 5 例全绿。**诚实缺口**：`-race` 未在本机原生跑（无 gcc），以容器替代；建议 CI 原生 `-race` 复跑兜底。
 
-### REV-04 · `checkInSession` 分钟粒度判定丢失秒级边界 + Tushare 1m 的 11:30 bar 形态未登记 [P3] ✅ 完成（2026-10-15，commit `a3730bb`）
+### REV-04 · `checkInSession` 分钟粒度判定丢失秒级边界 + Tushare 1m 的 11:30 bar 形态未登记 [P3] ✅ 完成（2026-10-15，commit `a3730bb`+`b4282e6`）
 
 - **① 目标**：会话校验的时间边界要么做到秒级精确，要么把「分钟粒度」假设与已知数据形态不兼容面写成已知边界，不让「11:30 整点 bar 会被当午休拒收」这类事实靠读代码的人自己悟。
 - **② 上下文**（2026-10-15 审查发现，两处关联同一函数族）：`pkg/marketdata/aggregate.go:191` 的 `checkInSession` 用 `hm := t.Hour()*60 + t.Minute()` 判定——**秒被丢弃**，于是 15:00:01–15:00:59 的 bar 与 15:00:00 收盘打点同判「合法」并入末 bucket（注释只承诺「含 15:00:00 收盘打点」）。标准分钟 bar 秒恒 0，此路径实际不可达，但带秒的非标数据会静默改变口径边界。**同族未登记事实**：A 股分钟数据普遍含 **11:30 整点 bar**（Tushare 1m 即有），而 `checkInSession` 把 11:30:00 判为「午休」（`hm < afternoonOpenMin` 分支）⇒ 整条 `Aggregate` fail-loud。这是「不静默丢 bar」设计决策的**兼容面**：mootdx 是当前唯一 1m 源且 `ohlcv_minute` 0 行，一旦按 D6 灌入 Tushare 1m，15m 聚合会以「午休」报错拒收——现象像数据脏，实为形态不兼容。
@@ -545,7 +601,9 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：不改聚合主口径与三细则（D1 定稿）；不动路由层；不顺手改 15:00 之后数据的其它语义；不为本单灌任何 1m 数据。
 - **⑤ 验收**：(a1) 有「15:00:30 bar → 拒收」测试钉住秒级语义；(a2)  whichever 选择都有对应测试（拒收且报错点名 / 接纳且并入正确 bucket）+ SPEC 或代码注释成文。`pkg/marketdata` 既有测试全绿；**破坏验证**：把秒级判断改回分钟粒度（或删 11:30 处理）→ 新测试红，还原转绿。
 - **⑥ 边界**：只做会话校验的边界精度与已知边界成文；分钟数据灌数（D6 前置）、聚合口径另立。
-- **✅ 完成记录（2026-10-15）**：两处一并落地，改动集中在 `pkg/marketdata/aggregate.go`（+测试 + SPEC 成文），未动路由层与其他 agent 并行施工的文件。**(a1) 秒级订正**：`checkInSession` 边界按秒判定——11:30:00 / 15:00:00 整点收盘打点合法；11:30:01+ / 15:00:01+（含 15:00:00.000000001 亚秒越界）拒收。分钟粒度 `hm` 判定会把 15:00:30 与 15:00:00 混同、静默放宽口径边界；标准分钟 bar 秒恒 0 使该路径实际不可达，但非标数据不该靠「恰好没出现」活着。**(a2) 选接纳方案**：`bucketStart15m` 增 `hm == morningCloseMin` 分支，11:30:00 并入 11:15 bucket。理由：① 与 15:00:00 并入 14:45 bucket 对称——下午收盘打点接纳、上午收盘打点拒收没有口径理由；② D1 bucket 定义「11:15 bucket 止于 11:30」本就含边界包含语义，代码此前没实现；③ Tushare 1m 普遍含 11:30 整点 bar（mootdx 导出不带），入站处兼容两种分钟形态，免得 D6 灌数后把形态不兼容伪装成「数据脏」报错，也免掉同步侧 normalize 层。拒绝语义不变：11:30:01+ / 15:00:01+ 仍 fail-loud，不静默丢 bar。**测试**：既有 `TestBucketStart15m_SessionBoundaries` 的「11:30 午休打点拒绝」用例按新语义订正为「11:30:00 并入 11:15 bucket」，并补 11:30:01 / 15:00:30 / 15:00:00 亚秒越界三条边界；新增 `TestAggregate_SessionBoundarySecondPrecision`（11:30:00 与 11:15/11:29 合并的数值手算对拍 + 15:00:30 / 11:30:01 fail-loud 且报错点名）。**破坏验证**：把秒级判断改回分钟粒度（`hm <= afternoonCloseMin` 且 11:30:00 归午休分支）→ 新测试红（11:30:00 被拒、15:00:30 被误纳），还原转绿；`git diff` 确认无破坏残留。**验证**：`go build ./...` / `go vet ./...` / `gofmt -l .` 干净；`go test ./pkg/marketdata/... ./pkg/domain/... ./internal/repoguard/... -count=1` 全绿（spec_drift 与护栏同批过）。本机无 C 工具链（`-race` 需 cgo/gcc，不可用），race 门禁留 CI；本单改动为无并发纯函数，不涉及数据竞争面。**文档**：SPEC.md 聚合口径细则 2 补上午收盘打点对称并入、硬规则补秒级精度条、D1 已知边界登记两种分钟源 11:30 形态差异。**协作说明**：并行 agent 正在同包施工 REV-01（router.go 区间上限），本单未动其未提交文件；`docs/TASKS.md` 的 REV-01~05 登记段为他人未提交内容，本单 ✅ 标记与完成记录留待台账提交一并落地，未扫入本单 commit（循 REV-05 先例）。
+- **✅ 完成记录（2026-10-15）**：两处一并落地，改动集中在 `pkg/marketdata/aggregate.go`（+测试 + SPEC 成文），未动路由层与其他 agent 并行施工的文件。**(a1) 秒级订正**：`checkInSession` 边界按秒判定——11:30:00 / 15:00:00 整点收盘打点合法；11:30:01+ / 15:00:01+（含 15:00:00.000000001 亚秒越界）拒收。分钟粒度 `hm` 判定会把 15:00:30 与 15:00:00 混同、静默放宽口径边界；标准分钟 bar 秒恒 0 使该路径实际不可达，但非标数据不该靠「恰好没出现」活着。**(a2) 选接纳方案**：`bucketStart15m` 增 `hm == morningCloseMin` 分支，11:30:00 并入 11:15 bucket。理由：① 与 15:00:00 并入 14:45 bucket 对称——下午收盘打点接纳、上午收盘打点拒收没有口径理由；② D1 bucket 定义「11:15 bucket 止于 11:30」本就含边界包含语义，代码此前没实现；③ Tushare 1m 普遍含 11:30 整点 bar（mootdx 导出不带），入站处兼容两种分钟形态，免得 D6 灌数后把形态不兼容伪装成「数据脏」报错，也免掉同步侧 normalize 层。拒绝语义不变：11:30:01+ / 15:00:01+ 仍 fail-loud，不静默丢 bar。**测试**：既有 `TestBucketStart15m_SessionBoundaries` 的「11:30 午休打点拒绝」用例按新语义订正为「11:30:00 并入 11:15 bucket」，并补 11:30:01 / 15:00:30 / 15:00:00 亚秒越界三条边界；新增 `TestAggregate_SessionBoundarySecondPrecision`（11:30:00 与 11:15/11:29 合并的数值手算对拍 + 15:00:30 / 11:30:01 fail-loud 且报错点名）。**破坏验证**：把秒级判断改回分钟粒度（`hm <= afternoonCloseMin` 且 11:30:00 归午休分支）→ 新测试红（11:30:00 被拒、15:00:30 被误纳），还原转绿；`git diff` 确认无破坏残留。**验证**：`go build ./...` / `go vet ./...` 全绿；`gofmt -l pkg/marketdata/` 干净（整仓 `gofmt -l .` 另有 **11 个 HEAD 既有脏文件**——`cmd/data/setup.go`、`internal/repoguard/ai_boundary_test.go`、`internal/repoguard/package_wiring_test.go`、`pkg/backtest/reporting/compare_test.go`、`pkg/bootstrap/auth_test.go`、`pkg/bootstrap/server.go`、`pkg/kernel/adapters.go`、`pkg/msgbus/bus_pg_test.go`、`pkg/strategy/checkpoint.go`、`pkg/strategy/signal_provider_test.go` 等，系 2026-10-08/09 提交混入、AUD-27「可当结论用」已失效，另立工单，不在本单）；`go test ./pkg/marketdata/... ./pkg/domain/... ./internal/repoguard/... -count=1` 全绿（spec_drift 与护栏同批过）。本机无 C 工具链（`-race` 需 cgo/gcc，不可用），race 门禁留 CI；本单改动为无并发纯函数，不涉及数据竞争面。**文档**：SPEC.md 聚合口径细则 2 补上午收盘打点对称并入、硬规则补秒级精度条、D1 已知边界登记两种分钟源 11:30 形态差异。**协作说明**：① 本单测试改动被并行施工 REV-01 的 `0726e3f` 按文件名 add 带入，修复本体由 `a3730bb` 补齐，两者合计 HEAD 全绿；REV-01 方则在其完成记录中明确排除本单在途文件（`aggregate.go` 与未入库的 REV 登记段），纪律可鉴。② **反向披露**：`a3730bb` 以文件级 `git add docs/SPEC.md` 时，把 REV-01 未提交的「日内跨度边界」SPEC 段一并扫入——内容经核对与其 `0726e3f`/`7e41246` 的实现一致（366 自然日 = `maxIntradaySpan`），非错误内容，但归属在本单 message 之外，在此披露；因 `a3730bb` 已被本登记段引用，不改写历史。③ REV-03 经 `task/rev03-registration-book-lock` 合入 main（7071aa8）；REV-05 代码 `22ba02e`+`d9aeeb6` 已提交；REV 登记段由台账归属方以 `d8e010b` 入库，本单 ✅ 随之落地。④ 自审修复 `b4282e6` 落在 `task/d6-multi-frequency-strategy` 分支——施工期间另一 agent 将本工作树切至 D6 分支，提交随该分支合并回 main（main 侧 REV-04 功能本体 `a3730bb` 已完整，`b4282e6` 为报错格式/注释/测试补钉，无功能缺口）。
+
+**自审修复（2026-10-15，`b4282e6`）**：对本人更改的复审发现并修复四项——① 两处新增边界拒收（11:30:00 带秒 / 15:00:00 带秒及亚秒）的报错格式 RFC3339→**RFC3339Nano**：亚秒越界（15:00:00.000000001）在 RFC3339 下会显示成 `15:00:00`，「晚于 15:00 收盘」与时间字面自相矛盾，排查反被误导；RFC3339Nano 仅在有小数位时打印，整分/整秒 bar 输出与原来逐字相同。补测试钉住（报错含 "15:00:00.000000001" 字样）；破坏验证「改回 RFC3339 → 新用例红 → 还原 → 绿」通过。② 注释订正：「13:00–14:59 下午连续竞价」补「收盘集合竞价（14:57 起）」；文件头块补亚秒越界表述，与函数注释一致。③ 测试注释笔误（`helper  surface`→`helper surface`）。④ 本记录「验证」条如实订正（原「`gofmt -l .` 干净」不实，整仓 11 个 HEAD 既有脏文件，见上）。
 
 ### REV-05 · `Registry.Fetch` 不防御 adapter 返回 `(nil, nil)` [P3] ✅ 完成（2026-10-15，commit `22ba02e`+`d9aeeb6`）
 
