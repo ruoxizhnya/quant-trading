@@ -489,6 +489,77 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 
 ---
 
+## 二·补二 · 代码深度审查登记（2026-10-15，D1–D4 / D7 / DATA-01·02·04 / SYNC-02·03 完成代码全量审查）
+
+> **审查范围与方法**：对照本文件 ✅ 完成项，对 2026-10-14～15 的 16 个提交涉及的全部生产代码（Go + nt-sidecar Python）做逐文件审查，外加机械检查 `go build ./...` / `go vet ./...` 全绿、`pkg/marketdata` + `pkg/data/source` + `pkg/domain/...` 测试全绿。审查维度：正确性、错误处理、并发、输入校验、资源释放、性能、兼容性、可读性。
+> **查重结论（重要，防双登）**：`/stocks/count` 的 `latest_date` 吞错（`cmd/data/handlers_stocks.go:95`）**已被 DATA-03 逐字登记**（含 2026-10-14 实测证据与修法选项），不重复立项；财报 `ann_date` 悬空与宏观 `obs_date` 前视缺口已在 D2-R1；fallback 源/turnover 单位在 DATA-05；index-constituents 假成功在 DATA-06。以下 5 项为本次审查**新发现**。
+
+### REV-01 · `marketdata.Router` 分钟/15m 路径无行数上限的全量加载 [P2] ✅ 完成（2026-10-15，commit `0726e3f`）
+
+- **① 目标**：`Router.Bars` 的 1m/15m 路径对「一次吃进整个查询区间的全部分钟 bar」设定显式边界，大区间请求 fail-loud 或被流式处理，不再无上限 materialize。
+- **② 上下文**（2026-10-15 审查发现，逐行核对非推测）：`pkg/marketdata/router.go:44-49` 的 15m 分支先 `loadMinute` 把 `[start, end]` 全区间的分钟行全部 Scan 进 `[]market.OHLCV` 切片，再交 `Aggregate` 建 map 聚合——峰值内存 ≈ 区间内全市场分钟行数。无 LIMIT、无分页、无流式、无区间跨度校验。`ohlcv_minute` 现状 0 行（DATA-05 登记的三张空表之一），故当前不可达；但 D6（多频率进回测）以该表灌数为前提，届时「5900 标的 × 240 根/日 × N 日」一次请求即可压垮内存。1d 路径同无上限但日线量级（单票 727 行）可接受，不在本单。
+- **③ 要求**：二选一并写明理由——(a1) 区间跨度上限校验（如 ≤60 自然日），超限 400 且报错点名「已支持的最大跨度 + 当前请求跨度」；(a2) 聚合改流式（`rows` 迭代直接进 bucket 累加器，不落全量切片）。无论选哪种，15m 与 1m 两条路径都要覆盖，且错误/拒绝语义与 Router 既有 fail-loud 风格一致（不静默截断）。
+- **④ 约束与非目标**：不改聚合口径（aggregate.go 的 bucket 语义是 D1 定稿）；不动 1d 路径；不引入新依赖；不为本单灌 1m 数据（灌数属 D6/D5 前置）。
+- **⑤ 验收**：行为测试——大区间 15m/1m 请求被拒（报错含跨度信息）或流式路径数值与现全量路径**对拍一致**；`pkg/marketdata` 既有测试（含 `TestRouterSameRouteThreeFrequencies`）全绿。**破坏验证**：把上限调大/去掉流式保护 → 新测试红，还原转绿；`go build ./...` + `go vet` + `gofmt -l` 干净。
+- **⑥ 边界**：只做 Router 取数边界；分钟表灌数、聚合口径、多频率策略消费（D6）另立。
+- **完成记录（2026-10-15，`0726e3f`）**：
+  - **⚠️ 先纠正本单 ② 的量级（不改写原文，只加指针）**：那条查询是 `WHERE symbol = $1` —— **单标的**取数。② 写「峰值内存 ≈ 区间内全市场分钟行数」与「5900 标的 × 240 根/日 × N 日 一次请求压垮内存」在本函数里不成立：全市场放大是**调用方循环**的形状（正是 REV-02 描述的 `ComputeAllFactors` 那类），不是 `loadMinute` 一次请求。缺陷真实、也确实该限，但量级比原文小三个数量级：单标的一年 1m = 58,320 行 × 实测 144 B/行（`unsafe.Sizeof(market.OHLCV)`，2026-10-15）≈ **8.4MB**（含 symbol 字符串背板约 9.3MB）。后续以 ② 的量级估内存的人会被带偏，所以这里必须写明。
+  - **形状裁决（③ 二选一）**：选 **(a1) 跨度上限**，不选 (a2) 流式。两条理由：(a2) 要在 `rows` 迭代器里把 D1 定稿的 bucket 语义（会话校验、可见时刻、午休断点、集合竞价并入）再实现一遍，而 ④ 不许改聚合口径 —— 第二份实现迟早与第一份漂移；且 `ohlcv_minute` 现状 **0 行**（实测复核），「流式与全量对拍一致」这条验收今天根本做不出来。上限在**查库前**判定，零数据即可证伪。
+  - **上限取 366 自然日，不是 ③ 举例的 60 天**（技术岔路由我定，代价写明）：60 天会让 D6「多频率进回测」的 15m 视野根本没法用，而一个满足不了任何真实用法的上限，下一个用它的人只会把它调大或删除 —— 比没有护栏更糟。代价：单次请求最坏 8.4MB 级而非 1.4MB 级，需要多年分钟视野的调用方必须自己切片。理由与代价都写在 `maxIntradaySpan` 常量注释里，含「按自然日 ≠ 按行数」的含义边界（A 股 240 根/日 vs 美股 390 根/日，D7/D9 国外线到位后同一跨度行数差 ~1.6 倍）。
+  - **落点**：守卫挂在 `loadMinute` 入口而不是 `Bars` 的 switch 分支 —— 1m 与 15m 都经这个函数取分钟行（15m 再交 `Aggregate`），一处结构性覆盖 ③ 要求的两条路径，不依赖"记得两处都挂"。1d 路径不受约束（④），并有正反两面测试钉住挂错位置会红。报错点名已支持上限 + 当前请求跨度 + 下一步动作（切片），拒绝而非静默截断；天数从常量导出，不写字面量（否则改了常量后报错里两个数各说各话）。
+  - **测试（先红后绿）**：`TestRouter_IntradaySpanCapFailsLoud`（1m/15m 各一子例，`nil pool` 兼作「是否走到查库」的探针 —— 守卫若在查库之后就会 panic 而非返回 error）、`TestRouter_IntradayCapIsMeaningful`（**绝对**跨度）、`TestCheckIntradaySpan`（边界表：恰好等于放行 / 超一秒拒绝 / 零跨度 / 负跨度不由本守卫判）、`TestRouterDailyPathNotSpanCapped`（集成，自灌自清理，同一十年区间 1d 成功 + 1m 被拒）。起手 `undefined: maxIntradaySpan/checkIntradaySpan` 红，实现后 `pkg/marketdata` 整包 exit 0（含 D1 既有 `TestRouterSameRouteThreeFrequencies` 与遗留路径对拍腿）。
+  - **破坏验证两腿 + 一个自曝的测试缺陷**：① 摘掉守卫挂载（`if false`）→ 2 条红：一条报「同一区间交给 1m 必须被拒」，一条 nil pool 被碰到（证明原本在查库前）。② 把上限调到**一百年** → 只有绝对跨度腿与「十年区间拒绝」红，而 `TestRouter_IntradaySpanCapFailsLoud` **照样绿** —— 因为它的输入是从 `maxIntradaySpan` 推导的，门柱跟着常量一起挪。这不是设计意图，是我第一版测试的缺陷：**常量推导的输入没资格断言绝对行为**，故补绝对跨度腿并在注释写明这条护栏的失效形状（⑤「把上限调大 → 新测试红」要的正是这一类）。两腿还原后全绿，`grep -rn MUTATION pkg cmd` 零残留。
+  - **门禁**：`go build ./...` exit 0、`go vet ./pkg/marketdata` exit 0、`gofmt -l` 三个改动文件空输出、`go test ./pkg/marketdata -count=1` exit 0。诚实边界：`-race` 本机跑不了（无 gcc，CGO_ENABLED=0），本单是纯函数校验 + 单次查询，无新增并发面。
+  - **⚠️ 未完成的一半（必须留字，别让后人以为已经限到底了）**：③ 写「超限 **400**」，但 `Router.Bars` 今天**零生产调用方**（全仓 grep：仅本包测试与 worktree 副本；`NewRouter` 无生产装配点），HTTP 面不存在，400 无处可映射。本单把判定放在它该在的层并 fail-loud 返回 error；**将来接入 HTTP/网关时，接线方要把这个 error 显式映射成 400**（建议同时导出哨兵供 `errors.Is`，届时再加，本单不为假想需求提前造 API 面）。这属接线，不属取数边界，不在 ⑥ 范围内顺手做。
+  - **并发提醒**：本次提交只含 `pkg/marketdata/router.go` + 两个测试文件；同一工作树里他人的 `aggregate.go`（REV-04 在途）与尚未提交的整段 REV 登记文本明确排除。**本完成记录故意不随代码提交** —— 它落在尚未入库的 REV 段里，按主任 2026-10-15 的指示，`docs/TASKS.md` 由她本人入库，代提交会把别人的在途登记文本扫进本单的 commit。实质结论（② 量级纠正、400 缺口、护栏失效形状）已在 `0726e3f` 的 commit message 里，不依赖本段是否一起提交。
+  - **自审修订（2026-10-15，`7e41246`，审 `0726e3f` 后追加）**：三处真问题，都在我自己笔下。
+    1. **我写进 SPEC 与代码注释的量级是没量过的估算** —— 上一条 bullet 刚批评工单 ② 量级失真，我自己那句「5.9 万行 ≈ 8MB」同样没依据。实测补齐：58,320 行 × `unsafe.Sizeof(market.OHLCV)` = **144 B/行** ⇒ 切片本体 **8.4MB**（含 symbol 字符串背板约 9.3MB）。测量用临时测试文件跑完即删，`pkg/domain/market` 无残留。**改的不只是数字，是数字的来路**：给出算法，下一个人能重算而不是只能信我。
+    2. **报错不可执行**：跨度 397 天打成 `9528h0m0s`，读不出「超了多少、该切几片」，而这条报错存在的全部意义就是让调用方当场决定切片粒度。改为两个数都附自然日换算（仍从常量/入参导出，不写字面量）。
+    3. **我的测试注释自己算错了日数**：绝对腿写「≈ 425 自然日」，`AddDate(1,1,0)` 从 2024-01-02 起是 366（闰年）+ 31 = **397 天**。改正，并把该腿从「只断言有错」升级为断言文案含 `397.0 自然日` 与 `366 自然日` —— `"366"` 写死是刻意的：改上限必须在这里红一次，逼人重新确认这个数，而不是让断言跟着常量挪门柱（门柱漂移就是上面「破坏验证」那条自曝的失效形状）。
+    - 复验：`go build ./...` / `go vet` / `gofmt -l` / `go test ./pkg/marketdata` 全 exit 0。生产行为面只有报错文案变化，阈值与判定边界一字未动。
+
+### REV-02 · 公式型因子逐（因子 × 计算日）全市场重拉窗口数据 [P2] ⬜ 待做
+
+- **① 目标**：公式型因子的窗口数据拉取从「每个因子的每个计算日各拉一次全市场」降为「同一数据多因子/多日共享」，或在 SPEC 与已知边界中诚实登记该性能特征及适用面。
+- **② 上下文**（2026-10-15 审查发现）：`pkg/data/factor_formula.go:96-97` 的 `loadFactorSeries` 每个计算日调 `store.GetOHLCVForDateRange(ctx, start, date)`——该接口**无 symbol 过滤**（全市场），窗口 `[date-Lookback, date]`。于是：单日单因子（handler 按名调用路径）≈ 每次全市场扫一遍（5900 标的 × 21 日 ≈ 12 万行，秒级，可接受）；但 `ComputeAllFactors(ctx, date, parallel=true)`（`pkg/data/factor.go:392-418`）下，当日 3 个 leaf/formula 因子（momentum/value/quality）**并发各拉一次同一窗口**，历史回填 N 日即 N×M 次全市场扫描。D3 完成记录登记了「公式型不物化中间序列、按定义现算」的设计，但**全市场重拉的放大效应没有作为已知边界成文**。
+- **③ 要求**：(a1) 批处理路径（`ComputeAllFactors` / 将来的回填入口）按「日区间 × InputFields 来源表」预取一次，多因子多日共享（请求级缓存或预聚合二选一，数值必须与现路径对拍一致）；(a2) 若本期不做共享，则在 SPEC 因子章节 + D3 已知边界写明「公式型因子现算的单日成本模型与批量场景限制」，避免后人把批量回填跑成灾难还以为代码坏。handler 单日按名路径保留现状即可，但要写进文档。
+- **④ 约束与非目标**：不改任何因子的数学定义与现算数值（D3 红线）；不改 `FactorStore` 接口签名（`GetOHLCVForDateRange` 的无 symbol 形态是既有契约，加过滤方法另立）；不动代码型因子路径。
+- **⑤ 验收**：若选 (a1)：对拍测试（共享预取 vs 逐因子重拉，同日同因子数值逐只相等）+ 查询次数基准（N 日 M 因子的全市场查询次数从 N×M 降为 ≈N）；若选 (a2)：SPEC/已知边界成文 + `docs/` 链接守卫绿。两种都要求 `pkg/data` 既有测试全绿。
+- **⑥ 边界**：只做公式型因子的数据拉取效率/文档登记；代码型因子、因子落库批次大小、回测侧消费另立。
+
+### REV-03 · `RegistrationBook` 可变状态无并发保护 [P2] ✅ 完成（2026-10-15，commit `abf0af3`+`d891567`）
+
+- **① 目标**：`RegistrationBook` 的并发安全语义显式化——要么加锁成为并发安全类型，要么在类型契约中明示「非并发安全 + 调用方串行化约束」，不留「看起来能用其实会 race」的中间态。
+- **② 上下文**（2026-10-15 审查发现）：`pkg/data/factor_governance.go` 的 `RegistrationBook` 与 D3 的 `Registry` 不同——后者是**构造时定稿的不可变快照**（注释明示读侧无需加锁），前者是**可变账本**：`Register`（L82-116）与 `Rollback`（L121-147）直接写 `byNameHash` map / `ordered` / `audit` slice，无任何 mutex；`ResolveEffective`/`ResolvePinned`/`Registrations`/`Audit` 是读路径。当前**无生产调用方**（全仓 grep：仅 SPEC.md 文档引用与测试），故今天不会 race；但它是 D4 治理细则的唯一可执行形态，将来接入「因子登记/回滚」的 HTTP 或后台入口时，并发 Register/Rollback 就是 map 并发写（panic 或静默丢失登记与审计留痕）。`Registrations()`/`Audit()` 返回拷贝 ✓，`Rollback` 对 nil map 读安全 ✓——仅缺写侧保护与契约明示。
+- **③ 要求**：二选一并写明理由——(a1) 加 `sync.RWMutex`（读多写少：Resolve*/Registrations/Audit 走 RLock，Register/Rollback 走 Lock），保持现有签名与语义不变；(a2) 保持无锁，但在类型注释与 SPEC 治理细则中明示「非并发安全，调用方负责串行化（单线程装配期或外部锁）」，照 D3 Registry 的不可变快照思路写清约束。无论哪种，都要有 `-race` 测试钉住所选语义。
+- **④ 约束与非目标**：不改登记四样校验、回滚语义（新引用 miss / 历史引用 hit）与审计字段（D4 定稿）；不动 `pkg/storage/factor_registration.go` 的 DB 侧（其并发由调用方事务管理）；不引入外部治理系统。
+- **⑤ 验收**：若选 (a1)：`go test -race` 下并发 Register/Resolve/Rollback 混合测试绿（含同因子双版本并发登记去重）；若选 (a2)：类型注释 + SPEC 成文 + 一条「文档明示非并发安全」的守卫测试（如注释存在性断言，照 internal/repoguard 先例）。两种都要求 D4 既有测试（`factor_governance_test.go` 演练 + `factor_registration_test.go` 表驱动）全绿。
+- **⑥ 边界**：只做进程内账本的并发语义；DB 侧落库的并发/事务、HTTP 接入面另立。
+- **完成记录（2026-10-15，`abf0af3` + `d891567`）**：选 **(a1) 加 `sync.RWMutex`**——理由：本账本是**可变类型**，将来接 HTTP/后台「登记 / 回滚」入口即并发写；加锁让类型自成并发安全类型，契合本项目「并发访问共享资源须正确加锁」的约定，且保持签名与治理语义不变（比 (a2) 只写文档更彻底地消除 race 隐患）。实现在 [factor_governance.go](../pkg/data/factor_governance.go)：`RegistrationBook` 增 `mu sync.RWMutex`，写路径 `Register`/`Rollback` 持写锁（整方法为一个写事务：校验 + 去重 + 落账 + 留痕原子完成），读路径 `ResolveEffective`/`ResolvePinned`/`Registrations`/`Audit` 持读锁；类型注释明示并发语义并注明「因含锁不可按值拷贝」（构造入口均返回指针，无值拷贝调用点）。新增 `TestRegistrationBook_ConcurrentRegisterResolveRollback`（[factor_governance_test.go](../pkg/data/factor_governance_test.go)）：64×2 并发登记 v1/v2 + 8 读 goroutine 全程交叠 + 64 并发回滚；去重封闭——同因子双版本并发登记恰好 1 成功、其余 `ErrRegistrationDuplicate`，并发回滚恰好 1 成功，最终审计恰 3 条（register×2 + rollback×1）。**验证**：本机无 gcc（`-race` 需 cgo + gcc），`-race` 腿改在 `golang:1.25-alpine` 容器内跑（容器内 `apk add gcc musl-dev`）——`go test -race ./pkg/data/ -run TestRegistrationBook` 5 例全绿；**破坏验证**：去掉全部 `Lock`/`RLock` → `-race` 报多处 `WARNING: DATA RACE`（红），还原 → 绿。`gofmt -l` 空、`go build ./...`、`go vet ./pkg/data/`、`go test ./internal/...`（repoguard）干净；D4 既有测试（`pkg/data` 演练 4 例 + `pkg/domain` 表驱动）全绿。SPEC 同步：D4 治理细则新增「### 并发语义（进程内账本是并发安全类型，REV-03）」小节 + 护栏清单第 5 条。**自审补丁（`d891567`）**：复审本次改动时发现测试自身有缺陷——阶段 1 的 `t.Fatalf` 若提前退出，8 个读 goroutine 会一直忙等到整个测试二进制退出，可能拖慢/干扰同批其它测试；改为启动读 goroutine 后立即注册 `t.Cleanup`（`close(stopRead)` + `readers.Wait()`）收束，成功与失败两条路径都干净，忙等窗口顺带覆盖到最终态断言（`-race` 下读写交叠更充分），并重跑容器 `-race` 复验 5 例全绿。**诚实缺口**：`-race` 未在本机原生跑（无 gcc），以容器替代；建议 CI 原生 `-race` 复跑兜底。
+
+### REV-04 · `checkInSession` 分钟粒度判定丢失秒级边界 + Tushare 1m 的 11:30 bar 形态未登记 [P3] ✅ 完成（2026-10-15，commit `a3730bb`）
+
+- **① 目标**：会话校验的时间边界要么做到秒级精确，要么把「分钟粒度」假设与已知数据形态不兼容面写成已知边界，不让「11:30 整点 bar 会被当午休拒收」这类事实靠读代码的人自己悟。
+- **② 上下文**（2026-10-15 审查发现，两处关联同一函数族）：`pkg/marketdata/aggregate.go:191` 的 `checkInSession` 用 `hm := t.Hour()*60 + t.Minute()` 判定——**秒被丢弃**，于是 15:00:01–15:00:59 的 bar 与 15:00:00 收盘打点同判「合法」并入末 bucket（注释只承诺「含 15:00:00 收盘打点」）。标准分钟 bar 秒恒 0，此路径实际不可达，但带秒的非标数据会静默改变口径边界。**同族未登记事实**：A 股分钟数据普遍含 **11:30 整点 bar**（Tushare 1m 即有），而 `checkInSession` 把 11:30:00 判为「午休」（`hm < afternoonOpenMin` 分支）⇒ 整条 `Aggregate` fail-loud。这是「不静默丢 bar」设计决策的**兼容面**：mootdx 是当前唯一 1m 源且 `ohlcv_minute` 0 行，一旦按 D6 灌入 Tushare 1m，15m 聚合会以「午休」报错拒收——现象像数据脏，实为形态不兼容。
+- **③ 要求**：(a1) 秒级订正——hm 判定带秒（如 `15:00:00` 整接受、`>15:00:00` 拒），并补测试；(a2) 11:30 兼容性二选一：在 SPEC「规范层 Schema」已知边界成文「Tushare 1m 的 11:30 收盘 bar 当前被会话校验拒收，15m 聚合前须在同步/normalize 边界处理」，或在 aggregate 入站处显式接纳 11:30 整点并入 11:15 bucket（开口子必须写清理由与测试）。拒绝语义（不静默丢）不变。
+- **④ 约束与非目标**：不改聚合主口径与三细则（D1 定稿）；不动路由层；不顺手改 15:00 之后数据的其它语义；不为本单灌任何 1m 数据。
+- **⑤ 验收**：(a1) 有「15:00:30 bar → 拒收」测试钉住秒级语义；(a2)  whichever 选择都有对应测试（拒收且报错点名 / 接纳且并入正确 bucket）+ SPEC 或代码注释成文。`pkg/marketdata` 既有测试全绿；**破坏验证**：把秒级判断改回分钟粒度（或删 11:30 处理）→ 新测试红，还原转绿。
+- **⑥ 边界**：只做会话校验的边界精度与已知边界成文；分钟数据灌数（D6 前置）、聚合口径另立。
+- **✅ 完成记录（2026-10-15）**：两处一并落地，改动集中在 `pkg/marketdata/aggregate.go`（+测试 + SPEC 成文），未动路由层与其他 agent 并行施工的文件。**(a1) 秒级订正**：`checkInSession` 边界按秒判定——11:30:00 / 15:00:00 整点收盘打点合法；11:30:01+ / 15:00:01+（含 15:00:00.000000001 亚秒越界）拒收。分钟粒度 `hm` 判定会把 15:00:30 与 15:00:00 混同、静默放宽口径边界；标准分钟 bar 秒恒 0 使该路径实际不可达，但非标数据不该靠「恰好没出现」活着。**(a2) 选接纳方案**：`bucketStart15m` 增 `hm == morningCloseMin` 分支，11:30:00 并入 11:15 bucket。理由：① 与 15:00:00 并入 14:45 bucket 对称——下午收盘打点接纳、上午收盘打点拒收没有口径理由；② D1 bucket 定义「11:15 bucket 止于 11:30」本就含边界包含语义，代码此前没实现；③ Tushare 1m 普遍含 11:30 整点 bar（mootdx 导出不带），入站处兼容两种分钟形态，免得 D6 灌数后把形态不兼容伪装成「数据脏」报错，也免掉同步侧 normalize 层。拒绝语义不变：11:30:01+ / 15:00:01+ 仍 fail-loud，不静默丢 bar。**测试**：既有 `TestBucketStart15m_SessionBoundaries` 的「11:30 午休打点拒绝」用例按新语义订正为「11:30:00 并入 11:15 bucket」，并补 11:30:01 / 15:00:30 / 15:00:00 亚秒越界三条边界；新增 `TestAggregate_SessionBoundarySecondPrecision`（11:30:00 与 11:15/11:29 合并的数值手算对拍 + 15:00:30 / 11:30:01 fail-loud 且报错点名）。**破坏验证**：把秒级判断改回分钟粒度（`hm <= afternoonCloseMin` 且 11:30:00 归午休分支）→ 新测试红（11:30:00 被拒、15:00:30 被误纳），还原转绿；`git diff` 确认无破坏残留。**验证**：`go build ./...` / `go vet ./...` / `gofmt -l .` 干净；`go test ./pkg/marketdata/... ./pkg/domain/... ./internal/repoguard/... -count=1` 全绿（spec_drift 与护栏同批过）。本机无 C 工具链（`-race` 需 cgo/gcc，不可用），race 门禁留 CI；本单改动为无并发纯函数，不涉及数据竞争面。**文档**：SPEC.md 聚合口径细则 2 补上午收盘打点对称并入、硬规则补秒级精度条、D1 已知边界登记两种分钟源 11:30 形态差异。**协作说明**：并行 agent 正在同包施工 REV-01（router.go 区间上限），本单未动其未提交文件；`docs/TASKS.md` 的 REV-01~05 登记段为他人未提交内容，本单 ✅ 标记与完成记录留待台账提交一并落地，未扫入本单 commit（循 REV-05 先例）。
+
+### REV-05 · `Registry.Fetch` 不防御 adapter 返回 `(nil, nil)` [P3] ✅ 完成（2026-10-15，commit `22ba02e`+`d9aeeb6`）
+
+- **① 目标**：`Fetch` 对「adapter 返回 `(nil, nil)`」这一契约违背有显式处理，不再让 nil error 穿过成功检查、最终把 nil 包进 `%w` 产出 `%!w(<nil>)` 的损坏诊断。
+- **② 上下文**（2026-10-15 审查发现）：`pkg/data/source/registry.go:209-228` 的成功判定是 `if err == nil && resp != nil`——adapter 返回 `(nil, nil)` 时该分支不进，但下面 `if !IsRetryable(err)` 也不进（err 为 nil），于是循环继续、`lastErr = nil`；若链上所有 adapter 都如此，函数末尾 `fmt.Errorf("registry: all adapters exhausted for %s (tried %v): %w", ..., lastErr)` 把一个 **nil error** 包进 `%w`，错误文本变成 `%!w(<nil>)`——「所有源耗尽」的真实诊断被损坏。虽然现有 10 个 adapter 无一返回 (nil, nil)，但这是接口契约漏洞：`DataSourceAdapter.Fetch` 的文档没有钉死「err==nil 时 resp 必非 nil」。
+- **③ 要求**：`err == nil && resp == nil` 时按该 adapter 失败处理——记入 `tried`，`lastErr` 置为显式哨兵（如 `fmt.Errorf("adapter %q returned (nil, nil) response", name)`），继续走链；链耗尽时报错信息可读、不含 `%!w`。同时在该 adapter 接口注释或 D2 契约文档补一句「err==nil ⇒ resp 非 nil」的调用方契约。
+- **④ 约束与非目标**：不改 fallback 链语义（retryable 跳过 / 非 retryable 立即返回）；不动三类拒收与健康检查；不给现有 adapter 的行为找补（它们本来就不返回 nil, nil）。
+- **⑤ 验收**：单测——mock adapter 返回 `(nil, nil)`，断言 (1) 不 panic、(2) 链继续尝试后续 adapter、(3) 全部如此时最终错误文本含 "(nil, nil)" 字样且不含 `%!w`；`pkg/data/source` 既有测试（含 D2 契约测试）全绿。**破坏验证**：把 (nil,nil) 防御删掉 → 新测试红，还原转绿。
+- **⑥ 边界**：只做 Fetch 的 nil 响应防御与契约成文；adapter 实现质量、kill-switch 行为另立。
+- **✅ 完成记录（2026-10-15，`22ba02e` + 自审 `d9aeeb6`）**：③ 全部落地。`registry.go` 在成功检查之后新增 `err == nil && resp == nil` 分支：记入 `tried`、`lastErr` 置为点名该 adapter 的哨兵 `fmt.Errorf("adapter %q returned (nil, nil) response", name)`、`continue` 走链（不再落入 `!IsRetryable(err)` 那条把 (nil,nil) 当非可重试直接 return 的旧路径——`IsRetryable(nil)==false`，旧路径会让 Fetch 自身把 nil 响应 + nil error 交回调用方）。链耗尽时末尾 `%w` 包的是非 nil 哨兵，报错含 "(nil, nil)" 且无 `%!w(<nil>)`。`adapter.go` 的 `DataSourceAdapter.Fetch` 接口注释补「err==nil ⇒ resp 非 nil」调用方契约。`registry_rev05_test.go` 新增：(nil,nil) 源落链后健康源胜出；全链 (nil,nil) 时报错可读、含 "(nil, nil)"、不含 `%!w`。**破坏验证**：反转防御条件 → 两条测试转红（commit 自述已实测）。**自审补丁 `d9aeeb6`**：(nil,nil) 日志补回本文件既有 `failed:` token（避免运维按 failed 抓日志漏掉）；测试替身 `nilResponseAdapter` 从裸 int 计数改为 mutex + `callCount()`，对齐 `DataSourceAdapter`「实现须并发安全」的自身声明。**门禁**：commit 自述 `go build ./pkg/...` / `go vet ./pkg/data/source/...` / `gofmt -l` / `go test ./pkg/data/source` 干净。
+- **⚠️ 状态订正说明（本条由台账审查补记，2026-10-15）**：本段登记时其代码已随 `22ba02e`+`d9aeeb6` 入库，但标题误留 `⬜ 待做`、缺完成记录 —— 与 REV-01/03/04「✅ + 完成记录随台账一并落地」的先例不一致（那三条登记时码已在途或未在途都标注清楚了，本条是唯一漏改的）。已核对 `pkg/data/source/registry.go` 现存防御分支 + `adapter.go` 契约注释与 ③ 逐条相符，订正为 ✅；完成记录严格取自这两个 commit 的内容与当前源码，未补任何未经核实的细节。
+
+---
+
 ## 三、跨仓指针（不在本仓，勿双写）
 
 | 项 | 归属 | 说明 |
