@@ -520,7 +520,10 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
     分钟聚合的期间合计。派生侧无需重算：`factor_cache` 实测 0 行。
   - **落库后抽样比对（⑤ 第三件）**：`ohlcv_daily_qfq` 3,926,510 行 与备份
     `ohlcv_daily_qfq_bak_054` 3,926,510 行逐行比对 **0 mismatch**
-    （`abs(turnover − bak×1000) > 1e-6` 计数为 0）；千元态残留（比值 < 0.01）**0 行**；
+    （`abs(turnover − bak×1000) > 1e-6` 计数为 0）；**LEFT JOIN 方向也核了**：
+    活表里没有一行在备份中缺 counterpart（`b.symbol is null` 计数 0），
+    `turnover IS NULL` 与 `turnover = 0` 均 **0 行** —— 所以「整表 ×1000」这条路
+    没有「把 NULL 折没」「漏掉零值行」这类暗礁可走；千元态残留（比值 < 0.01）**0 行**；
     比值中位数从 0.0010127 变到 **1.0127**。派生侧无陈旧值：`factor_cache` 0 行，
     公式型因子注册表里没有引用 `turnover` 的公式（实测 grep；同名的
     `inventory_turnover_delta` 是财报比值，与行情单位无关）。

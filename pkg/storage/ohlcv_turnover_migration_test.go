@@ -99,8 +99,8 @@ func openTempSession(t *testing.T, rows []turnoverOHLCVRow, withSentinel bool) *
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 
-	mustExec(t, conn, `SET search_path = pg_temp`)
-	mustExec(t, conn, `
+	turnoverMigrationmustExec(t, conn, `SET search_path = pg_temp`)
+	turnoverMigrationmustExec(t, conn, `
 		CREATE TEMP TABLE ohlcv_daily_qfq (
 			symbol      VARCHAR(20) NOT NULL,
 			trade_date  DATE        NOT NULL,
@@ -109,7 +109,7 @@ func openTempSession(t *testing.T, rows []turnoverOHLCVRow, withSentinel bool) *
 			turnover    DOUBLE PRECISION NOT NULL,
 			PRIMARY KEY (symbol, trade_date)
 		)`)
-	mustExec(t, conn, `
+	turnoverMigrationmustExec(t, conn, `
 		CREATE TEMP TABLE data_migrations (
 			name       TEXT PRIMARY KEY,
 			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -132,14 +132,14 @@ func openTempSession(t *testing.T, rows []turnoverOHLCVRow, withSentinel bool) *
 
 	// 双保险：非限定名必须读到本用例的种子行（而不是真库的 392.6 万行）。
 	// 这条不成立就绝不执行 DO 块 —— 宁可测试红，也不动共享库。
-	if got := countRows(t, conn, "ohlcv_daily_qfq"); got != len(rows) {
+	if got := turnoverMigrationcountRows(t, conn, "ohlcv_daily_qfq"); got != len(rows) {
 		t.Fatalf("临时表隔离失效：ohlcv_daily_qfq 读到 %d 行，种子只有 %d 行 —— 名字没落在 pg_temp",
 			got, len(rows))
 	}
 	return conn
 }
 
-func mustExec(t *testing.T, conn *pgx.Conn, sql string) {
+func turnoverMigrationmustExec(t *testing.T, conn *pgx.Conn, sql string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -148,7 +148,7 @@ func mustExec(t *testing.T, conn *pgx.Conn, sql string) {
 	}
 }
 
-func runMigration(t *testing.T, conn *pgx.Conn) {
+func turnoverMigrationrunMigration(t *testing.T, conn *pgx.Conn) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -170,7 +170,7 @@ func turnoverOf(t *testing.T, conn *pgx.Conn, symbol string) float64 {
 	return v
 }
 
-func countRows(t *testing.T, conn *pgx.Conn, table string) int {
+func turnoverMigrationcountRows(t *testing.T, conn *pgx.Conn, table string) int {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -181,7 +181,7 @@ func countRows(t *testing.T, conn *pgx.Conn, table string) int {
 	return n
 }
 
-func tempTableExists(t *testing.T, conn *pgx.Conn, name string) bool {
+func turnoverMigrationtempTableExists(t *testing.T, conn *pgx.Conn, name string) bool {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -193,7 +193,7 @@ func tempTableExists(t *testing.T, conn *pgx.Conn, name string) bool {
 	return ok
 }
 
-func sentinelCount(t *testing.T, conn *pgx.Conn) int {
+func turnoverMigrationsentinelCount(t *testing.T, conn *pgx.Conn) int {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -221,7 +221,7 @@ var cnyRows = []turnoverOHLCVRow{
 
 func TestMigration054_ConvertsThousandCNY(t *testing.T) {
 	conn := openTempSession(t, thousandCNYRows, false)
-	runMigration(t, conn)
+	turnoverMigrationrunMigration(t, conn)
 
 	// 绝对数值断言（不从阈值推导）：千元 ×1000 = 元。
 	if got := turnoverOf(t, conn, "a054k1"); got != 10000 {
@@ -230,12 +230,12 @@ func TestMigration054_ConvertsThousandCNY(t *testing.T) {
 	if got := turnoverOf(t, conn, "a054k2"); got != 80000 {
 		t.Errorf("a054k2 turnover = %v, want 80000（80 千元 × 1000）", got)
 	}
-	if !tempTableExists(t, conn, "ohlcv_daily_qfq_bak_054") {
+	if !turnoverMigrationtempTableExists(t, conn, "ohlcv_daily_qfq_bak_054") {
 		t.Error("没建 ohlcv_daily_qfq_bak_054 —— 换算前没有恢复集")
 	} else if bak := bakTurnover(t, conn, "a054k1"); bak != 10 {
 		t.Errorf("bak_054 存的 a054k1 = %v, want 10（换算**前**的千元原值）", bak)
 	}
-	if n := sentinelCount(t, conn); n != 1 {
+	if n := turnoverMigrationsentinelCount(t, conn); n != 1 {
 		t.Errorf("哨兵没写进 data_migrations：count=%d, want 1", n)
 	}
 }
@@ -255,9 +255,9 @@ func bakTurnover(t *testing.T, conn *pgx.Conn, symbol string) float64 {
 // TestMigration054_RerunIsNoop 同一会话连跑两次（服务重启的形状）。
 func TestMigration054_RerunIsNoop(t *testing.T) {
 	conn := openTempSession(t, thousandCNYRows, false)
-	runMigration(t, conn)
+	turnoverMigrationrunMigration(t, conn)
 	first := turnoverOf(t, conn, "a054k1")
-	runMigration(t, conn)
+	turnoverMigrationrunMigration(t, conn)
 
 	if got := turnoverOf(t, conn, "a054k1"); got != first {
 		t.Errorf("重跑后 a054k1 = %v, want 仍是 %v（×1000 不能重复生效）", got, first)
@@ -271,7 +271,7 @@ func TestMigration054_RerunIsNoop(t *testing.T) {
 // 内容守卫不放行，一行都不动。
 func TestMigration054_SkipsWhenAlreadyCNY(t *testing.T) {
 	conn := openTempSession(t, cnyRows, false)
-	runMigration(t, conn)
+	turnoverMigrationrunMigration(t, conn)
 
 	if got := turnoverOf(t, conn, "a054c1"); got != 10000 {
 		t.Errorf("已是元的行被改了：a054c1 = %v, want 10000", got)
@@ -279,10 +279,10 @@ func TestMigration054_SkipsWhenAlreadyCNY(t *testing.T) {
 	if got := turnoverOf(t, conn, "a054c2"); got != 40000 {
 		t.Errorf("已是元的行被改了：a054c2 = %v, want 40000", got)
 	}
-	if tempTableExists(t, conn, "ohlcv_daily_qfq_bak_054") {
+	if turnoverMigrationtempTableExists(t, conn, "ohlcv_daily_qfq_bak_054") {
 		t.Error("没换算却建了备份表 —— 备份应当只在真正换算的那一次出现")
 	}
-	if n := sentinelCount(t, conn); n != 1 {
+	if n := turnoverMigrationsentinelCount(t, conn); n != 1 {
 		t.Errorf("跳过换算也要落哨兵：count=%d, want 1", n)
 	}
 }
@@ -296,7 +296,7 @@ func TestMigration054_SentinelBlocksStrayLotsRows(t *testing.T) {
 
 	// ① 有哨兵：整表一动不动，哪怕内容守卫成立。
 	conn := openTempSession(t, mixed, true)
-	runMigration(t, conn)
+	turnoverMigrationrunMigration(t, conn)
 	for sym, want := range map[string]float64{"a054c1": 10000, "a054c2": 40000, "a054stray": 10} {
 		if got := turnoverOf(t, conn, sym); got != want {
 			t.Errorf("有哨兵时 %s 被改了：got %v, want %v（哨兵必须让 054 至多生效一次）", sym, got, want)
@@ -306,7 +306,7 @@ func TestMigration054_SentinelBlocksStrayLotsRows(t *testing.T) {
 	// ② 没有哨兵（同一份数据、同一条 SQL）：内容守卫放行 ⇒ 整表 ×1000。
 	// 这条腿证明「挡住上面那次的是哨兵，不是内容守卫」，也就证明 ① 不是假护栏。
 	conn2 := openTempSession(t, mixed, false)
-	runMigration(t, conn2)
+	turnoverMigrationrunMigration(t, conn2)
 	if got := turnoverOf(t, conn2, "a054c1"); got != 10000000 {
 		t.Errorf("无哨兵时 a054c1 = %v, want 10000000 —— 内容守卫放行后整表换算，"+
 			"这正是哨兵要拦住的静默放大", got)
@@ -322,7 +322,7 @@ func TestMigration054_GoalpostsThreshold(t *testing.T) {
 	// 千元态、比值贴着实测 max：close×volume = 1e6、turnover = 3535 ⇒ 0.003535
 	conn := openTempSession(t,
 		[]turnoverOHLCVRow{{symbol: "a054g1", close_: 1000, volume: 1000, turnover: 3535}}, false)
-	runMigration(t, conn)
+	turnoverMigrationrunMigration(t, conn)
 	if got := turnoverOf(t, conn, "a054g1"); got != 3535000 {
 		t.Errorf("比值 0.003535 的千元行没被换算：got %v, want 3535000", got)
 	}
@@ -333,7 +333,7 @@ func TestMigration054_GoalpostsThreshold(t *testing.T) {
 	// 「贴边界的种子必须把比值算出来，不是把数值抄过来」这个坑值得记。）
 	conn2 := openTempSession(t,
 		[]turnoverOHLCVRow{{symbol: "a054g2", close_: 1000, volume: 1000, turnover: 322600}}, false)
-	runMigration(t, conn2)
+	turnoverMigrationrunMigration(t, conn2)
 	if got := turnoverOf(t, conn2, "a054g2"); got != 322600 {
 		t.Errorf("比值 0.3226 的元态行被误换算：got %v, want 322600 —— 阈值放得太宽了", got)
 	}
