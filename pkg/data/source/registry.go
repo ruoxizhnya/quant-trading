@@ -214,6 +214,21 @@ func (r *Registry) Fetch(ctx context.Context, req FetchRequest) (*FetchResponse,
 			resp.FetchedAt = start
 			return resp, nil
 		}
+		// REV-05: an adapter that returns (nil, nil) violates the Fetch
+		// contract ("err == nil ⇒ resp != nil", see DataSourceAdapter.Fetch).
+		// Left unhandled it slips past the success check above, then trips
+		// the `!IsRetryable(err)` arm below — IsRetryable(nil) is false, so
+		// that arm was entered and Fetch returned a nil response *and* a nil
+		// error to the caller, which would dereference resp. Treat it as an
+		// explicit per-adapter failure and keep walking the chain so a healthy
+		// downstream adapter can still serve. The error names the offender and
+		// survives %w wrapping intact (no "%!w(<nil>)" corruption).
+		if err == nil && resp == nil {
+			log.Printf("[source.Registry] Fetch[%s]: %q returned (nil, nil) — contract violation (err == nil requires non-nil response)", req.DataType, name)
+			lastErr = fmt.Errorf("adapter %q returned (nil, nil) response", name)
+			tried = append(tried, name)
+			continue
+		}
 		// CR-39: per-adapter failure logged at warn level. Without
 		// this line, an operator looking at a backtest that returned
 		// "all adapters exhausted for capital_flow" had no way to

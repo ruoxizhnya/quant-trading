@@ -196,6 +196,11 @@ type DataSourceAdapter interface {
 	//   - Respect ctx cancellation.
 	//   - Apply internal rate limiting before returning ErrRateLimited.
 	//   - Translate transport errors into ErrUpstreamUnavailable.
+	//
+	// Contract (REV-05): on success (err == nil) the returned *FetchResponse
+	// MUST be non-nil. Returning (nil, nil) is a contract violation: the
+	// Registry treats it as an adapter failure and falls through to the next
+	// adapter in the chain rather than handing callers a nil response.
 	Fetch(ctx context.Context, req FetchRequest) (*FetchResponse, error)
 
 	// HealthCheck performs a lightweight liveness probe.
