@@ -462,7 +462,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   - **未决**：同类口径欠账全部转入 **DATA-05**（见下）。
   - **审查修复（同日，收口前自查）**：① migration 守卫补哨兵（见上）；② `docs/design/kernel/kernel-pluggable-nt-ready.md` §8.2 映射表里的「volume 表内原值取整（tushare 手数口径）直传」与本单口径矛盾 → 更正为「表内原值（**股**）直传」；③ `nt-sidecar/sidecar/native.py` 的 `DEFAULT_TRADE_SIZE` 注释「默认每笔下单**手数**（股）」措辞自相矛盾 → 「默认每笔下单**数量**（股）」；④ `pkg/domain/market/types.go` 的 `Volume` 补单位注释——本单根因正是「没有一处写明这个字段的单位」。
 
-### DATA-05 · 成交量/成交额口径收尾（fallback 源 + 成交额 + 空表） ⬜ 待做
+### DATA-05 · 成交量/成交额口径收尾（fallback 源 + 成交额 + 空表） ✅ 完成（2026-10-15，branch `task/data-05-units`：`d76b247` / `424d997` / `04d5ffe`）
 
 - **① 目标**：把 DATA-04 未覆盖的**同类口径欠账**一次清掉——其余数据源与其余表的 volume/turnover 单位全部明确，并统一到规范层已声明的口径。
 - **② 上下文**（2026-10-14 DATA-04 审查时登记，均为未验证项）：
@@ -473,6 +473,101 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：不重复 DATA-04 已完成的日线 volume 部分；不引入第二套口径；`turnover` 变更会动因子与展示数值，须照 DATA-04 做「改坏→红→还原→绿」破坏验证。
 - **⑤ 验收**：每个源/表给出「实测单位 + 换算点 + 落库后抽样比对」三件证据；SPEC 规范层 Schema 的每个数值字段都能回答「单位是什么」；`cmd/dualrun -gate` 回归绿。
 - **⑥ 边界**：只做单位口径；源本身的接入与可靠性问题不在本单。
+
+- **完成记录（2026-10-15）**：
+  - **先证伪工单前提 —— ② 的三条里有两条与事实不符，按事实做**：
+    1. **fallback 源「取一次真实响应核对」没有可实测的对象**（三条独立证据，逐行核对）：
+       `cmd/data/registry_init.go` 以 **nil transport** 注册 mootdx ⇒ `Enabled()=false`
+       ⇒ `Registry.Fetch` 跳过它（go.mod 里也没有 go-mootdx SDK）；eastmoney 只声明
+       `capital_flow`，`Fetch(ohlcv_daily)` 直接 `ErrUnsupported`；`ETLPipeline`
+       （`Registry.Fetch` 的唯一生产调用方）**零调用方**（见新登记 **DATA-08**）。
+       ⇒ 日线 fallback 链今天整条不可达，**不存在**「mootdx 的 vol 到底是手还是股」
+       这个待答问题。据 ④「不猜未实测的源单位」：**不猜着改换算**。
+       真正要收的是那处**假声明** —— mootdx 的 schema 写着 `volume Unit:"share"` /
+       `amount Unit:"yuan"`，而 `fetchBars` 把 transport 原值直接塞进 DataItem，
+       同步边界一个换算点都没有（DATA-04 根因同型）。现在 `Unit` 如实留空（"" = 未声明），
+       并写明接线顺序：实测 → 同步边界换算到规范层 → 才补声明；
+       `declarations.go` 待办边界与 `registry_init.go` 那条「eastmoney 是日线第三级」
+       的设计注释同步订正（后者今天不成立）。守卫落在
+       `cmd/data/ohlc_units_guard_test.go`：已启用的 A 股行情源必须声明 volume/amount/
+       turnover 的单位 —— 今天够不着 mootdx，接线那一刻自动开始管它，规则的牙由替身
+       用例当场证明（不声明必红 / 声明齐全放行 / 未启用不在射程）。
+    2. **「前端 fmtAmount 显示值偏小 1000 倍」不成立**：成交额那条显示面今天根本没
+       接到 turnover —— `/api/market/index` 的响应结构里没有 `amount`/`volume`
+       （`cmd/data/handlers_stocks.go:130-136` 的 `indexData` 只有
+       code/name/close/change/pct），且它查的三个指数代码在 `ohlcv_daily_qfq` 里
+       **0 行**（实测；表内 5671 个 symbol 无指数），实测 curl 返回 `{"indices":[]}`。
+       ⇒ `fmtAmount(undefined)` 走 falsy 分支恒显示 '-'。「同步侧 + SPEC + 前端格式化」
+       三处里的**前端那一处不需要改**：`fmtAmount` 把入参按元解读，与规范层 CNY 一致。
+       界面这两个格子恒空是另一条缺陷，另立 **DATA-07**。
+    3. **turnover 是千元，实测而非引用文档**：真库 392.6 万行全量
+       `turnover / (volume_股 × close)` 中位 **0.0010127**、p01 0.000967、p99 0.001955、
+       max 0.003535 ⇒ 库里是「元」的千分之一。单行核对：600519.SH 2026-09-24
+       close=1237、volume=3123935 股、turnover=3867310.92（千元）→ ×1000 = 38.67 亿元
+       ≈ vwap × 股数。
+  - **换算点（⑤ 第二件）**：`pkg/data/tushare.go` 的 `cnyPerAmountUnit`（在
+    `normalizeDailyOHLCV` 里，与 052 的 `sharesPerLot` 同一行族）。全仓生产写点
+    **只此一处**（grep `Turnover:` 实测：另一处是 `pkg/marketdata/aggregate.go` 的
+    期间合计求和，单位无关）。**不取整**，与 volume 相反并有理由：源侧带 3–4 位小数
+    是元以下的真实精度（真库 `max|x−round(x)| = 0.5`），而下游没有整数纪律 ——
+    NT 导出的 SELECT 根本不带 turnover（`nt-sidecar/tools/export_bars.py:63`）。
+  - **落库后抽样比对（⑤ 第三件）**：`ohlcv_daily_qfq` 3,926,510 行 与备份
+    `ohlcv_daily_qfq_bak_054` 3,926,510 行逐行比对 **0 mismatch**
+    （`abs(turnover − bak×1000) > 1e-6` 计数为 0）；千元态残留（比值 < 0.01）**0 行**；
+    比值中位数从 0.0010127 变到 **1.0127**。派生侧无陈旧值：`factor_cache` 0 行，
+    公式型因子注册表里没有引用 `turnover` 的公式（实测 grep；同名的
+    `inventory_turnover_delta` 是财报比值，与行情单位无关）。
+  - **迁移执行方式的意外（如实记录，不当没发生）**：跑 `go test ./pkg/data/...` 时，
+    `pkg/data/tushare_adjustment_integration_test.go` 经 `NewPostgresStore → migrate()`
+    把 054 **真的作用在共享开发库上**（2026-10-15 约 11:08，无人授权、无提示）。
+    结果与预期一致且可回滚（÷1000 + 删 054 哨兵行；备份整列在 `…_bak_054`）。
+    **留下的实际风险不是数据坏了，而是「容器还是旧代码、库已是元」**：旧二进制此后
+    任何一次真实日线同步都会写入千元 ⇒ 混合表，而哨兵已置位、重启不会补跑。
+    实测 `sync_schedules` 里 `is_active` 为 **0 条**（今天没有自动同步在跑），
+    最新交易日仍是 2026-09-24。处置：部署 `task/data-05-units` 后再触发同步；
+    在此之前不要跑日线全量同步。根因（测试改共享库）另立 **DATA-09**。
+  - **⑤ 未收口的两条（不假装绿）**：
+    · `cmd/dualrun -gate` **没跑** —— NT sidecar `:9100` 未起（实测
+      `dial tcp 127.0.0.1:9100 … refused`），起它要动共享栈，留给主任决定。
+      口径上 turnover 不在 NT 导出的 SELECT 里、两内核读的是同一份 volume，
+      本次改动按理不影响对拍 —— 但这是推理，不是跑绿的证据。
+    · 「每个源都给实测」对 mootdx / eastmoney 是**不适用**（源未接线），不是失败。
+  - **破坏验证（四腿，均「改坏→红→还原→绿」，还原后 sha256 与基线逐字节一致）**：
+    ① 去掉 `× cnyPerAmountUnit` ⇒ `TestNormalizeDailyOHLCV_*` 三条断言红
+    （含自证的「仍是源侧原值」反证腿）；② 去掉哨兵条件 ⇒
+    `TestMigration054_SentinelBlocksStrayLotsRows` 红（10000 → 1e7 的静默放大重现）；
+    ③ 把准入阈值 0.01 调大到 1.0 ⇒ `TestMigration054_GoalpostsThreshold` 红
+    （贴着实测元态下界的种子被误换算）—— 按「护栏输入别从阈值推导」，
+    跑的是调大阈值而不是删守卫；④ 掏空单位守卫的条件 ⇒ 替身用例红。
+    过程中本单自己的脚手架被抓住一次：元态种子首版误填 `turnover=322.6`
+    （比值其实是 0.0003226，仍是千元态形状），改坏腿当场红，改完才对着实测边界算。
+
+### DATA-07 · 仪表盘「市场概览」的成交量/成交额恒显示 '-'（没有数据通道 + 指数 bar 不在日线表） ⬜ 待做
+
+- **① 目标**：`/api/market/index` 真的把 `volume`/`amount` 给到前端并带上指数 bar，或者删掉这两格 —— 界面上不再存在恒为 '-' 的指标。
+- **② 上下文**（2026-10-15 DATA-05 实测，两层独立缺失）：ui 仓 `web/src/components/dashboard/MarketMetrics.vue:31-32` 显示「成交量/成交额」两格，取 `metrics.volume` / `metrics.amount`；数据来自 `Dashboard.vue:88 getMarketIndex()` → 本仓 `cmd/data/handlers_stocks.go:125 marketIndexHandler`，其响应结构 `indexData`（:130-136）**只有** code/name/close/change/pct ⇒ 两个字段从来不在响应里，`fmtAmount(undefined)`（ui `web/src/utils/format.ts:40`）走 falsy 分支恒 '-'。第二层：该 handler 查的 `000300.SH / 000001.SH / 399006.SZ` 在 `ohlcv_daily_qfq` 里 **0 行**（实测 count=0，表内 5671 个 symbol 不含指数），实测 curl `:8085/api/market/index` 返回 `{"indices":[]}`。
+- **③ 要求**：先定「指数日线 bar 从哪来」（tushare `index_daily` 还是别的源），二选一并写明理由 ——(a1) 补指数同步 + 响应带 `volume`/`amount`（单位按规范层：股 / CNY）；(a2) 删掉这两格，界面与数据结构一致。
+- **④ 约束与非目标**：不动单位口径（DATA-05 已定，别在这里重开）；不顺手修 DATA-03 的吞错家族；不新增数据源依赖（需要新源先报主任）。
+- **⑤ 验收**：一条行为测试钉住「响应的 volume/amount 与库里逐字段相等」；接口或浏览器实测显示真值（或删格后界面一致）；`go build ./...` + `go vet` + `gofmt -l` 干净。
+- **⑥ 边界**：只做「界面有指标但没有数据通道」这一条。
+
+### DATA-08 · 多源 fallback 链零生产调用方（Registry 只服务观测端点） ⬜ 待做
+
+- **① 目标**：`Registry.Fetch` 在生产里有真实调用方并落到某张表，或者把这条链明确停用（配置 + 注释 + SPEC 一致标注「未启用」）。
+- **② 上下文**（2026-10-15 DATA-05 实测，逐行 grep）：`ETLPipeline.Process`（`pkg/data/source/etl.go:75`）是 `Registry.Fetch`（`pkg/data/source/registry.go:150`）的唯一生产调用方，而 `ETLPipeline` 在 cmd/pkg 非测试代码里**零调用方**；Registry 只被 `cmd/data/registry_handlers.go` 的 status/health/chains 观测端点使用。⇒ `ohlcv_daily: [tushare, mootdx, eastmoney]` 今天不会真的降级取数。同族先例：SYNC-01（「函数写得对但零调用方」，编译期与行为测试都看不见）。
+- **③ 要求**：给出接线计划（哪条工单在什么路径上调 ETLPipeline、落到哪张表、与 sync_jobs 队列的关系），或明确停用并删掉链配置与相应注释。
+- **④ 约束与非目标**：单位口径已在 DATA-05 收口，本单不重开；**不在本单顺手接 mootdx SDK**（新依赖需主任批准）；不改 Registry 的降级语义本身。
+- **⑤ 验收**：停用路线 —— `grep -rn "SetChain" cmd/data/registry_init.go` 与 SPEC 的链表一致且注明未启用；接线路线 —— 有一条从 HTTP/作业层真的走一次的测试（不是直接调 Process 的行为测试）。
+- **⑥ 边界**：只判断「链是否可达」；链上各源的可靠性（ODR-011 风险表）另议。
+
+### DATA-09 · 库侧测试会跑 migrate()，把 DML 迁移直接作用在共享开发库上 ⬜ 待做
+
+- **① 目标**：跑测试不再静默改共享开发库的数据；应用迁移是一次**显式**动作（启动/部署路径），而不是测试副产物。
+- **② 上下文**（2026-10-15 DATA-05 当场撞上）：`NewPostgresStore` 在 `pkg/storage/postgres.go:43` 直接调 `store.migrate(ctx)`，而直连 `localhost:5432/quant_trading`（**开发库本身**）的测试不少 —— `pkg/storage/postgres_test.go:16 testStore`、`pkg/data/tushare_adjustment_integration_test.go`、`cmd/data/handlers_ingest_test.go`、`cmd/data/handlers_stocks_test.go`。后果实测：`go test ./pkg/data/...` 一条命令就把 054 的整表 ×1000 真的跑了，无授权无提示；而 052/054 这类 DML 迁移**不可重放**（哨兵置位后重启不补跑），混合表只能靠备份回滚。同族：`pkg/storage/factor_registration_test.go:24-25` 与 `:32` 直接 `DELETE FROM factor_registrations` —— 并发会话共用同一个库时会互删数据（本仓当前确实有多个 worktree 会话在跑）。
+- **③ 要求**：二选一并写明理由 ——(a1) 库侧测试统一改指一次性容器/独立 schema（`pkg/storage/integration_test.go` 已有 dockertest 先例，把它做成唯一入口）；(a2) 生产入口保留 `migrate()`，但测试不得经 `NewPostgresStore` 走迁移（提供一个「连接不迁移」的构造入口，且该入口在生产侧零调用方，防它被拿去绕门禁）。
+- **④ 约束与非目标**：不删既有断言、不把真库测试改成 mock（本仓纪律要求真库证据）；不改 DML 迁移自身的守卫形状（052/054 的双守卫已验证，不是本单对象）；不在本单回滚 054 已经发生的写入。
+- **⑤ 验收**：在有开发库的机器上跑 `go test ./pkg/data/... ./pkg/storage/...`，前后对 `data_migrations` 行集与 `ohlcv_daily_qfq` 的计数 + 若干列值做比对，必须**逐字节一致**；一条负例：新增一个假 DML 迁移不会被测试执行（改坏 → 红 → 还原 → 绿）。
+- **⑥ 边界**：只治「测试改共享库」；真库备份/恢复流程与并发会话的数据隔离另议。
 
 ### DATA-06 · 指数成分股同步：落库失败只 Warn，端点照样回 "synced successfully" ⬜ 待做
 
