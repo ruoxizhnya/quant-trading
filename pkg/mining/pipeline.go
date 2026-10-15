@@ -123,6 +123,9 @@ func (p *Pipeline) Run(ctx context.Context) ([]Record, error) {
 	if p.book == nil {
 		return nil, fmt.Errorf("mining: registration book is required")
 	}
+	if p.evaluator == nil {
+		return nil, fmt.Errorf("mining: evaluator is required (governance reads IC on the snapshot)")
+	}
 	if strings.TrimSpace(p.registrar) == "" {
 		return nil, fmt.Errorf("mining: registrar is required (four-required: registrar)")
 	}

@@ -74,7 +74,7 @@ var unwiredPackages = map[string]string{
 	"github.com/ruoxizhnya/quant-trading/pkg/decimal":           "待采用：定点小数工具库，portfolio / 回测仍用 float64，迁移未排期（AUD-46 裁决保留，与另外 11 个能力包同型）",
 	"github.com/ruoxizhnya/quant-trading/pkg/backtest/auction":  "P1-6 集合竞价撮合（9:15-9:25 / 14:57-15:00），待回测引擎接线",
 	"github.com/ruoxizhnya/quant-trading/pkg/alert/systemalert": "系统级运维告警（数据同步停滞 / 回测失败 / 策略退化），待运维链路接线",
-	"github.com/ruoxizhnya/quant-trading/pkg/sandbox/wasm": "P2-27 WASM 沙箱（ADR-007 Phase 3 / ADR-019），待策略插件执行接线",
+	"github.com/ruoxizhnya/quant-trading/pkg/sandbox/wasm":      "P2-27 WASM 沙箱（ADR-007 Phase 3 / ADR-019），待策略插件执行接线",
 	"github.com/ruoxizhnya/quant-trading/pkg/live/margin":       "融资融券账户管理 / 可融券判定，待实盘链路接线",
 	"github.com/ruoxizhnya/quant-trading/pkg/strategy/options":  "期权策略（Black-Scholes / 二叉树），待策略层接线",
 	"github.com/ruoxizhnya/quant-trading/pkg/data/source/hkex":  "港股数据源，待数据同步接线",
@@ -82,9 +82,13 @@ var unwiredPackages = map[string]string{
 	"github.com/ruoxizhnya/quant-trading/pkg/testutil":          "预留的 DB 集成测试底座（AUD-43 裁决：保留，不删；归档审查报告曾把它列为「有 DB 环境下可选集成验证」的设想）",
 	// AI 拆仓阶段 2：消费者随 pkg/ai 迁往 quant-trading-agent 仓，core 侧
 	// 不再有导入者。包本体留在 core（通用基础设施），agent 经 module 依赖使用。
-	"github.com/ruoxizhnya/quant-trading/pkg/sandbox/runner":     "copilot build 沙箱 runner；消费者（cmd/ai 的 adapter）已随 AI 拆仓迁入 agent 仓",
+	"github.com/ruoxizhnya/quant-trading/pkg/sandbox/runner":      "copilot build 沙箱 runner；消费者（cmd/ai 的 adapter）已随 AI 拆仓迁入 agent 仓",
 	"github.com/ruoxizhnya/quant-trading/pkg/sandbox/staticcheck": "LLM 生成代码的 staticcheck 校验；消费者已随 AI 拆仓迁入 agent 仓",
-	"github.com/ruoxizhnya/quant-trading/pkg/strategy/monitor":   "策略健康监测（滚动指标 + 漂移）；消费者（tools 的 strategy_health 工具）已随 AI 拆仓迁入 agent 仓",
+	"github.com/ruoxizhnya/quant-trading/pkg/strategy/monitor":    "策略健康监测（滚动指标 + 漂移）；消费者（tools 的 strategy_health 工具）已随 AI 拆仓迁入 agent 仓",
+	// D8（2026-10-15）AI 因子挖掘流水线 + 治理层落地 pkg/mining：零件先写、
+	// 后接线（P2-9wire 同款）。真实 Proposer/Evaluator（LLM/MCTS 挖掘本体）
+	// 与因子应用策略是另立的工单，接线时由挖掘编排入口消费本包。
+	"github.com/ruoxizhnya/quant-trading/pkg/mining": "D8 挖掘流水线与治理层；待挖掘编排入口接线（真实 Proposer/Evaluator 属另立的挖掘算法工单）",
 }
 
 // retiredPackages maps an import path that was deliberately deleted to the

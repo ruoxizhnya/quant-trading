@@ -72,6 +72,8 @@ func TestDetectOverfit_FailClosedOnBadInput(t *testing.T) {
 		{"zero trials", OverfitInput{IC: 0.3, NumPeriods: 100, NumTrials: 0}},
 		{"NaN IC", OverfitInput{IC: math.NaN(), NumPeriods: 100, NumTrials: 1}},
 		{"Inf IC", OverfitInput{IC: math.Inf(1), NumPeriods: 100, NumTrials: 1}},
+		{"negative failed trials", OverfitInput{IC: 0.3, NumPeriods: 100, NumTrials: 10, FailedTrials: -1}},
+		{"failed trials exceed total", OverfitInput{IC: 0.3, NumPeriods: 100, NumTrials: 10, FailedTrials: 11}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

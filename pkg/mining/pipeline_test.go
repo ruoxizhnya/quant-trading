@@ -144,8 +144,10 @@ func TestPipeline_EndToEnd_MineTestUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("use-one-step: evaluate on snapshot failed: %v", err)
 	}
-	if len(got["AAA"]) != 40 {
-		t.Fatalf("use-one-step: expected 40-point series, got %d", len(got["AAA"]))
+	// 求值窗口 = 定义声明的 Lookback（与生产 provider 同款窗口语义）：快照
+	// 有 40 根、Lookback=20，故取最近 20 根。
+	if len(got["AAA"]) != def.Lookback {
+		t.Fatalf("use-one-step: expected the Lookback window (%d points), got %d", def.Lookback, len(got["AAA"]))
 	}
 }
 
@@ -249,6 +251,31 @@ func TestSnapshot_MissingFieldIsNaN(t *testing.T) {
 	}
 	if len(vals) != 1 || !isNaN(vals[0]) {
 		t.Fatalf("missing field must read as NaN, got %v", vals)
+	}
+}
+
+// 命根子②的窗口面：快照 provider 必须与生产 provider 同款窗口语义
+// （lookback>0 时只取最近 lookback 根）——否则沙箱会在比生产**更长**的窗口上
+// 判定「公式能跑」，窗口取窄的定义在沙箱放行、到生产侧变形。
+func TestSnapshot_ProviderHonorsLookback(t *testing.T) {
+	pv := NewSnapshot(map[string]map[string][]float64{
+		"close": {"AAA": {1, 2, 3, 4, 5}},
+	}).provider([]string{"close"})
+
+	got, err := pv.GetField("AAA", "close", 2)
+	if err != nil {
+		t.Fatalf("GetField: %v", err)
+	}
+	if len(got) != 2 || got[0] != 4 || got[1] != 5 {
+		t.Fatalf("lookback>0 must return the most recent bars, got %v", got)
+	}
+
+	all, err := pv.GetField("AAA", "close", 0)
+	if err != nil {
+		t.Fatalf("GetField: %v", err)
+	}
+	if len(all) != 5 {
+		t.Fatalf("lookback<=0 must return the whole series, got %v", all)
 	}
 }
 

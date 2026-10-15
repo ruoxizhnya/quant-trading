@@ -44,16 +44,18 @@ type OverfitResult struct {
 //	raw = 2·(1 − Φ(z))                 —— 单次检验的 p 值
 //	adj = 1 − (1 − raw)^NumTrials      —— 族系误差（试 N 次至少中一次的概率）
 //
-// 校正后 p ≥ alpha ⇒ Overfit=true。输入不合法（期数/尝试次数非正、IC NaN）
-// 同样判 Overfit=true 并附理由——**说不清就不放行**，与验证器链「缺任何
-// 一个就给不出诚实的概率」同款 fail-closed 立场。
+// 校正后 p ≥ alpha ⇒ Overfit=true。输入不合法（期数/尝试次数非正、失败次数
+// 越界、IC NaN）同样判 Overfit=true 并附理由——**说不清就不放行**，与验证器链
+// 「缺任何一个就给不出诚实的概率」同款 fail-closed 立场。
 func DetectOverfit(in OverfitInput) OverfitResult {
-	if in.NumPeriods <= 0 || in.NumTrials <= 0 || math.IsNaN(in.IC) || math.IsInf(in.IC, 0) {
+	if in.NumPeriods <= 0 || in.NumTrials <= 0 ||
+		in.FailedTrials < 0 || in.FailedTrials > in.NumTrials ||
+		math.IsNaN(in.IC) || math.IsInf(in.IC, 0) {
 		return OverfitResult{
 			Overfit: true,
 			Reasons: []string{fmt.Sprintf(
-				"过拟合检测无法进行：观测期数=%d、尝试次数=%d、IC=%.4f 不构成可评估输入——缺任何一项都不放行",
-				in.NumPeriods, in.NumTrials, in.IC)},
+				"过拟合检测无法进行：观测期数=%d、尝试次数=%d、失败次数=%d、IC=%.4f 不构成可评估输入——缺任何一项都不放行",
+				in.NumPeriods, in.NumTrials, in.FailedTrials, in.IC)},
 		}
 	}
 

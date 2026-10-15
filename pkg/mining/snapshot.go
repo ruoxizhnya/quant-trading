@@ -62,7 +62,7 @@ func (p *snapshotProvider) GetSymbols() []string { return p.symbols }
 
 func (p *snapshotProvider) Fields() []string { return p.fields }
 
-func (p *snapshotProvider) GetField(symbol, field string, _ int) ([]float64, error) {
+func (p *snapshotProvider) GetField(symbol, field string, lookback int) ([]float64, error) {
 	bySymbol, ok := p.snap.Fields[field]
 	if !ok {
 		// 快照没装这个字段：对该 symbol 一律 NaN。这不是 error——混源
@@ -72,6 +72,12 @@ func (p *snapshotProvider) GetField(symbol, field string, _ int) ([]float64, err
 	series, ok := bySymbol[symbol]
 	if !ok {
 		return []float64{math.NaN()}, nil
+	}
+	// 窗口语义与生产 provider 一致（OHLCVDataProvider.GetField：lookback>0
+	// 时只取最近 lookback 根）。沙箱求值若无视 lookback，就会在比生产**更长**
+	// 的窗口上判「公式能跑」，于是窗口取窄的定义在沙箱放行、到生产侧变形。
+	if lookback > 0 && len(series) > lookback {
+		return series[len(series)-lookback:], nil
 	}
 	return series, nil
 }
