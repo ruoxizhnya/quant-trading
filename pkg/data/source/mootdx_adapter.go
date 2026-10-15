@@ -145,6 +145,18 @@ func (a *MootdxAdapter) SupportedTypes() []string {
 }
 
 // Schema implements DataSourceAdapter.Schema.
+//
+// volume / amount 的 Unit 在这里**故意留空**（"" = 未声明，见 SchemaField.Unit 的
+// 取值口径）：fetchBars / fetchRealtime 把 transport 的原值直接塞进 DataItem，
+// 同步边界没有任何换算点，而 TDX 惯例是「手」—— 项目内**没有**实测依据
+// （mootdx 在 cmd/data/registry_init.go 里以 nil transport 注册，Enabled() 恒为
+// false，DATA-05 2026-10-15 核对）。声明成 "share" 就是 DATA-04 那个根因的复发
+// 形状：契约写着股、实现给的是手，差 100 倍且无人报错。
+//
+// 接线真实 transport 时的顺序是固定的：先取一次真实响应与同 symbol 的日线对比
+// 实测单位 → 在同步边界换算到规范层（股 / CNY，docs/SPEC.md「规范层 Schema」）→
+// 才把这里的 Unit 补上。cmd/data 的 TestProductionRegistryOHLCUnitsDeclared
+// 钉的就是「已启用的行情源必须声明单位」，跳过实测会当场红。
 func (a *MootdxAdapter) Schema(dataType string) (DataSchema, error) {
 	switch dataType {
 	case DataTypeRealtime:
@@ -156,8 +168,8 @@ func (a *MootdxAdapter) Schema(dataType string) (DataSchema, error) {
 				{Name: "high", Type: "float", Required: false, Unit: "yuan"},
 				{Name: "low", Type: "float", Required: false, Unit: "yuan"},
 				{Name: "last_close", Type: "float", Required: false, Unit: "yuan"},
-				{Name: "volume", Type: "int", Required: false, Unit: "share"},
-				{Name: "amount", Type: "float", Required: false, Unit: "yuan"},
+				{Name: "volume", Type: "int", Required: false},
+				{Name: "amount", Type: "float", Required: false},
 				{Name: "bid1", Type: "float", Required: false, Unit: "yuan"},
 				{Name: "ask1", Type: "float", Required: false, Unit: "yuan"},
 				{Name: "bid1_vol", Type: "int", Required: false},
@@ -172,8 +184,8 @@ func (a *MootdxAdapter) Schema(dataType string) (DataSchema, error) {
 				{Name: "high", Type: "float", Required: true, Unit: "yuan"},
 				{Name: "low", Type: "float", Required: true, Unit: "yuan"},
 				{Name: "close", Type: "float", Required: true, Unit: "yuan"},
-				{Name: "volume", Type: "float", Required: true, Unit: "share"},
-				{Name: "amount", Type: "float", Required: false, Unit: "yuan"},
+				{Name: "volume", Type: "float", Required: true},
+				{Name: "amount", Type: "float", Required: false},
 			},
 		}, nil
 	default:

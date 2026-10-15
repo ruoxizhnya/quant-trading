@@ -163,6 +163,12 @@ func buildDataSourceRegistry(tushareClient *data.TushareClient, logger zerolog.L
 //   - Daily OHLCV: tushare (authoritative, with full history) is
 //     primary. mootdx is the secondary for symbols tushare cannot
 //     serve. eastmoney is the tertiary.
+//     ⚠️ 这条设计意图**目前没有落地**（DATA-05 2026-10-15 核对）：mootdx 在
+//     下面以 nil transport 注册 ⇒ Enabled()=false 被 Registry.Fetch 跳过；
+//     eastmoney 只声明 capital_flow，Fetch(ohlcv_daily) 直接 ErrUnsupported。
+//     所以日线链今天是「tushare 一条腿 + 两条不可达的备胎」，而不是三级降级。
+//     把任一条腿接上前，必须先实测它的 volume/amount 单位并在同步边界换算到
+//     规范层（股 / CNY）—— 见 cmd/data/ohlc_units_guard_test.go 与 docs/TASKS.md DATA-05。
 //
 //   - Realtime quote: mootdx is primary (5-level depth, low latency).
 //     Eastmoney push2 is the fallback when the SDK is unavailable.
