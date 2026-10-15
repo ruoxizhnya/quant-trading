@@ -183,6 +183,21 @@ func TestSpecDriftFactorRegistration(t *testing.T) {
 			"没登记——登记 schema 悄悄长了，把字段补进 SPEC 表：%v", goOnly)
 }
 
+// TestSpecDriftFactorMiningRecord 挖掘留痕骨架双向比对（D8）：SPEC.md 锚点
+// factor_mining_record 与 domain.FactorMiningRecord 的 (字段名, json tag)
+// 必须逐字一致——留痕 schema 是治理审计的契约（来源/哈希/验证记录靠这些列
+// 可追溯），漂移即「凭什么进库」这条链断裂。
+func TestSpecDriftFactorMiningRecord(t *testing.T) {
+	spec := parseFactorDefSpecs(t, "factor_mining_record")
+	specOnly, goOnly := diffFieldSpecs(spec, goFieldSpecs(FactorMiningRecord{}))
+	assert.Empty(t, specOnly,
+		"domain.FactorMiningRecord：SPEC.md 锚点 factor_mining_record 里的这些字段在 Go 类型中"+
+			"不存在（或 json tag 不一致）——文档在描述不存在的留痕字段：%v", specOnly)
+	assert.Empty(t, goOnly,
+		"domain.FactorMiningRecord：Go 类型有这些字段，但 SPEC.md 锚点 factor_mining_record "+
+			"没登记——留痕 schema 悄悄长了，把字段补进 SPEC 表：%v", goOnly)
+}
+
 func TestSpecDriftOHLCV(t *testing.T) {
 	assertNoDrift(t, "market.OHLCV", "ohlcv", market.OHLCV{})
 }

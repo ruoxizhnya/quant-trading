@@ -1024,6 +1024,111 @@ type IntradayAware interface {
 
 ---
 
+## AI 因子挖掘流水线 + 治理层（D8）
+
+> ADR-031 蓝图 §5.5 / §6 三期③。**产物是公式文本不是代码**——LLM/MCTS
+> 只负责提出公式假设，公式带哈希入库、策略即用，全程零代码改动（「即挖即测」）。
+> 挖掘算法本体不在流水线内：`Proposer`（提候选）/ `Evaluator`（在快照上测 IC）
+> 是两个接口，LLM/MCTS/基因池是实现细节，躲在其后。
+
+### 闭环流水线
+
+```
+Candidate（公式文本 + 来源留痕）
+  → Candidate.Definition()（内核固定 formula，InputFields 由公式 identifier 派生）
+  → 沙箱验证（解析 + L1 闸门 + 字段词表 + Validity + 有界求值）→ Attestation（绑定版本哈希）
+  → 治理层（过拟合检测 + 样本外验证）
+  → D4 登记（四样齐全，凭证必须绑定该版本）
+  → 策略按名引用（Pipeline.Effective / EvaluateOnSnapshot）
+```
+
+单条候选任一环节不过**只拒收该条**并记录 `RejectReason`，不中断整轮——「挖一批、
+坏的挡在外面、好的进库」是流水线的正常形态。
+
+### 三条命根子（可复现 / 防偷看 / 可比）
+
+| 命根子 | 结构性落法 | 钉住它的测试 |
+|---|---|---|
+| ① 可复现 | 版本哈希由定义内容派生（canonical JSON 的 SHA-256，同 D3）——改一个字符即变；同一挖掘输入重跑哈希一致 | `TestCandidate_VersionHash_LocksContent` / `TestPipeline_Run_Reproducible` |
+| ② 防偷看 | 沙箱与治理求值只读**预加载快照**（`Snapshot`，只读适配器，无运行时查询入口）；快照缺字段一律 NaN（缺失≠0） | `TestSnapshot_MissingFieldIsNaN` |
+| ③ 可比 | 同一公式 + 同一快照两次求值逐点相等（NaN 感知） | `TestEvaluateOnSnapshot_BilateralComparability` |
+
+沙箱的隔离边界就是表达式 DSL 本身（无 IO、无循环、算子白名单）——不复用
+`pkg/sandbox/runner`（那是跑 Go **代码**的进程隔离，公式不编译不执行任意代码）。
+安全约束不放宽：闸门一条不少、`Lookback ≤ DefaultMaxEvalBars(4096)`、求值 panic 兜底。
+挖掘产物是「已有因子名的新公式版本」（改公式=新哈希），**不动态新增因子名**
+——名册仍是冻结协议（`ParseFactorType`）。
+
+### 治理层三件
+
+**① 过拟合检测**（`DetectOverfit`，多重检验校正）：
+
+```
+z   = |IC| × sqrt(期数)         该 IC 的 t 近似（H0: 真实 IC = 0）
+raw = 2·(1 − Φ(z))             单次检验的 p 值
+adj = 1 − (1 − raw)^NumTrials  族系误差（试 N 次至少中一次的概率）
+```
+
+`adj ≥ alpha(0.05)` ⇒ 判过拟合（拒收）。**`NumTrials` 必须含失败**——只统计成功率
+等于把选择偏差藏起来（先例 `pkg/ai/validation` 的 `StatisticalInput.NumTrials` 教训）；
+失败占比过半额外附因。输入不合法（期数/尝试次数非正、IC NaN/Inf）→ fail-closed 判过拟合
+（「说不清就不放行」）。正例：弱 IC 试 500 次被标记；反例：强信号 IC=0.30×252 期×只试 1 次不误伤。
+
+**② 样本外验证**（`ValidateOutOfSample`）：样本内外 IC **同号**且幅度保留比
+`|Out|/|In| ≥ 0.5`（默认）才通过。fail-closed：样本内 IC 为 0/NaN 或样本外缺失（NaN）
+一律判不通过——「没测」不等于「通过」。
+
+**③ 审计留痕**（`FactorMiningRecord`，以 `(factor_name, version_hash)` 为键）：
+
+<!-- drift:factor_mining_record -->
+| 字段 | JSON | 含义 |
+|---|---|---|
+| FactorName | factor_name | 因子名（须在冻结名册内） |
+| VersionHash | version_hash | 该定义版本的指纹（sha-256 hex，64 字符） |
+| SourceKind | source_kind | 来源分类：ai_hypothesis / literature / supply_chain / ad_hoc（「有机制支撑」与「试出来的」可信度不同一个量级） |
+| Generator | generator | 生成器标识（审计「谁生成」）。非空（纯空白不算） |
+| Generation | generation | 第几代（挖掘迭代代数） |
+| Rationale | rationale | 生成依据（可空） |
+| NumTrials | num_trials | 本轮共试次数（**含失败**，过拟合校正的输入）。为正 |
+| FailedTrials | failed_trials | 其中失败次数（≥0 且 ≤ NumTrials） |
+| SandboxHash | sandbox_hash | 沙箱凭证哈希（= 该定义版本哈希，绑定内容）。**Admitted 时必须 == VersionHash** |
+| Admitted | admitted | 是否登记入库 |
+| RejectReason | reject_reason | 拒收原因。**未入库时必须非空** |
+| OverfitRawP | overfit_raw_p | 过拟合检测原始 p 值 |
+| OverfitAdjP | overfit_adj_p | 多重检验校正后 p 值 |
+| OverfitFlag | overfit_flag | 是否被判过拟合 |
+| OOSInSample | oos_in_sample | 样本内 IC |
+| OOSOutSample | oos_out_sample | 样本外 IC |
+| OOSPass | oos_pass | 样本外是否通过 |
+| CreatedAt | created_at | 留痕创建时刻 |
+<!-- /drift:factor_mining_record -->
+
+校验在**两道关卡**共同守住（`FactorMiningRecord.Validate` + Migration 055 的 DB CHECK）：
+生成器非空 / 来源枚举 / 尝试次数自洽 / **admitted ⇒ sandbox_hash==version_hash** /
+被拒必须写明原因——连「绕过写入路径直接 INSERT 缺样」也被库拒绝（fail-closed）。
+
+### 破坏验证（D8 ⑤3，实跑闭环：改坏→红→还原→绿→`git diff` 零残留）
+
+1. 禁用 `Pipeline.admit` 的「凭证非空」闸门（跳过沙箱直接入库）→
+   `TestPipeline_Admit_RejectsWhenSandboxNotRun` 红（`ErrSandboxNotRun`）。
+2. `domain.FactorDefinition.VersionHash` 改为内容无关（去掉哈希锁版本）→
+   `TestCandidate_VersionHash_LocksContent` 红。
+3. 库侧兜底：`FactorMiningRecord{Admitted:true, SandboxHash:""}` / 凭证不绑定版本
+   → `TestFactorMiningRecord_AdmittedRequiresSandboxAttestation` 红。
+
+### 实现指针
+
+- 流水线 / 候选 / 来源留痕：`pkg/mining/pipeline.go`、`pkg/mining/mining.go`
+- 沙箱与只读求值：`pkg/mining/sandbox.go`（`Attestation`、`EvaluateOnSnapshot`）
+- 只读预加载快照：`pkg/mining/snapshot.go`
+- 治理层两件：`pkg/mining/governance.go`
+- 留痕类型与校验：`pkg/domain/mining.go`
+- DB 持久化：`pkg/storage/mining.go`
+- DDL：`pkg/storage/postgres.go` Migration 055（`factor_mining_records`）+
+  `docs/migrations/055_add_factor_mining_records.sql`
+
+---
+
 ## Strategy Interface
 
 > **Canonical definition** — matches [pkg/strategy/interfaces.go](../pkg/strategy/interfaces.go)
