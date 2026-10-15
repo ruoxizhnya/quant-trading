@@ -257,6 +257,12 @@ func TestRegistrationBook_ConcurrentRegisterResolveRollback(t *testing.T) {
 			}
 		}()
 	}
+	// 读 goroutine 靠 t.Cleanup 收束：即便中途 t.Fatal 提前退出测试，也会
+	// close + Wait 停下它们——不让忙等的读 goroutine 拖慢同批其它测试。
+	t.Cleanup(func() {
+		close(stopRead)
+		readers.Wait()
+	})
 
 	// ── 阶段 1：并发登记两版（各 workers 个 goroutine 抢登记同一版）──
 	start := make(chan struct{})
@@ -325,8 +331,6 @@ func TestRegistrationBook_ConcurrentRegisterResolveRollback(t *testing.T) {
 	}
 	close(start2)
 	roll.Wait()
-	close(stopRead)
-	readers.Wait()
 
 	if okR != 1 || alreadyR != workers-1 {
 		t.Fatalf("v2 并发回滚应恰好 1 成功 + %d 已回滚，got ok=%d already=%d", workers-1, okR, alreadyR)
