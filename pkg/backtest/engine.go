@@ -178,6 +178,25 @@ type Engine struct {
 	// 流式双模式，行为与旧 getSignalsFromLocalStrategy 逐字节一致）。
 	// 经 WithSignalProvider 注入远程/自定义实现（阶段 2 起）。
 	signalProvider strategy.SignalProvider
+
+	// router 是规范层透明路由（D1 产物，pkg/marketdata）。
+	//
+	// D6 日内快照预加载的唯一取数通道：warmIntradayIfNeeded 在回测
+	// 启动前经它按频率声明取 1m bar；回测期间策略只读快照，运行时
+	// 禁止直接查 provider（红线，结构执法见 intraday.go 与
+	// internal/repoguard 的 import 隔离护栏）。nil = 未接，
+	// IntradayAware 策略用到日内特征时明确失败（不静默当 0）。
+	router *marketdata.Router
+
+	// L1 日内分钟快照（D6）：symbol → 按 ts 升序的 1m bar
+	// （规范层类型，Frequency/VisibleAt 已由 Router 填好）。
+	//
+	// 回测启动前填充（warmIntradayIfNeeded 经 Router，或
+	// SetIntradaySnapshot 直接注入），回测期间只读；nil = 没有这份
+	// 数据，日内特征 provider 恒不可得（缺失≠0，不是 0）。
+	//
+	// 受 e.mu 保护：Engine 实例是共享的，多个回测可以并发跑。
+	intraday map[string][]domain.OHLCV
 }
 
 // BacktestState is defined in state.go (P1-20) with internal locking
@@ -749,6 +768,13 @@ func (e *Engine) runBacktestInternal(ctx context.Context, state *BacktestState) 
 		logger.Warn().Err(err).Msg("Fundamentals warm-up failed — 用了 pe/pb/roe 的表达式会明确失败（不会静默当 0）")
 	}
 
+	// D6：只有声明了要日内特征的策略才会真的去预热（同财报范式）。
+	// 快照在启动前一次取完全区间；回测期间策略只读快照 —— 运行时
+	// 查询 provider 是红线（蓝图 §4.3）。
+	if err := e.warmIntradayIfNeeded(ctx, params.StrategyName, params.StockPool, params.StartDate, params.EndDate); err != nil {
+		logger.Warn().Err(err).Msg("Intraday snapshot warm-up failed — 日内特征策略会明确失败（不会静默当 0）")
+	}
+
 	// P2-4：上市日历。拿不到就放弃按日在市过滤，并由偏差维如实记上。
 	e.loadListingCalendar(ctx)
 
@@ -1297,13 +1323,16 @@ func (e *Engine) getSignals(ctx context.Context, strategyName string, stockPool 
 		portfolio = tracker.GetPortfolio(extractLatestPrices(marketData))
 	}
 
-	// 未注入时用默认 LocalSignalProvider（现绑 factor/fundamentals method
-	// value，注入节奏同旧实现的每交易日注入）。
+	// 未注入时用默认 LocalSignalProvider（现绑 factor/fundamentals/intraday
+	// method value，注入节奏同旧实现的每交易日注入）。
 	sigProvider := e.signalProvider
 	if sigProvider == nil {
 		p := strategy.NewLocalSignalProvider(nil)
 		p.SetFactorReader(e.GetFactorZScore)
 		p.SetFundamentalsProvider(e.fundamentalsSnapshot)
+		// D6：绑定「当日」日内特征供给（快照 + 回放日边界）。策略未实现
+		// IntradayAware 时注入被断言挡掉，零成本零行为变化。
+		p.SetIntradayProvider(e.intradayFeatureProvider(date))
 		sigProvider = p
 	}
 

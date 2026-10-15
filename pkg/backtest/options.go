@@ -123,6 +123,16 @@ func WithSignalProvider(p strategy.SignalProvider) EngineOption {
 	}
 }
 
+// WithRouter 注入规范层透明路由（D1 产物）—— D6 日内分钟快照预加载的
+// 唯一取数通道（回测启动前经 Router.Bars 取 1m；运行时禁止策略直查
+// provider，红线）。传 nil = 不预热，IntradayAware 策略用到日内特征
+// 时明确失败。等价于 SetRouter。
+func WithRouter(r *marketdata.Router) EngineOption {
+	return func(e *Engine) {
+		e.SetRouter(r)
+	}
+}
+
 // WithStateStore 注入自定义 StateStore（P1-18, ADR-020）。
 //
 // 默认 Engine 使用 LRUStateStore（capacity=1000）。以下场景可注入：

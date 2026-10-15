@@ -81,6 +81,10 @@ type LocalSignalProvider struct {
 	registry     *Registry
 	factorReader FactorZScoreReader
 	fundamentals func() map[string]FundamentalSeries
+	// intraday 是日内分钟特征供给（D6）。nil = 引擎没接日内快照
+	// （没配 Router / 没预热），IntradayAware 策略拿不到供给，
+	// 用到特征时明确失败（契约注释口径）。
+	intraday IntradayFeatureProvider
 }
 
 // NewLocalSignalProvider 构造本地实现。registry 传 nil 表示调用时取
@@ -98,6 +102,13 @@ func (p *LocalSignalProvider) SetFactorReader(r FactorZScoreReader) {
 // SetFundamentalsProvider 绑定基本面快照供给（对应 FundamentalAware 注入）。
 func (p *LocalSignalProvider) SetFundamentalsProvider(f func() map[string]FundamentalSeries) {
 	p.fundamentals = f
+}
+
+// SetIntradayProvider 绑定日内分钟特征供给（D6，对应 IntradayAware 注入）。
+// 引擎每个交易日绑一个「当日绑定」的 provider（快照 + 回放日），
+// 与 factor/fundamentals 的每调用注入同节奏。
+func (p *LocalSignalProvider) SetIntradayProvider(ip IntradayFeatureProvider) {
+	p.intraday = ip
 }
 
 // Signals 实现 SignalProvider 契约。
@@ -125,6 +136,11 @@ func (p *LocalSignalProvider) Signals(ctx context.Context, scope Scope, asOf tim
 	}
 	if fu, ok := strat.(FundamentalAware); ok && p.fundamentals != nil {
 		fu.SetFundamentals(p.fundamentals())
+	}
+	// D6：日内特征注入。nil 供给时不注入 —— 策略保留旧状态（没拿到
+	// 就没有），用到特征时明确失败，不塞空 provider 假装有数据。
+	if ia, ok := strat.(IntradayAware); ok && p.intraday != nil {
+		ia.SetIntradayFeatures(p.intraday)
 	}
 
 	var signals []Signal

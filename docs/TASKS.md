@@ -118,7 +118,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   3. 样板记录：从「挂源」到「因子出分」的端到端步骤留档（后续一源一单的模板）。
 - **⑥ 边界**：只做样板全链路；第二个源、AI 挖掘消费（D8）另立。
 
-### D6 · 多频率进回测策略视野 ⬜ 待做（依赖 D1、D2）
+### D6 · 多频率进回测策略视野 ✅ 完成（2026-10-15，依赖 D1、D2）
 
 - **① 目标**：策略在回测中可「日频决策 + 引用当日内分钟特征」（如开盘半小时动量），分钟级防偷看闸门按分钟粒度生效，现有纯日线回测结果不变。
 - **② 上下文**：蓝图 §4.3 裁定 4、§9 #6（已拍板：前者先行，分钟级撮合另立）。现状：回测只吃日线，1 分钟数据「只存着」。红线：策略运行时**禁止**直接查 `marketdata.Provider`，所有数据回测启动前快照预加载进 Scope（可复现 / 防前视 / 双核输入一致）。分钟级 PIT 语义：10:00 的 1 分钟线 10:01 才可见。
@@ -133,6 +133,62 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   1. 机械判据：「日频决策 + 日内特征」样例策略回测测试通过；日线回归对拍通过；分钟 PIT 闸门测试（10:00 bar 在 10:00:30 不可见、10:01 可见）通过。
   2. **破坏验证**：回拨分钟可见时间（全日内可见）→ PIT 测试变红；绕过快照直接查 provider → 红线护栏红；均还原绿。
 - **⑥ 边界**：只做策略视野 + 闸门 + 回归；撮合精度、新频率数据接入（D5）另立。
+- **✅ 完成记录（2026-10-15）**：
+  1. **契约（声明注入，延续老范式）**：`pkg/strategy/intraday.go` 新增
+     `IntradayFeatureProvider`（`Features()` 能力声明 + `IntradayFeature(ctx, symbol,
+     name, asOf)` 分钟粒度取特征，`ok=false` = 此刻还没有，**不是 0**）与可选能力接口
+     `IntradayAware`（范式同 `FactorAware`/`FundamentalAware`，GenerateSignals 签名零改动）。
+     `LocalSignalProvider` 加 `SetIntradayProvider` + Signals() 内类型断言注入（nil 供给不注入，
+     策略用到特征明确失败）。
+  2. **闸门（分钟粒度 PIT）**：判定原语 `pkg/domain/market` 的 `OHLCV.VisibleBy(asOf)`
+     （VisibleAt 不晚于 asOf；零值恒不可见——未声明的可见性是泄漏）。10:00 的 1m bar
+     （VisibleAt 10:01）在 10:00:30 不可见、10:01 可见，`visibility_test.go` 逐条钉死
+     （含 15m bucket / 日线同构与边界前 1ns）。
+  3. **快照预加载（红线执行）**：`pkg/backtest/intraday.go`——`warmIntradayIfNeeded`
+     仅对 `IntradayAware` 策略触发（纯日线策略零成本，回归红线）；经 `Router.Bars(Freq1m)`
+     取数，**取数区间展开为 [start, end+1d)**（引擎 start/end 是 UTC 零点交易日，直接传
+     1m 路由会把当日 09:30 CST 之后的 bar 全部挡在门外——自灌自证测试当场抓到的缺口），
+     按 365 自然日分片（Router 跨度上限 366 天，REV-01；末片退 1ns 映射半开区间），
+     逐 symbol 顺序取（峰值内存确定）。快照 = `map[symbol][]domain.OHLCV`（ts 升序），
+     回测期间只读；`SetIntradaySnapshot` 给测试/无 Router 场景留直注门（范式同
+     SetFundamentals）。
+  4. **按日绑定 provider**：`snapshotIntradayProvider` 持快照 + 回放日边界，二分切当日段
+     （每 symbol 每天 O(log n)，不线性扫全史）；特征目录封闭（`open_momentum_30m` =
+     窗口末收/窗口首开−1，1m 与 15m 按 D1 聚合规则同值——对拍锚点）；可得条件双闸：
+     **窗口闭合**（存在周期跨过 10:00 的 bar，半日停牌/断档 ⇒ 半窗不给残缺样本）+
+     **已可见**（首末 bar VisibleAt ≤ asOf）。`TestSnapshotIntradayProvider_NoRuntimeDataChannel`
+     反射断言字段集合 = 快照 + 日期边界（无 provider/router/pool 句柄）。
+  5. **样例策略回测**：测试策略「日频决策 + 开盘半小时动量」（特征 > 阈值买入，
+     strength = 特征值；无供给明确失败不当 0）跑通 `RunBacktest`：01-02 特征手算
+     +0.05 ⇒ 收盘 10.50 含滑点成交、末日强平，`TotalTrades`=1（往返口径）、
+     fills=2，策略侧按日记录的特征值与手算一致（01-03 −0.03 不买、01-04 停牌无信号）。
+  6. **对拍与回归**：`TestSnapshotIntradayProvider_FeatureParity_1m_vs_15m`——1m 直取与
+     15m 聚合（D1 口径）两条输入算出同一特征值且等于手算样本 0.05，15m 可见性与 1m
+     同构（09:45 bucket VisibleAt = 10:00）；`TestEngine_DailyOnlyBacktest_UnchangedWithIntradayWiring`——
+     纯日线 momentum 在「无 D6 装配」与「快照+Router 全挂」两种装配下收益/笔数/equity
+     curve 逐点相等。DB 集成（真 PG + 真 Router 自灌自证自清理，不可达 Skip）：31 根种子
+     bar 的快照内容、频率声明、VisibleAt 口径（09:30→09:31、10:00→10:01）、端到端特征值。
+  7. **红线护栏（结构执法）**：`internal/repoguard/strategy_marketdata_isolation_test.go`——
+     AST 扫 `pkg/strategy` 生产文件 import，命中 `pkg/marketdata` 即红（点名文件 + import 行）。
+     与 D1 的 `canonical_layer` 护栏分工：那个守「不许直连物理表」（数据从哪来），这个守
+     「策略运行时不许摸取数包」（数据怎么到策略手里）。
+  8. **破坏验证两组，均「改坏→红→还原→绿」**：① `VisibleBy` 改成「有 VisibleAt 即可见」
+     （回拨分钟可见时间 = 全日内可见）⇒ 闸门测试红（含验收原句子例 10:00:30）、provider
+     特征测试红；还原后 sha256 与基线一致、复绿。② `pkg/strategy` 造 import marketdata 的
+     生产文件 ⇒ 红线护栏红（点名违规文件）；删除后复绿，工作树无残留（git status 复核）。
+  9. **文档同步**：SPEC.md 新增「多频率策略视野（Intraday Features，D6）」大节（红线 +
+     契约 + 特征目录表 + 对拍口径 + 取数区间坑 + 护栏测试表 + 已知边界）；ARCHITECTURE.md
+     §7 增补 D6 数据流图与红线执法；本节登记。
+  10. **既有红登记（ODR-067 纪律，stash 证伪非本单造成）**：`cmd/data`
+      `TestSyncAllFactorsHandler_ReportsSkipped`（skipped=8 want 5：D3 的 size/volatility/
+      growth pending 态 + fundamentals_detail 空表）与 `pkg/data`
+      `TestAdjustmentBasis_QfqLookAheadLeaksIntoBacktest`（库内复权因子与重建口径 2/20 只
+      不一致）在**不含本单改动**的干净基线上同样红（stash -u 复跑确认）——数据/预期漂移类
+      既有红，登记在案，不冒充本单噪声也不冒充本单修复。
+  11. **已知边界**：① 分钟级撮合不在本单（日频决策成交价 = 当日收盘含滑点，日内择时执行
+      另立）；② 15m 不物化（D1 裁定，快照只预载 1m，特征对 15m 输入同构有对拍证明）；
+      ③ 全区间 1m 快照的单标的内存上限约 8.4MB（REV-01 实测口径），大票池 × 长区间的
+      窗口化属后续治理项；④ 分钟表 `amount` NULL 折零（D1 已登记）不影响本单特征。
 
 ### D7 · NT 原生模式（国外线）✅ 完成（2026-10-14，依赖 D1）
 
