@@ -96,8 +96,61 @@ func TestNormalizeDailyOHLCV_VolumeNotAdjusted(t *testing.T) {
 	}
 	// 25271.64 手 → 2527164 股：不复权（不乘 scale），但要换算单位。
 	almost(t, "volume_shares", got[0].Volume, 2527164.0)
-	// amount 是「成交额」不是「成交量」，单位换算不在本单范围（见 TASKS.md 登记）。
-	almost(t, "turnover", got[0].Turnover, 2856061.0)
+	// amount 单位是千元，规范层 turnover 单位是 CNY ⇒ ×1000（见
+	// TestNormalizeDailyOHLCV_TurnoverThousandCNYToCNY）。同样不参与复权。
+	almost(t, "turnover_cny", got[0].Turnover, 2856061.0*1000)
+}
+
+// TestNormalizeDailyOHLCV_TurnoverThousandCNYToCNY 成交额单位：源侧千元 → 规范层 CNY。
+//
+// 实测依据（2026-10-15，真库 ohlcv_daily_qfq 392.6 万行全量，非引用文档）：
+//
+//	turnover / (volume_股 × close) 的中位数 = 0.0010127（p01 0.000967、p99 0.001955）
+//	⇒ 库里的 turnover 比「元」小三个数量级，即 tushare 的千元口径原样入库了。
+//	单行核对：600519.SH 2026-09-24 close=1237、volume=3123935 股、
+//	turnover=3867310.92（千元）→ ×1000 = 38.67 亿元 ≈ vwap × 股数。
+//
+// 而规范层声明的一直是 CNY（docs/SPEC.md「规范层 Schema」的 Turnover 行、
+// pkg/domain/market/types.go），故这里补上 ×1000 —— 与 DATA-04 的 volume 同型：
+// 契约早就写对了，是实现漏了一步。
+//
+// **不取整**（与 volume 相反）：真库实测 ×1000 后有 **199,240 行**偏离整数元超过
+// 1e-3（其中 5,015 行正好 0.5 元）—— 那是源侧 amount 带 4 位小数、元以下的**真实
+// 精度**，取整会把它抹掉；只有 61,699 行属于 <1e-6 的浮点噪声。而下游没有任何整数
+// 纪律要求它 —— NT 导出的 SELECT 根本不带 turnover（nt-sidecar/tools/export_bars.py:63）。
+// DATA-04 的 volume 必须取整是因为 as_quantity 精确判整数，这里没有这个约束。
+func TestNormalizeDailyOHLCV_TurnoverThousandCNYToCNY(t *testing.T) {
+	resp := dailyResp(dailyItem("20260924", 1240.0, 1255.0, 1231.0, 1237.0, 31239.35, 3867310.92))
+	factors := map[string]float64{"20260924": 1.0}
+
+	got := qfqTestClient().normalizeDailyOHLCV(resp, "600519.SH", factors)
+	if len(got) != 1 {
+		t.Fatalf("got %d records, want 1", len(got))
+	}
+	if got[0].Turnover != 3867310920.0 {
+		t.Errorf("turnover = %.6f, want 3867310920（千元 3867310.92 × 1000 = 元）", got[0].Turnover)
+	}
+	// 反证腿：换算必须真的发生 —— 与源侧原值相等就是「千元直接当元存」的旧行为。
+	if got[0].Turnover == 3867310.92 {
+		t.Error("turnover 仍是源侧千元原值 ⇒ 单位换算没生效")
+	}
+	// 复权因子不参与成交额：两行时首行 scale≈0.846（≠1），若顺手乘了 scale，
+	// 越早的成交额被压得越厉害 —— 与 volume 同一条纪律。
+	respAdj := dailyResp(
+		dailyItem("20200102", 1128.00, 1145.06, 1116.00, 1130.00, 25271.64, 2856061.0),
+		dailyItem("20260713", 1197.12, 1215.00, 1190.19, 1210.99, 12000.0, 1400000.0),
+	)
+	adjusted := qfqTestClient().normalizeDailyOHLCV(respAdj, "600519.SH", map[string]float64{
+		"20200102": 7.3186,
+		"20260713": 8.6463,
+	})
+	if len(adjusted) != 2 {
+		t.Fatalf("got %d records, want 2", len(adjusted))
+	}
+	if adjusted[0].Turnover != 2856061.0*1000 {
+		t.Errorf("首行 turnover = %.6f, want %.6f（千元×1000，且不乘 scale=%.6f）",
+			adjusted[0].Turnover, 2856061.0*1000, 7.3186/8.6463)
+	}
 }
 
 // TestNormalizeDailyOHLCV_VolumeLotsToSharesRounds 手→股必须取整。

@@ -435,14 +435,39 @@ type Portfolio struct {
 | High | float64 | high | 最高价（聚合 bar = 期间最高） |
 | Low | float64 | low | 最低价（聚合 bar = 期间最低） |
 | Close | float64 | close | 收盘价（聚合 bar = 末笔收） |
-| Volume | float64 | volume | 成交量（股；聚合 bar = 期间合计） |
-| Turnover | float64 | turnover | 成交额（CNY；聚合 bar = 期间合计）。分钟表 amount 可空，NULL 时记 0——字段级缺失唯一折零处（见「已知边界」） |
+| Volume | float64 | volume | 成交量（股；聚合 bar = 期间合计）。日线由 tushare `vol`（手）在同步边界 ×100 落库，见 `pkg/data` 的 `sharesPerLot` 与 migration 052 |
+| Turnover | float64 | turnover | 成交额（CNY；聚合 bar = 期间合计）。日线由 tushare `amount`（**千元**）在同步边界 ×1000 落库，见 `pkg/data` 的 `cnyPerAmountUnit` 与 migration 054。分钟表 amount 可空，NULL 时记 0——字段级缺失唯一折零处（见「已知边界」） |
 | TradeDays | int | trade_days | 成交日数（日线路径有值；聚合 bar 恒 0，不发明语义） |
 | Frequency | market.Frequency | frequency | 记录自带频率："1m"/"15m"/"1d"；零值 "" = 未声明（遗留取数路径不填，规范层路径必须填） |
 | VisibleAt | time.Time | visible_at | 可见时间点（PIT）：1m/15m = 周期结束时刻；1d = 当日 15:00 收盘（Asia/Shanghai）。零值 = 未声明 |
 | LimitUp | bool | limit_up | 涨停标记（日线路径有值；聚合 bar 恒 false，不推导） |
 | LimitDown | bool | limit_down | 跌停标记（同上） |
 <!-- /drift:ohlcv -->
+
+##### 行情表数值单位（DATA-05，2026-10-15）
+
+这里区分两件事，别再混：**规范层单位是规定**（本节说了算，落库必须符合），
+**源侧单位是实测**（取一次真实响应核对，决定该源要不要在同步边界换算）。
+DATA-04 的病根正是把两者当同一件事 —— SPEC 写着「股」、`pkg/data` 照抄 tushare 的
+「手」，两边都觉得自己对，差 100 倍且无人报错。0 行的表照样要先定单位：
+先规定后灌数，才不会把同一个坑再挖一遍。
+
+| 物理表 · 列（类型） | 规范层单位 | 源侧实测与换算点 |
+| --- | --- | --- |
+| `ohlcv_daily_qfq.volume` (double) | 股 | tushare `vol` = **手**（实测：×100 后 392.6 万行全为整数股）⇒ 同步边界 `×sharesPerLot`；存量见 migration 052 |
+| `ohlcv_daily_qfq.turnover` (double) | CNY | tushare `amount` = **千元**（实测：全表 `turnover/(volume_股 × close)` 中位 0.0010127、max 0.003535，即元的千分之一）⇒ 同步边界 `×cnyPerAmountUnit`；存量见 migration 054。**不取整**（与 volume 相反）：真库实测 ×1000 后 199,240 行偏离整数元 >1e-3（5,015 行正好 0.5 元），那是元以下的真实精度；仅 61,699 行是 <1e-6 的浮点噪声。下游也没有整数纪律（NT 导出不带 turnover） |
+| `ohlcv_minute.volume` (bigint) | 股（整数股） | 唯一计划中的源是 mootdx，**今天没接线**（`cmd/data/registry_init.go` 以 nil transport 注册 ⇒ `Enabled()=false`），故源侧单位**未实测**、其 wire schema 的 `Unit` 如实留空。接线顺序固定：实测 → 同步边界换算 → 补声明，缺一步就红（`cmd/data/ohlc_units_guard_test.go`）。表内 0 行（2026-10-15 实测） |
+| `ohlcv_minute.amount` (double) | CNY | 同上；NULL → `Turnover` 记 0 的折零口径见「已知边界」 |
+| `realtime_quote.volume` (bigint) | 股 | 同上（mootdx 五档快照，表内 0 行，源侧单位未实测） |
+| `realtime_quote.amount` (double) | CNY | 同上 |
+| `global_ohlcv.volume` (double) | 股 | 源 = yahoo_finance / alpha_vantage；两者 wire schema 都没声明 volume 单位，表内 0 行 ⇒ 未实测。本行同样是**规定**：境外线灌数前必须先实测源侧口径再落库（D7/D9 的前置） |
+| `global_ohlcv`（无 turnover 列） | — | 内联 DDL 里这张表根本没有成交额列（实测：列集为 symbol/trade_date/OHLC/volume/adj_close）⇒ 境外线目前给不了成交额类因子，需要时先加列再谈单位 |
+
+**为什么这张表值得存在**：`ohlcv_daily_qfq` 那两个字段是全库唯一有数据的行情列，
+它们的单位此前只写在 Go 注释里，SPEC 的字段表只说「股 / CNY」而不说「源侧是什么、
+在哪一步折成规范层」——读的人无法判断「库里这个数该乘多少」。现在每一行都能被质问：
+规定在左列，证据在中列，换算点在 `pkg/data`，存量对齐在 migration。
+
 
 #### Fundamental — `market.Fundamental`
 
@@ -589,7 +614,7 @@ Router.Bars(ctx, freq, symbol, start, end) ([]market.OHLCV, error)
 | 声明频率 | 取数路径 | 数值口径 |
 | --- | --- | --- |
 | 1d | ohlcv_daily_qfq 直查 | 与遗留 storage.GetOHLCV 逐字段相等（回归红线：集成测试对拍，D1 ③5） |
-| 1m | ohlcv_minute 直查 | 原样返回（volume 由表内 BIGINT 承载；amount → Turnover） |
+| 1m | ohlcv_minute 直查 | 原样返回：表内 `volume` 由 BIGINT 承载，单位**股**；`amount` → `Turnover`，单位 **CNY**（单位口径与源侧实测状态见「行情表数值单位」） |
 | 15m | 1m 直查 + 聚合 | 见「聚合口径」；不物化 |
 | 其他 | **fail-loud 报错** | 拒绝静默回退 |
 
@@ -769,6 +794,13 @@ FactorComputer.ComputeFactorByName(ctx, name, date)
 
 - 分钟表 `amount` 可空，NULL → Turnover 记 0：字段级缺失唯一折零处，
   D2 接 connector 契约时收编（bar 级「无 bar = 缺失」不受影响）。
+- 分钟 / 实时 / 境外线三张表的 volume·amount 单位**只有规定、没有实测**（表内 0 行，
+  且源都没接线）：DATA-05 2026-10-15 核对到日线 fallback 链整条不可达 ——
+  mootdx 以 nil transport 注册（`Enabled()=false`）、eastmoney 的 `Fetch` 对
+  `ohlcv_daily` 直接 `ErrUnsupported`、`ETLPipeline`（`Registry.Fetch` 的唯一生产
+  调用方）零调用方。灌数前必须先实测源侧口径并在同步边界换算到规范层，
+  否则就是 DATA-04 的坑换个表重演。单位口径见「行情表数值单位」，
+  机械守卫见 `cmd/data/ohlc_units_guard_test.go`；链本身何时接通属另一工单。
 - 会话边界秒级精度与 11:30 bar 形态（REV-04，2026-10-15）：
   `checkInSession` 按秒判定，11:30:00 并入 11:15 bucket、15:00:00
   并入 14:45 bucket（收盘打点对称接纳）；11:30:01 / 15:00:01 及

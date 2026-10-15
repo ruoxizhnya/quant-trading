@@ -15,6 +15,10 @@ import "github.com/ruoxizhnya/quant-trading/pkg/domain/market"
 // 待办边界（D1 在 SPEC 已点名，此处如实登记不越界）：
 //   - mootdx 分钟表 amount 为 NULL 时 Turnover 记 0 —— 字段级折零由 D2 收编，
 //     不改 ETL 行为，仅在契约文档登记；
+//   - mootdx 的 volume / amount **单位未实测**（TDX 惯例是「手」，项目内无证据），
+//     故其 Schema 把 Unit 如实留空、同步边界也不放换算点 —— 没有实测就不声明。
+//     DATA-05 核对（2026-10-15）：该源今天以 nil transport 注册，整条日线 fallback
+//     链不可达；接线时先实测单位再声明，守卫见 cmd/data/ohlc_units_guard_test.go；
 //   - 产业链 fetcher 不走 Registry（不建 adapter），其时间语义在契约文档中
 //     成文登记为已知边界（建 adapter 是 D5 的事）。
 
