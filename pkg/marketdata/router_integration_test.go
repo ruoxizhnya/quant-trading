@@ -219,3 +219,27 @@ func TestRouterRegressionDailyUnchanged(t *testing.T) {
 		assert.Equal(t, legacy[i].TradeDays, routed[i].TradeDays)
 	}
 }
+
+// TestRouterDailyPathNotSpanCapped 钉 ④「不动 1d 路径」：REV-01 的跨度上限只约束
+// 日内频率，日线按交易日闭区间取数、单票量级可接受，不能被这个守卫顺手挡掉。
+//
+// 同一条十年区间走正反两面：1d 必须成功，1m 必须被拒 —— 只有两个都成立，才证明
+// 守卫挂在日内路径上而不是挂在 Bars 入口上（挂错地方的话这里会假绿）。
+func TestRouterDailyPathNotSpanCapped(t *testing.T) {
+	pool, ctx := setupRouterDB(t)
+	seedAll(t, pool, ctx)
+	r := NewRouter(pool)
+
+	wideStart := time.Date(2014, 1, 1, 0, 0, 0, 0, time.UTC)
+	wideEnd := time.Date(2024, 12, 31, 0, 0, 0, 0, time.UTC)
+	require.Greater(t, wideEnd.Sub(wideStart), maxIntradaySpan,
+		"本测试的跨度必须真的超过日内上限，否则正反两面都不成立")
+
+	daily, err := r.Bars(ctx, market.Freq1d, testSymbol, wideStart, wideEnd)
+	require.NoError(t, err, "1d 路径不受跨度上限约束（④ 不动 1d）")
+	assert.Len(t, daily, 2, "十年跨度内取到的仍是库里那 2 根种子日线")
+
+	_, err = r.Bars(ctx, market.Freq1m, testSymbol, wideStart, wideEnd)
+	require.Error(t, err, "同一区间交给 1m 必须被拒 —— 否则守卫挂错了地方")
+	assert.Contains(t, err.Error(), "上限")
+}

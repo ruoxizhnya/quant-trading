@@ -16,6 +16,12 @@ func cst(y int, m time.Month, d, hh, mm int) time.Time {
 	return time.Date(y, m, d, hh, mm, 0, 0, market.AsiaShanghai)
 }
 
+// cstSec 构造带秒的 Asia/Shanghai 时刻（REV-04 秒级边界用例；
+// 纳秒级越界用例内联 time.Date，不放大 helper  surface）。
+func cstSec(y int, m time.Month, d, hh, mm, ss int) time.Time {
+	return time.Date(y, m, d, hh, mm, ss, 0, market.AsiaShanghai)
+}
+
 // minuteBar 构造一根规范层 1m bar（Frequency 必须显式声明 —— 零值
 // "未声明" 过不了聚合器输入校验）。
 func minuteBar(symbol string, ts time.Time, o, h, l, c, v float64) market.OHLCV {
@@ -164,6 +170,9 @@ func TestAggregate_RejectsWrongFrequencyAndTargets(t *testing.T) {
 
 // TestBucketStart15m_SessionBoundaries 会话边界逐点钉住：
 // 集合竞价并入首/末 bucket、午休两侧不合并、时段外 fail-loud。
+// REV-04（2026-10-15）起边界按秒判定：11:30:00 上午收盘打点并入
+// 11:15 bucket（与 15:00:00 对称——旧语义把 11:30:00 当午休拒收，
+// 那是分钟粒度判定的遗漏，不是口径）；带秒/亚秒越界打点拒收。
 func TestBucketStart15m_SessionBoundaries(t *testing.T) {
 	cases := []struct {
 		name string
@@ -176,11 +185,14 @@ func TestBucketStart15m_SessionBoundaries(t *testing.T) {
 		{"09:44:59 归 09:30 bucket", cst(2024, 1, 2, 9, 44), cst(2024, 1, 2, 9, 30)},
 		{"11:15 归 11:15 bucket", cst(2024, 1, 2, 11, 15), cst(2024, 1, 2, 11, 15)},
 		{"11:29 归 11:15 bucket（午休前最后一根）", cst(2024, 1, 2, 11, 29), cst(2024, 1, 2, 11, 15)},
-		{"11:30 午休打点拒绝", cst(2024, 1, 2, 11, 30), time.Time{}},
+		{"11:30:00 上午收盘打点并入 11:15 bucket（REV-04：与 15:00:00 对称）", cst(2024, 1, 2, 11, 30), cst(2024, 1, 2, 11, 15)},
+		{"11:30:01 带秒打点拒收（已进午休）", cstSec(2024, 1, 2, 11, 30, 1), time.Time{}},
 		{"12:30 午休打点拒绝", cst(2024, 1, 2, 12, 30), time.Time{}},
 		{"13:00 归 13:00 bucket（不与上午合并）", cst(2024, 1, 2, 13, 0), cst(2024, 1, 2, 13, 0)},
 		{"14:57 收盘竞价归 14:45 bucket", cst(2024, 1, 2, 14, 57), cst(2024, 1, 2, 14, 45)},
 		{"15:00:00 收盘打点归 14:45 bucket", cst(2024, 1, 2, 15, 0), cst(2024, 1, 2, 14, 45)},
+		{"15:00:30 带秒打点拒收（分钟粒度会误纳入末 bucket）", cstSec(2024, 1, 2, 15, 0, 30), time.Time{}},
+		{"15:00:00 亚秒越界拒收", time.Date(2024, 1, 2, 15, 0, 0, 1, market.AsiaShanghai), time.Time{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -199,6 +211,53 @@ func TestBucketStart15m_SessionBoundaries(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestAggregate_SessionBoundarySecondPrecision REV-04：会话校验秒级精度
+// 与 11:30 收盘 bar 形态兼容，两个事实一组对称——
+//  1. 11:30:00 上午收盘打点合法，并入 11:15 bucket（收=末笔、量合计），
+//     与 15:00:00 并入 14:45 bucket 同款语义；Tushare 1m 普遍含 11:30
+//     整点 bar（mootdx 导出不带），两种分钟形态在入站处兼容（SPEC 已知边界）。
+//  2. 边界带秒的打点（15:00:30 / 11:30:01）拒收且报错点名——分钟粒度
+//     判定会把它们与整点收盘打点混同，静默放宽口径边界。
+func TestAggregate_SessionBoundarySecondPrecision(t *testing.T) {
+	sym := "600000.SH"
+
+	// ① 11:30:00 并入 11:15 bucket：与 11:15/11:29 两根合成一个 bucket，
+	// 收=11:30 末笔、高取跨笔极值、量含 11:30 bar。
+	morning := []market.OHLCV{
+		minuteBar(sym, cst(2024, 1, 2, 11, 15), 10.20, 10.25, 10.18, 10.22, 1000),
+		minuteBar(sym, cst(2024, 1, 2, 11, 29), 10.22, 10.30, 10.21, 10.28, 1500),
+		minuteBar(sym, cstSec(2024, 1, 2, 11, 30, 0), 10.28, 10.31, 10.27, 10.30, 500),
+	}
+	out, err := Aggregate(morning, market.Freq15m)
+	require.NoError(t, err, "11:30:00 上午收盘打点是合法 bar（并入 11:15 bucket）")
+	require.Len(t, out, 1, "11:15/11:29/11:30 三根同归 11:15 bucket（不跨午休）")
+	assert.Equal(t, cst(2024, 1, 2, 11, 15), out[0].Date)
+	assert.Equal(t, 10.20, out[0].Open, "开=首笔开")
+	assert.Equal(t, 10.31, out[0].High, "高=期间最高（含 11:30 bar）")
+	assert.Equal(t, 10.18, out[0].Low)
+	assert.Equal(t, 10.30, out[0].Close, "收=末笔收（11:30 收盘打点）")
+	assert.Equal(t, 3000.0, out[0].Volume, "量=期间合计（含 11:30 bar）")
+	assert.Equal(t, cst(2024, 1, 2, 11, 30), out[0].VisibleAt)
+
+	// ② 15:00:30 带秒盘后打点 → fail-loud，不静默并入 14:45 bucket
+	afternoon := []market.OHLCV{
+		minuteBar(sym, cst(2024, 1, 2, 14, 45), 10.40, 10.45, 10.38, 10.44, 800),
+		minuteBar(sym, cstSec(2024, 1, 2, 15, 0, 30), 10.44, 10.46, 10.43, 10.45, 100),
+	}
+	_, err = Aggregate(afternoon, market.Freq15m)
+	require.Error(t, err, "15:00:30 已过收盘，必须拒收而非当收盘打点并入末 bucket")
+	assert.Contains(t, err.Error(), "晚于 15:00 收盘")
+
+	// ③ 11:30:01 带秒午休打点 → fail-loud，不静默并入 11:15 bucket
+	lunch := []market.OHLCV{
+		minuteBar(sym, cst(2024, 1, 2, 11, 29), 10.22, 10.30, 10.21, 10.28, 1500),
+		minuteBar(sym, cstSec(2024, 1, 2, 11, 30, 1), 10.28, 10.29, 10.27, 10.28, 100),
+	}
+	_, err = Aggregate(lunch, market.Freq15m)
+	require.Error(t, err, "11:30:01 已进午休，必须拒收")
+	assert.Contains(t, err.Error(), "午休")
+}
+
 // TestRouter_UnknownFrequencyFailsLoud 路由对未知频率 fail-loud，
 // 不静默回退（nil pool 也不会被碰到——校验在查库之前）。
 func TestRouter_UnknownFrequencyFailsLoud(t *testing.T) {
@@ -211,6 +270,89 @@ func TestRouter_UnknownFrequencyFailsLoud(t *testing.T) {
 	_, err = r.Bars(context.Background(), market.Frequency(""), "600000.SH",
 		time.Unix(0, 0), time.Unix(0, 0))
 	require.Error(t, err, "零值频率 = 未声明，不是合法入参")
+}
+
+// TestRouter_IntradaySpanCapFailsLoud 钉 REV-01：1m 与 15m 两条路径的大区间请求
+// 必须在**查库之前**被拒，而不是把整个区间的分钟行 materialize 进内存。
+//
+// nil pool 就是「有没有走到 Query」的探针：守卫若在查库之后，这里会 panic 而不是
+// 返回错误。两条频率都要过——15m 经 loadMinute 取分钟行，所以它和 1m 共用同一个
+// 入口，本单 ③ 要求两条路径都覆盖。
+func TestRouter_IntradaySpanCapFailsLoud(t *testing.T) {
+	r := NewRouter(nil)
+	start := cst(2024, 1, 2, 9, 30)
+	end := start.Add(maxIntradaySpan + time.Second)
+	wantSpan := (maxIntradaySpan + time.Second).String()
+
+	for _, freq := range []market.Frequency{market.Freq1m, market.Freq15m} {
+		freq := freq
+		t.Run(string(freq), func(t *testing.T) {
+			var got []market.OHLCV
+			var err error
+			require.NotPanics(t, func() {
+				got, err = r.Bars(context.Background(), freq, "600000.SH", start, end)
+			}, "校验必须发生在查库之前 —— nil pool 被碰到就会 panic")
+			require.Error(t, err, "超上限必须报错，不能静默截断（③ 与 Router 既有 fail-loud 同风格）")
+			assert.Nil(t, got)
+			// ③ 点名要求：报错要说清「已支持的最大跨度」与「当前请求跨度」。
+			assert.Contains(t, err.Error(), "上限")
+			assert.Contains(t, err.Error(), maxIntradaySpan.String(), "报错应点名已支持的最大跨度")
+			assert.Contains(t, err.Error(), wantSpan, "报错应点名当前请求跨度")
+			assert.Contains(t, err.Error(), "切片", "报错应给出可执行的下一步，而不是只说太大")
+		})
+	}
+}
+
+// TestRouter_IntradayCapIsMeaningful 用**绝对**跨度钉住上限的量级：约 14 个月的
+// 分钟请求必须被拒。
+//
+// 这条刻意不用 maxIntradaySpan 去构造输入：上面那组用例的输入是从常量推导的，
+// 把上限调到一百年，它们会跟着门柱一起挪而照样绿 —— 而「护栏被调大」正是 REV-01
+// 要防的失效形状（一个满足不了任何真实用法的上限会被下一个人删掉）。
+// 绝对输入才有资格断言绝对行为。
+func TestRouter_IntradayCapIsMeaningful(t *testing.T) {
+	r := NewRouter(nil)
+	start := cst(2024, 1, 2, 9, 30)
+	end := start.AddDate(1, 1, 0) // ≈ 425 自然日
+
+	for _, freq := range []market.Frequency{market.Freq1m, market.Freq15m} {
+		t.Run(string(freq), func(t *testing.T) {
+			var err error
+			require.NotPanics(t, func() {
+				_, err = r.Bars(context.Background(), freq, "600000.SH", start, end)
+			})
+			require.Error(t, err, "约 14 个月的日内请求必须被拒 —— 上限必须是量级上有意义的数")
+		})
+	}
+}
+
+// TestCheckIntradaySpan 是守卫自身的边界表。
+func TestCheckIntradaySpan(t *testing.T) {
+	base := cst(2024, 1, 2, 9, 30)
+	cases := []struct {
+		name       string
+		start, end time.Time
+		wantErr    bool
+	}{
+		{"恰好等于上限放行", base, base.Add(maxIntradaySpan), false},
+		{"远小于上限放行", base, base.AddDate(0, 3, 0), false},
+		{"同刻零跨度放行", base, base, false},
+		{"超上限一秒拒绝", base, base.Add(maxIntradaySpan + time.Second), true},
+		{"十年区间拒绝", base, base.AddDate(10, 0, 0), true},
+		// end 早于 start 不在本单判断范围：负跨度由 SQL 的 BETWEEN 自然给空集，
+		// 把它当错误是另一件事（不顺手扩大范围）。
+		{"end 早于 start 不由本守卫拒绝", base.Add(time.Hour), base, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkIntradaySpan(tc.start, tc.end)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }
 
 // TestFrequencyVocabulary 频率词表：解析/校验/日内分钟数。
