@@ -455,7 +455,7 @@ DATA-04 的病根正是把两者当同一件事 —— SPEC 写着「股」、`p
 | 物理表 · 列（类型） | 规范层单位 | 源侧实测与换算点 |
 | --- | --- | --- |
 | `ohlcv_daily_qfq.volume` (double) | 股 | tushare `vol` = **手**（实测：×100 后 392.6 万行全为整数股）⇒ 同步边界 `×sharesPerLot`；存量见 migration 052 |
-| `ohlcv_daily_qfq.turnover` (double) | CNY | tushare `amount` = **千元**（实测：全表 `turnover/(volume_股 × close)` 中位 0.0010127、max 0.003535，即元的千分之一）⇒ 同步边界 `×cnyPerAmountUnit`；存量见 migration 054。**不取整**：源侧带 3–4 位小数，那是元以下的真实精度，且下游无整数纪律（NT 导出不带 turnover） |
+| `ohlcv_daily_qfq.turnover` (double) | CNY | tushare `amount` = **千元**（实测：全表 `turnover/(volume_股 × close)` 中位 0.0010127、max 0.003535，即元的千分之一）⇒ 同步边界 `×cnyPerAmountUnit`；存量见 migration 054。**不取整**（与 volume 相反）：真库实测 ×1000 后 199,240 行偏离整数元 >1e-3（5,015 行正好 0.5 元），那是元以下的真实精度；仅 61,699 行是 <1e-6 的浮点噪声。下游也没有整数纪律（NT 导出不带 turnover） |
 | `ohlcv_minute.volume` (bigint) | 股（整数股） | 唯一计划中的源是 mootdx，**今天没接线**（`cmd/data/registry_init.go` 以 nil transport 注册 ⇒ `Enabled()=false`），故源侧单位**未实测**、其 wire schema 的 `Unit` 如实留空。接线顺序固定：实测 → 同步边界换算 → 补声明，缺一步就红（`cmd/data/ohlc_units_guard_test.go`）。表内 0 行（2026-10-15 实测） |
 | `ohlcv_minute.amount` (double) | CNY | 同上；NULL → `Turnover` 记 0 的折零口径见「已知边界」 |
 | `realtime_quote.volume` (bigint) | 股 | 同上（mootdx 五档快照，表内 0 行，源侧单位未实测） |

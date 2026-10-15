@@ -155,7 +155,7 @@ func (a *MootdxAdapter) SupportedTypes() []string {
 //
 // 接线真实 transport 时的顺序是固定的：先取一次真实响应与同 symbol 的日线对比
 // 实测单位 → 在同步边界换算到规范层（股 / CNY，docs/SPEC.md「规范层 Schema」）→
-// 才把这里的 Unit 补上。cmd/data 的 TestProductionRegistryOHLCUnitsDeclared
+// 才把这里的 Unit 补上。cmd/data 的 TestProductionRegistryMarketUnitsDeclared
 // 钉的就是「已启用的行情源必须声明单位」，跳过实测会当场红。
 func (a *MootdxAdapter) Schema(dataType string) (DataSchema, error) {
 	switch dataType {

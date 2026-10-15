@@ -56,9 +56,9 @@ func turnoverMigrationStmt(t *testing.T) string {
 	return ""
 }
 
-// TestMigration054_StatementShape 静态形状检查：不连库也能钉住三件事 ——
-// ① 有哨兵准入、② 整表换算（不是逐行 WHERE）、③ 备份发生在换算之前。
-// 任何一条被后来的编辑弄丢，本测试立刻红。
+// TestMigration054_StatementShape 静态形状检查：不连库也能钉住四件事 ——
+// ① 有哨兵准入、② 整表 ×1000 确实发生、③ 备份在换算之前、④ 哨兵写在 IF 之外
+// （跳过换算的那次启动也留痕）。任何一条被后来的编辑弄丢，本测试立刻红。
 func TestMigration054_StatementShape(t *testing.T) {
 	stmt := turnoverMigrationStmt(t)
 
@@ -72,10 +72,12 @@ func TestMigration054_StatementShape(t *testing.T) {
 			t.Errorf("054 迁移体里缺 %q", want)
 		}
 	}
-	// 反证腿：整表换算不能写成逐行条件 —— 真库 91.6% 的行 turnover 带 3 位以上
-	// 小数，逐行判据会漏掉其余行，产出一张半千元半元的混合表（052 的同款坑）。
-	if strings.Contains(stmt, "UPDATE ohlcv_daily_qfq SET turnover = turnover * 1000 WHERE") {
-		t.Error("054 的 UPDATE 带逐行 WHERE —— 准入判据只管整表换算，不该出现在 UPDATE 上")
+	// 哨兵必须落在 IF **之外**：内容守卫不放行时（清库重灌、库里已经是元）也要记下
+	// 「054 已经来过了」，否则下一次启动会重新评估内容守卫。行为腿是
+	// TestMigration054_SkipsWhenAlreadyCNY；这条结构断言管的是「为什么必须这样写」。
+	if strings.Index(stmt, "END IF") > strings.Index(stmt, "INSERT INTO data_migrations") {
+		t.Error("054 的哨兵 INSERT 被挪进了 IF 里 —— 跳过换算的那次启动不会留痕，" +
+			"内容守卫下次还会重新成立")
 	}
 	// 备份必须在 UPDATE 之前（否则恢复集里已经是换算后的值，等于没备份）。
 	if strings.Index(stmt, "ohlcv_daily_qfq_bak_054") > strings.Index(stmt, "SET turnover = turnover * 1000") {

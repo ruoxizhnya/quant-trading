@@ -114,9 +114,10 @@ func TestNormalizeDailyOHLCV_VolumeNotAdjusted(t *testing.T) {
 // pkg/domain/market/types.go），故这里补上 ×1000 —— 与 DATA-04 的 volume 同型：
 // 契约早就写对了，是实现漏了一步。
 //
-// **不取整**：×1000 后仍有真实小数（真库 max|turnover×1000 − round(…)| = 0.5，
-// 源侧 amount 带 3–4 位小数，那是元以下的真实精度），而下游没有任何整数纪律
-// 要求它 —— NT 导出的 SELECT 根本不带 turnover（nt-sidecar/tools/export_bars.py:63）。
+// **不取整**（与 volume 相反）：真库实测 ×1000 后有 **199,240 行**偏离整数元超过
+// 1e-3（其中 5,015 行正好 0.5 元）—— 那是源侧 amount 带 4 位小数、元以下的**真实
+// 精度**，取整会把它抹掉；只有 61,699 行属于 <1e-6 的浮点噪声。而下游没有任何整数
+// 纪律要求它 —— NT 导出的 SELECT 根本不带 turnover（nt-sidecar/tools/export_bars.py:63）。
 // DATA-04 的 volume 必须取整是因为 as_quantity 精确判整数，这里没有这个约束。
 func TestNormalizeDailyOHLCV_TurnoverThousandCNYToCNY(t *testing.T) {
 	resp := dailyResp(dailyItem("20260924", 1240.0, 1255.0, 1231.0, 1237.0, 31239.35, 3867310.92))

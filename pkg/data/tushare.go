@@ -400,17 +400,20 @@ const sharesPerLot = 100
 // turnover / (volume_股 × close) 中位数 0.0010127（p01 0.000967 / p99 0.001955）
 // —— 比「元」小三个数量级，坐实了千元原样入库。
 //
-// 与 volume 不同，这里**不取整**：×1000 后仍可能留真实小数（源侧 amount 带 3–4 位
-// 小数 = 元以下的精度，真库 max|x−round(x)| = 0.5），而且下游没有整数纪律要求它
-// （NT 导出的 SELECT 不带 turnover）。volume 必须 round 是因为 as_quantity 精确
+// 与 volume 不同，这里**不取整**。实测依据（392.6 万行全量，对换算前的备份列做
+// |x − round(x)| 分布统计）：**199,240 行**的小数偏离超过 1e-3 —— 那是源侧 amount
+// 带 4 位小数（= 元以下）的**真实精度**，其中 5,015 行正好 0.5 元；只有 61,699 行
+// 的偏差是 <1e-6 的浮点噪声。取整会把 5 万个真实半元抹掉，而下游没有整数纪律要求
+// 它（NT 导出的 SELECT 不带 turnover）。volume 必须 round 是因为 as_quantity 精确
 // 判整数，turnover 没有这个约束 —— 无约束时不发明精度损失。
 const cnyPerAmountUnit = 1000
 
 // normalizeDailyOHLCV converts a `daily` response into 前复权 (qfq) OHLCV rows.
 //
 // daily fields: ts_code, trade_date, open, high, low, close, vol, amount
-// 四个价格按 qfq 口径换算：raw × 当日因子 / 最新因子。成交量**不做复权** ——
-// tushare 的 vol/amount 本来就是原始成交量，前复权不改它（stk_factor_pro 亦同）。
+// 四个价格按 qfq 口径换算：raw × 当日因子 / 最新因子。成交量与成交额**不做复权** ——
+// tushare 的 vol/amount 本来就是不复权的原始量值（vol 是成交量、amount 是成交额），
+// 前复权不改它（stk_factor_pro 亦同）。
 //
 // 但成交量**要做单位换算**：tushare 的 vol 是「手」，规范层要的是「股」，
 // 故 ×sharesPerLot。且必须 round —— vol 是两位小数的「手」，浮点乘 100

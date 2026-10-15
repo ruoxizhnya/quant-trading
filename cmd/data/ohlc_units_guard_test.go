@@ -23,6 +23,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,8 +44,10 @@ var aShareMarketDataTypes = map[string]bool{
 	source.DataTypeRealtime:   true,
 }
 
-// undeclaredMarketUnits 返回「已启用但字段没声明单位」的清单，元素形如
-// "mootdx/ohlcv_daily.volume"。清单为空即合规。
+// undeclaredMarketUnits 返回「已启用的行情源没能把单位声明齐全」的清单。元素一律
+// 是 `源名/类型.字段` 形状：缺单位时字段就是 volume/amount/turnover，取不到 schema
+// 时是 `schema(...)` —— 后者同样是无从判定单位（声称服务该类型却没给出字段表），
+// 所以并列进来，但调用方的报错文案必须同时涵盖这两种。清单为空即合规。
 func undeclaredMarketUnits(adapters []source.DataSourceAdapter) []string {
 	var bad []string
 	for _, a := range adapters {
@@ -57,7 +60,7 @@ func undeclaredMarketUnits(adapters []source.DataSourceAdapter) []string {
 			}
 			schema, err := a.Schema(dt)
 			if err != nil {
-				bad = append(bad, dt+": "+err.Error())
+				bad = append(bad, a.Name()+"/"+dt+".schema("+err.Error()+")")
 				continue
 			}
 			for _, f := range schema.Fields {
@@ -85,22 +88,26 @@ func TestProductionRegistryMarketUnitsDeclared(t *testing.T) {
 	}
 
 	if bad := undeclaredMarketUnits(adapters); len(bad) > 0 {
-		t.Errorf("已启用的行情源有字段没声明单位：%v —— "+
+		t.Errorf("已启用的行情源没能把 volume/amount/turnover 的单位声明齐全（或拿不出字段表）：%v —— "+
 			"DATA-05 的规矩是「先实测再声明」：取一次真实响应核对量级，在同步边界"+
 			"换算到规范层（volume=股 / turnover=CNY，docs/SPEC.md），然后才把 Unit 填上", bad)
 	}
 }
 
-// unitStubAdapter 是规则的替身：已启用、服务 ohlcv_daily，volume / amount 的单位
-// 由用例决定。除 Schema 外的方法都是最小实现（本测试不碰 Fetch）。
+// unitStubAdapter 是规则的替身：已启用、服务 ohlcv_daily（可由 supported 改），
+// volume / amount 的单位由用例决定。除 Schema 外的方法都是最小实现（本测试不碰 Fetch）。
 type unitStubAdapter struct {
 	source.AdapterBase
 	volumeUnit string
 	amountUnit string
+	supported  []string
 }
 
 func (s *unitStubAdapter) Type() source.AdapterType { return source.AdapterTypeSDK }
 func (s *unitStubAdapter) SupportedTypes() []string {
+	if len(s.supported) > 0 {
+		return s.supported
+	}
 	return []string{source.DataTypeOHLCDaily}
 }
 func (s *unitStubAdapter) Declarations() []source.ConnectorDeclaration {
@@ -130,9 +137,9 @@ func (s *unitStubAdapter) Fetch(context.Context, source.FetchRequest) (*source.F
 func (s *unitStubAdapter) HealthCheck(context.Context) error { return nil }
 func (s *unitStubAdapter) RateLimit() source.RateLimitConfig { return source.RateLimitConfig{} }
 
-// TestUnitRuleFlagsEnabledAdapterWithoutUnit 证明规则真的咬人：同一个替身，
-// 不声明单位 ⇒ 被抓；补上单位 ⇒ 放行。少了这一腿，
-// TestProductionRegistryMarketUnitsDeclared 今天绿得可能只是因为没东西可查。
+// TestUnitRuleFlagsEnabledAdapterWithoutUnit 证明规则真的咬人，四条腿各管一条边界：
+// 缺单位 ⇒ 被抓；单位齐全 ⇒ 放行；未启用 ⇒ 不在射程；拿不出字段表 ⇒ 也被抓。
+// 少了这一组，TestProductionRegistryMarketUnitsDeclared 今天绿得可能只是因为没东西可查。
 func TestUnitRuleFlagsEnabledAdapterWithoutUnit(t *testing.T) {
 	t.Parallel()
 
@@ -160,4 +167,15 @@ func TestUnitRuleFlagsEnabledAdapterWithoutUnit(t *testing.T) {
 	}
 	require.Empty(t, undeclaredMarketUnits([]source.DataSourceAdapter{disabled}),
 		"Enabled()=false 的源不该被要求声明未实测的单位")
+
+	// 反证腿：声称服务行情类型却拿不出字段表，同样是「单位无从判定」，
+	// 必须并列抓到 —— 否则「Schema 取不到」这条路是空转的，规则只在字段表齐全时才生效。
+	noSchema := &unitStubAdapter{
+		AdapterBase: source.NewAdapterBase("stub-noschema", true),
+		supported:   []string{source.DataTypeOHLCMinute},
+	}
+	gotNS := undeclaredMarketUnits([]source.DataSourceAdapter{noSchema})
+	require.Len(t, gotNS, 1, "拿不出 ohlcv_minute 字段表的已启用源必须被记一条：%v", gotNS)
+	require.True(t, strings.HasPrefix(gotNS[0], "stub-noschema/ohlcv_minute.schema("),
+		"违规项要保持 `源名/类型.字段` 形状（调用方的报错文案按这个形状说话），got=%v", gotNS)
 }

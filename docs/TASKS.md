@@ -508,9 +508,16 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   - **换算点（⑤ 第二件）**：`pkg/data/tushare.go` 的 `cnyPerAmountUnit`（在
     `normalizeDailyOHLCV` 里，与 052 的 `sharesPerLot` 同一行族）。全仓生产写点
     **只此一处**（grep `Turnover:` 实测：另一处是 `pkg/marketdata/aggregate.go` 的
-    期间合计求和，单位无关）。**不取整**，与 volume 相反并有理由：源侧带 3–4 位小数
-    是元以下的真实精度（真库 `max|x−round(x)| = 0.5`），而下游没有整数纪律 ——
-    NT 导出的 SELECT 根本不带 turnover（`nt-sidecar/tools/export_bars.py:63`）。
+    期间合计求和，单位无关）。**不取整**，与 volume 相反并有实测依据：×1000 后
+    **199,240 行**偏离整数元 >1e-3（其中 5,015 行正好 0.5 元）—— 那是源侧 amount
+    带 4 位小数、元以下的真实精度，只有 61,699 行属于 <1e-6 的浮点噪声；而下游没有
+    整数纪律 —— NT 导出的 SELECT 根本不带 turnover（`nt-sidecar/tools/export_bars.py:63`）。
+  - **影响面实测（自审时补的核对，别只写「会影响因子」这种话）**：全仓生产代码里
+    **没有**拿 turnover 与绝对金额阈值比较的地方（`1e7`/`10_000_000`/`MinTurnover` grep
+    零命中）；`pkg/backtest/tracker/tracker.go:347` 的流动性阈值与 `exec_algo` 的成本模型
+    读的都是 **volume** 不是 turnover（grep `pkg/backtest/costexec` 对 turnover 零命中）。
+    真正随 ×1000 变的只有：公式/表达式引擎的 `turnover` 字段输入、`/api` 响应数值、
+    分钟聚合的期间合计。派生侧无需重算：`factor_cache` 实测 0 行。
   - **落库后抽样比对（⑤ 第三件）**：`ohlcv_daily_qfq` 3,926,510 行 与备份
     `ohlcv_daily_qfq_bak_054` 3,926,510 行逐行比对 **0 mismatch**
     （`abs(turnover − bak×1000) > 1e-6` 计数为 0）；千元态残留（比值 < 0.01）**0 行**；
@@ -541,6 +548,34 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
     跑的是调大阈值而不是删守卫；④ 掏空单位守卫的条件 ⇒ 替身用例红。
     过程中本单自己的脚手架被抓住一次：元态种子首版误填 `turnover=322.6`
     （比值其实是 0.0003226，仍是千元态形状），改坏腿当场红，改完才对着实测边界算。
+  - **提交后自审（七处，均已改）**：
+    ① `normalizeDailyOHLCV` 的文档把 `amount` 称作「原始成交量」—— 成交额不是成交量，
+    且本单刚给它加了单位换算，最容易误导；订正为「不复权的原始量值（vol 是成交量、
+    amount 是成交额）」。② 「不取整」的依据原本只写了 `max|x−round(x)| = 0.5`，
+    升级为分布计数（199,240 行真实 sub-元 vs 61,699 行浮点噪声）—— 原来的说法没错，
+    但撑不住「为什么不顺手 round 掉噪声」这个质问。③ 单位守卫的违规清单里混进了一条
+    非单位项（`类型: schema错误`）而报错文案只说「字段没声明单位」；统一成
+    `源名/类型.字段` 形状、文案涵盖两种，并补第四条腿（声称服务行情却拿不出字段表
+    也被抓），免得那条分支空转。④ 影响面从推理改成核对：grep 确认生产代码没有
+    拿 turnover 比绝对阈值的判据（见上条）。⑤ 注释指向一个**不存在的测试名**
+    （`TestProductionRegistryOHLCUnitsDeclared`）—— 幻影指针会把下一个读者送到死路上，
+    改成真名 `TestProductionRegistryMarketUnitsDeclared`；`declarations.go` 里
+    「DATA-05（2026-10-14）核对」的日期口径一并订正（登记是 10-14，核对是 10-15）。
+    ⑥ **撤掉一条从 052 借来的不成立论证**：形状测试原本断言「UPDATE 不许带逐行 WHERE」，
+    理由是「真库 91.6% 的行带 3 位以上小数，逐行判据会漏」—— 那是 052 它那套判据
+    （`volume <> floor(volume)` 配 19.24% 本来就是整数的「手」）的性质，对 turnover
+    **不成立**：`turnover < volume×close×0.01` 逐行反而能抓住混合行。理由不成立的守卫
+    就是假护栏，换成真不变量「哨兵 INSERT 必须写在 IF 之外」（跳过换算的那次启动也要
+    留痕），并在 `.sql` 里写明混合表不由本迁移修复、为什么。新增第五腿破坏验证：
+    把 INSERT 挪进 IF ⇒ 结构断言与 `SkipsWhenAlreadyCNY` 双双红，还原后 sha256 一致。
+    ⑦ 还原腿自己踩了一次环境坑：用 Python **文本模式**改写 `postgres.go` 把 LF 写成了
+    CRLF（1246 处），而 `.gitattributes` 的 `eol=lf` 让 `git diff` 显示「无变化」——
+    只有 sha256 暴露了它。哈希比对这条腿这次真救了场；改用二进制读写后 sha256 与基线一致。
+  - **差点写错的一条**：我原本判断 `/api/market/index` 恒空是 `Scan(&close)`（close 已是
+    `*float64`，取地址即 `**float64`）的类型错，实测 pgx **接受**这种目标类型
+    （`err = <nil>`，600519.SH 单行探针）—— 真实原因是那三个指数代码在日线表里 0 行。
+    DATA-07 的 ② 按实测写，不沿用推断。教训同 `hash 命中≠已上线`：能跑一次的结论
+    不要靠形状推断。
 
 ### DATA-07 · 仪表盘「市场概览」的成交量/成交额恒显示 '-'（没有数据通道 + 指数 bar 不在日线表） ⬜ 待做
 
