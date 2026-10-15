@@ -89,11 +89,13 @@ func (r *Router) loadDaily(ctx context.Context, symbol string, start, end time.T
 // []market.OHLCV，峰值内存随行数线性涨，而行数 ≈ 每交易日 bar 数 × 交易日数 ——
 // 没有任何 LIMIT / 分页 / 跨度校验时，这个数只由调用方传进来的区间决定。
 //
-// 上限取 **366 自然日**（≈ 244 交易日 ≈ A 股 1m 的 5.9 万行 ≈ 8MB 单标的一次请求），
-// 不是随手挑的：再小（如工单举例的 60 天）会让 D6「多频率进回测」的 15m 视野没法用，
+// 上限取 **366 自然日**，不是随手挑的：约 243 交易日 × 240 根/日 = **58,320 行**，
+// × `unsafe.Sizeof(market.OHLCV)` 实测 **144 B/行** = 切片本体 **8.4MB**（含每行
+// symbol 字符串背板约 9.3MB）—— 单标的单次请求，2026-10-15 本机实测，不是估算。
+// 再小（如工单举例的 60 天）会让 D6「多频率进回测」的 15m 视野没法用，
 // 一个满足不了任何真实用法的上限，下一个用它的人只会把它调大或删除 —— 那比没有
-// 护栏更糟。代价写清：单次请求最坏 8MB 级而不是 1.4MB 级，需要多年分钟视野的调用方
-// 必须自己切片分次取。
+// 护栏更糟。代价写清：单次请求最坏 8.4MB 级而不是 1.4MB 级，需要多年分钟视野的
+// 调用方必须自己切片分次取。
 //
 // 按自然日而非行数：③ 给的是跨度上限或流式两条路，跨度这条能在**查库前**判定、
 // 零数据即可测（ohlcv_minute 现状 0 行，行数上限当场无法证伪）；但它对每日 bar
@@ -114,11 +116,13 @@ func checkIntradaySpan(start, end time.Time) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"marketdata: 日内频率（1m/15m）请求跨度 %s 超过单次上限 %s（%d 自然日）—— "+
+		"marketdata: 日内频率（1m/15m）请求跨度 %s（%.1f 自然日）超过单次上限 %s（%d 自然日）—— "+
 			"请切片后分次取数；本层拒绝静默截断，也不做无上限全量加载",
-		// 天数从常量导出，不写死字面量：否则改了 maxIntradaySpan 之后，报错里
-		// 会和紧挨着打印的那个 Duration 各说各话。
-		span, maxIntradaySpan, int64(maxIntradaySpan.Hours()/24))
+		// 两个数都从入参/常量导出，不写死字面量：否则改了 maxIntradaySpan 之后，报错里
+		// 会和紧挨着打印的那个 Duration 各说各话。自然日换算留着是因为纯 Duration 串
+		// （397 天打成 "9528h0m0s"）读不出「超了多少、该切几片」，而这条报错的全部意义
+		// 就在于当场可执行 —— 测试直接断言 "397.0 自然日" 与 "366 自然日" 两个串。
+		span, span.Hours()/24, maxIntradaySpan, int64(maxIntradaySpan.Hours()/24))
 }
 
 func (r *Router) loadMinute(ctx context.Context, symbol string, start, end time.Time) ([]market.OHLCV, error) {

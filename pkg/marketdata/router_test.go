@@ -313,7 +313,7 @@ func TestRouter_IntradaySpanCapFailsLoud(t *testing.T) {
 func TestRouter_IntradayCapIsMeaningful(t *testing.T) {
 	r := NewRouter(nil)
 	start := cst(2024, 1, 2, 9, 30)
-	end := start.AddDate(1, 1, 0) // ≈ 425 自然日
+	end := start.AddDate(1, 1, 0) // 2024 闰年 ⇒ 366 + 31 = **397 自然日**
 
 	for _, freq := range []market.Frequency{market.Freq1m, market.Freq15m} {
 		t.Run(string(freq), func(t *testing.T) {
@@ -322,6 +322,12 @@ func TestRouter_IntradayCapIsMeaningful(t *testing.T) {
 				_, err = r.Bars(context.Background(), freq, "600000.SH", start, end)
 			})
 			require.Error(t, err, "约 14 个月的日内请求必须被拒 —— 上限必须是量级上有意义的数")
+			// 报错里的天数是**绝对断言**：纯 Duration 串（397 天打成 "9528h0m0s"）
+			// 读不出「超了多少、该切几片」。"366 自然日" 写死也是刻意的 —— 改上限
+			// 必须在这里红一次、逼人重新确认这个数，而不是让断言跟着常量挪门柱
+			// （挪门柱正是本条测试存在的理由，见函数头）。
+			assert.Contains(t, err.Error(), "397.0 自然日", "报错应把请求跨度换算成自然日")
+			assert.Contains(t, err.Error(), "366 自然日", "报错应点名上限的自然日数")
 		})
 	}
 }
