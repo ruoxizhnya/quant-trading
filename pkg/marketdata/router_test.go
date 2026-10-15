@@ -17,7 +17,7 @@ func cst(y int, m time.Month, d, hh, mm int) time.Time {
 }
 
 // cstSec 构造带秒的 Asia/Shanghai 时刻（REV-04 秒级边界用例；
-// 纳秒级越界用例内联 time.Date，不放大 helper  surface）。
+// 纳秒级越界用例内联 time.Date，不放大 helper surface）。
 func cstSec(y int, m time.Month, d, hh, mm, ss int) time.Time {
 	return time.Date(y, m, d, hh, mm, ss, 0, market.AsiaShanghai)
 }
@@ -256,6 +256,16 @@ func TestAggregate_SessionBoundarySecondPrecision(t *testing.T) {
 	_, err = Aggregate(lunch, market.Freq15m)
 	require.Error(t, err, "11:30:01 已进午休，必须拒收")
 	assert.Contains(t, err.Error(), "午休")
+
+	// ④ 15:00:00 亚秒越界 → 拒，且报错必须把亚秒位打出来：RFC3339 会把
+	// 15:00:00.000000001 显示成 15:00:00，报错自相矛盾（自审修复钉住）。
+	subSecond := []market.OHLCV{
+		minuteBar(sym, cst(2024, 1, 2, 14, 45), 10.40, 10.45, 10.38, 10.44, 800),
+		minuteBar(sym, time.Date(2024, 1, 2, 15, 0, 0, 1, market.AsiaShanghai), 10.44, 10.46, 10.43, 10.45, 100),
+	}
+	_, err = Aggregate(subSecond, market.Freq15m)
+	require.Error(t, err, "15:00:00.000000001 是亚秒越界，必须拒收")
+	assert.Contains(t, err.Error(), "15:00:00.000000001", "报错须带亚秒精度——不能把越界 bar 显示成 15:00:00")
 }
 
 // TestRouter_UnknownFrequencyFailsLoud 路由对未知频率 fail-loud，
