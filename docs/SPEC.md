@@ -813,8 +813,8 @@ FactorComputer.ComputeFactorByName(ctx, name, date)
   fail-closed 报错而非静默 0——定义补齐属后续工单。
 - 公式型因子的 universe 规则：全 market 字段 → OHLCV 出现过的股票；
   全 fundamentals 字段 → 财报快照股票；混源 → 并集（缺侧 NaN → 缺失）。
-  种子名册的公式型因子均单源；混源并集路径在取数侧已实现，D4 登记的
-  新因子若混源会一次拉齐多张来源表——成本面见下条。
+  种子名册的公式型因子均单源；混源并集路径在取数侧已实现，将来名单若
+  扩出混源公式因子会一次拉齐多张来源表——成本面见下条。
 - `pkg/backtest/cache/factor_cache.go` 的回测预热清单是存量库外清单
   （基线登记），收敛到 Registry 读取留待 D6。
 - **公式型因子现算的取数成本形状（REV-02，2026-10-16 登记）**：
@@ -822,21 +822,30 @@ FactorComputer.ComputeFactorByName(ctx, name, date)
   各自拉取窗口数据，**无跨因子、跨日共享**。来源形状逐类实测
   （2026-10-16，本机库）：market 源 → `GetOHLCVForDateRange` **无 symbol
   过滤 = 全市场区间扫描**，Lookback=30 自然日窗口内 5,569 标的 ×
-  22 交易日 = 122,097 行，单次秒级；activity 源 →
-  `GetMarketActivityForDateRange` 同为全市场区间扫描（`market_activity`
-  现 0 行，形态同构）；fundamentals 源 → `GetFundamentalsSnapshot`
-  单日快照，非区间扫描（`stock_fundamentals` 现 0 行）。
-  **放大面 = 计算日数 × 行情/活跃度系因子数**：
-  `ComputeAllFactors(parallel=true)` 当日的行情系与活跃度系因子并发各扫
-  一遍；`ComputeFactorsForRange` 历史回填 N 日即 N 个批次，每批一刷
-  （批内因子数不是常数——D4/D8 登记的新公式因子进同一取数路径，
-  系数随登记数增长）。**适用面结论（本期裁决 (a2)：登记成文，不做共享
-  预取）**：handler 单日按名单因子路径 = 一次全市场扫描，秒级可接受，
-  **保留现状是有意的，不是遗漏**；批量回填在预取落地前须自控视野
-  （分区间跑、错峰跑），跑出来的「慢」是形状如此，不是代码坏。
-  共享预取（请求级缓存 / 按「日区间 × 来源表」预取一次，数值与现路径
-  对拍一致）另立工单再做——那是对拍纪律下的独立行为变更，不该夹进
-  文档登记单。
+  22 交易日 = 122,097 行，单次端到端实测 1.22s（psql 全列取回，
+  不含 Go 侧 scan 开销，量级口径与工单「秒级」一致）；activity 源 →
+  `GetMarketActivityForDateRange` 同为全市场区间扫描
+  （`market_activity` 现 0 行，形态同构）；fundamentals 源 →
+  `GetFundamentalsSnapshot` 单日快照，非区间扫描（`stock_fundamentals`
+  现 0 行）。
+  **放大面 = 计算日数 × 当日行情/活跃度系因子数，且当下系数是 1 不是
+  3**：真正打全市场区间扫描的只有 momentum；value / quality 走财报单日
+  快照，market_activity 扫现 0 行的活跃度表。**计算名册当下是编译期
+  种子**——`NewFactorComputer` 只装 `BuiltinFactorDefinitions`
+  （`pkg/data/factor.go:62`），库里 `factor_definitions` 表是种子向库
+  的投影（`SyncFactorDefinitions`），反向读取 `LoadFactorDefinitions`
+  与 D4/D8 的登记线**零生产调用方**。所以「系数随登记数增长」不是
+  已成立的事实，而是**接线后即出现的放大面**：把 DB 名册接进计算注册
+  表的工单，必须连同本条成本形状一起读——每登记一个行情系公式因子，
+  批量回填就多一次全市场区间扫描。`ComputeFactorsForRange` 历史回填
+  N 日即 N 个批次串行推进，`ComputeAllFactors(parallel=true)` 则批内
+  并发各拉各的。**适用面结论（本期裁决 (a2)：登记成文，不做共享
+  预取）**：单日按名路径里行情系因子一次全市场扫描、财报系因子一次
+  快照，量级可接受，**保留现状是有意的，不是遗漏**；批量回填在预取
+  落地前须自控视野（分区间跑、错峰跑），跑出来的「慢」是形状如此，
+  不是代码坏。共享预取（请求级缓存 / 按「日区间 × 来源表」预取一次，
+  数值与现路径对拍一致）的兑现面在「名册扩量接线」落地之后，届时另立
+  工单——那是对拍纪律下的独立行为变更，不该夹进文档登记单。
 
 ### 已知边界（D1 如实登记）
 
@@ -996,6 +1005,7 @@ slice，故自持 `sync.RWMutex` 成为**并发安全类型**：
 | 6 | **语言层**：新数据字段进表达式词表（新来源 `activity`） | `pkg/expression/registry.go`（`FieldSourceActivity` + `TableMarketActivity`） | 可用性地图 / 来源声明 / 跨包能力护栏测试绿 |
 | 7 | **因子**：公式因子定义入库 + D4 登记四样 | `pkg/domain/factor_def_seed.go` / `pkg/domain/factor.go`（名册） | 手算值钉死 / 缺失≠0 / 历史不足 / PIT 不可见测试绿 |
 | 8 | **策略侧供给**：`OHLCVDataProvider` 供应活跃度字段（未注入 → 明确报错） | `pkg/strategy/expression/data_provider.go` | 能力清单双向相等护栏绿 |
+| 9 | **集成测试（真库贯通）**：注册 → 同步 → 因子出分，真 adapter → 真 PostgresStore → 真 `factor_cache` | `pkg/data/source/daily_basic_integration_test.go` | 手算分落真库 / 重放幂等 / 晚于计算日的观测不可见（真 SQL 上界），用例自清且复核归零 |
 
 ### 实测记录（要求①：不实测不动工，2026-10-15）
 
@@ -1046,8 +1056,14 @@ D3 之后**第一个新增名册名** `market_activity`（`domain.FactorMarketAc
 | # | 破坏 | 目标测试（红） |
 | --- | --- | --- |
 | ① | 声明 `after_close` → 改宽成盘中可见（`custom` + fetch_time 表达式） | `TestDailyBasicDeclaration_MustBeAfterClose`（source 包） |
-| ② | 取数上界 `trade_date <= end` → 去掉上界/改方向 | `TestMarketActivity_RangeQueryIsPITBounded`（storage 真库）+ `TestMarketActivityFactor_FutureRowsAreInvisible`（因子链路） |
+| ② | 取数上界 `trade_date <= end` → 去掉上界/改方向 | `TestMarketActivity_RangeQueryIsPITBounded`（storage 真库）+ `TestMarketActivityFactor_FutureRowsAreInvisible`（因子链路）+ `TestD5Integration_RegisterSyncComputeScores` 第④步（真库贯通） |
 | ③ | 摘掉「有行但全跳过」的 fail-loud 闸门 | `TestFetchDailyBasic_FailsLoudWhenAllRowsSkipped`（data 包） |
+
+**另有一条结构护栏顺带执法**：AUD-42 的
+`TestNoHandRolledPostgresDSNAssemblyOutsideStorage`（`pkg/storage` 是唯一
+DSN 构造点）——集成测试初版手拼 DSN 被它当场判红，改为
+`storage.BuildDSN(DatabaseConfig{...})` 后过。这类「新代码撞上既有护栏」
+是护栏在正常工作，不是障碍。
 
 ### 实现指针
 
