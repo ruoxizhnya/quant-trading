@@ -463,7 +463,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **⑥ 边界**：只改停用路径的字段清理；`last_run_job_id` 等其余残留另立。
 - **完成记录（2026-10-14，`274dad7`）**：修在 [scheduler.go](../pkg/sync/scheduler.go) `ToggleSchedule` 停用分支——置 `schedule.NextRunAt = nil`，由既有的**单条** `UpdateSyncSchedule` 全字段写回落为 NULL，与 `is_active=false` 同一语句、无中间态；结构体与 JSON 字段名未动。单测两条腿（`pkg/sync/scheduler_start_test.go`）：`TestToggleScheduleOffClearsNextRunAt`（含激活前置事实腿，store 读回 `NextRunAt == nil` + `Stats().NextRuns` 为空）+ `TestToggleScheduleOnStillSetsNextRunAt`（反向腿：激活路径不被清除语句误伤）。破坏验证已做（去掉清除语句单测红，还原绿）。**诚实缺口**：活进程 curl 复测未做（本机无 docker 环境），留待有环境时补。
 
-### SYNC-04 · 调度器启动失败不可观测：`scheduler/stats` 的 `0/0` 有两种成因 ✅ 完成（2026-10-16，branch `task/sync-04` commit `c8ef50a`，待合入；依赖 SYNC-01 ✅、SYNC-03 ✅；ui 仓 A-08 的前置已解锁）
+### SYNC-04 · 调度器启动失败不可观测：`scheduler/stats` 的 `0/0` 有两种成因 ✅ 完成（2026-10-16，branch `task/sync-04` commits `c8ef50a`+`04b4b57`，待合入；依赖 SYNC-01 ✅、SYNC-03 ✅；ui 仓 A-08 的前置已解锁）
 
 - **① 目标**：`GET /api/sync/scheduler/stats` 能区分「调度器启动失败 / 被禁用」与「已启动但确实没有 active 排程」。现在两种情形都回 `0/0`，前端只能显示一个无法被当场质问的数字——这是 A-08 stats 块「每个数字可被质问」的前置。
 - **② 上下文**（2026-10-16 源码复核，行号为当下值）：
@@ -494,10 +494,16 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   - **字段（③.1，纯增量）**：`SchedulerStats` 追加 `IsRunning bool`（`is_running`，恒在，对标 `WorkerStats.IsRunning` 形状）+ `StartError string`（`start_error,omitempty`，仅失败时出现，不新增必填字段破坏现有解析）；旧三字段不改名不改语义，测试里断言「两组旧计数同形（0/0）」把这一点钉死——防止有人反过来挪用计数造区分。
   - **测试（先红后绿，⑤.1/⑤.2）**：`pkg/sync/scheduler_stats_test.go` 三条腿（失败组 vs 对照组可区分 + `start_error` 承载底层原因文本 / 重试成功后「置运行中 + 清空原因」同时发生 / 旧字段语义挪用防线）——起手编译红（`bad.IsRunning undefined`，exit 1），实现后 `go test ./pkg/sync/ -count=1` exit 0；`cmd/data/sync_handlers_stats_test.go` 两条腿走真实 `StartScheduler`+`getSchedulerStatsHandler` 的**实际 JSON**（失败体 `is_running:false`+`start_error` 含注入原因；运行体 `is_running:true` 且 `start_error` 键**缺席**，并断两组 JSON 可区分）——exit 0。
   - **破坏验证（⑤.3）**：删掉 `Stats()` 里的 `IsRunning`/`StartError` 记录（退回只读两个计数）→ pkg/sync 两条腿红（`StartError Should NOT be empty`）、cmd/data 两条腿红（`is_running` 断言红，含区分腿 `Should not be: false`）；Edit 工具还原后 `sha256sum -c` 与基线**逐字节一致**、复测全绿。
-  - **门禁（⑤.4）**：`go build ./...` exit 0、`go vet ./pkg/sync/... ./cmd/data/...` exit 0、`gofmt -l` 四个改动/新增文件空输出、`go test ./pkg/sync/... -count=1` exit 0。`go test ./cmd/data/... -count=1` 全量有**1 条既有红**：`TestSyncAllFactorsHandler_ReportsSkipped`（skipped=8 want 5，原因=共享开发库 `fundamentals_detail` 无行 + `size`/`volatility`/`growth` 内核未定义）——已在**纯 HEAD（2eba0a7）临时 detached worktree** 复现同一条同文失败（临时 worktree 已删），证非本单引入，按 ODR-067 登记在案不动。⚠️ 顺带发现一处**与本单无关的既有红**：`cmd/data/setup.go` 在 HEAD 上就不过 `gofmt`（import 分组顺序），与 AUD-27「整仓 gofmt 可当结论」的登记相悖，未修（⑥ 边界外），建议另立小单。
+  - **门禁（⑤.4）**：`go build ./...` exit 0、`go vet ./pkg/sync/... ./cmd/data/...` exit 0、`gofmt -l` 四个改动/新增文件空输出、`go test ./pkg/sync/... -count=1` exit 0。`go test ./cmd/data/... -count=1` 全量有**1 条既有红**：`TestSyncAllFactorsHandler_ReportsSkipped`（skipped=8 want 5，原因=共享开发库 `fundamentals_detail` 无行 + `size`/`volatility`/`growth` 内核未定义）——已在**纯 HEAD（2eba0a7）临时 detached worktree** 复现同一条同文失败（临时 worktree 已删），证非本单引入，按 ODR-067 登记在案不动（**后续更新**：D5 线已在 `1489c54` 校正该测试期望，合入预演中全量 `cmd/data` 已绿，见下方自审修订 ③）。⚠️ 顺带发现一处**与本单无关的既有红**：`cmd/data/setup.go` 在 HEAD 上就不过 `gofmt`（import 分组顺序），与 AUD-27「整仓 gofmt 可当结论」的登记相悖，未修（⑥ 边界外），建议另立小单。
   - **文档同步（③.4）**：`docs/SPEC.md` §sync 端点块新增 `GET /api/sync/scheduler/stats` 行 + 响应契约注记（两种成因的判读口径）；本文件 §三 A-08 指针行已注明「stats 现带 `is_running`/`start_error`，前端可据此区分」。（`docs/openapi.yaml` 从未登记过任何 `/api/sync/*` 路径——机器可读契约缺口是本单之前的既有状态，工单只要求 SPEC，未扩；DATA-02 自审先例提示这里迟早要补，另立为宜。）
   - **诚实缺口**：活进程 curl 三态复测未做——本单代码在未合入的 `task/sync-04` 分支上，容器由主工作树构建，合入后需 `docker compose build data-service && up -d data-service` 再按「psql 读数 → curl 网关」链补一次实测（SYNC-01/02/03 同款缺口）。`-race` 本机不可跑（无 gcc，CGO_ENABLED=0）。
   - **合入方式**：主工作树当时有并行 agent 未提交改动（factor/market_activity 系），本单全程在独立 worktree 完成；`c8ef50a` 未 push、未合入 main，合并与台账提交的时机归主任。
+  - **自审修订（2026-10-16，审 `c8ef50a` 后追加，不改写上面原始记录）**：
+    1. **`is_running` 当时不是活性读数（已修，commit `04b4b57`）**：工单②明说照抄 `WorkerStats.IsRunning` 的形状，而那是 `wp.ctx.Err()==nil` 的活性语义；首版只记最近一次 `Start()` 的结局，`Stop()` 之后仍会报运行中——字段名骗读它的人。修法：`Stop()` 末尾在 `s.mu` 下翻转 `isRunning`（`startError` 不动：正常停止不是启动失败）。先红链：新增 `TestStopClearsIsRunning` 起手红（`Should be false`，exit 1）→ 实现 → `pkg/sync` 全量绿；破坏验证：摘掉翻转**仅该腿红**、其余全绿，还原 `sha256sum -c` 逐字节一致后复测绿。
+    2. **SPEC 判读表缺第三形态（随 `04b4b57` 补）**：首版只写「启动失败 vs 无排程」两种成因；`is_running=false` 且 `start_error` 缺席 = 未启动或已停止，也需要判读口径（正常服务走不到这格，启动接线由 wiring guard 钉住）。SPEC 注记现给全三态。
+    3. **上面「门禁」那条登记的环境红已过期（已加指针）**：`TestSyncAllFactorsHandler_ReportsSkipped` 由 D5 线在 `1489c54` 校正测试期望；合入预演实测全量 `cmd/data` 绿，它不再是登记红。
+    4. **合入预演（新证据）**：临时 worktree 里把 `task/sync-04`（两 commit）合入 main `3de5ef6` —— 唯一重叠文件 `docs/SPEC.md` ort 自动合并零冲突；合并态上 `go build`/`go vet`/`go test ./pkg/sync/... ./cmd/data/... -count=1` **全部 exit 0**（临时 worktree 与预演分支已删）。分支本身未动：`c8ef50a` 已被台账引用，不重写历史，待主任合并。
+  - **台账归属留痕**：本完成记录写入主工作树时挂在并发 agent 的未提交改动上，随后被 D5 线的提交（`fa53ca2`/`1489c54` 系）一并携带入库——内容完整无损，按主任 2026-10-14 裁决接受该形状，仅在此注明归属。
 
 ### DATA-02 · 票池状态拆分没有只读通道（幸存者偏差块只能显示空态） ✅ 完成（2026-10-14）
 
@@ -763,7 +769,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：不改任何因子的数学定义与现算数值（D3 红线）；不改 `FactorStore` 接口签名（`GetOHLCVForDateRange` 的无 symbol 形态是既有契约，加过滤方法另立）；不动代码型因子路径。
 - **⑤ 验收**：若选 (a1)：对拍测试（共享预取 vs 逐因子重拉，同日同因子数值逐只相等）+ 查询次数基准（N 日 M 因子的全市场查询次数从 N×M 降为 ≈N）；若选 (a2)：SPEC/已知边界成文 + `docs/` 链接守卫绿。两种都要求 `pkg/data` 既有测试全绿。
 - **⑥ 边界**：只做公式型因子的数据拉取效率/文档登记；代码型因子、因子落库批次大小、回测侧消费另立。
-- **完成记录（2026-10-16，SPEC 本体 `ca06c8b`；本段按台账纪律由归属方入库）**：选 **(a2) 文档登记**。三条理由：① **(a1) 本期没有共享对象** —— 见下面对 ② 的实测订正，当下每日真正打全市场区间扫描的因子只有 momentum 一个，请求级缓存无从共享；② (a1) 的验收要求「数值与现路径对拍一致」，落点 `pkg/data/factor*.go` 正被并行施工占用，对拍是对 D3 数值红线的独立行为变更，不该挤进本单夹带；③ 形状成文本来就是 ② 自己指出的缺口（「放大效应没有作为已知边界成文」），先堵认知面。**等「名册扩量」接线落地后 (a1) 才有兑现面，届时另立工单**（预取 + 对拍 + 查询次数基准一体做）——见下方自审修订：计算名册当下是编译期种子，登记线到计算注册表尚未接线，扩量的前提本身没成立。
+- **完成记录（2026-10-16，SPEC 本体 `ca06c8b`；本段正文实际由 `92cc6c7` 携带入库——非归属方本人 commit，归属说明见本段末条）**：选 **(a2) 文档登记**。三条理由：① **(a1) 本期没有共享对象** —— 见下面对 ② 的实测订正，当下每日真正打全市场区间扫描的因子只有 momentum 一个，请求级缓存无从共享；② (a1) 的验收要求「数值与现路径对拍一致」，落点 `pkg/data/factor*.go` 正被并行施工占用，对拍是对 D3 数值红线的独立行为变更，不该挤进本单夹带；③ 形状成文本来就是 ② 自己指出的缺口（「放大效应没有作为已知边界成文」），先堵认知面。**等「名册扩量」接线落地后 (a1) 才有兑现面，届时另立工单**（预取 + 对拍 + 查询次数基准一体做）——见下方自审修订：计算名册当下是编译期种子，登记线到计算注册表尚未接线，扩量的前提本身没成立。
   - **⚠️ 先订正本单 ② 的形状（不改写原文，只加指针）**：「3 个 leaf/formula 因子（momentum/value/quality）并发各拉一次**同一窗口**」在 main HEAD 不成立。`loadFactorSeries` 按 InputFields 来源分路：**只有 momentum（`[close]`）打 `GetOHLCVForDateRange` 全市场区间扫描**；value（`[pe]`）/ quality（`[roe]`）走 `GetFundamentalsSnapshot` 单日快照（非区间扫描，且 `stock_fundamentals` 现 0 行）；D5 后名册多了一个 `market_activity`（`[turnover_rate]`，扫 `market_activity` 区间，现 0 行，形态同构）。所以放大面当下 = **交易日数 × 1 次行情系全市场扫描**，不是 ×3。缺陷形状真实（逐因子逐日无共享、无 symbol 过滤），但量级比 ② 的估计小一截——后续按 ×3 估回填成本的人会被带偏。**量级现量（2026-10-16，本机库实测，非估算）**：momentum 窗口（Lookback=30 自然日）内 122,097 行 / 5,569 标的 × 22 交易日；`ohlcv_daily_qfq` 全库 distinct symbol 5,671。
   - **落点**：SPEC.md「因子定义 Schema（D3）」→「已知边界（D3 如实登记）」新增成本形状条（逐来源形状 + 实测数 + handler 单日按名路径保留现状的裁决 + 批量回填适用面），顺带把 universe 条的「三个公式型因子均不混源」订正为「种子名册单源、混源并集路径已实现」（D5 后名册为 4 个，且 D4 登记可扩）。
   - **验收**：`tools/check_doc_links.py` exit 0（扫描 13 个常青/活跃层 Markdown，含 SPEC.md）。⑤ 的「`pkg/data` 既有测试全绿」**未本机实测，如实登记**：主工作区 `pkg/data` 是并行 agent 的在途改动（新迁移 056 + `postgres.go` 已改未提交），跑 `go test ./pkg/data/` 会经 `migrate()` 把在途 DML 打到共享开发真库（DATA-09 的隔离修复在 `task/data-09-test-migration` 未并 main）；替代方案「`git archive main` 提纯副本跑」被本机 auto 权限闸门拦下。本单改动纯文档、零 Go 代码，无测试回归因果面；请入库方 / CI 在干净 main 上补跑这一腿。
@@ -771,6 +777,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
     1. **「批内因子数随登记数增长」在 main HEAD 不成立——被我自己的成本条带偏**。核对：计算名册 = 编译期种子（`NewFactorComputer` 只装 `BuiltinFactorDefinitions`，`pkg/data/factor.go:62`）；库 `factor_definitions` 表是种子向库的**投影**（`SyncFactorDefinitions`），反向读取 `LoadFactorDefinitions` 与 D4 登记线、D8 挖掘求值（自建 sandbox，不经 `loadFactorSeries`）**均零生产调用方**。故当下放大系数是 1（momentum）而非「随登记增长」——那是**接线后即出现**的放大面。SPEC 条改为条件句并把「接线工单必须连本形状一起读」写成前置义务，免得接线人看不到成本面。
     2. **「单次秒级」补来路**：本机 psql 全列端到端实测 **1.22s**（122,097 行，含传输不含 Go scan 开销），量级与工单口径一致；原先是我没量过就沿用 ② 的话，形状同 REV-01 自审第 1 条。
     3. 顺手收口：universe 条与落点句里「D4 登记可扩」同因 1 改为「扩量尚未接线的放大面」；「handler 单日按名路径 = 一次全市场扫描」订正为「行情系一次全市场扫描、财报系一次快照」（按名路径同走 `loadFactorSeries` 分来源）。修正已复跑 `tools/check_doc_links.py` exit 0。
+  - **协作/归属说明（2026-10-16，实况非提案）**：① 修正 commit `e3b9e39` 是 pathspec 整文件提交，把 D5 三段**在途** SPEC 片段（实现矩阵第 9 行、破坏验证②第三用例名、AUD-42 护栏段）一并扫入——扫入当时 `daily_basic_integration_test.go` 尚未入库，文档短暂处于幻影引用态，`92cc6c7`（D5 方提交测试本体）后自愈；那三段归属 D5，被本单 commit 携带非本意，照 REV-04 先例披露不改写。② 我发现扫入后曾在工作树临时摘除那三段，随即被 `92cc6c7` 的整体提交吸收，最终态 SPEC/TASKS 工作树与 HEAD 一致、无残留。③ 本完成记录整段（含自审与本子条）正是随 `92cc6c7` 入的库，「由归属方本人入库」的台账纪律这次未兑现——不是我不想守，是并行 agent 的文件级 add 抢在了前面；内容完整、未动他人分毫，按主任 2026-10-14 裁决口径可接受，归属以本条为准。
 
 ### REV-03 · `RegistrationBook` 可变状态无并发保护 [P2] ✅ 完成（2026-10-15，commit `abf0af3`+`d891567`）
 
@@ -814,7 +821,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 | **AUD-61 · E2E 测试对齐**（含阶段一前置：61 条 `test.fixme` 登记 + 取红清单） | quant-trading-ui 仓 `docs/TASKS.md` | 2026-10-14 自 core 迁出（迁移指针见归档卷）。⚠️ **阶一已从「测试债」升格为 ODR-067 主干工作流前置**（61 failed/116 passed 全量 e2e 现状，不做则直推 main 红灯与历史解耦），启动时点与 DOCS-01 守卫落地协同 |
 | **NT v2.0.0 正式版升级** | quant-trading-docs 仓 `docs/guides/nt-sidecar-operations.md` 预案 | 唯一外部等待项：正式版发布后按预案收口，**双跑对齐回归为升级验收门**（NT 决策门裁决一） |
 | UI 仓 Stitch 设计稿相关（A-05 等） | quant-trading-ui 仓 `docs/design/stitch_quantlab_ux_redesign/TASKS.md` | 本地栈实测证据全文在其 A-05 节，core 侧只留指针（归档卷 §八） |
-| **A-08 · 数据同步页（作业队列 + 排程 CRUD + worker/scheduler 统计）** | quant-trading-ui 仓 `docs/design/stitch_quantlab_ux_redesign/TASKS.md` A-08 节（六字段实施计划） | 前置 SYNC-01 已 ✅、**SYNC-04 已 ✅（2026-10-16，`task/sync-04` `c8ef50a`，待合入）**（均见本文件 §二·补）。原「`scheduler/stats` 的 `0/0` 两种成因不可区分」缺口已在后端关闭：stats 现带 `is_running`/`start_error`（契约见 `docs/SPEC.md` §sync 端点块），前端可据此区分。⚠️ 消费前提：该分支合入并重建 data-service 后接口才会带新字段，否则线上读数仍是旧形状 |
+| **A-08 · 数据同步页（作业队列 + 排程 CRUD + worker/scheduler 统计）** | quant-trading-ui 仓 `docs/design/stitch_quantlab_ux_redesign/TASKS.md` A-08 节（六字段实施计划） | 前置 SYNC-01 已 ✅、**SYNC-04 已 ✅（2026-10-16，`task/sync-04` `c8ef50a`+`04b4b57`，待合入）**（均见本文件 §二·补）。原「`scheduler/stats` 的 `0/0` 两种成因不可区分」缺口已在后端关闭：stats 现带 `is_running`/`start_error`（契约见 `docs/SPEC.md` §sync 端点块），前端可据此区分。⚠️ 消费前提：该分支合入并重建 data-service 后接口才会带新字段，否则线上读数仍是旧形状 |
 
 ---
 
