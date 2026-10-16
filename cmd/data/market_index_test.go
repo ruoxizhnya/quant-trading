@@ -118,9 +118,9 @@ func TestMarketIndexHandler_ChannelAndHonestEmpty(t *testing.T) {
 // TestMarketIndexHandler_ReadFailureFailsLoud 钉失败面：库侧读失败 ⇒ 500，
 // 不回一份「indices 缺席所以界面空白」的 200。
 //
-// ⚠️ 分工：本条守的是「handler 不把库侧 error 折成空数组」。它抓不到单位换算错误
-// （那是纯映射腿的事），也抓不到「prev close 查询单独失败」（同一条 SQL 一趟取回，
-// 结构上不存在半途状态）。
+// ⚠️ 分工：本条守的是「handler 不把库侧 error 折成空数组」，以及「失败响应点名哪一步」。
+// 它抓不到单位换算错误（那是纯映射腿的事），也抓不到「prev close 查询单独失败」
+// （同一条 SQL 一趟取回，结构上不存在半途状态）。
 func TestMarketIndexHandler_ReadFailureFailsLoud(t *testing.T) {
 	store, err := storage.NewPostgresStoreConnected(context.Background(), stocksCountTestDSN)
 	if err != nil {
@@ -140,6 +140,15 @@ func TestMarketIndexHandler_ReadFailureFailsLoud(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code,
 		"读失败必须回 500；回 200 加空数组就是把「读失败」显示成「今天没有行情」；实际 body：%s", w.Body.String())
+
+	// 光有 500 还不够：`Wrap` 在 5xx 上会把文案整个换成通用句
+	// （pkg/httpserver/errors.go:115-124），那样这条端点与 /stocks/count 的失败响应
+	// 就是同一个字节串，调用方分不清挂在哪一步 —— 与本单「几种成因不许压成同一个形状」
+	// 同一把尺子。所以 handler 走 FailCause，本条钉文案里有这一步的名字。
+	assert.Contains(t, w.Body.String(), "failed to read index bars",
+		"失败响应要点名是哪一步（SPEC §1 与 openapi 的 '500' 都登记了这条）；实际 body：%s", w.Body.String())
+	assert.NotContains(t, w.Body.String(), "indices",
+		"失败响应不得带半份成功数据（哪怕是空数组）；实际 body：%s", w.Body.String())
 }
 
 func ptrF(v float64) *float64 { return &v }

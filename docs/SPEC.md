@@ -2142,6 +2142,10 @@ GET  /api/datasource/registry/chains    - List configured fallback chains
   - 现在三种情形各有形状：**读到日期** = `"YYYY-MM-DD"`；**库里没有行情** = 显式 `null`；
     **这一趟读失败** = 5xx。`null` 只表示「没有读数」这一个意思，不背「读挂了」这层含义。
   - 缺席不是合法形状：契约声明了它，读不出来就该响，而不是让界面无声少一个数。
+  - 失败响应点名是哪一步（`httpserver.FailCause` 的静态文案），底层原因只进服务端日志 ——
+    同一个端点上的「票池拆分没读到」与「行情日期没读到」不回同一个字节串。
+- 网关 `GET /api/stocks/count` 是**字段透传**（`proxyRequest` 解码成 map 再编码），
+  所以这条形状不需要网关侧改动，也不需要在网关再登记一遍。
 
 #### `GET /market/index` 的响应形状（DATA-07，2026-10-16）
 
@@ -2158,10 +2162,11 @@ GET  /api/datasource/registry/chains    - List configured fallback chains
   `+0.00%` 是假数字。`amount` 在 `turnover` 列为 NULL 时同理（该列可空，DDL 只有 `DEFAULT 0`）。
 - 一趟窗口函数取回最新一期与上一期收盘。旧形状是每个代码两趟查询、且第二趟的 error
   被丢进 `if err == nil` 分支，于是「读失败」与「这个指数没数据」同样是「这条不出现」。
+  现在读失败 ⇒ 5xx（响应文案点名是这条端点读的，不是通用句），没数据 ⇒ `[]`。
 - **`indices` 当前实测为 `[]`**：`000300.SH / 000001.SH / 399006.SZ` 在
   `ohlcv_daily_qfq` 里 0 行，全库也没有指数日线表（2026-10-16 实测 count=0）。
   空数组是**诚实读数**，不是这条端点的缺陷；补指数 bar 需要新数据源（tushare
-  `index_daily`）与建表，另立工单，不在 DATA-07 夹带。
+  `index_daily`）与建表，已登记为 **DATA-12**（待主任批准），不在 DATA-07 夹带。
 - 库里没有行的代码**不产出条目**，不会编一条零值读数（零值 close 会被读成「收盘价 0.00」）。
 
 #### PIT 历史读数：`/fundamentals/:symbol/history` 不对 SPA 开放（DATA-03 b2，2026-10-16）
@@ -2175,9 +2180,6 @@ GET  /api/datasource/registry/chains    - List configured fallback chains
   实际给不出读数的面，比"没有面"更坏。
 - 工单 ③ 的注同样是这条：**通道与数据是两件事，别混着结案**。
   等 EQD-P1-2 通了，再按「先有数、再开面」的顺序另立单补。
-
-- 网关 `GET /api/stocks/count` 是**字段透传**（`proxyRequest` 解码成 map 再编码），
-  所以这条形状不需要网关侧改动，也不需要在网关再登记一遍。
 
 #### `POST /sync/index-constituents/:index_code` 的响应形状（DATA-06，2026-10-16）
 

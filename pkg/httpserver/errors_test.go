@@ -101,6 +101,48 @@ func TestWrap_PrefixPlusLoggedCause(t *testing.T) {
 	}
 }
 
+// TestWrap_At5xxDiscardsTheMessage 钉上面那条 4xx 腿的**另一半**：Wrap 的前缀只到
+// 4xx 为止，5xx 走通用文案（errors.go 的 5xx 分支根本不读 message）。
+//
+// 为什么值得单独钉：调用点写得像「文案会给出去」（`Wrap(c, 500, err, "failed to
+// read index bars: ")`），实际到不了客户端 —— 于是同一个 handler 里几个 500 出口
+// 回的是同一个字节串，调用方分不清挂在哪一步。DATA-03/DATA-07 因此把这类站点改用
+// FailCause（静态文案出去、cause 只进日志），依据就是本条钉住的这个行为。
+func TestWrap_At5xxDiscardsTheMessage(t *testing.T) {
+	t.Parallel()
+	const stage = "failed to read index bars: "
+	w := newRecorder(t, func(c *gin.Context) {
+		Wrap(c, http.StatusInternalServerError, errors.New("relation \"ohlcv_daily_qfq\" does not exist"), stage)
+	})
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("状态码应为 500，实际 %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), stage) {
+		t.Fatalf("预期 Wrap 在 5xx 上丢弃 message，实际却出现在响应里：%s", w.Body.String())
+	}
+	got := bodyOf(t, w)
+	if got["error"] != genericMessage(http.StatusInternalServerError) {
+		t.Fatalf("5xx 应给通用文案，实际 %v", got["error"])
+	}
+}
+
+// TestFailCause_KeepsStageTextAt5xx 是上一条的对照腿：FailCause 专为
+// 「5xx 也要说清挂在哪一步，但内部原因不外泄」而生，静态文案必须出去。
+func TestFailCause_KeepsStageTextAt5xx(t *testing.T) {
+	t.Parallel()
+	const stage = "failed to read index bars"
+	w := newRecorder(t, func(c *gin.Context) {
+		FailCause(c, http.StatusInternalServerError, stage, errors.New("pgx: connection refused"))
+	})
+	got := bodyOf(t, w)
+	if got["error"] != stage {
+		t.Fatalf("FailCause 应把静态文案原样回出，实际 %v", got["error"])
+	}
+	if strings.Contains(w.Body.String(), "pgx:") {
+		t.Fatalf("cause 不得进响应体：%s", w.Body.String())
+	}
+}
+
 func TestFailf_Formats(t *testing.T) {
 	t.Parallel()
 	w := newRecorder(t, func(c *gin.Context) {

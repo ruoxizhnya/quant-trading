@@ -2246,6 +2246,14 @@ paths:
                       所以 null 只表示「没有读数」这一个意思，不背「读挂了」这层含义。
                       形状问题由 DATA-03 关闭（原形状把 date 扫进 **string 且丢弃
                       error，该字段在任何库里都不曾出现）。
+        '500':
+          description: >
+            这一趟没读成（票池拆分或行情日期任一失败）。DATA-03 之后读失败不再折成
+            「200 + 字段缺席/为 null」；文案点名失败的那一步，底层原因只进服务端日志。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/market/index:
     get:
@@ -2254,7 +2262,8 @@ paths:
       description: >
         数据服务从 ohlcv_daily_qfq 取三个指数代码的最新一期与上一期收盘（一趟窗口函数）。
         库里这三个代码当前 0 行（没有指数日线表），所以实测回 `{"indices":[]}` ——
-        这是诚实读数，不是缺陷；补指数 bar 需要新数据源与建表，另立工单（DATA-07 台账）。
+        这是诚实读数，不是缺陷；补指数 bar 需要新数据源与建表，已登记为 DATA-12（待主任批准）。
+        读失败回 500（见本路径的 '500'），不是把失败折成空数组。
       operationId: getMarketIndex
       responses:
         '200':
@@ -2304,6 +2313,14 @@ paths:
                           format: double
                           nullable: true
                           description: 成交额，单位**CNY**；turnover 列为 NULL 时是 null，不是 0
+        '500':
+          description: >
+            指数 bar 这一趟没读成（DATA-07）。旧形状把读失败折成「200 + 这条不出现」，
+            与「这个指数没有日线」长得一样；现在失败回 500，没数据才回 []。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/sync/calendar:
     post:

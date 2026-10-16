@@ -95,9 +95,15 @@ func stocksCountHandler(store *storage.PostgresStore) gin.HandlerFunc {
 		// （pgx 收到的目标是 `**string`）并**丢弃** Scan 的 error —— 查询本身成功、
 		// 值也回来了，是类型映射不进去，于是 `latest_date` 在任何库里都没出现过，
 		// 而 SPEC 与前端类型都声明了它。现在：读失败 ⇒ 500；库里没有行情 ⇒ 显式 null。
+		//
+		// 用 FailCause 而不是 Wrap：Wrap 在 5xx 上把 message 整个换成通用文案
+		// （pkg/httpserver/errors.go:115-124），本 handler 因此会出现三个字节相同的
+		// 500 响应体，调用方分不清挂在哪一步 —— 与 DATA-03「别把几种成因压成一个形状」
+		// 同一把尺子。FailCause 的文案是写死的静态句，cause 只进日志，不外泄。
 		latest, err := store.LatestQuoteDate(ctx)
 		if err != nil {
-			httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to read latest quote date: ")
+			httpserver.FailCause(c, http.StatusInternalServerError,
+				"failed to read latest quote date", err)
 			return
 		}
 		var latestDate *string
@@ -154,12 +160,14 @@ func marketIndexHandler(store *storage.PostgresStore) gin.HandlerFunc {
 		// error 都被丢进 `if err == nil` 的分支里 —— 读失败与「这个指数没数据」
 		// 同样表现为「这一条不出现」。现在一趟取回，读失败就是 500。
 		//
-		// 库里这三个代码当前 0 行（工单 ② 实测，且全库没有指数日线表），
-		// 所以响应是诚实的 `{"indices":[]}`；补指数日线需要新数据源与建表，
-		// 归另立的工单，不在本单夹带。
+		// 库里这三个代码当前 0 行（工单 ② 实测，且全库没有指数日线表），所以响应是
+		// 诚实的 `{"indices":[]}`；补指数日线需要新数据源与建表，登记为 **DATA-12**
+		// （待主任批准），不在本单夹带。
 		bars, err := store.LatestIndexBars(ctx, marketIndexCodes)
 		if err != nil {
-			httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to read index bars: ")
+			// FailCause 而非 Wrap：见上面 stocksCountHandler 里同一条注释。
+			httpserver.FailCause(c, http.StatusInternalServerError,
+				"failed to read index bars", err)
 			return
 		}
 

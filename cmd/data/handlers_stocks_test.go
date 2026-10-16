@@ -204,6 +204,12 @@ func TestStocksCountHandler_LatestDatePresentAndMatchesDatabase(t *testing.T) {
 // （无 error 可读）。那一面由三处守：库侧 TestLatestQuoteDate_PropagatesQueryError
 // （error 必须上抛，不被折成 nil）+ 上面那条逐值核对（读失败 ⇒ 值不可能对）+
 // 活进程真实失败路径（隔离库里 DROP 表后 curl 必须 500，见 DATA-03 台账）。
+//
+// 本条**不断言失败文案**：ctx 取消先撞在票池拆分那一趟（:90，既有调用点走 Wrap ⇒
+// 通用文案），点名「哪一步」那条腿由只有一趟读的 /market/index 守
+// （TestMarketIndexHandler_ReadFailureFailsLoud），不在这里冒充覆盖。
+// 「Wrap 在 5xx 丢弃 message / FailCause 留住静态文案」这件事本身，由 pkg/httpserver
+// 的 TestWrap_At5xxDiscardsTheMessage 与 TestFailCause_KeepsStageTextAt5xx 两条腿钉。
 func TestStocksCountHandler_ReadFailureFailsLoud(t *testing.T) {
 	store, err := storage.NewPostgresStoreConnected(context.Background(), stocksCountTestDSN)
 	if err != nil {
