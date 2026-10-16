@@ -40,6 +40,13 @@ func (a *TushareAdapter) Declarations() []ConnectorDeclaration {
 			// 不是 DataItem.TradeTime —— 财报连接器的 TradeTime 承载的是
 			// **报告期截止日**（pkg/data/tushare.go normalizeFundamentals
 			// 取 end_date），用它当锚点等于把前视洞放回来。
+			//
+			// 锚点写法（优先级，D2-R1 定稿）：这里仍声明**保留记号**
+			// VisibleFieldAnnDate —— 语义以规范层为准，不因 wire 是否投影而变。
+			// D2-R1 起 tushare 财报 connector 已把 ann_date 投影进 wire schema
+			// （Schema(DataTypeFundamental) + fundamentalToMap），锚点从
+			// 「悬空、不可实测」变为「可实测」；投影可选，若投影则类型必须是
+			// date/datetime（validateReservedAnchorProjection 执法）。
 			DataType:      DataTypeFundamental,
 			TimeSemantics: market.VisibleOnAnnouncementDay,
 			VisibleField:  VisibleFieldAnnDate,

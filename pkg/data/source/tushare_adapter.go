@@ -80,6 +80,12 @@ func (a *TushareAdapter) Schema(dataType string) (DataSchema, error) {
 				{Name: "net_profit", Type: "float", Required: false, Unit: "yuan"},
 				{Name: "total_assets", Type: "float", Required: false, Unit: "yuan"},
 				{Name: "total_liab", Type: "float", Required: false, Unit: "yuan"},
+				// ann_date 是**披露日**（= 可见时间锚点）。D2 时代锚点只以保留
+				// 记号存在（语义承载在规范层 market.Fundamental.AnnDate），wire
+				// schema 里没有 ann_date，于是声明「悬空、不可实测」；D2-R1 起
+				// 把它投影进 wire schema，锚点有了实测载体。非必填——上游缺披露
+				// 日时留空（缺失≠0），不编一个日期顶上。
+				{Name: "ann_date", Type: "date", Required: false},
 			},
 		}, nil
 	default:
@@ -161,7 +167,12 @@ func (a *TushareAdapter) fetchFundamentals(ctx context.Context, req FetchRequest
 		}
 		for _, f := range fundamentals {
 			items = append(items, DataItem{
-				Symbol:    f.Symbol,
+				Symbol: f.Symbol,
+				// TradeTime 承载**报告期截止日**（end_date），**不是**可见锚点。
+				// 财报的可见时刻是披露日，承载在 Data["ann_date"]
+				// （规范层 market.Fundamental.AnnDate；D2 契约保留记号
+				// VisibleFieldAnnDate）。两者不可互替：拿 TradeTime 当可见点，
+				// 三季报（9/30 截止、10/25 披露）在 9/30 就可交易——前视洞。
 				TradeTime: f.Date,
 				Data:      fundamentalToMap(f),
 			})
@@ -191,6 +202,11 @@ func fundamentalToMap(f domain.Fundamental) map[string]interface{} {
 		"net_profit":     f.NetProfit,
 		"total_assets":   f.TotalAssets,
 		"total_liab":     f.TotalLiab,
+		// ann_date：披露日（可见时间锚点）在 wire 上的投影（D2-R1）。
+		// 直接透传 domain.Fundamental.AnnDate 的指针——同本 map 里 PE/PB 等
+		// 可空字段的口径：nil = 上游未披露 → **留空为 nil**，绝不用零值时间
+		// 或 0 顶上（缺失≠0）；锚点语义以规范层为准，本键是它的可选载体。
+		"ann_date": f.AnnDate,
 	}
 }
 

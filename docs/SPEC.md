@@ -570,8 +570,15 @@ Go 侧词表是唯一真相：`pkg/domain/market`（`TimeSemantics` / `Frequency
 `VisibleField` 是记录中承载可见时间锚点的字段名：`DataSchema.Fields` 里的
 date/datetime 字段名，或**保留锚点记号**——`trade_time`（OHLCV 类数据锚点在
 `DataItem.TradeTime`，不在 schema 字段里）、`ann_date`（财报类数据锚点是规范
-层 `market.Fundamental.AnnDate`，披露日即可见时间点，见「规范层 Schema」；
-connector 的 wire schema 与 `Data` map 都不承载它，故列为保留记号）。
+层 `market.Fundamental.AnnDate`，披露日即可见时间点，见「规范层 Schema」）。
+
+**优先级（D2-R1 定稿）**：保留记号的语义**以规范层为准**；connector 在 wire
+schema 里投影同名字段是**可选**的——D2 时代 `ann_date` 只在规范层（声明悬空、
+不可实测），D2-R1 起 `tushare` 财报 connector 把它投影进 wire schema
+（`Schema(DataTypeFundamental)` 的 date 字段 + `fundamentalToMap` 的 `ann_date`
+键），锚点变**可实测**。投影一旦存在，类型必须是 date/datetime：
+`validateReservedAnchorProjection` 对用 string/float 冒充可见时间点的投影按
+`ErrDeclarationMismatch` 拒收；不投影仍合法（语义仍在规范层）。
 
 **fail-closed 三类拒收**（错误信息点名 adapter + 数据类型 + 缺什么）：
 
@@ -593,7 +600,7 @@ connector 的 wire schema 与 `Data` map 都不承载它，故列为保留记号
 | adapter | 数据类型 | 时间语义 | 频率口径 |
 | --- | --- | --- | --- |
 | tushare | `ohlcv_daily` | `after_close` | `daily` |
-| tushare | `fundamentals` | `announcement_day`（锚点=`ann_date` 保留记号，**披露日**，非报告期截止日） | `event` |
+| tushare | `fundamentals` | `announcement_day`（锚点=`ann_date` 保留记号 = **披露日**，非报告期截止日；D2-R1 起同时投影进 wire schema） | `event` |
 | tushare_macro | `macro_series` | `announcement_day`（锚点=`obs_date`，见已知边界④） | `event` |
 | tushare_daily_basic | `daily_basic` | `after_close`（锚点=`trade_date`；**D5 高危场景第一个真实考卷**） | `daily` |
 | mootdx | `realtime_quote` | `custom`（观察时刻即可见） | `intraday` |
@@ -613,7 +620,8 @@ connector 的 wire schema 与 `Data` map 都不承载它，故列为保留记号
 注册成功、被拒 adapter 不污染 Registry（注册原子性）。**破坏验证（改坏→
 红→还原→绿）**：① 注册一个不声明时间语义的 connector → 拒收且报错点名；
 ② 删掉任一 adapter 的某条声明 → 集成测试红；③ 把「收盘后可见」改成词表
-外的「盘中即可见」→ 集成测试红。
+外的「盘中即可见」→ 集成测试红；④ 保留锚点的 wire 投影写成非 date/datetime
+（如 string）→ `reserved_ann_date_projected_as_string_fails` 红（D2-R1 新增）。
 
 **已知边界（D2 如实登记）**：① `mootdx` 分钟表 `amount` 为 NULL 时
 `Turnover` 记 0 —— 字段级折零由 D2 在契约文档收编（D1 已点名），本单不改
@@ -621,14 +629,21 @@ ETL 行为；② 产业链 fetcher（`pkg/data/supply_chain.go`）不走 Registr
 其时间语义在此成文登记为已知边界。**注**：D5（2026-10-16）落地的样板源是
 **`daily_basic` 市场活跃度**（`tushare_daily_basic` adapter），**不是**产业链
 adapter——后者仍不在册，建它属后续「一源一单」；③ `tushare` 财报
-connector 的 wire schema / `Data` map **未透出 `ann_date`** —— 真实披露日
-由底层 `data.TushareClient` 直写 `stock_fundamentals.ann_date`（规范层
-`market.Fundamental.AnnDate` 承载可见语义），故锚点取保留记号 `ann_date`；
-补齐透出链路（让 connector 的 `DataItem` 也带 `ann_date`）属单独立项
-（TASKS D2-R1）；④ `tushare_macro` 的可见锚点声明为 `obs_date`，但
-`obs_date` 是**观测日**（月频取当月首日），真实发布日**晚于**它——声明
-口径对齐 P2-1 既有「obs_date 为 PIT」约定，该缺口（潜在前视）已登记为
-跟进项（TASKS D2-R1），是否改判宏观层 PIT 门不在 D2 范围。
+connector 的 wire schema / `Data` map **未透出 `ann_date`** —— **D2-R1 已关闭
+此项**（2026-10-16）：`fundamentalToMap` 透出 `ann_date`（nil = 未披露，缺失≠0）、
+`Schema(DataTypeFundamental)` 增 `ann_date`（date，非必填），锚点从「悬空、
+不可实测」变为「可实测」，投影类型由 `validateReservedAnchorProjection` 执法。
+真实披露日仍由底层 `data.TushareClient` 直写 `stock_fundamentals.ann_date`
+（规范层 `market.Fundamental.AnnDate` 承载可见语义）；④ `tushare_macro` 的
+可见锚点声明为 `obs_date`，但 `obs_date` 是**观测日**（月频取当月首日），
+真实发布日**晚于**它——声明口径对齐 P2-1 既有「obs_date 为 PIT」约定。
+**D2-R1 复核结论（2026-10-16，证据指针见 TASKS D2-R1）**：该缺口**当前不可达**
+（决策路径零消费方：`pkg/backtest` / `pkg/strategy` / `pkg/mining` 对 macro 零
+引用；因子输入字段词表无宏观来源；唯一读者是只读 API `GET /api/macro/series`），
+故**不是现行前视**；但**声明本身不保守**（声称 obs_date 当天可见，真实发布
+更晚）——任何按 `obs_date` 做 PIT 过滤的新消费方一接线即达。收紧方案（锚点改
+`as_of` 导入时刻 / 补发布日列）触及 P2-1 的 PIT 口径，**待 P2-1 层裁决**，本单
+不改；裁决前宏观数据的前置义务：**只可按 `as_of` 过滤，不得按 `obs_date` 过滤**。
 
 ### 透明路由
 
