@@ -245,6 +245,49 @@ func TestValidateDeclarations_Rejection(t *testing.T) {
 		}
 		require.NoError(t, validateDeclarations(a))
 	})
+
+	// D2-R1：保留锚点**可以**被投影进 wire schema（tushare 财报就这么做，
+	// 投影后锚点从「悬空声明」变「可实测」）。投影本身合法，但类型必须能
+	// 承载日期——用 string 冒充可见时间点即形态矛盾。
+	t.Run("reserved_ann_date_projected_as_date_passes", func(t *testing.T) {
+		a := &declAdapter{
+			AdapterBase: NewAdapterBase("fund-proj", true),
+			types:       []string{"fundamentals"},
+			fields: map[string][]SchemaField{
+				"fundamentals": {
+					{Name: "pe", Type: "float"},
+					{Name: VisibleFieldAnnDate, Type: "date", Required: false},
+				},
+			},
+			decls: []ConnectorDeclaration{{
+				DataType:      "fundamentals",
+				TimeSemantics: market.VisibleOnAnnouncementDay,
+				VisibleField:  VisibleFieldAnnDate,
+				Frequency:     market.FreqSpecEvent,
+			}},
+		}
+		require.NoError(t, validateDeclarations(a))
+	})
+
+	t.Run("reserved_ann_date_projected_as_string_fails", func(t *testing.T) {
+		a := &declAdapter{
+			AdapterBase: NewAdapterBase("fund-bad-proj", true),
+			types:       []string{"fundamentals"},
+			fields: map[string][]SchemaField{
+				"fundamentals": {{Name: VisibleFieldAnnDate, Type: "string"}},
+			},
+			decls: []ConnectorDeclaration{{
+				DataType:      "fundamentals",
+				TimeSemantics: market.VisibleOnAnnouncementDay,
+				VisibleField:  VisibleFieldAnnDate,
+				Frequency:     market.FreqSpecEvent,
+			}},
+		}
+		err := validateDeclarations(a)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrDeclarationMismatch)
+		assert.Contains(t, err.Error(), VisibleFieldAnnDate)
+	})
 }
 
 // TestRegistryRejectsInvalidDeclarations 断言被拒的 adapter 不污染 Registry：

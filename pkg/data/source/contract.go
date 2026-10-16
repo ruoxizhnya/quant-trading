@@ -29,8 +29,12 @@ const VisibleFieldTradeTime = "trade_time"
 // 锚点是披露日，而不是 DataItem.TradeTime（对财报连接器而言那是**报告期
 // 截止日**，用它当锚点会把前视洞放回来）。
 //
-// 该锚点不落在 connector 的 wire schema 上（DataSchema.Fields 无 ann_date），
-// 由规范层字段承载，故同样列为保留记号。
+// 规范层承载是**唯一必需**的形态；connector 可以额外把 `ann_date` 投影进
+// wire schema（D2-R1 起 tushare 财报 connector 就是这么做的：投影之后锚点
+// 从「悬空声明」变为「可实测」）。优先级（D2-R1 定稿）：**语义以保留记号
+// （规范层字段）为准，wire 同名字段是可选的物理载体**；一旦投影存在，其类型
+// 必须是 date/datetime——由 validateReservedAnchorProjection 执法，用
+// string/float 冒充可见时间点会被拒收。
 const VisibleFieldAnnDate = "ann_date"
 
 // ConnectorDeclaration 是单个数据类型的注册声明。
@@ -42,8 +46,13 @@ type ConnectorDeclaration struct {
 	// VisibleExpr 自定义时点的判定表达；TimeSemantics == VisibleCustom 时必填。
 	VisibleExpr string
 	// VisibleField 记录中承载可见时间锚点的字段名：DataSchema.Fields 里的
-	// date/datetime 字段名，或保留记号 VisibleFieldTradeTime。必填——
-	// 「声明了次日开盘可见但记录里没有可见时间可推导」即此处的形态矛盾。
+	// date/datetime 字段名，或保留记号（VisibleFieldTradeTime /
+	// VisibleFieldAnnDate）。必填——「声明了次日开盘可见但记录里没有可见时间
+	// 可推导」即此处的形态矛盾。
+	//
+	// 优先级（D2-R1 定稿）：保留记号的语义**以规范层为准**（如 ann_date →
+	// market.Fundamental.AnnDate）；connector 在 wire schema 里投影同名字段是
+	// 可选的（投影后锚点可实测），但投影字段的类型必须能承载日期。
 	VisibleField string
 	// Frequency 频率口径。必填且必须是合法枚举。
 	Frequency market.FrequencySpec
@@ -122,10 +131,12 @@ func validateVisibleAnchor(a DataSourceAdapter, d ConnectorDeclaration) error {
 		return fmt.Errorf("%w: %s/%s declares time semantics %q but names no visible anchor field (VisibleField)",
 			ErrDeclarationMismatch, a.Name(), d.DataType, d.TimeSemantics)
 	}
-	// 保留锚点：规范层已定义其承载者的名字，不需要出现在 connector wire schema。
-	// trade_time → DataItem.TradeTime；ann_date → market.Fundamental.AnnDate。
+	// 保留锚点：规范层已定义其承载者的名字，**不要求**出现在 connector wire
+	// schema。trade_time → DataItem.TradeTime；ann_date → market.Fundamental.AnnDate。
+	// connector 若把同名字段投影进 wire schema（D2-R1 的 tushare 财报），投影
+	// 本身合法但类型要能承载日期——交给 validateReservedAnchorProjection 执法。
 	if field == VisibleFieldTradeTime || field == VisibleFieldAnnDate {
-		return nil
+		return validateReservedAnchorProjection(a, d, field)
 	}
 
 	schema, err := a.Schema(d.DataType)
@@ -145,6 +156,34 @@ func validateVisibleAnchor(a DataSourceAdapter, d ConnectorDeclaration) error {
 	}
 	return fmt.Errorf("%w: %s/%s visible anchor %q not found in schema (fields: %v)",
 		ErrDeclarationMismatch, a.Name(), d.DataType, field, schemaFieldNames(schema))
+}
+
+// validateReservedAnchorProjection 校验保留锚点的**可选 wire 投影**（D2-R1）。
+//
+// 背景：D2 时代保留锚点（trade_time / ann_date）不落在 connector wire schema
+// 上——语义由规范层承载，声明因此「悬空、不可实测」。D2-R1 起 tushare 财报
+// connector 把 ann_date 投影进 wire schema，锚点变得可实测；本函数把这条投影
+// 钉住：**可以没有**（向后兼容，语义仍在规范层），**一旦有**就必须是
+// date/datetime，否则等于用 string/float 冒充可见时间点。
+//
+// schema 不可得（adapter 不服务该类型等）时不报警：保留锚点本身已足够，
+// 探测失败不该变成误拒——三类拒收只针对确凿的矛盾。
+func validateReservedAnchorProjection(a DataSourceAdapter, d ConnectorDeclaration, field string) error {
+	schema, err := a.Schema(d.DataType)
+	if err != nil {
+		return nil
+	}
+	for _, f := range schema.Fields {
+		if f.Name != field {
+			continue
+		}
+		if f.Type != "date" && f.Type != "datetime" {
+			return fmt.Errorf("%w: %s/%s reserved anchor %q is projected into the wire schema with type %q (want date/datetime): 投影字段必须能承载日期，要么改类型，要么撤掉投影（保留记号本身已合法）",
+				ErrDeclarationMismatch, a.Name(), d.DataType, field, f.Type)
+		}
+		return nil
+	}
+	return nil
 }
 
 // schemaFieldNames 返回 schema 字段名，用于错误信息点名。
