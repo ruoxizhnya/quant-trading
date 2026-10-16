@@ -2080,14 +2080,20 @@ E2E 验收测试 (Phase 2.6) 需要 Hermes + Ollama + 全栈基础设施运行�
 GET  /health                       - Health check
 GET  /stocks                       - List stocks (with filters)
 GET  /stocks/:symbol               - Get single stock
-GET  /stocks/count                 - Stock records + status split (DATA-02, 见下方响应形状)
-GET  /market/index                 - Get market index data
+GET  /stocks/count                 - Stock records + status split + latest quote date
+                                     (DATA-02 / DATA-03, 见下方响应形状)
+GET  /market/index                 - Get market index data (DATA-07, 见下方响应形状)
      ?symbol=000001.SH&date=2024-01-01
+     ⚠️ 这两个查询参数**当前不生效**：handler 固定回 `000300.SH / 000001.SH / 399006.SZ`
+     三个代码的**最新一期**，不按 symbol 选、不按 date 做 PIT（登记为 DATA-11，
+     与 DATA-07 的通道问题是两回事：这里是"读数不对齐调用方要的那一天/那一个指数"）。
 GET  /ohlcv/:symbol                - Get OHLCV data for symbol
      ?start_date=2024-01-01
      &end_date=2024-12-31
 POST /api/v1/ohlcv/bulk            - Bulk OHLCV query
 GET  /fundamental/:symbol          - Get fundamental data
+GET  /fundamentals/:symbol/history - PIT 财务历史（**数据服务内部面，网关不转发**，
+                                     见下方「PIT 历史读数」；DATA-03 b2）
 GET  /index/:code/constituents     - Get index constituent stocks
 POST /sync/index-constituents/:index_code - Sync index constituents (DATA-06, 见下方响应形状)
 GET  /api/v1/trading/calendar      - Get trading calendar
@@ -2117,7 +2123,7 @@ GET  /api/datasource/registry/chains    - List configured fallback chains
 #### `GET /stocks/count` 的响应形状（DATA-02，2026-10-14）
 
 ```json
-{"count": <总行数>, "by_status": {"<status>": <行数>, "…": 0}}
+{"count": <总行数>, "by_status": {"<status>": <行数>, "…": 0}, "latest_date": "<YYYY-MM-DD>" | null}
 ```
 
 - `count` **含已退市**，且由各档**求和**导出（同一条 GROUP BY 的产物，不是第二次
@@ -2128,7 +2134,48 @@ GET  /api/datasource/registry/chains    - List configured fallback chains
   `DEFAULT 'active'`，无 NOT NULL）。这是一档**显式**读数，不是被静默丢弃的行。
 - 票池为空时 `by_status` 序列化成 `{}` 而不是 `null`（前端类型按对象读，
   `null` 会被当成"字段不存在"而不是"票池是空的"）。
-- `latest_date` 仍可能缺席 —— 那是 **DATA-03** 登记的形状问题，本单不动。
+- `latest_date` 由 **DATA-03**（2026-10-16）落地：键**恒在**，值取自
+  `SELECT MAX(trade_date) FROM ohlcv_daily_qfq`。原形状是把 date 扫进 `*string`
+  （pgx 收到 `**string`）并丢弃 error，实测报
+  `cannot scan date (OID 1082) in binary format into **string` —— 查询成功、值也回来了，
+  是类型映射不进去，所以这个字段在任何库里都不曾出现过。
+  - 现在三种情形各有形状：**读到日期** = `"YYYY-MM-DD"`；**库里没有行情** = 显式 `null`；
+    **这一趟读失败** = 5xx。`null` 只表示「没有读数」这一个意思，不背「读挂了」这层含义。
+  - 缺席不是合法形状：契约声明了它，读不出来就该响，而不是让界面无声少一个数。
+
+#### `GET /market/index` 的响应形状（DATA-07，2026-10-16）
+
+```json
+{"indices": [{"code": "000300.SH", "name": "沪深300", "close": <数>,
+  "change": <数|null>, "pct": <数|null>, "volume": <股>, "amount": <CNY|null>}]}
+```
+
+- **`volume` / `amount` 是新补上的通道**（此前响应里从来没有这两个字段，ui 那两格因此
+  恒 '-'）。单位沿用规范层已定死的口径：`volume` 股（DATA-04）、`amount` CNY（DATA-05），
+  **服务端不换算**——亿/万是展示层的事，这里除一次就有了第二处真相。
+- `pct` 是**百分数刻度**（`1.23` 表示 +1.23%），沿用该字段改动前的语义；展示端不要再乘 100。
+- `change` / `pct` 在没有上一期收盘时为 `null`，不是 `0` —— 把「无从算起」显示成
+  `+0.00%` 是假数字。`amount` 在 `turnover` 列为 NULL 时同理（该列可空，DDL 只有 `DEFAULT 0`）。
+- 一趟窗口函数取回最新一期与上一期收盘。旧形状是每个代码两趟查询、且第二趟的 error
+  被丢进 `if err == nil` 分支，于是「读失败」与「这个指数没数据」同样是「这条不出现」。
+- **`indices` 当前实测为 `[]`**：`000300.SH / 000001.SH / 399006.SZ` 在
+  `ohlcv_daily_qfq` 里 0 行，全库也没有指数日线表（2026-10-16 实测 count=0）。
+  空数组是**诚实读数**，不是这条端点的缺陷；补指数 bar 需要新数据源（tushare
+  `index_daily`）与建表，另立工单，不在 DATA-07 夹带。
+- 库里没有行的代码**不产出条目**，不会编一条零值读数（零值 close 会被读成「收盘价 0.00」）。
+
+#### PIT 历史读数：`/fundamentals/:symbol/history` 不对 SPA 开放（DATA-03 b2，2026-10-16）
+
+- 该路由只存在于**数据服务**（`cmd/data/main.go:208`），网关不转发，`openapi.yaml`
+  也不登记 —— 这是裁决后的形状，不是遗漏。护栏在
+  `cmd/analysis/deps_test.go`：有人加转发就红。
+- 为什么不开这个面：PIT 三时刻（财务期末 / 公告披露 / 因子可交易起始）的数据前提是
+  `fundamentals_detail`，该表 2026-10-16 实测 **0 行**（摄取链路未通 = **EQD-P1-2**）。
+  转发出去只会给前端一条恒回 `{"history":null}` 的通道 —— 一个看起来能用、
+  实际给不出读数的面，比"没有面"更坏。
+- 工单 ③ 的注同样是这条：**通道与数据是两件事，别混着结案**。
+  等 EQD-P1-2 通了，再按「先有数、再开面」的顺序另立单补。
+
 - 网关 `GET /api/stocks/count` 是**字段透传**（`proxyRequest` 解码成 map 再编码），
   所以这条形状不需要网关侧改动，也不需要在网关再登记一遍。
 
@@ -2335,10 +2382,12 @@ prefix only** — the no-prefix mirrors are gone (see "Removed" below).
 GET  /api/ohlcv/:symbol           - Get OHLCV data for symbol
      ?start_date=2024-01-01&end_date=2024-12-31
 POST /api/screen                  - Screen stocks by criteria
-GET  /api/stocks/count            - Stock count + status split (passthrough;
-                                    形状见 §1「`GET /stocks/count` 的响应形状」)
-GET  /api/market/index            - Get market index data
+GET  /api/stocks/count            - Stock count + status split + latest quote date
+                                    (passthrough; 形状见 §1「`GET /stocks/count` 的响应形状」)
+GET  /api/market/index            - Get market index data (passthrough;
+                                    形状与单位见 §1「`GET /market/index` 的响应形状」)
      ?symbol=000001.SH&date=2024-01-01
+     ⚠️ 参数当前不生效（同 §1 的 DATA-11 登记），转发是原样透传，问题在数据服务侧。
 GET  /api/factors/:factor_name    - Read a factor_cache row (citation 五元组，见 §AI 实验员实验室)
      ?symbol=&date=
 ANY  /api/sync/*path              - Streaming reverse proxy to data-service

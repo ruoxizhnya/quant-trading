@@ -2220,7 +2220,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [count, by_status]
+                required: [count, by_status, latest_date]
                 properties:
                   count:
                     type: integer
@@ -2237,22 +2237,73 @@ paths:
                       format: int64
                   latest_date:
                     type: string
+                    format: date
+                    nullable: true
                     description: >
-                      行情最新日。**可能缺席** —— handler 丢掉了 Scan 的 error，
-                      这是 DATA-03 登记的形状问题，DATA-02 未修；不要把它当必填读。
+                      行情最新日 = SELECT MAX(trade_date) FROM ohlcv_daily_qfq（DATA-03）。
+                      键**恒在**：有行情时是 YYYY-MM-DD，库里还没有行情时是显式 null。
+                      读失败不再折成 null —— handler 让这一趟失败回 5xx，
+                      所以 null 只表示「没有读数」这一个意思，不背「读挂了」这层含义。
+                      形状问题由 DATA-03 关闭（原形状把 date 扫进 **string 且丢弃
+                      error，该字段在任何库里都不曾出现）。
 
   /api/market/index:
     get:
       tags: [Data Proxy]
       summary: Get market index (proxied)
+      description: >
+        数据服务从 ohlcv_daily_qfq 取三个指数代码的最新一期与上一期收盘（一趟窗口函数）。
+        库里这三个代码当前 0 行（没有指数日线表），所以实测回 `{"indices":[]}` ——
+        这是诚实读数，不是缺陷；补指数 bar 需要新数据源与建表，另立工单（DATA-07 台账）。
       operationId: getMarketIndex
       responses:
         '200':
-          description: Market index data
+          description: >
+            indices 恒为数组（没数据是 []，不是 null，也不是编一条零值条目）。
+            volume 单位股、amount 单位 CNY（规范层口径，DATA-04/05），服务端不做换算，
+            亿/万的展示由前端负责。pct 是**百分数刻度**（1.23 == +1.23%）。
+            change/pct 在没有上一期收盘时为 null（「无从算起」不显示成 +0.00%）；
+            amount 在 turnover 为 NULL 时同理。
           content:
             application/json:
               schema:
                 type: object
+                required: [indices]
+                properties:
+                  indices:
+                    type: array
+                    items:
+                      type: object
+                      required: [code, name, close, volume]
+                      properties:
+                        code:
+                          type: string
+                          description: 指数代码，如 000300.SH
+                        name:
+                          type: string
+                          description: 中文名由服务端给（沪深300 等），前端不再各自维护映射
+                        close:
+                          type: number
+                          format: double
+                        change:
+                          type: number
+                          format: double
+                          nullable: true
+                          description: 与上一期收盘的差；没有上一期时为 null
+                        pct:
+                          type: number
+                          format: double
+                          nullable: true
+                          description: 涨跌幅，百分数刻度（1.23 == +1.23%）
+                        volume:
+                          type: number
+                          format: double
+                          description: 成交量，单位**股**（原样透出，不换算成手/万/亿）
+                        amount:
+                          type: number
+                          format: double
+                          nullable: true
+                          description: 成交额，单位**CNY**；turnover 列为 NULL 时是 null，不是 0
 
   /api/sync/calendar:
     post:
