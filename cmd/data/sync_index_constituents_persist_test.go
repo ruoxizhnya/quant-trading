@@ -5,7 +5,9 @@ package main
 // 旧形态：落库发生在 TushareClient 内部，error 只 Warn；handler 拿到非空切片
 // 就回 200 "index constituents synced successfully" —— HTTP 面上「一行没写进去」
 // 与「写成功」不可区分。本文件钉住修复后的契约（工单 ③ 选 a1：错误上抛 ⇒ 5xx）：
-//   1. 落库失败 ⇒ 5xx，响应体不得出现 "synced successfully"，原始错误可追溯。
+//   1. 落库失败 ⇒ 500 + 静态环节文案（「取到了但落库失败」对外可辨）；内部 DB
+//      原因按本仓 5xx 口径只进日志不进响应体，原始错误在 error 链里经 %w 可追溯
+//      （链上的逐腿断言在 pkg/data/tushare_index_constituents_persist_test.go）。
 //   2. 落库成功 ⇒ 200，且「取到 N 条」与「落库 N 条」是响应体里两个可区分的数。
 //   3. 400 校验（不支持的指数代码）行为不变 —— 修复不许顺带动边界。
 
