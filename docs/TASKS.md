@@ -318,27 +318,6 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   - **顺手修（边界内，已标注）**：`cmd/ai/builders.go` 的适配器逐字段手工拷贝时漏了 `UniverseMaxSize`（票池规模）与 `InvalidReasons`，正是「真票池规模进 PoolSize」链路上的一环，与归档卷 §八 #8（OBS-01-R2 同型、位置不同）一并补齐两个字段。
   - **环境事实**：东财 `push2.eastmoney.com` 实测 **502** ⇒ 板块表既有 eastmoney 链路不可用；Tushare 无个股→行业接口（`stock_industry` 不存在、申万 `index_member` 的 `is_new` 全为 N）⇒ 改由 `stocks.industry`（5908 只全覆盖、110 个细分行业）物化，快照类字段留 NULL 不编造，`source='stocks_industry'` 与东财板块区分。
 
-### OBS-01-R1 · 偏差维输出一个它没量过的数字 ✅ 完成（2026-10-14）
-
-- **① 目标**：验证器偏差维在池子规模未测量时**不打印数量**（「0 只」不再冒充实测值），屏幕上每个数字都可被当场质问。
-- **② 上下文**：归档卷 §八工单表 #7（2026-10-14 立单，**代码在 quant-trading-agent 仓**）：`cmd/ai/handlers_explore.go:50` 设 `PoolSource=PoolSourceCurrent` 但从不设 `PoolSize`（只有 `:96` 预热成功路径才填）⇒ `pkg/ai/validation/bias.go:296-303` 无条件把 `in.PoolSize`（Go 零值 0）插进 blocking 文案 ⇒「股票池按今天的上市名单取（**0 只**）」。**0 是零值不是测量结果**（愿景原则 4：每个数字可被当场质问）。`PoolSize<=0` 的「未测量」分支已有先例（`bias.go:202` 与 `:314`），只有 `PoolSourceCurrent` 这支漏了。**概率侧没有 bug**：`biasProbability` 对 `PoolSourceCurrent` 提前返回 `BiasProbFloor`，低分有意为之，错的只有那句话。
-- **③ 要求**：`PoolSize<=0` 时不带数量措辞（对齐 `bias.go:202`/`:314` 既有「未测量」分支先例）；文案改动最小化。
-- **④ 约束与非目标**：**不改 `biasProbability` 与 `PoolSourceCurrent` 的概率**；不借机重构偏差维；不动其他维。
-- **⑤ 验收**：单测：`PoolSize=0`（未测量）输出无数量词、`PoolSize>0` 输出带真实数量；**破坏验证**：改回无条件打印 → 新测试红，还原绿。正常 run 输出文案回归不变（有测量值场景）。
-- **⑥ 边界**：只改这一处措辞分支。
-- **✅ 完成记录（2026-10-14）**：**代码修复由并发 agent 落地**（quant-trading-agent 仓 `f432074`）：`biasChallenges` 幸存者 switch 新增 `PoolSource == PoolSourceCurrent && PoolSize <= 0` 前置分支，文案改「（池子规模未测量）」，对齐 `bias.go:202`（概率侧未评估返回 0）与 `bias.go:323-328`（文案侧「幸存者偏差未评估」note）既有先例（任务原文引 `:314` 系笔误，该行实为「池子不小却无退市股」的带数量 warning 分支）；severity 保持 blocking，`biasSurvivorship` 对 `PoolSourceCurrent` 仍返回 `BiasProbFloor`——④「概率不动」达成，③「文案改动最小化」达成（+9 行）。**两腿单测**：`TestBias_CurrentPoolWithoutSizeSaysUnmeasured`（零值输出含「未测量」且不含「0 只」）+ `TestBias_CurrentPoolWithSizePrintsCount`（PoolSize=300 带真实数量，⑤ 回归场景）。**本单收口复验（独立重做，不轻信原提交声称）**：`go test ./pkg/ai/validation/ -count=1` 全绿（42.4s）、gofmt/vet 干净；**破坏验证**：把该分支改回原始 bug 形态（无条件 `fmt.Sprintf` 打印零值）→ `TestBias_CurrentPoolWithoutSizeSaysUnmeasured` 精确变红 → 还原 → 复绿，`git diff` 零残留；另做过一次「只拆条件不改文案」的变体验证（红在 WithSize 腿，亦还原），两变体共同证明护栏非空转。**接线现状核对**（`cmd/ai/handlers_explore.go`）：静态 `exploreBias`（:40-53）不带 `PoolSize` = 未测量路径，文案不再冒充实测值；`biasInput()`（:86-103）在引擎预热到上市日历时填 `PoolSize=len(windows)` = 测量路径带真实数量。**提交方式说明**：本标记在 D3 批次（core `5225df5`）提交后以 pathspec 单文件提交，未触碰并发 agent 在途的 7 个无关脏文件。
-
-### OBS-01-R2 · AI 链路把 K9 三值丢在客户端边界上 ⛔ 阻塞（Ask First：改法 a/b 待若曦裁决）
-
-- **① 目标**：AI 侧消费者（Copilot 播报、实验日志、`pkg/ai/loop` 候选评估）能读到 completed / invalid / failed 三值状态，不再只靠 `invalid_reasons` 反推。
-- **② 上下文**：归档卷 §八工单表 #8（A-07 收口时逐字核出；**客户端代码在 quant-trading-agent 仓**，domain/core 契约在 core 仓）：agent 仓 `pkg/ai/client/backtest_client.go:47` 的 `RunBacktest` 解出了 `BacktestResponse.Status`（同文件 `:43`）但返回值只有 `*domain.BacktestResult` ⇒ 三值被丢弃；core 仓 `pkg/domain/backtest.go:5-39` 的 `BacktestResult` **没有 `Status` 字段**（只有 `InvalidReasons`，`:38`）。响应语义在 core 仓 `pkg/backtest/contracts/contracts.go:250-252`（Status 与 Error/InvalidReasons 搭配属响应层）。**改法 (a) 涉及 core 仓 domain，改法 (b) 只动 agent 仓**；若走 (b) 则本单纯 agent 仓单点改动，无需跨仓原子提交。⚠️ **不是用户可见假成功**（引擎 `CheckValidity` 每次返回前挂 Code，前端 A-07 已按三值接住并自救），登记的是**契约残缺**。
-- **③ 要求**（两条路，**属 Ask First——动 `pkg/domain` 核心类型或 AI 客户端公开签名，落笔前须若曦裁决 a/b**）：
-  - **(a)** `domain.BacktestResult` 加 `Status` 字段，引擎 `runBacktestInternal` 末尾按 `contracts.Status*` 常量填；
-  - **(b)**（倾向）`RunBacktest` 返回带 `Status`/`Error` 的小结构，不动 domain——三值在规格里本属响应层，塞进「运行指标集合」会造成同一概念两处真相。
-- **④ 约束与非目标**：不改前端（已自救且有 7 条单测钉住）；不借机重构 pipeline 结果结构；K9 三值语义（completed/invalid/failed）不变。
-- **⑤ 验收**：单测断言 `RunBacktest` 返回能区分三值、invalid 时 `InvalidReasons` 非空；真请求 `POST /api/backtest` 确认线上 JSON `status` 与结构体字段一致；`go test -race` 全绿。
-- **⑥ 边界**：只补三值透传（按裁决的 a/b 之一）；前端、pipeline 结构不动。
-
 ### DOCS-01 · AGENTS.md 文档指针在文档拆仓后集体失效（🟠）✅ 完成（2026-10-14）
 
 - **① 目标**：`AGENTS.md` 里每条 `docs/...` 引用都能在某个工作树命中，且由一条机器断言守住（新增死链当场变红）。
@@ -382,23 +361,6 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **⑥ 边界**：只做「让既有红归零所需的最小指针 / 元数据修复」；文档内容重写、AGENTS.md 版本史散文（尾注 `E2E_TEST_GUIDE.md`/`TEST.md` 表述）仍另立。
 
 > **收口记录（2026-10-14）**：两档 `python tools/check_doc_links.py`[ `--include-archive`] 均退出码 0、`✓ 未发现坏链` + `✓ 入口层文档都带 R1 frontmatter`。补 `docs/ARCHITECTURE.md`（last-verified 2026-10-12）/`docs/TASKS.md`（2026-10-14）frontmatter；归档 `../AGENTS.md`×2 改 `../../`、`design/kernel/*`×2 与 `docs/design/kernel/k15-*`×2 改对层级（均在 core 命中）、`archive/TASKS-2026-10-08-archived.md`+`ADR-030`×1 各改 (b) 显式跨仓指针。**破坏验证**：临时把一条改回 `../AGENTS.md` → `--include-archive` 报 1 条坏链退出 1 → 还原 → 退出 0 绿。未动守卫逻辑。
-
-### OPS-01 · 观察页状态轮询 SSE 化 ⛔ core 侧关闭（2026-10-14 改判：前提失效，实现移 agent 仓）
-
-- **① 目标**：观察页 run 状态从轮询改为 SSE 推送（或给只读状态端点单列限流预算），消除 429 与真失败混淆的土壤。
-- **② 上下文**：归档卷 §八 6 号裁决（2026-10-14）：`/api/explore/runs/:id` **不进** `RateLimitExemptPaths`（逐字相等匹配机制上做不到 + 判据不满足），真解是 SSE；本仓已有先例 `/api/sync/stream`（前端已接 `EventSource`）。前端已自救（`POLL_MS=2500` + 连续 6 次失败才认断线 + e2e 钉住），本单是后端真解，不急。
-- **③ 要求**：观察页 run 状态走 SSE（复用 `/api/sync/stream` 模式）或只读状态端点单列限流预算（二选一，实现时定）；前端接线顺带（ui 仓另立小单，跨仓两段式 core 先行）。
-- **④ 约束与非目标**：不动 `IsRateLimitExempt` 的逐字匹配语义（安全不变量）；不改前端既有自救逻辑的判定阈值；不动限流全局参数。
-- **⑤ 验收**：SSE 通道状态推送测试通过（或限流预算单列测试）；观察页轮询频率显著下降或消失（前端单确认）；回归：`/api/sync/stream` 既有行为不变。
-- **⑥ 边界**：只做观察页状态通道；其他轮询端点另立。
-
-> **core 侧改判关闭（2026-10-14，派工即核查触发，逐条源码核过）—— 前提失效，本单在 core 无法按原样落地：**
-> 1. **explore 已不在 core**：`pkg/ai` / `pkg/tools` 在本仓不存在（AI 拆仓 ADR-027；AGENTS.md §1 明写 copilot/pipeline/explore/tools 四族 handler 现住 `quant-trading-agent` 仓）。core 对 `/api/explore/*` 只做纯反代（`cmd/analysis/handlers_ai_proxy.go:63`）——**既无 explore handler，也无 run 状态数据源**，core 侧 SSE 无从推起。⑤「SSE 通道状态推送测试通过」在 core 不可成立（被测源不在此）。
-> 2. **core 其实已 SSE-safe**：同代理 `handlers_ai_proxy.go:53` `proxy.FlushInterval = -1 // SSE 逐写直通`（文件头注释已点名流式端点直通）。即 agent 仓一旦暴露 `GET /api/explore/runs/:id/stream`，core 现有代理**原样直通、零新增代码**——拆仓时就把「core 侧要做的」做完了。
-> 3. **改判**：实现移 **`quant-trading-agent` 仓另立单**——**已立 `OPS-01-A`（`quant-trading-agent/docs/TASKS.md`）**：在 run 状态源处产出 `runs/:id/stream` SSE，形状复用 data-service 先例 `sseProgressHandler`（`cmd/data/sync_handlers.go:761`）；ui 前端接线仍另立（跨仓两段式）。本 core 单**关闭**，保留可追溯指针不删。
-> 4. **不动限流器**：§八 6 号「`/api/explore/runs/:id` 不进 `RateLimitExemptPaths`（逐字匹配做不到 + 判据不满足）」的裁决**继续有效**；本单不因 SSE 触 `IsRateLimitExempt` 语义或全局预算。
->
-> **顺带纠偏**：本单 ②③⑤ 引用的先例 `/api/sync/stream` 在本仓**不存在**；真实 SSE 先例是 `GET /api/sync/jobs/:id/progress`（在 **data-service**，非 analysis），且它本身是每 2s 轮询 store 再转推 SSE（非 pub/sub）。不影响结论——SSE 省 429 的原理是「N 次轮询请求（前端 `POLL_MS=2500`≈24 req/min/页）→ 1 条长连接只占 1」。
 
 ---
 
@@ -956,14 +918,13 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 
 ---
 
-## 三、跨仓指针（不在本仓，勿双写）
+## 三、跨仓任务索引（不在本仓，勿双写）
 
-| 项 | 归属 | 说明 |
-|---|---|---|
-| **AUD-61 · E2E 测试对齐**（含阶段一前置：61 条 `test.fixme` 登记 + 取红清单） | quant-trading-ui 仓 `docs/TASKS.md` | 2026-10-14 自 core 迁出（迁移指针见归档卷）。⚠️ **阶一已从「测试债」升格为 ODR-067 主干工作流前置**（61 failed/116 passed 全量 e2e 现状，不做则直推 main 红灯与历史解耦），启动时点与 DOCS-01 守卫落地协同 |
-| **NT v2.0.0 正式版升级** | quant-trading-docs 仓 `docs/guides/nt-sidecar-operations.md` 预案 | 唯一外部等待项：正式版发布后按预案收口，**双跑对齐回归为升级验收门**（NT 决策门裁决一） |
-| UI 仓 Stitch 设计稿相关（A-05 等） | quant-trading-ui 仓 `docs/design/stitch_quantlab_ux_redesign/TASKS.md` | 本地栈实测证据全文在其 A-05 节，core 侧只留指针（归档卷 §八） |
-| **A-08 · 数据同步页（作业队列 + 排程 CRUD + worker/scheduler 统计）** | quant-trading-ui 仓 `docs/design/stitch_quantlab_ux_redesign/TASKS.md` A-08 节（六字段实施计划） | 前置 SYNC-01 已 ✅、**SYNC-04 已 ✅（2026-10-16，合入 main `33f845f`，data-service 已重建）**（均见本文件 §二·补）。原「`scheduler/stats` 的 `0/0` 两种成因不可区分」缺口已在后端关闭并上线：stats 现带 `is_running`/`start_error`（契约与三态判读见 `docs/SPEC.md` §sync 端点块），2026-10-16 活进程经网关 `:8085` 实测读数 `{"active_schedules":0,"total_entries":0,"is_running":true}`，前端可据此区分 |
+> **本仓台账只登记 core 自己的任务**：实现代码或交付物整体落在别仓的任务一律移出，本仓只留可追溯指针（不镜像正文、不重复记账）。各任务正文在其归属仓台账。
+>
+> - **quant-trading-agent 仓**（`docs/TASKS.md`）：`OPS-01-A` ✅、`OBS-01-R1-A` ✅、`OBS-01-R2-A` ⬜ —— 三条均由 core 改判迁出：OPS-01 于 2026-10-14（前提失效：AI 已拆仓，core 只剩纯反代，SSE 无源可推）；OBS-01-R1 于 2026-10-14（代码本就落本仓 `f432074`）；OBS-01-R2 于 2026-10-16（裁决 (b)，core 零改动）。
+> - **quant-trading-ui 仓**：`docs/TASKS.md` 的 `AUD-61` ⬜；`docs/design/stitch_quantlab_ux_redesign/TASKS.md` 的 `A-05` ✅、`A-08` ✅。core 侧对其的全部产出是前置（SYNC-01~04 + `scheduler/stats` 的 `is_running`/`start_error` 契约，均已合入 main）。
+> - **quant-trading-docs 仓**：**NT v2.0.0 正式版升级**（`docs/guides/nt-sidecar-operations.md` 预案）——唯一外部等待项：正式版发布后按预案收口，**双跑对齐回归为升级验收门**（NT 决策门裁决一）。
 
 ---
 
