@@ -54,6 +54,11 @@ func NewPostgresStore(ctx context.Context, connString string) (*PostgresStore, e
 // NewPostgresStoreConnected opens the pool and verifies it with a ping, but
 // runs **no migrations and no seed** — the database is taken as it is.
 //
+// Seeding is excluded for the same reason migrating is: it INSERTs rows into
+// factor_hypothesis, and a test run has no business writing to the shared
+// development database. No test reads that table today (实测：`factor_hypothesis`
+// 在 *_test.go 里零命中)；将来有用例需要它，应当自灌自清理，而不是把 seed 请回测试路径。
+//
 // This is the entry for DB-touching tests: the shared development database must
 // keep its migration state (and its rows) outside of `go test`. It presupposes
 // an already-migrated database — on a fresh one these tests fail with

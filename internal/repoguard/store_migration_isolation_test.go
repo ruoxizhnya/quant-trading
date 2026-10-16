@@ -4,8 +4,8 @@ package repoguard
 //
 // The defect, measured (2026-10-15, 台账 DATA-05「迁移执行方式的意外」)
 // --------------------------------------------------------------------
-// `NewPostgresStore`（`pkg/storage/postgres.go:19`）在构造里直接调
-// `store.migrate(ctx)`（`:43`），而默认构建（无 build tag）的库侧测试直连
+// `NewPostgresStore` 在构造里直接调 `store.migrate(ctx)`（本单之前是全仓唯一一次，
+// 也是唯一一处；行号会随编辑漂移，所以这里只点符号不点行号），而默认构建（无 build tag）的库侧测试直连
 // `localhost:5432/quant_trading` —— **开发库本身**。后果当场实测：一条
 // `go test ./pkg/data/...` 就把 Migration 054 的整表 ×1000 真的作用在
 // 3,926,510 行历史成交额上，无授权、无提示（`data_migrations` 里
@@ -54,8 +54,11 @@ package repoguard
 //     way (e.g. filename suffix `_integration_test.go`, which the go tool does
 //     **not** treat as a constraint) is treated as default-build — fail closed.
 //   - Files that fail to parse are reported as errors, not skipped silently.
-//   - The walkers never match themselves: the two constructor names are built
-//     from fragments, so the literal spellings do not occur in this file.
+//   - The walkers never match themselves. This file **does** spell both
+//     constructors out in prose (a guard nobody can read is not a guard), but
+//     the walker records only *call expressions*, so a mention is invisible to
+//     it. That is asserted, not claimed: see
+//     TestStoreConstructorGuardDoesNotMatchItsOwnProse.
 
 import (
 	"fmt"
@@ -343,6 +346,41 @@ func TestNonMigratingEntryBodyNeverMigrates(t *testing.T) {
 	assert.Equal(t, 0, bodies["connectPostgresStore"],
 		"connectPostgresStore（两个入口共用的连接段）里不得有 migrate() —— 否则不迁移入口名不副实；实测 %d 次",
 		bodies["connectPostgresStore"])
+}
+
+// TestStoreConstructorGuardDoesNotMatchItsOwnProse turns the header's
+// 「注释不算调用」 from a claim into a leg, on the one file where it must hold:
+// this guard's own prose spells both constructors out in full. Two-sided on
+// purpose — asserting only "zero calls here" would pass vacuously the day
+// somebody deletes the comments, and then the walker's self-invisibility would
+// no longer be demonstrated anywhere.
+func TestStoreConstructorGuardDoesNotMatchItsOwnProse(t *testing.T) {
+	t.Parallel()
+
+	const self = "internal/repoguard/store_migration_isolation_test.go"
+	root := filepath.Join("..", "..")
+
+	calls, scanned, err := scanStoreConstructorCalls(root)
+	require.NoError(t, err)
+	require.True(t, scanned[self], "遍历没走到护栏自己这个文件上 —— 这条腿没有对象")
+
+	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(self)))
+	require.NoError(t, err)
+	// noMigrateCtor 的拼写里含着一整段 migratingCtor，所以要减掉，
+	// 否则「不迁移入口被写了几次」会把这条前提冒充成「迁移入口被提到了」。
+	proseMentions := strings.Count(string(raw), migratingCtor) - strings.Count(string(raw), noMigrateCtor)
+	assert.GreaterOrEqual(t, proseMentions, 2,
+		"前提不成立：护栏正文里已经不再完整写出迁移入口的名字，"+
+			"这条腿就不再演示「提及不算调用」了（要么把说明写回来，要么删掉这条腿）")
+
+	var selfCalls []string
+	for _, c := range calls {
+		if c.rel == self {
+			selfCalls = append(selfCalls, fmt.Sprintf("%s:%d %s", c.rel, c.line, c.selector))
+		}
+	}
+	assert.Empty(t, selfCalls,
+		"护栏把自己的注释当成了调用点 —— walker 会认出自己，红出来的清单不可信：%v", selfCalls)
 }
 
 // scanStoreConstructorCalls walks the repo and returns every call site of the
