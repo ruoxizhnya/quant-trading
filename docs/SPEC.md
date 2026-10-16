@@ -872,7 +872,10 @@ FactorComputer.ComputeFactorByName(ctx, name, date)
   `ohlcv_daily` 直接 `ErrUnsupported`、`ETLPipeline`（`Registry.Fetch` 的唯一生产
   调用方）零调用方。灌数前必须先实测源侧口径并在同步边界换算到规范层，
   否则就是 DATA-04 的坑换个表重演。单位口径见「行情表数值单位」，
-  机械守卫见 `cmd/data/ohlc_units_guard_test.go`；链本身何时接通属另一工单。
+  机械守卫见 `cmd/data/ohlc_units_guard_test.go`。链本身的状态已由
+  **DATA-08（2026-10-16）收口**：Registry 明确停用为纯观测面（无生产
+  Fetch 调用方），接线计划登记为 DATA-10；「未接线」由
+  `internal/repoguard/registry_etl_wiring_test.go` 机械钉住。
 - 会话边界秒级精度与 11:30 bar 形态（REV-04，2026-10-15）：
   `checkInSession` 按秒判定，11:30:00 并入 11:15 bucket、15:00:00
   并入 14:45 bucket（收盘打点对称接纳）；11:30:01 / 15:00:01 及
@@ -2099,6 +2102,17 @@ GET  /api/datasource/registry/status    - Snapshot of all adapters and chains
 GET  /api/datasource/registry/health    - Run HealthCheck on every adapter
 GET  /api/datasource/registry/chains    - List configured fallback chains
 ```
+
+> **这三个端点是纯观测面，链不承载已生效的降级能力**（DATA-08，2026-10-16 主任
+> 裁决「停用路线」）：`Registry.Fetch` 的唯一生产调用方 `ETLPipeline` 零生产构造
+> 点，数据同步全部直连 `TushareClient`（`handlers_sync.go` / `sync_handlers.go`）——
+> 因此 `/chains` 展示的是**设计意图**而非「今天会发生的降级」。链上另有不可达的腿：
+> mootdx 以 nil transport 注册（`Enabled()=false`）、eastmoney 只声明
+> `capital_flow`（日线/分钟/实时三条链里的 eastmoney 备胎是 chain drift 形状，
+> `Registry.Fetch` 会 loud-skip）。接线前置条件（源单位实测 → 同步边界换算 →
+> Normalizer → 与 sync_jobs 的关系）登记为 **DATA-10**；「未接线」状态由
+> `internal/repoguard/registry_etl_wiring_test.go` 机械钉住（生产代码出现
+> ETLPipeline 构造或观测面出现 `.Fetch` 即红）。
 
 #### `GET /stocks/count` 的响应形状（DATA-02，2026-10-14）
 
