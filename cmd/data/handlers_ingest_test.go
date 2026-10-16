@@ -96,7 +96,7 @@ func TestParseIngestAsOf(t *testing.T) {
 // content_hash to cite, and the platform can resolve that hash back to the
 // exact archived record. Re-posting must not rewrite it.
 func TestIngestRawHandler_ArchivesAndIsIdempotent(t *testing.T) {
-	store, err := storage.NewPostgresStore(context.Background(), ingestTestDSN)
+	store, err := storage.NewPostgresStoreConnected(context.Background(), ingestTestDSN)
 	if err != nil {
 		t.Skipf("skipping test: cannot connect to DB: %v", err)
 	}

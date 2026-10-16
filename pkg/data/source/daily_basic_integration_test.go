@@ -77,12 +77,19 @@ func envOrDefault(key, def string) string {
 	return def
 }
 
-// openD5Store 打开真库（migrate() 会带上 Migration 056 的 market_activity）。
+// openD5Store 打开真库，走**不迁移**入口（DATA-09：跑测试不得改库的迁移状态）。
+// 本用例读的是**已迁移**的库 —— Migration 056 的 market_activity 由启动/部署路径落库，
+// 不是由这里落。
+//
+// ⚠️ 由此带出一条 CI 前提（DATA-09 台账登记，待主任裁决）：CI 的 postgres service
+// 是**空库**，此前靠测试自己跑 migrate() 把 39 张表建出来才绿（实测：空库
+// `data09_ci_sim` 上跑本用例 exit 0，建出 39 表含 market_activity）。改走不迁移入口后，
+// CI 需要一次**显式**迁移才能继续跑库侧测试。
 func openD5Store(t *testing.T) *storage.PostgresStore {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	store, err := storage.NewPostgresStore(ctx, d5ITestDSN(t))
+	store, err := storage.NewPostgresStoreConnected(ctx, d5ITestDSN(t))
 	if err != nil {
 		t.Skipf("跳过 D5 集成用例：连不上真库（%v）。本机先起 PG（127.0.0.1:5432/quant_trading）再跑；CI 由 postgres service container 提供", err)
 	}

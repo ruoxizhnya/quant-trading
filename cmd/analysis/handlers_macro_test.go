@@ -42,11 +42,11 @@ func macroCleanup(t *testing.T, store *storage.PostgresStore, source string) {
 	}
 }
 
-// newMacroTestRouter 建真库 store（含 migrate——Migration 050 随之执行），
+// newMacroTestRouter 建真库 store（不迁移入口，DATA-09；Migration 050 由启动路径落库），
 // 挂上 MacroHandler。库不在就红不 skip（本族用例自灌自证）。
 func newMacroTestRouter(t *testing.T) (*gin.Engine, *storage.PostgresStore) {
 	t.Helper()
-	store, err := storage.NewPostgresStore(context.Background(),
+	store, err := storage.NewPostgresStoreConnected(context.Background(),
 		"postgres://postgres:postgres@localhost:5432/quant_trading?sslmode=disable")
 	if err != nil {
 		t.Fatalf("连接测试库失败（库不在就红不 skip——先起 PG 再跑）: %v", err)

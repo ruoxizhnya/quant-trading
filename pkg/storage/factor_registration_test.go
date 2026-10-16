@@ -16,7 +16,7 @@ func newFactorRegistrationTestStore(t *testing.T) *PostgresStore {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	store, err := NewPostgresStore(ctx, factorDefinitionsTestDSN)
+	store, err := NewPostgresStoreConnected(ctx, factorDefinitionsTestDSN)
 	if err != nil {
 		t.Skipf("local Postgres unavailable: %v", err)
 	}

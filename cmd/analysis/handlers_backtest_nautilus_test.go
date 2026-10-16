@@ -190,7 +190,7 @@ func TestBacktestPost_NautilusKernelEndToEnd(t *testing.T) {
 	if dsn == "" {
 		dsn = "postgres://postgres:postgres@127.0.0.1:5432/quant_trading?sslmode=disable"
 	}
-	store, err := storage.NewPostgresStore(context.Background(), dsn)
+	store, err := storage.NewPostgresStoreConnected(context.Background(), dsn)
 	if err != nil {
 		t.Skipf("skipping: no reachable Postgres for the end-to-end leg (%v)", err)
 	}

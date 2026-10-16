@@ -28,9 +28,10 @@ const (
 	// 与 pkg/storage/postgres.go 内联 DDL 里的哨兵名同一个字符串。
 	turnoverMigrationName = "054_ohlcv_turnover_thousand_cny_to_cny"
 
-	// 本机 PG。与同包其它库侧测试同一个连接串，但**不走** testStore /
-	// NewPostgresStore —— 那两个会连带跑 migrate()，把本迁移真的作用到共享
-	// 开发库的 ohlcv_daily_qfq 上。本测试只要一条裸连接。
+	// 本机 PG。与同包其它库侧测试同一个连接串，但**不走** testStore ——
+	// pg_temp 是会话级的，池子会换连接（见文件头），本测试只要一条裸连接。
+	// （DATA-09 之前这里还多一条理由：testStore 连带跑 migrate()，会把本迁移真的
+	// 作用到共享开发库的 ohlcv_daily_qfq 上；现在测试侧统一走不迁移入口。）
 	turnoverTestDSN = "postgres://postgres:postgres@localhost:5432/quant_trading?sslmode=disable"
 )
 

@@ -24,7 +24,7 @@ const evidenceTestDSN = "postgres://postgres:postgres@localhost:5432/quant_tradi
 // Returns the store too, so tests can seed ingest.raw rows directly.
 func newEvidenceTestRouter(t *testing.T) (*gin.Engine, *storage.PostgresStore) {
 	t.Helper()
-	store, err := storage.NewPostgresStore(context.Background(), evidenceTestDSN)
+	store, err := storage.NewPostgresStoreConnected(context.Background(), evidenceTestDSN)
 	if err != nil {
 		t.Skipf("skipping test: cannot connect to DB: %v", err)
 	}

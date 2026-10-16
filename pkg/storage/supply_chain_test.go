@@ -30,11 +30,12 @@ import (
 
 const scTestDSN = "postgres://postgres:postgres@localhost:5432/quant_trading?sslmode=disable"
 
-// scNewStore 建真库 store（含 migrate()——Migration 049 随之执行）。
-// 库不在就红不 skip：Fatalf 信息点名「先起 PG」。
+// scNewStore 建真库 store，走**不迁移**入口（DATA-09：跑测试不得改共享库的迁移状态）。
+// 本族用例读的是**已迁移**的开发库 —— Migration 049/050 由启动/部署路径落库，
+// 不是由这里落。库不在就红不 skip：Fatalf 信息点名「先起 PG」。
 func scNewStore(t *testing.T) *PostgresStore {
 	t.Helper()
-	store, err := NewPostgresStore(context.Background(), scTestDSN)
+	store, err := NewPostgresStoreConnected(context.Background(), scTestDSN)
 	if err != nil {
 		t.Fatalf("连接测试库失败（DSN=%s；库不在就红不 skip——先起 PG 再跑）: %v", scTestDSN, err)
 	}
@@ -220,7 +221,7 @@ func TestSupplyChainSchemaDDL_HasProvenanceColumns(t *testing.T) {
 // EnsureSchema 一致」的可执行形态——information_schema + pg_constraint 就是
 // 无 psql 时的 \d。
 func TestSupplyChainSchema_RealDBCatalogMatchesDDL(t *testing.T) {
-	store := scNewStore(t) // NewPostgresStore 已跑 migrate()（含 049）
+	store := scNewStore(t) // 不迁移入口（DATA-09）；读已迁移的开发库
 	ctx := context.Background()
 	db := store.DB()
 

@@ -64,7 +64,7 @@ func universeDSN(t *testing.T) string {
 func newProbeEngine(t *testing.T, dsn string) (*Engine, *storage.PostgresStore) {
 	t.Helper()
 	ctx := context.Background()
-	store, err := storage.NewPostgresStore(ctx, dsn)
+	store, err := storage.NewPostgresStoreConnected(ctx, dsn)
 	if err != nil {
 		t.Skipf("跳过 DATA-01 展开护栏：库连不上（%v）", err)
 	}
