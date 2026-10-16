@@ -463,7 +463,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **⑥ 边界**：只改停用路径的字段清理；`last_run_job_id` 等其余残留另立。
 - **完成记录（2026-10-14，`274dad7`）**：修在 [scheduler.go](../pkg/sync/scheduler.go) `ToggleSchedule` 停用分支——置 `schedule.NextRunAt = nil`，由既有的**单条** `UpdateSyncSchedule` 全字段写回落为 NULL，与 `is_active=false` 同一语句、无中间态；结构体与 JSON 字段名未动。单测两条腿（`pkg/sync/scheduler_start_test.go`）：`TestToggleScheduleOffClearsNextRunAt`（含激活前置事实腿，store 读回 `NextRunAt == nil` + `Stats().NextRuns` 为空）+ `TestToggleScheduleOnStillSetsNextRunAt`（反向腿：激活路径不被清除语句误伤）。破坏验证已做（去掉清除语句单测红，还原绿）。**诚实缺口**：活进程 curl 复测未做（本机无 docker 环境），留待有环境时补。
 
-### SYNC-04 · 调度器启动失败不可观测：`scheduler/stats` 的 `0/0` 有两种成因 ✅ 完成（2026-10-16，branch `task/sync-04` commits `c8ef50a`+`04b4b57`，待合入；依赖 SYNC-01 ✅、SYNC-03 ✅；ui 仓 A-08 的前置已解锁）
+### SYNC-04 · 调度器启动失败不可观测：`scheduler/stats` 的 `0/0` 有两种成因 ✅ 完成（2026-10-16，`task/sync-04` `c8ef50a`+`04b4b57` 已 `--no-ff` 合入 main `33f845f`；依赖 SYNC-01 ✅、SYNC-03 ✅；ui 仓 A-08 的前置已解锁）
 
 - **① 目标**：`GET /api/sync/scheduler/stats` 能区分「调度器启动失败 / 被禁用」与「已启动但确实没有 active 排程」。现在两种情形都回 `0/0`，前端只能显示一个无法被当场质问的数字——这是 A-08 stats 块「每个数字可被质问」的前置。
 - **② 上下文**（2026-10-16 源码复核，行号为当下值）：
@@ -503,6 +503,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
     2. **SPEC 判读表缺第三形态（随 `04b4b57` 补）**：首版只写「启动失败 vs 无排程」两种成因；`is_running=false` 且 `start_error` 缺席 = 未启动或已停止，也需要判读口径（正常服务走不到这格，启动接线由 wiring guard 钉住）。SPEC 注记现给全三态。
     3. **上面「门禁」那条登记的环境红已过期（已加指针）**：`TestSyncAllFactorsHandler_ReportsSkipped` 由 D5 线在 `1489c54` 校正测试期望；合入预演实测全量 `cmd/data` 绿，它不再是登记红。
     4. **合入预演（新证据）**：临时 worktree 里把 `task/sync-04`（两 commit）合入 main `3de5ef6` —— 唯一重叠文件 `docs/SPEC.md` ort 自动合并零冲突；合并态上 `go build`/`go vet`/`go test ./pkg/sync/... ./cmd/data/... -count=1` **全部 exit 0**（临时 worktree 与预演分支已删）。分支本身未动：`c8ef50a` 已被台账引用，不重写历史，待主任合并。
+    5. **合入执行 + 活进程实测闭环（2026-10-16，随「合并吧」指令）**：`task/sync-04` 已 `--no-ff` 合入 main（merge commit `33f845f`，`docs/SPEC.md` ort 自动合并零冲突），合并态复跑 `go build`/`go vet`/`go test ./pkg/sync/... ./cmd/data/... -count=1` 全部 exit 0；`docker compose build data-service && up -d data-service` 后三方对照 —— 重建**前** `:8081` 与网关 `:8085` 均回旧形状 `{"active_schedules":0,"total_entries":0}`，重建**后**两处同回 `{"active_schedules":0,"total_entries":0,"is_running":true}`（**analysis 网关零改动即透传**，流式反代 map 解码再编码），启动日志三行坐实真实形态「启动成功 + 0 个 active 排程」⇒ 该格 `0/0` 现在可当场质问。上面「诚实缺口」与「合入方式」两条的待办就此关闭；「启动失败带 `start_error`」那一格活进程无法安全复现（需弄坏共享库的读路径，写操作授权纪律），由单元 + HTTP 层测试腿覆盖，如实注明。分支 worktree 与已合并分支收尾同批清掉。
   - **台账归属留痕**：本完成记录写入主工作树时挂在并发 agent 的未提交改动上，随后被 D5 线的提交（`fa53ca2`/`1489c54` 系）一并携带入库——内容完整无损，按主任 2026-10-14 裁决接受该形状，仅在此注明归属。
 
 ### DATA-02 · 票池状态拆分没有只读通道（幸存者偏差块只能显示空态） ✅ 完成（2026-10-14）
@@ -860,7 +861,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 | **AUD-61 · E2E 测试对齐**（含阶段一前置：61 条 `test.fixme` 登记 + 取红清单） | quant-trading-ui 仓 `docs/TASKS.md` | 2026-10-14 自 core 迁出（迁移指针见归档卷）。⚠️ **阶一已从「测试债」升格为 ODR-067 主干工作流前置**（61 failed/116 passed 全量 e2e 现状，不做则直推 main 红灯与历史解耦），启动时点与 DOCS-01 守卫落地协同 |
 | **NT v2.0.0 正式版升级** | quant-trading-docs 仓 `docs/guides/nt-sidecar-operations.md` 预案 | 唯一外部等待项：正式版发布后按预案收口，**双跑对齐回归为升级验收门**（NT 决策门裁决一） |
 | UI 仓 Stitch 设计稿相关（A-05 等） | quant-trading-ui 仓 `docs/design/stitch_quantlab_ux_redesign/TASKS.md` | 本地栈实测证据全文在其 A-05 节，core 侧只留指针（归档卷 §八） |
-| **A-08 · 数据同步页（作业队列 + 排程 CRUD + worker/scheduler 统计）** | quant-trading-ui 仓 `docs/design/stitch_quantlab_ux_redesign/TASKS.md` A-08 节（六字段实施计划） | 前置 SYNC-01 已 ✅、**SYNC-04 已 ✅（2026-10-16，`task/sync-04` `c8ef50a`+`04b4b57`，待合入）**（均见本文件 §二·补）。原「`scheduler/stats` 的 `0/0` 两种成因不可区分」缺口已在后端关闭：stats 现带 `is_running`/`start_error`（契约见 `docs/SPEC.md` §sync 端点块），前端可据此区分。⚠️ 消费前提：该分支合入并重建 data-service 后接口才会带新字段，否则线上读数仍是旧形状 |
+| **A-08 · 数据同步页（作业队列 + 排程 CRUD + worker/scheduler 统计）** | quant-trading-ui 仓 `docs/design/stitch_quantlab_ux_redesign/TASKS.md` A-08 节（六字段实施计划） | 前置 SYNC-01 已 ✅、**SYNC-04 已 ✅（2026-10-16，合入 main `33f845f`，data-service 已重建）**（均见本文件 §二·补）。原「`scheduler/stats` 的 `0/0` 两种成因不可区分」缺口已在后端关闭并上线：stats 现带 `is_running`/`start_error`（契约与三态判读见 `docs/SPEC.md` §sync 端点块），2026-10-16 活进程经网关 `:8085` 实测读数 `{"active_schedules":0,"total_entries":0,"is_running":true}`，前端可据此区分 |
 
 ---
 
