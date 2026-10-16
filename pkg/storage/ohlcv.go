@@ -218,3 +218,78 @@ func (s *PostgresStore) GetLatestOHLCVDate(ctx context.Context, symbol string) (
 	}
 	return *t, nil
 }
+
+// LatestQuoteDate 返回全表最新的行情日期；表为空时返回 (nil, nil)。
+//
+// DATA-03：这个读数原来在 handler 里就地写 SQL，并把 `MAX(trade_date)`（date 类型）
+// 扫进 `*string` —— pgx 收到的目标是 `**string`，实测直接拒
+// `cannot scan date (OID 1082) in binary format into **string`，而那条 error 被丢弃。
+// 查询本身成功、值也回来了，是类型映射不进去，于是 `latest_date` 在任何库里都
+// 不可能出现（工单 ② 说的「这一趟没成」据此订正为更准的形状）。
+//
+// 两个语义分开给：`(nil, nil)` = 库里没有行情（表空），`(non-nil, nil)` = 读到日期，
+// `(_, non-nil)` = 这趟没读成。原来三者被压成同一个「字段缺席」。
+func (s *PostgresStore) LatestQuoteDate(ctx context.Context) (*time.Time, error) {
+	var latest *time.Time
+	if err := s.pool.QueryRow(ctx,
+		`SELECT MAX(trade_date) FROM ohlcv_daily_qfq`).Scan(&latest); err != nil {
+		return nil, fmt.Errorf("failed to get latest quote date: %w", err)
+	}
+	return latest, nil
+}
+
+// MarketIndexBar 是「市场概览」里一个指数的最新读数（DATA-07）。
+//
+// 单位口径沿用规范层已定死的值，本层一律不换算：
+//   - Volume：股（DATA-04 把 ohlcv_daily_qfq.volume 从手统一成股）
+//   - Turnover：CNY（DATA-05 把 turnover 从千元统一成 CNY）
+//
+// Turnover / PrevClose 用指针：turnover 列可空（DDL 只有 DEFAULT 0，无 NOT NULL），
+// 只有一期时也没有上一期收盘。**缺失读成 0** 会让界面显示「成交额 0 元」
+// 「涨跌幅 +0.00%」这两个假数字。
+type MarketIndexBar struct {
+	Code      string
+	Close     float64
+	Volume    float64
+	Turnover  *float64
+	PrevClose *float64
+}
+
+// LatestIndexBars 一趟取回给定代码各自的最新一期读数（含上一期收盘）。
+//
+// 原形状是每个代码两趟查询（最新收盘、上一收盘），且第二趟的 error 被丢弃 ——
+// 收进一条窗口函数后，「取到最新但算不出涨跌幅」这种半途状态结构上不存在。
+// 库里没有行的代码**不产出条目**（不是产一条零值读数）。
+func (s *PostgresStore) LatestIndexBars(ctx context.Context, codes []string) ([]MarketIndexBar, error) {
+	if len(codes) == 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT symbol, close, volume, turnover, prev_close
+		FROM (
+			SELECT symbol, close, volume, turnover,
+			       LEAD(close) OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS prev_close,
+			       ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn
+			FROM ohlcv_daily_qfq
+			WHERE symbol = ANY($1)
+		) latest
+		WHERE rn = 1
+		ORDER BY symbol`, codes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read latest index bars: %w", err)
+	}
+	defer rows.Close()
+
+	bars := make([]MarketIndexBar, 0, len(codes))
+	for rows.Next() {
+		var bar MarketIndexBar
+		if err := rows.Scan(&bar.Code, &bar.Close, &bar.Volume, &bar.Turnover, &bar.PrevClose); err != nil {
+			return nil, fmt.Errorf("failed to scan index bar: %w", err)
+		}
+		bars = append(bars, bar)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read index bars: %w", err)
+	}
+	return bars, nil
+}

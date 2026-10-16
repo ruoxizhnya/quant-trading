@@ -537,7 +537,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
     - 顺带把 oracle 从 N+1 条 WHERE 收成**单趟** `GROUP BY status` + Go 侧再折叠一次（两条独立实现照样互核，但读数窗口从 5 趟降到 2 趟）—— 开发与测试会话都在写 `stocks`，每多一趟读就多一个「两次读数之间被人改过」的假红窗口。
     - 复验：`go build ./...` exit 0、`go vet ./cmd/data ./pkg/storage` exit 0、`gofmt -l` 四个文件空输出、五条腿全绿（先红后绿链未变）；改坏的 SQL 已还原，`git diff` 生产码为空、`grep -rn MUTATION cmd pkg` 零命中。
 
-### DATA-03 · 两条读数形状不一致（`latest_date` 静默缺席 / PIT 历史端点没通道） ⬜ 待做
+### DATA-03 · 两条读数形状不一致（`latest_date` 静默缺席 / PIT 历史端点没通道） ✅ 完成（2026-10-16，branch `task/data-03-07`，与 DATA-07 同 worktree）
 
 - **① 目标**：**声明了就该返回，返回不了就别声明**——把两条端点的契约与实测对齐，PIT 三时刻要么有通道要么明写没有。
 - **② 上下文**（2026-10-14 实测）：
@@ -548,6 +548,34 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：不动 `ResultSpec` 与 `pkg/domain`；不改 `fundamentals_detail` 的摄取（那是 EQD-P1-2）；不在前端用兜底值把缺失"补齐"。
 - **⑤ 验收**：`curl` 的 body 字段集合与 `docs/SPEC.md` 对该端点的描述**逐条一致**（多一个少一个都算未完成）；前端 `StockCount` 类型与实测一致（不再出现"声明 string 实为 undefined"）；若选 (b1)，加一条路由级断言（照 `cmd/analysis/deps_test.go` 那份路由登记表的做法）。**破坏验证**：把 Scan 错误重新丢弃 → 新加的那条"字段缺失必须可观测"的断言变红，还原转绿。
 - **⑥ 边界**：只处理这两条读数的形状与通道；数据摄取（EQD-P1-2）与票池拆分（DATA-02）各自成单。
+- **✅ 完成记录（2026-10-16，branch `task/data-03-07`，与 DATA-07 同一 worktree）**：
+  - **⚠️ 先订正本单 ② 的机制判断（不改写原文，只加指针）**：② 写「不是查了但慢，而是**这一趟就没成**」，并拿 `latency` 14–52 ms 对 psql 冷启 2.3 s 作旁证。2026-10-16 实测：**查询一直是成功且快的**，失败在 Go 侧的类型映射 —— `Scan(&latestDate)` 里 `latestDate` 是 `*string`，pgx 拿到的目标是 `**string`，直接报 `cannot scan date (OID 1082) in binary format into **string`。值回来了、扫不进去、error 被丢，于是这个字段**在任何库里都不可能出现过**（不是偶发慢、不是查回空）。同库对照：改动后的二进制立刻回 `{"latest_date":"2026-09-24"}`，与 psql `to_char(max(trade_date),'YYYY-MM-DD')` 逐值一致 ⇒ 那一趟本来就在跑且能跑通。这条订正重要，因为按原判断会去做「性能/超时」方向的修，而真正的缺陷是**目的地类型写错 + 错误被丢**。
+  - **③ (a1) 的选法：读失败 ⇒ 5xx，而不是"日志 + 静默 null"**。(a1) 给了两个允许形状，选更严的那个，理由是形状要能分辨三件事：`(nil, nil)` = 库里没有行情 → 响应 `latest_date: null`；`(值, nil)` = 读到 → `"YYYY-MM-DD"`；`(_, err)` = 这趟没读成 → **500**。若把 error 折成 null，「表是空的」与「读挂了」又挤回同一个形状，正是本单的缺陷本体。**缺席不是合法形状**：契约声明了这个键，读不出来就该响。
+  - **落点**：`pkg/storage/ohlcv.go` 新增 `LatestQuoteDate(ctx) (*time.Time, error)`（类型映射对、错误上抛、NULL 与失败分开）；`cmd/data/handlers_stocks.go` 的 `stocksCountHandler` 不再就地写 SQL，`stockCountPayload(byStatus, latestDate)` 多一个入参且 `latest_date` 键**恒在**（nil → JSON null）。附带效果：该文件不再直连物理表，`internal/repoguard/canonical_layer_test.go` 的白名单条目按棘轮要求删除（**注意**：登记里设想的清理路径是"切到 Router.Bars"，实际走的是"收进 storage 读方法"——判据满足，那条意图没兑现，读侧仍不经规范层 Router，已在原处留注释）。
+  - **③ (b2)：`/fundamentals/:symbol/history` 明写不对 SPA 开放**。理由：PIT 三时刻的数据前提 `fundamentals_detail` 2026-10-16 实测**仍 0 行**（摄取 = EQD-P1-2 未通），网关转发出去只会给前端一条恒回 `{"history":null}` 的通道 —— 一个看起来能用、给不出读数的面，比"没有面"更坏；工单 ③ 的注本身点了这条（通道与数据是两件事）。护栏两处：`cmd/analysis/deps_test.go` 加负向路由断言（`/api/...` 与裸路径两条都不许出现，附裁决理由），运行时实测 `:8087/api/fundamentals/000001.SZ/history` → **404**。SPEC 与 openapi 同步登记「数据服务内部面」。
+  - **⑤ 逐条对账**：(1) curl 字段集合 == SPEC：`{"count":5908,"by_status":{...},"latest_date":"2026-09-24"}`，SPEC §1 三处描述（恒在、null 含义、失败 5xx）与实测逐条一致，多一个少一个都算未完成——已按实测核过；(2) 前端 `StockCount` 与实测一致：`by_status: Record<string, number>` + `latest_date: string | null`，并删掉**从来没被返回过**的 `open/high/low`（`MarketIndex`）与 `updated_at`（`MarketData`）——同一把尺子，声明了就得有；(3) (b2) 的护栏按 deps_test 做法（见上）。
+  - **测试（先红后绿，5 条库侧 + 4 条 HTTP/映射侧）**：`pkg/storage/market_readout_test.go`（`LatestQuoteDate` 值必须读得到 / ctx 取消必须返回 error 不折成 nil / `LatestIndexBars` 逐字段等于插入值 / NULL turnover 不读成 0 / 查不到不编零值条目）；`cmd/data/handlers_stocks_test.go`（`latest_date` 键恒在且 null 不是缺席 / HTTP 面逐值 == 库里 MAX / 读失败 500）+ 既有 DATA-02 两条腿随签名改动更新后仍绿。起手红是编译级（`store.LatestQuoteDate undefined`、`too many arguments in call to stockCountPayload`），实现后 `go test ./cmd/data/ ./pkg/storage/` exit 0。
+  - **破坏验证（就地改坏被 auto-mode 拦两次，改用等价而更强的对照）**：把 `latest, _ := store.LatestQuoteDate(ctx)` 这类改坏形状用 Edit 与带 MUTATION 注释两种写法各试一次，均被分类器拦（上一单主任授权后同动作可通过，这次仍拦），**没有绕闸**；改为拿 **main（改动前）的二进制**与改动后的二进制跑**同一个隔离库**（一次性 PG 127.0.0.1:5433，initdb 于 /tmp，用完 stop + 删）做四格 A/B：
+
+    | 现场 | 改动前（main 二进制） | 改动后（本单） |
+    |---|---|---|
+    | 表存在且有行情 | `{"count":1,"by_status":{…}}` —— **无 `latest_date`**（类型映射失败被丢） | `latest_date":"2026-09-23"` == psql oracle |
+    | 表存在但为空 | 键**缺席** | 键在，值 **null**（=「库里没有行情」这一个意思） |
+    | 表被 DROP（读失败） | **200** + 键缺席；`/market/index` **200** `{"indices":[]}` —— 读失败冒充「没数据」 | **500**（两腿），日志带 `relation "ohlcv_daily_qfq" does not exist` |
+    | 经网关（:8087 → 数据服务） | 同上旧形状 | `latest_date` 与 `volume/amount` **原样透传**（PIT 那条 404） |
+
+    这组对照比"改坏自己的码再还原"更硬：它跑的是**真实发布过的旧形状**，不是合成的 mutant。
+  - **诚实边界（必须留字）**：单测**抓不到**「handler 丢掉 error 但库里其实读得到」这一形状——健康库上它行为等价。那一面由三处合起来守：库侧 `TestLatestQuoteDate_PropagatesQueryError`（error 不许折成 nil）+ 逐值核对（读失败就不可能对上）+ 上表第三行的隔离库 500 腿。分工已写进 `TestStocksCountHandler_ReadFailureFailsLoud` 的 ⚠️ 注释，不让任何一条腿声称它守不住的东西（DATA-02 自审的教训）。
+  - **顺带发现，新登记**：① **DATA-11** · `/market/index` 忽略 `?symbol` 与 `?date`（handler 固定三个代码的最新一期），ui 的选指数与日期控件因此是装饰性的 —— SPEC 两处已标 ⚠️，与本单的「有没有通道」是两件事；② **DATA-12** · 指数 bar 取数（tushare `index_daily` 用当前 token 实测可用，返 `4439.1443` 等真值），需要新 API 面 + 建表（不能塞进 `ohlcv_daily_qfq`，那会把指数当股票进票池/因子/NT 导出），**待主任批准**，见 DATA-07 记录；③ ui 侧 `DataQualityPanel.vue` 的说明文字仍写"在市/退市拆分没有只读接口"，而 DATA-02 早就在 `/stocks/count` 给了 `by_status`、本单又给了 `latest_date` ⇒ 空态文案已过期，且 `fmtVolume/fmtAmount` 对 `0` 走 falsy 分支显 `-`，会把「0 股」显示成「没数据」——两条都属 ui 仓 A-08 后续，不在本单夹带。
+  - **并发与代价**：全程在两个独立 worktree（`qt-verify/d0307` core + `qt-verify/d0307-ui`）完成，主工作树里他人 `pkg/data/source/*` 的在途改动没被碰；**共享容器未重建**（:8081/:8085 仍是旧二进制，端到端读数由临时实例 + 隔离库给）；起了 4 个临时进程与 1 个一次性 PG，全部已停并删除；**零 Tushare 调用**（不占共享限流桶）；未 push。
+  - **门禁**：`go build ./...` exit 0、`go vet ./cmd/data ./cmd/analysis ./pkg/storage ./internal/repoguard` exit 0、本单 7 个改动文件 `gofmt -l` 空输出、`go test ./cmd/data/ ./pkg/storage/ ./internal/repoguard/ -count=1` 全 exit 0、`docs/openapi.yaml` 用 YAML 解析复验（`required: [count, by_status, latest_date]`、`latest_date` = `string/format: date/nullable: true`、`/api/market/index` 从裸 `type: object` 补成完整形状）。诚实边界：`-race` 本机跑不了（无 gcc）；整仓 `gofmt -l` 仍有 8 个既有未格式化文件（含 SYNC-04 已登记的 `cmd/data/setup.go`），非本单引入。
+  - **自审修订（2026-10-16，并入前；问题由通读自己的 diff 查出，不是外部反馈）**：
+    1. **两个新 500 出口原本用 `Wrap`，而 `Wrap` 在 5xx 上把 message 整个丢掉**（`pkg/httpserver/errors.go:115-124` 的 5xx 分支根本不读 `message` 参数）⇒ 本 handler 三个失败出口回**同一个字节串**，调用方分不清是票池拆分没读到还是行情日期没读到 —— 本单反对的「几种成因压成一个形状」，我在新代码里原样复现了一遍。改用 `FailCause`（静态文案出、cause 只进日志），与 DATA-06 同一选法。**既有 `:90` 那行同款问题不改**：那是 `pkg/httpserver` 的仓库级用法面（P1-5 收口产物，全站调用点同一形状），与本单契约无关，动它属 drive-by。
+    2. **护栏的机械证明不靠叙述**：`pkg/httpserver/errors_test.go` 原本只钉了 `Error` 的 5xx 掩码与 `Wrap` 的 **4xx** 拼接，「Wrap 在 5xx 丢文案」这半没人管 ⇒ 补两条对照腿：`TestWrap_At5xxDiscardsTheMessage`（反证腿：步骤名结构性地到不了响应体，所以「改回 Wrap 必红」是有保证的）与 `TestFailCause_KeepsStageTextAt5xx`（正面腿：静态文案必须出去、cause 不许外泄）。`TestMarketIndexHandler_ReadFailureFailsLoud` 加 `Contains("failed to read index bars")` + `NotContains("indices")`（失败响应不许带半份成功数据）。就地改坏 handler 那条腿仍被 auto-mode 拦（本单第三次），新建脚手架测试文件也被拦，**未绕**；改用在真实 helper 上跑的对照腿取证 —— 它证的是机制，比改某一个调用点更硬。
+    3. **SPEC 插章节时插错了位置**：新增章节把「网关 `GET /api/stocks/count` 是字段透传」这条 bullet 挤到了 PIT 章节下面，读起来像在说 PIT ⇒ 移回 `/stocks/count` 段末。内容不错，位置错 —— 这类失真只有通读 diff 才看得见。
+    4. **openapi 只登记了 `'200'`，而本单新增的行为恰恰是「读失败 = 5xx」** ⇒ 契约登记缺一半。两条路径各补 `'500'`（`$ref` → `components/schemas/Error`，与仓内其余 15 处同法），描述写明「失败文案点名哪一步、内部原因不外泄」。
+    5. 「另立工单」不可 grep ⇒ SPEC / openapi / handler 注释三处统一写成 **DATA-12**。
+  - **自审后复验**：`go build ./...` exit 0、`go vet` 四包 exit 0、`go test ./cmd/data/ ./pkg/storage/ ./internal/repoguard/ ./cmd/analysis/ -count=1` 全 exit 0、`go test ./pkg/httpserver/ -count=1 -run "TestWrap_|TestFailCause_"` 三条 PASS、改动文件 `gofmt -l` 空输出、openapi YAML 解析复验两条路径均为 `['200','500']` 且 `Error` schema 存在。
 
 ### DATA-04 · 成交量单位统一（手 → 股）+ D1 导出路径修复 ✅ 完成（2026-10-14）
 
@@ -692,7 +720,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
     DATA-07 的 ② 按实测写，不沿用推断。教训同 `hash 命中≠已上线`：能跑一次的结论
     不要靠形状推断。
 
-### DATA-07 · 仪表盘「市场概览」的成交量/成交额恒显示 '-'（没有数据通道 + 指数 bar 不在日线表） ⬜ 待做
+### DATA-07 · 仪表盘「市场概览」的成交量/成交额恒显示 '-'（没有数据通道 + 指数 bar 不在日线表） ✅ 完成（2026-10-16，branch `task/data-03-07`，与 DATA-03 同 worktree）
 
 - **① 目标**：`/api/market/index` 真的把 `volume`/`amount` 给到前端并带上指数 bar，或者删掉这两格 —— 界面上不再存在恒为 '-' 的指标。
 - **② 上下文**（2026-10-15 DATA-05 实测，两层独立缺失）：ui 仓 `web/src/components/dashboard/MarketMetrics.vue:31-32` 显示「成交量/成交额」两格，取 `metrics.volume` / `metrics.amount`；数据来自 `Dashboard.vue:88 getMarketIndex()` → 本仓 `cmd/data/handlers_stocks.go:125 marketIndexHandler`，其响应结构 `indexData`（:130-136）**只有** code/name/close/change/pct ⇒ 两个字段从来不在响应里，`fmtAmount(undefined)`（ui `web/src/utils/format.ts:40`）走 falsy 分支恒 '-'。第二层：该 handler 查的 `000300.SH / 000001.SH / 399006.SZ` 在 `ohlcv_daily_qfq` 里 **0 行**（实测 count=0，表内 5671 个 symbol 不含指数），实测 curl `:8085/api/market/index` 返回 `{"indices":[]}`。
@@ -700,6 +728,41 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：不动单位口径（DATA-05 已定，别在这里重开）；不顺手修 DATA-03 的吞错家族；不新增数据源依赖（需要新源先报主任）。
 - **⑤ 验收**：一条行为测试钉住「响应的 volume/amount 与库里逐字段相等」；接口或浏览器实测显示真值（或删格后界面一致）；`go build ./...` + `go vet` + `gofmt -l` 干净。
 - **⑥ 边界**：只做「界面有指标但没有数据通道」这一条。
+- **✅ 完成记录（2026-10-16，与 DATA-03 同一 worktree 同一分支；裁决 = (a2) 界面收口 + 把已有真数给出去）**：
+  - **⚠️ 先扩② 的现场（实测 2026-10-16，不是引用）**：② 说的是「volume/amount 两格恒 '-'」，实测范围更大 —— `:8085/api/market/index` 现回 **`{"indices":[]}`**（三个指数代码 0 行、全库无指数日线表），所以**整张「市场概览」卡片是死的**：收盘价、涨跌幅同样是恒 '-'。另外查出两处 ② 没提的形状：① ui `MarketMetrics.vue` 读的是 `metrics.change_pct`，而后端发的键叫 `pct` —— **字段名对不上**，即使有数据那格也不会动；② ui 把 `pct` 过 `fmtPercent`，而那个函数自己会再乘 100（它假定入参是小数比例）—— 由于该格恒 '-'，这个 **100 倍错配一直被遮着**，接上数据那天才会浮出来。两处都在本单收掉，理由：① 就是「有指标但没通道」的另一条腿；② 是接上通道后必然踩到的下一步。
+  - **裁决 (a2) 与「把已有真数给出去」的组合**：没有指数 bar 这件事（②的第二层）在本单**不修**，因为补它要 tushare `index_daily`（新 API 面）+ 新表（`ohlcv_daily_qfq` 不能复用 —— 会把指数当股票喂进票池展开、因子计算与 NT 导出，且 qfq 语义对指数不成立），④ 明写「不新增数据源依赖（需要新源先报主任）」、AGENTS.md §9 又把改 schema 列为 Ask First ⇒ 已按实测报主任并登记为 **DATA-12 待批**（`index_daily` 当前 token 实测可用，返 `4439.1443` 等真值）。**能给的都给了**：库里 `ohlcv_daily_qfq` 本来就有 `volume`（股，DATA-04）与 `turnover`（CNY，DATA-05）两列，响应结构 `indexData` 却从不带它们 —— 这就是「指标没有数据通道」的本体，已补；②的第一层因此关闭，③ (a2) 的「界面与数据结构一致」按当下数据状态给出（空态），不造数。
+  - **core 落点**：`pkg/storage/ohlcv.go` 新增 `MarketIndexBar` + `LatestIndexBars(ctx, codes)`（**一趟**窗口函数取回最新一期与上一期收盘；旧形状是每个代码两趟查询、且第二趟的 error 被丢进 `if err == nil`，「读失败」与「这个指数没数据」长得一样）；`cmd/data/handlers_stocks.go` 的 `marketIndexHandler` 改走库侧方法，读失败 ⇒ 500，`marketIndexPayload` 摊响应：`code/name/close/change/pct/volume/amount`。三个形状决定：库里没有行的代码**不产条目**（不编零值 close）；`turnover` 为 NULL ⇒ `amount: null`（不是 0，否则界面显示「成交额 0 元」这个假数字）；无上一期收盘 ⇒ `change/pct: null`（不是 `+0.00%`）。**单位一律不换算**（亿/万是展示层），`pct` 保持百分数刻度并在 SPEC/openapi/类型三处写明「展示端不要再乘 100」。
+  - **ui 落点**（同分支的 ui worktree `qt-verify/d0307-ui`）：`types/api.ts` 的 `MarketIndex` 与实测对齐（补 `volume/amount`、`change/pct` 改 `number | null`，**删掉从来没被返回的** `open/high/low` 与 `MarketData.updated_at` —— DATA-03 那把尺子同样适用：声明了就该有）；`StockCount` 补 `by_status` 并把 `latest_date` 改成 `string | null`；`MarketMetrics.vue` 的 prop 从 `Record<string, any>` 改成 `MarketIndex | null`（`any` 正是把「后端没发」和「前端没接」压成同一个形状的地方），字段名改读 `pct`，`null` 一律显示**未读取**而不是 `-`/0，`metrics` 为 null 时不渲染四格、改渲染显式空态（`无指数数据` + 「三个指数代码在日线表里 0 行」+ 「补 bar 需新源与建表，待批后另立工单」），口径照 A-08 对 `DataQualityPanel` 的裁决；`Dashboard.vue` 空数组与请求失败都置 `null`（不留旧帧，也不把失败显示成「今天没行情」）。
+  - **⑤ 逐条对账**：(1)「行为测试钉住响应的 volume/amount 与库里逐字段相等」——库侧腿 `TestLatestIndexBars_FieldByFieldAgainstInserted` 用自灌探针行逐字段断言（`close 4439.1443 / volume 151965787 / turnover 375461676.1428`，含 NULL 与无 prev close 两条分支）；端到端那格用**隔离库灌真指数 bar** 后 curl 给：`:8093` 与经网关 `:8087` 都回 `(000300.SH, 4439.1443, 151965787, 375461676.1428, pct 0.878…)`，与 psql 读数逐字段一致，且 `000001.SH` 那条如实回 `amount: null / change: null / pct: null`。(2)「接口或浏览器实测显示真值（或删格后界面一致）」——**两条都跑了**：接口真值见上；浏览器用本 worktree 的 dev server（:5174，代理打容器网关 :8085，当下真实数据状态）实测卡片 DOM：`cellCount=0`、空态文案在屏、`hasDashCell=false`、整页无 `undefined/NaN/[object Object]`（顺带满足 `critical-e2e` 那条同文断言）；`/data-sync` 页一并回读确认改类型没伤到 `DataQualityPanel`。(3) 门禁见下。
+  - **破坏验证（不绕闸的等价做法）**：把本单新增的 7 条 ui 测试跑在**改动前的组件**上（ui 仓 main 的 detached worktree，`npm ci` 后 `vitest run`）⇒ **7 条全红**，红得有名：`expected '-' to be '+1.23%'`、`expected '-' to be '未读取'`、`expected false to be true`（空态未渲染）。core 侧同思路：main 二进制 vs 本单二进制在隔离库三格现场 A/B（表在且有数据 / 表在但空 / 表被 DROP），差异逐格记在 DATA-03 的记录里。就地改坏生产码那条被 auto-mode 拦（两种写法各试一次），**未绕**。
+  - **测试与探针纪律**：探针行只用自己的假代码（`D37…` 形状撞不上真票），日期**固定在库内既有跨度 [2023-09-25, 2026-09-24] 之内**（2026-09-22/23）—— 因为 `pkg/data/tushare_adjustment_integration_test.go:281` 读的是**全表** min/max `trade_date` 并据此取基准因子，探针日期把全局 max 推后就等于我在别人的测试里造偶发红；这条取舍写在测试文件头。库侧测试走 `NewPostgresStoreConnected`（DATA-09 口径，默认构建不迁移）。
+  - **顺带发现，新登记**：**DATA-11** · `/market/index` 完全忽略 `?symbol` 与 `?date`（固定三个代码的最新一期），ui 的选指数下拉与日期选择器因此是装饰件；下拉里还列着 `399001.SZ 深证成指`，而 core 从来不给它 —— 属「读数不对齐调用方要的那一天/那一个指数」，与本单的「有没有通道」是两回事，SPEC 两处已标 ⚠️，本单不动（⑥ 边界）。
+  - **门禁**：core `go build ./...` / `go vet ./cmd/data ./cmd/analysis ./pkg/storage ./internal/repoguard` exit 0，本单改动文件 `gofmt -l` 空输出，`go test ./cmd/data/ ./pkg/storage/ ./internal/repoguard/ -count=1` 全 exit 0；ui `npm test` **492 passed / 37 files**、`npm run typecheck` exit 0、`npm run lint` **0 error**（警告 953 → 944，本单净减 9 条）。`docs/openapi.yaml` YAML 解析复验通过（`/api/market/index` 从裸 `type: object` 补成完整形状）。诚实边界：`-race` 本机跑不了（无 gcc）；ui 的 Playwright e2e 与视觉基线**未跑** —— `dashboard.png` 会随卡片文案变化（改了卡片文字就需要 `--update-snapshots`），而 e2e 要打的是真实后端 :8085（旧二进制），跑它既证不了本单改动又会与并发会话抢限流桶；这条腿留给合入 main 后重建 `data-service` 容器时一起补，届时界面真值与视觉基线一并回读。
+  - **代价与并发**：零 Tushare 调用；一次性 PG（127.0.0.1:5433，initdb 于 /tmp）与 4 个临时实例（:8091/:8093/:8095/:8087）+ dev server（:5174）全部已停并删除；**共享容器与共享开发库未被写入**（:8081/:8085 仍跑旧代码，`ohlcv_daily_qfq` 只在测试事务窗口内插删自己的假代码行）；主工作树里他人 `pkg/data/source/*` 的在途改动未被触碰；未 push。
+  - **自审修订（2026-10-16，并入前）**：
+    1. **空态文案在「请求失败」那一帧是说谎的**，而我自己的台账原文写着"也不把失败显示成『今天没行情』"。`MarketMetrics.vue` 的空态只有一句「接口实测回空数组：三个指数代码在日线表里 0 行」，而 `Dashboard.vue` 把**请求失败**也置 `metrics = null` ⇒ 后端不可达时，屏幕上打的是"确实没有"这句话。叙述与实现各说各话，通读 diff 才抓出来。修法：空态按成因分两句（`fetchFailed` 由 Dashboard 传，三态：读到条目 / 回了空数组 / 回包连 `indices` 都不是），口径照本仓 `a1393c6` 已立的「空态分句」；新测试那条断 `not.toContain('0 行')`。
+    2. `metrics!.volume == null ? '未读取' : …` 是**与契约矛盾的死分支**：`volume` 在 `MarketIndex` 里是必填 `number`、openapi 的 `required` 含它、DDL 是 `NOT NULL` ⇒ 这个三元永远为假，而真出问题时它把"契约违约"说成"没有读数"。删守卫；顺带把 `pctText/pctClass` 入参收窄成 `MarketIndex`、去掉 `isNaN` 分支（JSON 带不出 NaN —— Go 侧 marshal 直接报错，那是防空转）。模板 `v-if="!metrics"` / `v-else` 已由 vue-tsc 收窄 ⇒ 三处 `metrics!` 断言全部去掉，`npm run typecheck` exit 0 就是这件事的判据，不是我嘴上说收窄了。
+    3. **被我这次改动证伪的两处旧文案**（`DataQualityPanel.vue` 的屏幕文字与 script 注释）：写着「总数接口里声明的行情最新日实测从不返回（handler 把 Scan 的错误丢掉了）」—— DATA-03 已让那个键恒在。就地订正，并把 PIT 那块从"没有转发（像遗漏）"改成"DATA-03 裁决不开放 + 护栏已钉"；整块读数与文案重写仍留 **UI-01**（`by_status`/`latest_date` 上屏、`fmtVolume(0)` 显 '-' 那条）。UI-01 的 ② 同步改一笔，不让它重复登记本单已订正的内容。
+    4. core 侧的两处（`FailCause`、openapi 补 `'500'`）记在 DATA-03 的自审修订里，不在这里重复。
+  - **自审后复验 + 破坏验证（跑了，不是推的）**：ui `npm test` **493 passed / 37 files**（比修订前 +1 条 = 失败帧那条）、`npm run typecheck` exit 0、`npm run lint` **0 error**（警告 944 → 943；vs main 的 953 净减 10 条）。把修订后的测试文件跑在**修订前的组件**上（`081cbf8` 的 detached worktree + `npm ci`）⇒ **2 failed / 6 passed**，红得有名：`expected '…无指数数据 接口实测回空数组：…0 行…' to contain '读数失败'`（失败帧确实在说"确实没有"）与 `expected '…' to contain 'DATA-12'`（空态没指名工单号）。还原后本次全量为绿；对照 worktree 用完即删。
+
+### DATA-11 · `/market/index` 忽略 `?symbol` 与 `?date`，界面选什么都是同一格 ⬜ 待做
+
+- **① 目标**：`GET /market/index` 按调用方给的 `symbol`（可选 `date` 做 PIT）给数，或者明写它只回固定三个指数的最新一期并把 ui 的选择控件撤掉 —— 控件存在但不影响读数，等于界面在撒谎。
+- **② 上下文**（2026-10-16 做 DATA-07 时实测，逐行核对非推测）：`cmd/data/handlers_stocks.go` 的 `marketIndexHandler` 只遍历固定的 `marketIndexCodes = {000300.SH, 000001.SH, 399006.SZ}`，**从不读** `c.Query("symbol")` / `c.Query("date")`；而 ui `api/market.ts:4-10` 的 `getMarketIndex(symbol, date)` 照样把两个参数发出去，`Dashboard.vue:88` 还取 `indices[indices.length-1]`（不看选中项）。下拉里另有 `399001.SZ 深证成指`，core 从来不给它。SPEC §1/§2 两处已按 DATA-07 的记录标了 ⚠️「参数不生效」。
+- **③ 要求**：二选一并写明理由 ——(a1) handler 认 `symbol`（不传=三个都给）并认 `date`（按 `trade_date <= d` 取该日或之前最近一期，明写这不是 PIT 快照而是"最近一根 bar"）；(a2) 后端不参数化，ui 撤掉下拉与日期选择器，卡片标题写明"三个指数的最新一期"。
+- **④ 约束与非目标**：不动 DATA-07 刚定的响应形状与单位口径（volume 股 / amount CNY / pct 百分数刻度，`null` 语义）；不在本单引入指数日线取数（那是 DATA-12，需新源与建表）；不碰 `pkg/domain`。
+- **⑤ 验收**：选 (a1) ⇒ 一条行为测试钉「传 `symbol=000001.SH` 只回那一条」「传 `date` 时读到的是该日或之前最近一期」，并经网关 curl 两腿实测；选 (a2) ⇒ ui 里 `indexOptions`/`n-date-picker` 与 `selectedIndex` 一并删除，`npm test` + `npm run typecheck` 绿，SPEC 两处 ⚠️ 改成明写。**两种都要**：`grep -rn "symbol" cmd/data/handlers_stocks.go` 与 SPEC 描述一致（不许再出现"文档给了参数、代码不认"）。破坏验证：改坏参数分派（恒回三个代码）⇒ 新测试红。
+- **⑥ 边界**：只做"参数与界面控件是否诚实"；数据面（指数 bar 进库）在 DATA-12。
+
+### DATA-12 · 指数日线没有数据面（`/market/index` 有通道但仍回空数组） ⬜ 待做（**待主任批准新源 + 建表**）
+
+- **① 目标**：让 `000300.SH / 000001.SH / 399006.SZ` 真的能查到最新一期 bar，`GET /api/market/index` 不再恒回 `{"indices":[]}`，仪表盘那张卡在**默认数据状态下**就有数。
+- **② 上下文**（2026-10-16 实测）：DATA-07 已把通道补上（响应带 `volume`/`amount`，隔离库里灌真 bar 后 curl 与 psql 逐字段一致），缺的只是数据面：这三个代码在 `ohlcv_daily_qfq` 里 **0 行**（实测 count=0，表内 5671 个 symbol 全是股票），全库也没有指数日线表（`pg_tables` 只有 `index_constituents` 与 `market_activity` 沾"指数"名）。可用源已探过：tushare `index_daily` 用当前 token 实测返回真值（`000300.SH` 20260924 `close=4439.1443 vol=151965787 amount=375461676.1428`）。
+- **③ 要求**：**先批准再动手** —— 批准后按「新 API 面 + 新表 + 同步入口 + 单位校准」一体做：`index_daily` 的 `vol`/`amount` 单位**必须实测校准**（文档口径是手 / 千元，与 DATA-04/DATA-05 规范层的股 / CNY 不同，量级差 100/1000 倍；不准就 fail-loud，不猜）。落点建议 `market.index_daily`（B 类规范化数据，**不是**塞进 `ohlcv_daily_qfq`：那会把指数当股票喂进 `resolveStockPool` 票池展开、因子计算与 NT 导出，且 qfq 复权语义对指数不成立）。
+- **④ 约束与非目标**：不改 DATA-07 刚定的响应形状；不重开单位口径（规范层已定，本单只做**源单位 → 规范层**的一次换算并写明依据）；不在本单做指数成分股（`index_constituents` 已有通道）；不动 `ohlcv_daily_qfq` 的既有行。
+- **⑤ 验收**：灌数后 `curl :8085/api/market/index` 三个代码都有条目，`volume`/`amount` 与 psql 直查逐字段一致且**单位对得上规范层**（拿一只个股同期日线量级交叉比，或拿 tushare 官网口径页留证）；一条幂等重跑不产生重复行；建表走 `pkg/storage/postgres.go` 的 `migrate()` 内联数组末尾（**不是** `migrations/*.sql`）；`bulk_insert_ddl_test.go` 的防漂移断言把新表收进去。破坏验证：摘掉单位换算 ⇒ 量级断言红。
+- **⑥ 边界**：只做"指数日线进库并读得出"；参数化/PIT 语义在 DATA-11，成分股在 DATA-01/06 线。
 
 ### DATA-08 · 多源 fallback 链零生产调用方（Registry 只服务观测端点） ✅ 完成（2026-10-16，branch `task/data-08-registry-unwired`）
 
