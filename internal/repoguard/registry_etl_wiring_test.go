@@ -7,22 +7,32 @@ package repoguard
 //
 // 守两条，各管一条漂移路径：
 //
-//   A. 生产代码（cmd/ pkg/ internal/ 的非测试文件）不得调用
-//      `NewETLPipeline(...)`；包外（非 package source 的文件）不得出现
-//      `ETLPipeline{...}` 复合字面量。Registry.Fetch 的唯一生产调用方是
-//      ETLPipeline.Process，而 ETLPipeline 零生产构造点 —— 哪天有人把
-//      它接进 HTTP/作业层，这条守卫当场红，逼他先走 DATA-10 的接线计划
-//      （单位边界 → Normalizer → sync_jobs 关系），而不是静默多一条
-//      生产写路径。
-//      包内字面量刻意放行：`NewETLPipeline` 构造器自己的函数体就返回
-//      `&ETLPipeline{...}`，那是**实现**不是接线 —— 第一版判据把包内
-//      字面量也算违规，结果守卫从第一天起就对着 etl.go 常红（假护栏
-//      形状），故按「包外才算接线」收窄。
+//   A. 生产代码（cmd/ pkg/ internal/ 的非测试文件）里，package source
+//      **之外**不得出现 `NewETLPipeline` 的任何引用 —— 调用、函数值
+//      （`f := source.NewETLPipeline` 存起来再调）、点导入后的裸名，
+//      一律 Ident 级判定：包一层函数值绕不开名字匹配。package source
+//      **内部**不许调用 `NewETLPipeline(...)`（同包构造同样是接线意图），
+//      但构造器本体的 `&ETLPipeline{...}` 字面量与 `NewETLPipeline` 这个
+//      函数名本身是**实现**，放行 —— 第一版判据把包内字面量也算违规，
+//      结果守卫从第一天起就对着 etl.go 常红（假护栏形状），故按「包内
+//      字面量是实现、包外才算接线」收窄。包外同样不得出现
+//      `ETLPipeline{...}` 复合字面量。
+//      Registry.Fetch 的唯一生产调用方是 ETLPipeline.Process，而
+//      ETLPipeline 零生产构造点 —— 哪天有人把它接进 HTTP/作业层，这条
+//      守卫当场红，逼他先走 DATA-10 的接线计划（单位边界 → Normalizer →
+//      sync_jobs 关系），而不是静默多一条生产写路径。
+//      **已知边界（刻意不追）**：`type P = source.ETLPipeline` 后再
+//      `P{}` —— 类型别名绕开名字匹配。防它需要类型信息（go/types），
+//      而那是编译器的事；本护栏防的是漂移与疏忽，不是蓄意伪装（蓄意者
+//      会直接改护栏，那时红的是他的 diff）。
 //
-//   B. cmd/data/registry_handlers.go 这个观测面文件不得出现 `.Fetch(`
-//      选择器调用。Registry 的 HTTP 端点今天是也只应该是只读观测
-//      （status/health/chains）；一个会触发真实取数的端点必须经过与 A
-//      同样的显式决策。
+//   B. cmd/data/registry_*.go 这一组观测面文件（production，非 _test）
+//      不得出现 `.Fetch(` 选择器调用。Registry 的 HTTP 端点今天是也只
+//      应该是只读观测（status/health/chains）；一个会触发真实取数的端点
+//      必须经过与 A 同样的显式决策。按前缀 glob 而不是写死一个文件名：
+//      今天射程是 registry_handlers.go 与 registry_init.go，将来观测面
+//      长出新文件（registry_admin.go 之类）自动进射程，不会静默漏查；
+//      glob 命中为空时测试自报失败 —— 文件被改名/删光的那一刻不许假绿。
 //
 // 为什么放在 repoguard：要扫的是全仓生产代码，walk 机器在这个包里已有
 // 先例（package_wiring_test.go，AUD-45/46）。测试文件被刻意排除 ——
@@ -56,10 +66,9 @@ const etlPackageName = "source"
 // etlWiringOffendersInSource 返回一份源码里所有「把 ETLPipeline 接进
 // 生产」的站点，元素形如 `file:line: 形态`。
 //
-// 判定用 AST 而不是文本匹配，两个文本陷阱因此不存在：
-//   - 定义不是调用：`func NewETLPipeline(...)` 是 FuncDecl，不进 CallExpr；
-//   - 注释不是代码：文件头注释里点名 NewETLPipeline（etl.go 自己就有）
-//     不会进 AST —— 解析时刻意不带 comment。
+// 判定用 AST 而不是文本匹配，文本陷阱因此不存在：定义不是代码里的一次
+// 「引用命中」之外的形态、注释点名（etl.go 文件头自己就有）不进 AST
+// —— 解析时刻意不带 comment。
 //
 // 注意解析模式：必须完整解析（mode 0）。package_wiring_test.go 用的
 // parser.ImportsOnly 只解析 import 声明、整个跳过函数体 —— 第一版图省
@@ -76,16 +85,28 @@ func etlWiringOffendersInSource(src, filename string) []string {
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.CallExpr:
-			if name := calleeName(x.Fun); name == "NewETLPipeline" || name == etlPackageName+".NewETLPipeline" {
-				offenders = append(offenders, fmt.Sprintf("%s:%d: NewETLPipeline 调用", filename, fset.Position(x.Pos()).Line))
+			// 同包调用才算这一腿的违规；包外的调用由下面的 Ident 腿覆盖
+			//（Ident 腿在包内放行，避免把构造器自己的函数名算成接线）。
+			if inETLPackage {
+				if name := calleeName(x.Fun); name == "NewETLPipeline" || name == etlPackageName+".NewETLPipeline" {
+					offenders = append(offenders, fmt.Sprintf("%s:%d: NewETLPipeline 调用", filename, fset.Position(x.Pos()).Line))
+				}
+			}
+		case *ast.Ident:
+			// 包外任何 NewETLPipeline 引用即红：直接调用、函数值
+			// （f := source.NewETLPipeline）、点导入后的裸名。选择器
+			// 的 Sel 也是 Ident，source.NewETLPipeline 里的
+			// NewETLPipeline 会以 Ident 形态被访到，故无需单列
+			// SelectorExpr 腿。
+			if !inETLPackage && x.Name == "NewETLPipeline" {
+				offenders = append(offenders, fmt.Sprintf("%s:%d: NewETLPipeline 引用", filename, fset.Position(x.Pos()).Line))
 			}
 		case *ast.CompositeLit:
 			// 包内的字面量是构造器实现，放行；包外手搓 pipeline 算接线。
-			if inETLPackage {
-				return true
-			}
-			if name := typeName(x.Type); name == "ETLPipeline" || name == etlPackageName+".ETLPipeline" {
-				offenders = append(offenders, fmt.Sprintf("%s:%d: ETLPipeline 复合字面量", filename, fset.Position(x.Pos()).Line))
+			if !inETLPackage {
+				if name := typeName(x.Type); name == "ETLPipeline" || name == etlPackageName+".ETLPipeline" {
+					offenders = append(offenders, fmt.Sprintf("%s:%d: ETLPipeline 复合字面量", filename, fset.Position(x.Pos()).Line))
+				}
 			}
 		}
 		return true
@@ -201,25 +222,45 @@ func TestProductionCodeDoesNotWireETLPipeline(t *testing.T) {
 }
 
 // TestRegistryObservabilitySurfaceDoesNotFetch —— 规则 B 的仓库级断言：
-// 观测面文件不得触发真实取数。
+// 观测面文件（cmd/data/registry_*.go，production）不得触发真实取数。
+// 按前缀 glob 而非写死文件名：观测面长出新文件自动进射程；glob 命中为
+// 空时自报失败，文件被改名/删光的那一刻不许假绿。
 func TestRegistryObservabilitySurfaceDoesNotFetch(t *testing.T) {
 	t.Parallel()
 
 	root := filepath.Join("..", "..")
-	rel := "cmd/data/registry_handlers.go"
-	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+	matches, err := filepath.Glob(filepath.Join(root, "cmd", "data", "registry_*.go"))
 	require.NoError(t, err)
+	production := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if strings.HasSuffix(m, "_test.go") {
+			continue
+		}
+		production = append(production, m)
+	}
+	require.NotEmpty(t, production,
+		"cmd/data/registry_*.go 一个生产文件都没匹配到 —— 观测面被改名或删光时，"+
+			"本守卫不许以「零个文件可查」的形式假绿")
 
-	offenders := registryObservabilityOffendersInSource(string(raw), rel)
+	var offenders []string
+	for _, path := range production {
+		raw, rerr := os.ReadFile(path)
+		require.NoError(t, rerr)
+		rel, rerr := filepath.Rel(root, path)
+		require.NoError(t, rerr)
+		offenders = append(offenders, registryObservabilityOffendersInSource(string(raw), filepath.ToSlash(rel))...)
+	}
+	sort.Strings(offenders)
+
 	assert.Empty(t, offenders,
-		"registry_handlers.go 出现了 .Fetch 调用 —— DATA-08 裁决 Registry 的 HTTP 面只做只读观测"+
+		"观测面文件出现了 .Fetch 调用 —— DATA-08 裁决 Registry 的 HTTP 面只做只读观测"+
 			"（status/health/chains）。会触发真实取数的端点属于新的生产写路径，按 DATA-10 计划显式立项：%v", offenders)
 }
 
-// TestETLWiringGuard_FlagsSyntheticCallSite —— 规则 A 的替身五腿：
-// 跨包调用、同包调用、包外字面量各红一次；构造器本体的包内字面量与
-// 注释不误伤。少了这一组，仓库级测试今天的绿可能只是因为「扫的范围里
-// 恰好没有」。
+// TestETLWiringGuard_FlagsSyntheticCallSite —— 规则 A 的替身六腿：
+// 跨包引用、同包调用、包外字面量、函数值旁路各红一次；解析失败必须
+// fail-loud；构造器本体的包内字面量与注释不误伤。少了这一组，仓库级
+// 测试今天的绿可能只是因为「扫的范围里恰好没有」。
 func TestETLWiringGuard_FlagsSyntheticCallSite(t *testing.T) {
 	t.Parallel()
 
@@ -234,7 +275,7 @@ func wire() {
 `
 	got := etlWiringOffendersInSource(cross, "synthetic_cross.go")
 	require.Len(t, got, 1, "source.NewETLPipeline(...) 必须被抓到：%v", got)
-	assert.Contains(t, got[0], "NewETLPipeline 调用")
+	assert.Contains(t, got[0], "NewETLPipeline 引用")
 
 	local := `
 package source
@@ -245,6 +286,7 @@ func wire() {
 `
 	got = etlWiringOffendersInSource(local, "synthetic_local.go")
 	require.Len(t, got, 1, "同包 NewETLPipeline(...) 同样必须被抓到：%v", got)
+	assert.Contains(t, got[0], "NewETLPipeline 调用")
 
 	literal := `
 package main
@@ -258,6 +300,21 @@ func wire() {
 	got = etlWiringOffendersInSource(literal, "synthetic_literal.go")
 	require.Len(t, got, 1, "包外手搓 ETLPipeline 字面量必须被抓到：%v", got)
 
+	// 函数值旁路腿（自审修订二补）：只认调用形态时，把构造器存进变量
+	// 就绕开了匹配。Ident 级判定堵住这条路。
+	value := `
+package main
+
+import "github.com/ruoxizhnya/quant-trading/pkg/data/source"
+
+func wire() {
+	f := source.NewETLPipeline
+	_ = f
+}
+`
+	got = etlWiringOffendersInSource(value, "synthetic_value.go")
+	require.Len(t, got, 1, "把构造器存进函数值同样必须被抓到 —— 否则包一层变量就绕开了字面匹配：%v", got)
+
 	// 反证腿一：构造器本体的包内字面量是实现不是接线 —— 第一版判据
 	// 把它算违规，守卫从第一天起就对着 etl.go 常红（假护栏形状）。
 	definition := `
@@ -270,6 +327,13 @@ func NewETLPipeline(reg *Registry, store any) *ETLPipeline {
 `
 	require.Empty(t, etlWiringOffendersInSource(definition, "synthetic_def.go"),
 		"package source 内的字面量与注释不是接线站点，不该被算进违规")
+
+	// 反证腿二：解析失败必须 fail-loud 报出来，而不是静默跳过 ——
+	// 「扫了个空 AST」正是第一版假绿的形状。
+	broken := "package main\n\nfunc {"
+	got = etlWiringOffendersInSource(broken, "synthetic_broken.go")
+	require.Len(t, got, 1, "解析失败必须报出一条 offender：%v", got)
+	assert.Contains(t, got[0], "parse error")
 }
 
 // TestRegistryObservabilityGuard_FlagsSyntheticFetch —— 规则 B 的替身：
