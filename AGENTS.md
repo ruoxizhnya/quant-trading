@@ -305,6 +305,7 @@ docker compose down                     # Stop all services
 - 命名：导出符号用 PascalCase，未导出用 camelCase
 - 包结构：`domain/` → `data/` → `strategy/` → `backtest/` → `storage/`
 - 使用 `logrus` 或标准 `log` 包记录日志（与现有代码一致）
+- **库侧测试用 `storage.NewPostgresStoreConnected`（连库 + ping，不迁移），不用 `NewPostgresStore`**。`migrate()` 只由 `NewPostgresStore` 承载，那是**启动 / 部署路径**（`cmd/data/setup.go`、`pkg/bootstrap/engine.go`、`cmd/dualrun`，以及 `//go:build integration` 下 dockertest 一次性容器套件）。DATA-09 的实测代价（2026-10-15）：默认构建的测试直连开发库调迁移入口，一条 `go test ./pkg/data/...` 就把 Migration 054 的整表 ×1000 真的作用在 3,926,510 行上，无授权无提示，且 `data_migrations` 哨兵置位后**不可重放**。双向护栏在 `internal/repoguard/store_migration_isolation_test.go`（测试不许调迁移入口 / 生产不许调不迁移入口 / 两个入口的函数体形状也钉住）。代价如实登记：库侧测试从此**预设库已迁移**，新库先起一次服务或跑一次 tagged 集成套件。
 
 **Canonical Strategy Interface**（单一事实来源）：
 ```go
