@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/ruoxizhnya/quant-trading/pkg/httpserver"
 	"net/http"
@@ -48,17 +49,26 @@ func syncIndexConstituentsHandler(tc *data.TushareClient) gin.HandlerFunc {
 			return
 		}
 
-		// Fetch latest constituents (no specific date = latest)
+		// Fetch latest constituents (no specific date = latest).
+		// DATA-06：FetchIndexConstituents 现在把落库 error 上抛（旧形态只 Warn
+		// 后返回成功）。两种失败都回 5xx，但按哨兵区分「哪一步」的静态文案 ——
+		// 内部原因按本仓 5xx 口径只进日志（httpserver.Error 的 cause），不进响应体。
 		constituents, err := tc.FetchIndexConstituents(ctx, indexCode, "")
 		if err != nil {
+			if errors.Is(err, data.ErrIndexConstituentPersistFailed) {
+				httpserver.FailCause(c, http.StatusInternalServerError,
+					"index constituents fetched but failed to persist", err)
+				return
+			}
 			httpserver.Error(c, http.StatusInternalServerError, err)
 			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"message":    "index constituents synced successfully",
-			"index_code": indexCode,
-			"count":      len(constituents),
+			"message":         "index constituents synced successfully",
+			"index_code":      indexCode,
+			"fetched_count":   len(constituents),
+			"persisted_count": len(constituents),
 		})
 	}
 }

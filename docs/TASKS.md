@@ -717,7 +717,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **⑤ 验收**：在有开发库的机器上跑 `go test ./pkg/data/... ./pkg/storage/...`，前后对 `data_migrations` 行集与 `ohlcv_daily_qfq` 的计数 + 若干列值做比对，必须**逐字节一致**；一条负例：新增一个假 DML 迁移不会被测试执行（改坏 → 红 → 还原 → 绿）。
 - **⑥ 边界**：只治「测试改共享库」；真库备份/恢复流程与并发会话的数据隔离另议。
 
-### DATA-06 · 指数成分股同步：落库失败只 Warn，端点照样回 "synced successfully" ⬜ 待做
+### DATA-06 · 指数成分股同步：落库失败只 Warn，端点照样回 "synced successfully" ✅ 完成（2026-10-16）
 
 - **① 目标**：`POST /sync/index-constituents/:index_code` 在**落库失败时不再报成功**——响应体要么 5xx，要么如实区分「取到 N 条」与「落库 N 条」。
 - **② 上下文**（2026-10-14 做 DATA-02 时顺带 grep，逐行核对非推测）：
@@ -729,6 +729,21 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：不改 `SaveIndexConstituentBatch` 的签名与批量语义；不动 `normalizeIndexConstituents` 的 in/out 区间推导（属 DATA-01）；不碰 `stocks` 表；不顺手修 DATA-02/DATA-03；不加新依赖。
 - **⑤ 验收**：行为测试**先红后绿**——经 `TushareStore` 接口注入一个必返回 error 的 stub（生产码不为测试让路），断言 handler 不再回 "synced successfully"（或响应体 `persisted=false` + reason）；反证腿：同一 stub 返回成功时读数照常；活进程一条真实失败路径的 curl 留证；**破坏验证**：把 error 重新吞回 `Warn` ⇒ 新测试红，还原转绿；`go build ./... `+ `go vet` + `gofmt -l` 全绿。
 - **⑥ 边界**：只做这一条静默失败的上抛/如实标注；失败后的**重试与作业状态收敛**（与 sync_jobs 队列的关系）另立。
+- **✅ 完成记录（2026-10-16，分支 `task/data-06`，隔离 worktree）**：
+  - **裁决 ③：选 (a1) 上抛**。理由三条：① 同进程先例 —— `syncCalendarHandler`（handlers_sync.go:484）对 `SaveTradingCalendarBatch` 的 error 直接 5xx；`pkg/data/supply_chain.go` 全线收口为上抛，其测试注释（supply_chain_test.go:292）点名旧 `FetchIndexConstituents` 是吞错反模式、「新代码不许继承」—— 本单把最后这条旧路径收进同一口径。② (a2) 的 2xx 部分成功语义会把「报成功但没落库」换成「报成功但 persisted=false」，调用方照常踩坑。③ `SaveIndexConstituentBatch` 是**单事务全有全无**（cache.go:369，BEGIN→批→COMMIT），结构上不存在「落库一半」的中间态 —— (a1) 后成功路径 `persisted == fetched` 恒成立。
+  - **落点**：`pkg/data/tushare.go` —— `FetchIndexConstituents` 落库失败返回 `ErrIndexConstituentPersistFailed` 哨兵 + `%w` 原始错误（错误串自带「index_weight fetched N but saved 0」，两个数写进错误本身）；失败时返回 `nil` 切片，未落库的行不再被当成结果。`cmd/data/handlers_sync.go` —— handler 按哨兵区分环节，落库失败回 500 + 静态文案 `"index constituents fetched but failed to persist"`；内部 DB 原因按本仓 5xx 口径**只进日志不进响应体**（`FailCause`；`httpserver.Error` 对 5xx 一律脱敏，我最初把原始错误断言成对外可见，前提错了，按实测改的）。成功体拆成 `fetched_count` / `persisted_count` 两个数（③ 末句要的「两个可区分的数」）。
+  - **对外错误形状（自记边界，别当成内部原因外泄）**：`persisted_count` 是真数（成功路径恒等于 `fetched_count`）；落库失败的「N 取到 / 0 落库」两个数只在日志与错误链里，HTTP 体只有静态环节文案 —— (a1) 下 5xx 状态本身即如实区分。
+  - **测试（先红后绿）**：`pkg/data/tushare_index_constituents_persist_test.go` 两腿（stub 经 `TushareStore` 接口注入，生产码未开测试后门）—— 红腿起手 `An error is expected but got nil`，绿后 exit 0；反证腿核对 store 真收到 2 行且 DATA-01 的 in/out 区间语义未被上抛改造碰坏。`cmd/data/sync_index_constituents_persist_test.go` 三腿 —— 红腿起手 `expected: 500, actual: 200` 且 body 原样带 `"synced successfully"`（旧缺陷留影）；成功腿断言 `fetched_count==persisted_count==2` 且 stub 实收 2 行；400 校验腿钉边界不变。
+  - **破坏验证（主任 2026-10-16 授权后就地执行）**：把 error 改回旧形态 `logger.Warn` 吞掉 → `TestFetchIndexConstituents_PropagatesSaveError` 红（`An error is expected but got nil`）、`TestSyncIndexConstituents_PersistFailureNotReportedSuccess` 红（`expected: 500 actual: 200`）→ `cp -p` 还原 → **sha256 与基线逐字节一致**（本仓还原判据，不信「diff 为空」）→ 复跑 exit 0。
+  - **活进程 curl（同经授权；未重建共享容器，避免把并行 agent 的在途代码带上 :8081）**：从本 worktree 编译 data-service 起 `:8091` —— 成功腿 `POST /sync/index-constituents/000300.SH` → **HTTP 200 `{"fetched_count":354,"persisted_count":354,…}`**（与 DATA-01 登记的 354 行一致），同实例只读 `GET /index/000300.SH/constituents` 回库 **354** 行核对落库为真。失败腿用一次性空库集群 `127.0.0.1:5433`（initdb 于 /tmp，用完 `pg_ctl stop` + 删目录），起 `:8093` 跑完迁移后 `DROP TABLE index_constituents` 再打同一 POST → **HTTP 500 `"index constituents fetched but failed to persist"`**，日志带 `index_weight fetched 354 but saved 0: … relation "index_constituents" does not exist (SQLSTATE 42P01)` —— 「一行没写进去」从此在 HTTP 面可区分。**代价入账**：两次真实 Tushare `index_weight` 调用（共享限流桶），upsert 幂等、库行数不变。
+  - **门禁**：`go build ./...` exit 0；`go vet ./cmd/data ./pkg/data` exit 0；`gofmt -l` 五个改动文件空输出；`go test ./cmd/data -run 'TestSyncIndexConstituents_|TestDataRouter|TestStockCountPayload|TestStocksCountHandler'` exit 0；`go test ./pkg/data` 全量 **1 条既有红**：`TestAdjustmentBasis_QfqLookAheadLeaksIntoBacktest` —— 按 D1 先例本单复跑确认 **基线（stash 移开本单改动后）同样红**，非本单引入，登记不修。诚实边界：`-race` 本机跑不了（无 gcc）。
+  - **文档同步**：`docs/SPEC.md` 端点行加指针 + 新增「DATA-06 响应形状」节（成功两数恒等的原因、500 静态文案、哨兵机制、以及 **GET 回源路径语义随之一致**：`GetIndexConstituents` DB 空时回源共用本函数，旧行为是把未落库的行直接回给调用方，现在如实 500）。`docs/openapi.yaml` 未登记过该端点（机器可读契约本就没有这条），不动。
+  - **④ 逐条核对**：`SaveIndexConstituentBatch` 签名/批量语义未动（只改调用方对 error 的处理）；`normalizeIndexConstituents` 未动（反证腿钉住区间语义）；`stocks` 表未碰；DATA-02/03 未顺手修；零新依赖。`cmd/data/main.go` 只更新了指向 `tushare.go:690` 的易漂移行号注释。
+  - **自审修订（2026-10-16，审本单三个 commit 的 diff 后追加，不改写上面原始记录）**：三处真问题，都在叙述与机制的口径上，行为面复核无新问题。
+    1. **测试文件头注释与断言不符**：原第 1 条写「落库失败 ⇒ 5xx…原始错误可追溯」—— 那是对外可见的口径，而我中途实测证伪并改掉了（本仓 `httpserver.Error` 对 5xx 一律脱敏，断言改成了「静态环节文案对外、内部原因不外泄」），文件头没跟着改。这正是本单登记的缺陷家族「叙述与护栏各说各话」，我自己又踩了一次。已按断言现状改写注释，并把「原始错误可追溯」的落点写实：error 链上的 `%w` 逐腿断言在 `pkg/data/tushare_index_constituents_persist_test.go`，HTTP 面只保证环节可辨。
+    2. **落点 bullet 的 handler 机制描述有歧义**：原句读起来像「Error + 只进日志」，实际是两条通道 —— 落库失败经哨兵走 `FailCause`（静态文案 + cause 进日志），其余错误走 `httpserver.Error`（5xx 同样脱敏）。已在本条订正；上文「裁决 ③」与「对外错误形状」两条与实现一致，不动。另订正一个记法：错误串的实际字面是 `index_weight fetched 354 but saved 0`（数字为真值，活进程日志留证），原始记录里写的 `N` 是规范形式不是字面。
+    3. **「更新行号注释」措辞不实**：`main.go:135` 那条注释我实际是**移除**了 `tushare.go:690` 的行号引用（改成按函数名指位），不是更新成新行号 —— 行号引用是本仓反复登记的漂移源，撤掉比续号稳。原句按字面读会误以为留着一个新行号。
+    - **rebase 后证据有效性复核（如实边界）**：base 从 `2eba0a7` 移到 `ca06c8b`（d5 两笔落地），其对本单依赖面的改动只在 `TushareStore` 接口追加 `MarketActivityStore`；fetch→persist→error 路径与 handler 行为未变，故活进程 curl 证据仍适用。本单 rebase 后**未重跑真实 Tushare 调用**（省共享限流），复跑的是：`go build ./...` / `go vet` / `gofmt -l` / 两文件全部测试 + `Tushare|IndexConstituent|Constituents` 邻域回归，全部 exit 0。
 
 ---
 

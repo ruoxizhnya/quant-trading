@@ -2071,7 +2071,7 @@ GET  /ohlcv/:symbol                - Get OHLCV data for symbol
 POST /api/v1/ohlcv/bulk            - Bulk OHLCV query
 GET  /fundamental/:symbol          - Get fundamental data
 GET  /index/:code/constituents     - Get index constituent stocks
-POST /sync/index-constituents/:index_code - Sync index constituents
+POST /sync/index-constituents/:index_code - Sync index constituents (DATA-06, 见下方响应形状)
 GET  /api/v1/trading/calendar      - Get trading calendar
 POST /sync/calendar                - Sync trading calendar
 POST /sync/stocks                  - Trigger stock-list sync
@@ -2102,6 +2102,25 @@ GET  /api/datasource/registry/chains    - List configured fallback chains
 - `latest_date` 仍可能缺席 —— 那是 **DATA-03** 登记的形状问题，本单不动。
 - 网关 `GET /api/stocks/count` 是**字段透传**（`proxyRequest` 解码成 map 再编码），
   所以这条形状不需要网关侧改动，也不需要在网关再登记一遍。
+
+#### `POST /sync/index-constituents/:index_code` 的响应形状（DATA-06，2026-10-16）
+
+成功（200）：
+
+```json
+{"message": "index constituents synced successfully", "index_code": "000300.SH",
+ "fetched_count": <取到条数>, "persisted_count": <落库条数>}
+```
+
+- 旧形状是单个 `count`。DATA-06 把它拆成两个可区分的数：`SaveIndexConstituentBatch`
+  是全有全无的单事务，**成功路径上两数恒等**；「取到了但没落库」不再可能以 200 出现。
+- **落库失败 ⇒ 500**，`error.message` 为静态文案 `"index constituents fetched but
+  failed to persist"`（经 `data.ErrIndexConstituentPersistFailed` 哨兵区分环节）；
+  原始 DB 错误按本仓 5xx 口径**只进日志不进响应体**。取数失败同样 500（通用文案）。
+- 此前落库 error 只 `logger.Warn`，端点照样回 `"synced successfully"` ——
+  「Tushare 取到了、一行没写进去」与「写成功」在 HTTP 面上不可区分（工单 ②）。
+- `GET /index/:code/constituents` 的 DB 回源路径共用同一函数，语义随之一致：
+  回源落库失败 ⇒ 500（旧行为是把未落库的行直接回给调用方）。
 
 ### 2. Strategy Service (port 8082)
 **Responsibilities**:
