@@ -628,9 +628,9 @@ schema 里投影同名字段是**可选**的——D2 时代 `ann_date` 只在规
 ETL 行为；② 产业链 fetcher（`pkg/data/supply_chain.go`）不走 Registry，
 其时间语义在此成文登记为已知边界。**注**：D5（2026-10-16）落地的样板源是
 **`daily_basic` 市场活跃度**（`tushare_daily_basic` adapter），**不是**产业链
-adapter——后者仍不在册，建它属后续「一源一单」；③ `tushare` 财报
-connector 的 wire schema / `Data` map **未透出 `ann_date`** —— **D2-R1 已关闭
-此项**（2026-10-16）：`fundamentalToMap` 透出 `ann_date`（nil = 未披露，缺失≠0）、
+adapter——后者仍不在册，建它属后续「一源一单」；③（**D2-R1 已关闭**，2026-10-16）
+`tushare` 财报 connector 的 wire schema / `Data` map 曾**未透出 `ann_date`**：
+`fundamentalToMap` 透出 `ann_date`（nil = 未披露，缺失≠0）、
 `Schema(DataTypeFundamental)` 增 `ann_date`（date，非必填），锚点从「悬空、
 不可实测」变为「可实测」，投影类型由 `validateReservedAnchorProjection` 执法。
 真实披露日仍由底层 `data.TushareClient` 直写 `stock_fundamentals.ann_date`
