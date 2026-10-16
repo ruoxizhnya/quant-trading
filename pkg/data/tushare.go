@@ -39,6 +39,9 @@ type TushareStore interface {
 	// MacroStore（P2-1）：宏观指标序列写入面（pkg/data/macro.go）。
 	// 同 SupplyChainStore，内嵌以独立命名契约钉住 Save 签名。
 	MacroStore
+	// MarketActivityStore（D5）：市场活跃度观测写入面
+	// （pkg/data/tushare_daily_basic.go，market_activity 表）。
+	MarketActivityStore
 	// SaveRawIngest archives a class-A raw source response (ADR-022 §2,
 	// ingest.raw). Declared here so the archive contract is enforced at
 	// compile time rather than discovered at runtime.

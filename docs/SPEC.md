@@ -510,6 +510,29 @@ DATA-04 的病根正是把两者当同一件事 —— SPEC 写着「股」、`p
 
 因子定义入库 / 版本指纹属 D3；消费属 D6 / D8——D1 只冻结形状。
 
+#### 市场活跃度 — `domain.MarketActivity`（D5 新增数据类）
+
+个股日频活跃度观测（换手率族），来源 = Tushare `daily_basic`，经
+`tushare_daily_basic` adapter 导入 `market_activity` 表（Migration 056）。
+时间语义 **`after_close`**（换手率由当日全天成交量除以股本统计得出，
+收盘前不存在——蓝图 §4.2 点名的高危 PIT 场景）；可见锚点 = `trade_date`。
+
+<!-- drift:activity -->
+| 字段 | Go 类型 | json tag | 语义 |
+| --- | --- | --- | --- |
+| Symbol | string | symbol | 股票代码（wire 侧 ts_code） |
+| TradeDate | time.Time | trade_date | 交易日（DATE，UTC 零点）——**可见时间锚点**：该日收盘后可见 |
+| TurnoverRate | *float64 | turnover_rate | 换手率（%，总股本口径 = 成交量/总股本）；nil = 缺失（停牌/未发布，≠ 0） |
+| TurnoverRateF | *float64 | turnover_rate_f | 自由流通换手率（%，自由流通股本口径）；nil = 缺失 |
+| VolumeRatio | *float64 | volume_ratio | 量比（当日均量 / 近 5 日均量，无量纲）；nil = 缺失 |
+| Source | string | source | 溯源列（tushare） |
+| AsOf | time.Time | as_of | 导入时刻（观察时点，非可见时间点） |
+<!-- /drift:activity -->
+
+唯一键 `(symbol, trade_date, source)` = 幂等键（同键重导刷新取值）。
+与 `stock_fundamentals`（fina_indicator 财报期截面，`announcement_day`
+事件流）并列不重复：那是财报口径，这是日频市场关注度截面。
+
 ### 时间语义（PIT 红线）
 
 蓝图 §4.2：每条数据必须自带「什么时候才可见」，否则即数据泄漏，且
@@ -560,8 +583,9 @@ connector 的 wire schema 与 `Data` map 都不承载它，故列为保留记号
 
 **高危样例（蓝图 §4.2 点名场景）**：市场活跃度 / 拥挤度类数据「收盘后才
 可得」，盘中用当日值即偷看——其声明必须是 `TimeSemantics: after_close`
-（保守口径，不早于真实可见时刻），**不得**声明任何盘中可见语义。D5 接入
-该源时直接照此声明。
+（保守口径，不早于真实可见时刻），**不得**声明任何盘中可见语义。**D5 已按此
+落地第一个真实考卷**：`tushare_daily_basic` 声明 `after_close` + 锚点
+`trade_date`，并由 PIT 破坏验证钉死（改宽成盘中可见 → 测试红，见 D5 节）。
 
 **存量 connector 声明一览**（`pkg/data/source/declarations.go`，「声明即登记」；
 新增 connector 必须在此为每个 `SupportedTypes` 成员补声明）：
@@ -571,6 +595,7 @@ connector 的 wire schema 与 `Data` map 都不承载它，故列为保留记号
 | tushare | `ohlcv_daily` | `after_close` | `daily` |
 | tushare | `fundamentals` | `announcement_day`（锚点=`ann_date` 保留记号，**披露日**，非报告期截止日） | `event` |
 | tushare_macro | `macro_series` | `announcement_day`（锚点=`obs_date`，见已知边界④） | `event` |
+| tushare_daily_basic | `daily_basic` | `after_close`（锚点=`trade_date`；**D5 高危场景第一个真实考卷**） | `daily` |
 | mootdx | `realtime_quote` | `custom`（观察时刻即可见） | `intraday` |
 | mootdx | `ohlcv_minute` | `custom`（bar 周期结束即可见） | `intraday` |
 | mootdx | `ohlcv_daily` | `after_close` | `daily` |
@@ -593,7 +618,9 @@ connector 的 wire schema 与 `Data` map 都不承载它，故列为保留记号
 **已知边界（D2 如实登记）**：① `mootdx` 分钟表 `amount` 为 NULL 时
 `Turnover` 记 0 —— 字段级折零由 D2 在契约文档收编（D1 已点名），本单不改
 ETL 行为；② 产业链 fetcher（`pkg/data/supply_chain.go`）不走 Registry，
-其时间语义在此成文登记为已知边界，建 adapter 属 D5；③ `tushare` 财报
+其时间语义在此成文登记为已知边界。**注**：D5（2026-10-15）落地的样板源是
+**`daily_basic` 市场活跃度**（`tushare_daily_basic` adapter），**不是**产业链
+adapter——后者仍不在册，建它属后续「一源一单」；③ `tushare` 财报
 connector 的 wire schema / `Data` map **未透出 `ann_date`** —— 真实披露日
 由底层 `data.TushareClient` 直写 `stock_fundamentals.ann_date`（规范层
 `market.Fundamental.AnnDate` 承载可见语义），故锚点取保留记号 `ann_date`；
@@ -726,10 +753,10 @@ error 映射成 400。
 
 ### 内核四态
 
-| 态 | 求值路径 | 现状（11 个冻结因子） |
+| 态 | 求值路径 | 冻结名册的因子 |
 |---|---|---|
 | leaf | 表达式引擎（字段直取） | quality（`roe`） |
-| formula | 表达式引擎（叶子 + 算子） | momentum（`close / ts_delay(close, 20) - 1`）、value（`1 / pe`） |
+| formula | 表达式引擎（叶子 + 算子） | momentum（`close / ts_delay(close, 20) - 1`）、value（`1 / pe`）、**market_activity**（`turnover_rate / ts_mean(turnover_rate, 20) - 1`，D5 新增） |
 | code | Go 出口（`CodeRef` 绑定闭包） | 纵向 5 因子——单季差分 / TTM 桥接 / 跨期趋势需要财报期坐标，表达引擎的求值模型是日频数字序列、没有「季」维度，**不硬凑公式**（D3 判据） |
 | pending | 不计算，fail-closed 报「已登记未定义」 | size / volatility / growth——名册有名字、计算线从未实现，**不发明数学定义** |
 
@@ -927,6 +954,102 @@ slice，故自持 `sync.RWMutex` 成为**并发安全类型**：
 - DB 侧持久化与审计：`pkg/storage/factor_registration.go`
 - DDL：`pkg/storage/postgres.go` Migration 053（`factor_registrations` /
   `factor_registration_audit`）+ `docs/migrations/053_add_factor_registrations.sql`
+
+---
+
+## 新数据源样板：挂新数据 → 可挖因子（D5）
+
+**目标口径**（蓝图 §4.4 / §6 三期②）：接入**一个**新数据源，翻译进规范层 +
+按 D2 契约注册 + 写**一个**引用它的公式因子并算出按日分数序列——打样
+「挂新数据 → 可挖因子」全链路；多源接入后续一源一单。
+
+### 端到端步骤留档（后续一源一单的模板）
+
+| # | 步骤 | 落点 | 证据 |
+| --- | --- | --- | --- |
+| 1 | **前置核实**：官方 API 文档 / 时间戳语义 / token 配额，实测不臆断 | 本单上下文（见下「实测记录」） | 真 token 逐接口探测（`daily_basic` code:0，5563 行/日） |
+| 2 | **存储层**：Migration 056 建 `market_activity` 表 + 读写面 | `pkg/storage/postgres.go` / `pkg/storage/market_activity.go` | 真库往返 / 幂等 / PIT 上界三测试绿 |
+| 3 | **领域层**：规范层数据类 | `pkg/domain/market_activity.go` | SPEC 本文件字段表 + 漂移锚点 `activity`（反射双向比对） |
+| 4 | **connector**：adapter + 声明 + 注册 + kill-switch | `pkg/data/source/tushare_daily_basic_adapter.go` / `declarations.go` / `cmd/data/registry_init.go` | 契约注册 / 声明政策 / Fetch 汇总落库测试绿 |
+| 5 | **数据层**：Tushare 拉取 + normalize + 幂等落库 | `pkg/data/tushare_daily_basic.go` | 缺失≠0 / 脏值跳过 / 全跳过 fail-loud 测试绿 |
+| 6 | **语言层**：新数据字段进表达式词表（新来源 `activity`） | `pkg/expression/registry.go`（`FieldSourceActivity` + `TableMarketActivity`） | 可用性地图 / 来源声明 / 跨包能力护栏测试绿 |
+| 7 | **因子**：公式因子定义入库 + D4 登记四样 | `pkg/domain/factor_def_seed.go` / `pkg/domain/factor.go`（名册） | 手算值钉死 / 缺失≠0 / 历史不足 / PIT 不可见测试绿 |
+| 8 | **策略侧供给**：`OHLCVDataProvider` 供应活跃度字段（未注入 → 明确报错） | `pkg/strategy/expression/data_provider.go` | 能力清单双向相等护栏绿 |
+
+### 实测记录（要求①：不实测不动工，2026-10-15）
+
+真 token 逐接口探测（`20261014` 数据）：可访问 —— `daily_basic`（5563 行，
+换手率/量比/市值族）、`moneyflow`（5574 行）、`index_dailybasic`（指数换手率）、
+`top_list`（73 行）、`daily`（5563 行）；无权限（40203）—— `bak_daily` /
+`limit_list_d` / `limit_step` / `ths_hot` / `hm_list` / `hm_detail` / `kpl_list` /
+`stk_factor` / `stk_factor_pro` / `moneyflow_ind_dc`。
+
+**选型结论**：取 `daily_basic` 换手率族做「市场活跃度」。理由：换手率
+是活跃度的教科书定义（成交量/股本），单位（%）无歧义、无需单位实测
+（对比 `moneyflow` 金额单位未实测，按项目纪律不实测不声明）；且
+`daily_basic` **未被任何现有链路使用**（现有 fundamentals 走
+`fina_indicator`），是真新数据类。单交易日一次请求（全市场约 5.5k 行/日，
+官方单次上限 6000），按日迭代、跨度上限 400 日（自己的配额保护，非上游
+文档限额）。
+
+### 名册协议变更记录（D5，正式变更）
+
+D3 之后**第一个新增名册名** `market_activity`（`domain.FactorMarketActivity`）。
+依据蓝图 §6「协议变更纪律」：因子名清单是冻结面，改注册表管理是正式契约
+变更、审计要求更高。D5 是「挂新数据 → 可挖因子」全链路样板——不新开名册名，
+新数据源的公式因子无处登记（size/volatility/growth 三个 pending 名语义上都不
+接受活跃度数据，硬塞 = 发明数学定义）。故走正式变更：加名 + D3 十字段骨架
+定义 + D4 登记四样（公式/哈希/登记人/生效日，演练见
+`pkg/data/factor_market_activity_governance_test.go`）+ 本文件与蓝图同步留痕。
+**不放松任何既有校验**：`Definition.Validate` / `NewRegistry` 六重 fail-closed /
+`RegistrationBook` 四样齐全，全部照旧适用于它。
+
+### 因子定义（market_activity）
+
+| 项 | 值 |
+| --- | --- |
+| 内核 | `formula`（表达式引擎） |
+| 公式 | `turnover_rate / ts_mean(turnover_rate, 20) - 1`（异常活跃度：当日换手率 / 近 20 日含当日平均换手率 − 1） |
+| 域过滤 `Validity` | `turnover_rate > 0 and ts_mean(turnover_rate, 20) > 0` |
+| 输入字段 | `turnover_rate`（D1 规范层新字段，来源 `activity`） |
+| 口径 | `z-score` |
+| 前视纪律 | `trade_date`（横截面日频因子；`after_close` 声明的取数侧由 `GetMarketActivityForDateRange` 的 `trade_date <= end` 执法） |
+| 生效日 | `2026-10-15`（D5 落地日） |
+
+**为什么不是裸换手率（leaf）**：水平值受个股流通盘结构影响不可比，相对
+自身历史的偏离才是关注度**变化**信号（Barber & Odean 注意力机制的作用量
+是注意力冲击而非水平）。
+
+### 破坏验证（改坏 → 红 → 还原 → 绿）
+
+| # | 破坏 | 目标测试（红） |
+| --- | --- | --- |
+| ① | 声明 `after_close` → 改宽成盘中可见（`custom` + fetch_time 表达式） | `TestDailyBasicDeclaration_MustBeAfterClose`（source 包） |
+| ② | 取数上界 `trade_date <= end` → 去掉上界/改方向 | `TestMarketActivity_RangeQueryIsPITBounded`（storage 真库）+ `TestMarketActivityFactor_FutureRowsAreInvisible`（因子链路） |
+| ③ | 摘掉「有行但全跳过」的 fail-loud 闸门 | `TestFetchDailyBasic_FailsLoudWhenAllRowsSkipped`（data 包） |
+
+### 实现指针
+
+- 领域类型：`pkg/domain/market_activity.go`；名册与假设：`pkg/domain/factor.go`；
+  种子定义：`pkg/domain/factor_def_seed.go`
+- 存储：`pkg/storage/market_activity.go` + Migration 056
+- 数据层：`pkg/data/tushare_daily_basic.go`；connector：
+  `pkg/data/source/tushare_daily_basic_adapter.go` + `declarations.go`
+- 语言层：`pkg/expression/registry.go`（`FieldSourceActivity`）；策略侧供给：
+  `pkg/strategy/expression/data_provider.go`
+- 因子计算链路：`pkg/data/factor_formula.go`（`loadActivitySeries`）
+
+### 已知边界（D5 如实登记）
+
+- 只做**一个源 + 一个因子**（样板）：第二个源、AI 挖掘消费（D8）另立；
+   `moneyflow` / `index_dailybasic` 等其余可访问源未接入。
+- 未接入生产同步环路：数据经 adapter `Fetch`（按日迭代）导入，尚无
+  `cmd/data` 的定时同步任务（与宏观 P2-1 同姿态——先打通链路，调度另立）。
+- 策略侧 `OHLCVDataProvider` 已能供应活跃度字段，但回测引擎尚未在
+  快照阶段注入活跃度数据（用该字段的策略会得到明确报错而非静默 0）；
+  注入属后续「新数据进回测视野」工单（与 D6 同型）。
+- `turnover_rate_f` / `volume_ratio` 已进字段词表与存储，但当前只有一个
+  因子消费 `turnover_rate`；另两个字段待后续因子使用。
 
 ---
 

@@ -56,6 +56,7 @@ func TestFieldAvailabilityReflectsProbe(t *testing.T) {
 func TestFieldAvailabilityAllTablesHaveData(t *testing.T) {
 	avail, err := FieldAvailability(context.Background(), fakeProbe(map[string]bool{
 		TableOHLCV: true, TableFundamentals: true, TableSectorMap: true,
+		TableMarketActivity: true,
 	}, ""))
 	require.NoError(t, err)
 	for f, ok := range avail {
@@ -108,7 +109,10 @@ func TestFieldsDependingOn(t *testing.T) {
 // TestFieldDefsDependOnKnownTables 是注册表自洽护栏：DependsOn 必须是已声明
 // 的表常量之一。拼错的表名会让探测永远返回「不可用」，且极难发现。
 func TestFieldDefsDependOnKnownTables(t *testing.T) {
-	known := map[string]bool{TableOHLCV: true, TableFundamentals: true, TableSectorMap: true}
+	known := map[string]bool{
+		TableOHLCV: true, TableFundamentals: true, TableSectorMap: true,
+		TableMarketActivity: true,
+	}
 	for f, def := range fieldRegistry {
 		require.NotEmpty(t, def.DependsOn, "字段 %q 缺 DependsOn（无法判定可用性）", f)
 		require.True(t, known[def.DependsOn], "字段 %q 的 DependsOn %q 不是已知表常量（拼写漂移）", f, def.DependsOn)

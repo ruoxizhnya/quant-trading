@@ -18,6 +18,10 @@ import (
 type d3MockStore struct {
 	ohlcv        []domain.OHLCV
 	fundamentals []domain.FundamentalData
+	// activity 是 D5 市场活跃度夹具（turnover_rate 族）。范围查询按
+	// `TradeDate <= end` 过滤——与存储侧 SQL 同口径，使「晚于计算日的
+	// 行不可见」这一 PIT 属性在 mock 层也可被钉住。
+	activity []domain.MarketActivity
 
 	saved []*domain.FactorCacheEntry
 }
@@ -34,6 +38,16 @@ func (m *d3MockStore) GetFundamentalsSnapshot(_ context.Context, _ time.Time) ([
 
 func (m *d3MockStore) GetFundamentalsDetailAsOf(_ context.Context, _ []string, _ time.Time) ([]domain.FundamentalsDetailRow, error) {
 	return nil, nil
+}
+
+func (m *d3MockStore) GetMarketActivityForDateRange(_ context.Context, start, end time.Time) ([]domain.MarketActivity, error) {
+	var out []domain.MarketActivity
+	for _, r := range m.activity {
+		if !r.TradeDate.Before(start) && !r.TradeDate.After(end) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 func (m *d3MockStore) GetTradingDays(_ context.Context, _, _ time.Time) ([]time.Time, error) {

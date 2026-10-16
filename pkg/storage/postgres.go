@@ -1046,6 +1046,35 @@ func migrationStatements() []string {
 		`CREATE INDEX IF NOT EXISTS idx_factor_mining_records_name ON factor_mining_records(factor_name, created_at DESC)`,
 	}...)
 
+	// Migration 056: market_activity（D5 新数据源样板——市场活跃度）。
+	// DDL 记录在 docs/migrations/056_add_market_activity_table.sql。
+	// 个股日频活跃度观测（换手率 / 自由流通换手率 / 量比），Tushare
+	// daily_basic 经 tushare_daily_basic adapter 导入；与 stock_fundamentals
+	// （fina_indicator 财报口径）并列不重复——那是财报期截面，这是日频
+	// 市场关注度截面。时间语义 after_close（D2 契约：收盘后才统计得出）。
+	// 缺失≠0：三个数值列可空，NULL = 上游未发布，绝不落 0 冒充有效观测。
+	// 数值有限性在写入面校验（SaveMarketActivityBatch，同宏观先例），
+	// DB 侧 CHECK 只管身份列非空。
+	// 幂等键 (symbol, trade_date, source)：同键重导刷新行（ON CONFLICT
+	// DO UPDATE，见 pkg/storage/market_activity.go）。
+	migrations = append(migrations, []string{
+		`CREATE TABLE IF NOT EXISTS market_activity (
+			id              BIGSERIAL      PRIMARY KEY,
+			symbol          VARCHAR(20)    NOT NULL,
+			trade_date      DATE           NOT NULL,
+			turnover_rate   DOUBLE PRECISION,
+			turnover_rate_f DOUBLE PRECISION,
+			volume_ratio    DOUBLE PRECISION,
+			source          VARCHAR(64)    NOT NULL,
+			as_of           TIMESTAMPTZ    NOT NULL,
+			CONSTRAINT market_activity_identity_present CHECK (
+				btrim(symbol) <> '' AND btrim(source) <> ''
+			),
+			UNIQUE (symbol, trade_date, source)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_market_activity_trade_date ON market_activity(trade_date)`,
+	}...)
+
 	return migrations
 }
 

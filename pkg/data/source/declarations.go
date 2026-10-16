@@ -20,7 +20,9 @@ import "github.com/ruoxizhnya/quant-trading/pkg/domain/market"
 //     DATA-05 核对（2026-10-15）：该源今天以 nil transport 注册，整条日线 fallback
 //     链不可达；接线时先实测单位再声明，守卫见 cmd/data/ohlc_units_guard_test.go；
 //   - 产业链 fetcher 不走 Registry（不建 adapter），其时间语义在契约文档中
-//     成文登记为已知边界（建 adapter 是 D5 的事）。
+//     成文登记为已知边界。注意：D5（2026-10-15）落地的样板源是
+//     **daily_basic 市场活跃度**（tushare_daily_basic adapter），不是产业
+//     链 adapter——后者仍不在册，建它属后续一源一单。
 
 // Declarations implements DataSourceAdapter.Declarations.
 // Tushare 是 A 股日线（前复权，唯一进回测口径）与财报字段的来源。
@@ -174,6 +176,27 @@ func (a *XueqiuAdapter) Declarations() []ConnectorDeclaration {
 			VisibleExpr:   "visible_at = publish_time（新闻发布时刻即可见）",
 			VisibleField:  "publish_time",
 			Frequency:     market.FreqSpecEvent,
+		},
+	}
+}
+
+// Declarations implements DataSourceAdapter.Declarations.
+// 市场活跃度（D5 样板，daily_basic 换手率族）：**收盘后可见**——换手率由
+// 当日全天成交量除以股本统计得出，收盘前不存在，这是蓝图 §4.2 点名的
+// 「高危 PIT 场景」（活跃度/拥挤度）的第一个真实考卷。可见时间锚点是
+// trade_date（wire schema 里的 date 列，日更聚合数据的标准锚点），频率
+// 口径日频。
+//
+// ⚠️ 此声明被 D5 的 PIT 破坏验证钉死（tushare_daily_basic_adapter_test.go
+// 的 TestDailyBasicDeclaration_MustBeAfterClose）：把 after_close 改宽成
+// 「盘中即可见」（custom + fetch_time 表达式）→ 测试红。闸门必须真的在拦。
+func (a *TushareDailyBasicAdapter) Declarations() []ConnectorDeclaration {
+	return []ConnectorDeclaration{
+		{
+			DataType:      DataTypeDailyBasic,
+			TimeSemantics: market.VisibleAfterClose,
+			VisibleField:  "trade_date",
+			Frequency:     market.FreqSpecDaily,
 		},
 	}
 }

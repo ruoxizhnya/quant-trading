@@ -28,7 +28,8 @@ var ohlcvFields = map[string]bool{
 // 的最新一期财报，取不到就是 NaN（不是 0 —— PE 缺失被读成 0 会变成"极便宜"，
 // 那是 P2-10 修掉的那个坑）。
 //
-// 这张表 + ohlcvFields 的并集必须与 Fields() 一致（后者是兑外的能力声明）。
+// 这张表 + ohlcvFields + activityFields 的并集必须与 Fields() 一致（后者
+// 是兑外的能力声明）。
 var fundamentalFields = map[string]bool{
 	"pe":      true,
 	"pb":      true,
@@ -37,6 +38,15 @@ var fundamentalFields = map[string]bool{
 	"roa":     true,
 	"revenue": true, // → f.Revenue
 	"profit":  true, // → f.NetProfit（财报口径的净利润）
+}
+
+// activityFields 是表达式里能用的市场活跃度字段（D5：market_activity 表，
+// daily_basic 换手率族）。日频观测与日线 1:1 对齐（同一天的活跃度配同
+// 一根 bar），缺失（停牌/未发布）→ NaN，不是 0。
+var activityFields = map[string]bool{
+	"turnover_rate":   true,
+	"turnover_rate_f": true,
+	"volume_ratio":    true,
 }
 
 // OHLCVDataProvider adapts map[string][]domain.OHLCV (the strategy
@@ -52,6 +62,9 @@ type OHLCVDataProvider struct {
 	// fundamentals 是每股的财务记录，**按可用日升序**（见 SetFundamentals）。
 	// nil = 这一路没有基本面数据，用了 pe/pb 之类会明确报错。
 	fundamentals map[string][]domain.Fundamental
+	// activity 是每股的市场活跃度观测，**按交易日升序**（D5）。
+	// nil = 这一路没有活跃度数据，用了 turnover_rate 之类会明确报错。
+	activity map[string][]domain.MarketActivity
 }
 
 // NewOHLCVDataProvider constructs a provider from a bars map.
@@ -71,6 +84,20 @@ func NewOHLCVDataProvider(bars map[string][]domain.OHLCV) *OHLCVDataProvider {
 func NewOHLCVDataProviderWithFundamentals(
 	bars map[string][]domain.OHLCV, records map[string][]domain.Fundamental,
 ) *OHLCVDataProvider {
+	return NewOHLCVDataProviderWithActivity(bars, records, nil)
+}
+
+// NewOHLCVDataProviderWithActivity 额外带上市场活跃度观测（D5）。
+//
+// records 里每条的 TradeDate 必须与 bar 的 Date 同日对齐（日频 1:1）——
+// 活跃度是「收盘后可见」的日更截面（D2 契约），与 bar 同日本身就是
+// 其可见时刻；对齐错日期会把前视洞放回来。nil = 这一路没有活跃度数据，
+// 用了 turnover_rate 之类会明确报错（不返回 0 冒充）。
+func NewOHLCVDataProviderWithActivity(
+	bars map[string][]domain.OHLCV,
+	records map[string][]domain.Fundamental,
+	activity map[string][]domain.MarketActivity,
+) *OHLCVDataProvider {
 	symbols := make([]string, 0, len(bars))
 	for s := range bars {
 		symbols = append(symbols, s)
@@ -80,6 +107,7 @@ func NewOHLCVDataProviderWithFundamentals(
 		bars:         bars,
 		symbols:      symbols,
 		fundamentals: records,
+		activity:     activity,
 	}
 }
 
@@ -89,24 +117,26 @@ func (p *OHLCVDataProvider) GetSymbols() []string {
 }
 
 // Fields 返回本 provider 能供应的数据字段名（升序、无重复）——
-// expr.DataProvider 的能力声明（OBS-08 切片 1）。
+// expr.DataProvider 的能力声明（OBS-08 切片 1；D5 补活跃度三字段）。
 //
-// 这里是**手写的能力清单**，刻意不展开自 ohlcvFields/fundamentalFields 的
-// 内部 map：护栏（pkg/strategy/expression/data_provider_fields_test.go）要
-// 把它和语言侧注册表（expr.AvailableDataFields()）钉成双向相等，只有两侧
-// 各自**独立声明**，漂移才会被真正抓到。
+// 这里是**手写的能力清单**，刻意不展开自 ohlcvFields/fundamentalFields/
+// activityFields 的内部 map：护栏（pkg/strategy/expression/
+// data_provider_fields_test.go）要把它和语言侧注册表
+// （expr.AvailableDataFields()）钉成双向相等，只有两侧各自**独立声明**，
+// 漂移才会被真正抓到。
 //
 // 注意：`sector` 不在其中 —— 它是 group 分组标签，本 provider 不供应，
 // 求值期会给出「属于 group 数据源」的可读报错（见 GetField）。
 func (p *OHLCVDataProvider) Fields() []string {
 	return []string{
-		// 行情（market）
+		// 行情（market）—— 全局按字典序排列（护栏测试钉住升序）
 		"close", "high", "low", "open",
-		// 基本面（fundamentals）—— 注意全局按字典序，故 market 的 turnover/
-		// volume 排在 fundamentals 之后
+		// 基本面（fundamentals）
 		"pb", "pe", "profit", "ps", "revenue", "roa", "roe",
-		// 行情（续）
-		"turnover", "volume",
+		// 行情（续）："turnover" < "turnover_rate" < "turnover_rate_f"（前缀短的在前）
+		"turnover", "turnover_rate", "turnover_rate_f",
+		// 行情（续）+ 活跃度（activity，D5）
+		"volume", "volume_ratio",
 	}
 }
 
@@ -117,9 +147,12 @@ func (p *OHLCVDataProvider) Fields() []string {
 //   - 行情：open, high, low, close, volume, turnover
 //   - 基本面（P2-12 / OBS-08）：pe, pb, ps, roe, roa, revenue, profit
 //     —— 需要构造时传入财报数据
+//   - 活跃度（D5）：turnover_rate, turnover_rate_f, volume_ratio
+//     —— 需要构造时传入活跃度观测（与 bar 同日对齐）
 //
-// 基本面没传进来时，pe/pb 之类**报错而不是返回 0**：给一串 0 会让估值
-// 表达式「看起来能跑」，产出的却是最危险的假信号（PE=0 = 白送的股票）。
+// 基本面/活跃度没传进来时，对应字段**报错而不是返回 0**：给一串 0 会让
+// 表达式「看起来能跑」，产出的却是最危险的假信号（PE=0 = 白送的股票；
+// 换手率=0 = 无人交易的僵尸股）。
 //
 // 未知字段的报错**区分两类「不可用」**（OBS-08 切片 1，3.4）：
 //   - 字段不在语言注册表里 →「未知字段 X（可用字段：…）」；
@@ -152,6 +185,13 @@ func (p *OHLCVDataProvider) GetField(symbol, field string, lookback int) ([]floa
 					"没有就是没有，给一串 0 只会产出看似能跑的假信号", field)
 		}
 		vals = p.fundamentalSeries(symbol, field, bars)
+	case activityFields[field]:
+		if p.activity == nil {
+			return nil, fmt.Errorf(
+				"data_provider: 表达式用了活跃度字段 %q，但这一路没有市场活跃度数据 —— "+
+					"没有就是没有，给一串 0 只会产出看似能跑的假信号", field)
+		}
+		vals = p.activitySeries(symbol, field, bars)
 	default:
 		return nil, p.unavailableFieldError(field)
 	}
@@ -255,6 +295,64 @@ func fundamentalValue(f domain.Fundamental, field string) (float64, bool) {
 		return 0, false
 	}
 	return *p, true
+}
+
+// activityValue 取一条活跃度观测里的某个字段。nil = 未发布（NaN 兜底）。
+//
+// 与 fundamentalValue 的估值倍数字段不同，这里不套「非正即 NaN」规则：
+// 换手率/量比的 0 与负值在有数据时是有意义观测（量比可小于 1 即萎缩），
+// 「缺失」由 nil 承载，不由数值域承载。
+func activityValue(r domain.MarketActivity, field string) (float64, bool) {
+	var p *float64
+	switch field {
+	case "turnover_rate":
+		p = r.TurnoverRate
+	case "turnover_rate_f":
+		p = r.TurnoverRateF
+	case "volume_ratio":
+		p = r.VolumeRatio
+	default:
+		return 0, false
+	}
+	if p == nil {
+		return 0, false
+	}
+	return *p, true
+}
+
+// activitySeries 把活跃度观测对齐到每根 K 线：第 i 根 K 线用**同日**的
+// 那条观测（日频 1:1）。
+//
+// 取不到（停牌未发布 / 该日未同步）一律 NaN —— 不是 0。活跃度是「收盘后
+// 可见」的日更截面（D2 契约），与 bar 同日本身就是其可见时刻，故不需要
+// 财报那样的 forward-fill：forward-fill 会把昨日的活跃度当成今日的，
+// 那是另一形式的张冠李戴。
+func (p *OHLCVDataProvider) activitySeries(
+	symbol, field string, bars []domain.OHLCV,
+) []float64 {
+	records := p.activity[symbol]
+	vals := make([]float64, len(bars))
+	for i := range vals {
+		vals[i] = math.NaN()
+	}
+	if len(records) == 0 {
+		return vals
+	}
+	next := 0 // 下一条还没用上的观测；随 K 线日期单调前进（records 须按日升序）
+	for i, bar := range bars {
+		for next < len(records) && records[next].TradeDate.Before(bar.Date) {
+			next++
+		}
+		if next >= len(records) || !records[next].TradeDate.Equal(bar.Date) {
+			continue // 当日无观测
+		}
+		v, ok := activityValue(records[next], field)
+		if !ok {
+			continue // 该列缺失（nil）
+		}
+		vals[i] = v
+	}
+	return vals
 }
 
 // extractField returns the requested field from a single OHLCV bar.

@@ -61,6 +61,12 @@ const (
 	// quant.macro_series. Served by the tushare_macro adapter
 	// (TUSHARE_TOKEN, 0 new keys).
 	DataTypeMacro = "macro_series"
+	// DataTypeDailyBasic is the per-stock daily market activity layer (D5):
+	// turnover rate / free-float turnover rate / volume ratio, persisted in
+	// market_activity (Migration 056). Served by the tushare_daily_basic
+	// adapter (same TUSHARE_TOKEN, 0 new keys). Declaration: after_close
+	// (blueprint §4.2 high-risk PIT scenario — see declarations.go).
+	DataTypeDailyBasic = "daily_basic"
 )
 
 // ErrUnsupported indicates the adapter cannot serve the requested data type.

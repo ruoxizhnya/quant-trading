@@ -40,6 +40,13 @@ var (
 		"pe": true, "pb": true, "ps": true, "roe": true, "roa": true,
 		"revenue": true, "profit": true,
 	}
+	// activityFieldSet 是市场活跃度字段（D5：market_activity 表）。日频
+	// 序列与行情同构——按 symbol 收集、日期升序、末点=date 当日。
+	activityFieldSet = map[string]bool{
+		"turnover_rate":   true,
+		"turnover_rate_f": true,
+		"volume_ratio":    true,
+	}
 )
 
 // factorSeriesProvider 把 FactorStore 的日频数据适配成 expression 的
@@ -71,19 +78,22 @@ func (p *factorSeriesProvider) GetField(symbol, field string, _ int) ([]float64,
 // loadFactorSeries 按定义的 InputFields 来源拉取窗口数据。
 //
 // universe 规则：全 market 字段 → OHLCV 出现过的股票；全 fundamentals
-// 字段 → 财报快照里的股票；混源 → 并集（缺的那侧由 GetField 给 NaN，
-// 产出端即缺失，与原版「各因子只遍历自己来源」一致）。
+// 字段 → 财报快照里的股票；全 activity 字段 → 活跃度观测里的股票；
+// 混源 → 并集（缺的那侧由 GetField 给 NaN，产出端即缺失，与原版
+// 「各因子只遍历自己来源」一致）。
 func loadFactorSeries(ctx context.Context, store FactorStore, def domain.FactorDefinition, date time.Time) (*factorSeriesProvider, error) {
-	wantMarket, wantFundamentals := false, false
+	wantMarket, wantFundamentals, wantActivity := false, false, false
 	for _, f := range def.InputFields {
 		switch {
 		case marketFieldSet[f]:
 			wantMarket = true
 		case fundamentalsFieldSet[f]:
 			wantFundamentals = true
+		case activityFieldSet[f]:
+			wantActivity = true
 		default:
 			// code/pending 型不走本路径；formula 型字段已在 NewRegistry
-			// 校验过 ⊆ 词表，到这里只剩两类来源。
+			// 校验过 ⊆ 词表，到这里只剩三类来源。
 			return nil, fmt.Errorf("factor %q: input field %q has no data source mapping", def.Name, f)
 		}
 	}
@@ -142,11 +152,77 @@ func loadFactorSeries(ctx context.Context, store FactorStore, def domain.FactorD
 			p.series[field] = fieldSeries
 		}
 	}
+	if wantActivity {
+		if err := loadActivitySeries(ctx, store, def, date, p, symbolSet); err != nil {
+			return nil, err
+		}
+	}
 	for s := range symbolSet {
 		p.symbols = append(p.symbols, s)
 	}
 	sort.Strings(p.symbols)
 	return p, nil
+}
+
+// loadActivitySeries 拉取市场活跃度窗口（D5）。
+//
+// PIT 执法在存储侧：GetMarketActivityForDateRange 的 `trade_date <= end`
+// 让晚于计算日的行结构上不可见——「收盘后可见」声明的取数侧落点。数值
+// 列为 nil（缺失）的位置**不进序列**（该 symbol 此字段当日无数据），
+// 与财报分支的「nil 跳过」同口径；序列本身按日期升序（末点=date 当日）。
+func loadActivitySeries(ctx context.Context, store FactorStore, def domain.FactorDefinition, date time.Time, p *factorSeriesProvider, symbolSet map[string]bool) error {
+	start := date.AddDate(0, 0, -def.Lookback)
+	rows, err := store.GetMarketActivityForDateRange(ctx, start, date)
+	if err != nil {
+		return fmt.Errorf("load market activity for formula factor %q: %w", def.Name, err)
+	}
+	bySymbol := make(map[string][]domain.MarketActivity)
+	for _, r := range rows {
+		bySymbol[r.Symbol] = append(bySymbol[r.Symbol], r)
+	}
+	for field := range activityFieldSet {
+		if !containsStr(def.InputFields, field) {
+			continue
+		}
+		fieldSeries := make(map[string][]float64, len(bySymbol))
+		for symbol, rs := range bySymbol {
+			sort.Slice(rs, func(i, j int) bool { return rs[i].TradeDate.Before(rs[j].TradeDate) })
+			vals := make([]float64, 0, len(rs))
+			for _, r := range rs {
+				v, ok := activityFieldValue(r, field)
+				if !ok {
+					continue // nil = 缺失，不进序列（该 symbol 此字段当日无数据）
+				}
+				vals = append(vals, v)
+			}
+			if len(vals) == 0 {
+				continue // 该 symbol 整窗无此字段数据 → 无序列（GetField 给 NaN）
+			}
+			fieldSeries[symbol] = vals
+			symbolSet[symbol] = true
+		}
+		p.series[field] = fieldSeries
+	}
+	return nil
+}
+
+// activityFieldValue 取一条活跃度观测的字段值。nil = 缺失 → (0, false)。
+func activityFieldValue(r domain.MarketActivity, field string) (float64, bool) {
+	var p *float64
+	switch field {
+	case "turnover_rate":
+		p = r.TurnoverRate
+	case "turnover_rate_f":
+		p = r.TurnoverRateF
+	case "volume_ratio":
+		p = r.VolumeRatio
+	default:
+		return 0, false
+	}
+	if p == nil {
+		return 0, false // 缺失≠0：nil 不当 0
+	}
+	return *p, true
 }
 
 func containsStr(list []string, s string) bool {

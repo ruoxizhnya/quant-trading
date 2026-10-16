@@ -140,6 +140,20 @@ func buildDataSourceRegistry(tushareClient *data.TushareClient, logger zerolog.L
 		}
 	}
 
+	// 9. Tushare daily_basic (D5) — per-stock daily market activity
+	// (turnover rate family, market_activity table). Reuses the same
+	// TushareClient (TUSHARE_TOKEN, 0 new keys) with its own kill switch:
+	// DATA_DISABLE_TUSHARE_DAILY_BASIC stops activity imports without
+	// touching the OHLCV chain. Declaration is after_close (blueprint
+	// §4.2 high-risk PIT scenario — the D5 sabotage test pins it).
+	// A nil client (token not configured) registers it as disabled,
+	// same degraded-mode posture as the other adapters.
+	if !envDisabled("DATA_DISABLE_TUSHARE_DAILY_BASIC") {
+		if err := reg.Register(source.NewTushareDailyBasicAdapter(tushareClient)); err != nil {
+			logger.Warn().Err(err).Msg("failed to register tushare_daily_basic adapter")
+		}
+	}
+
 	// Configure explicit fallback chains. The default chain built by
 	// Registry.Register appends adapters in registration order, but
 	// for the most important data types we want a precise priority.
@@ -231,6 +245,12 @@ func configureFallbackChains(reg *source.Registry) {
 	// the first version — they would each add a new key).
 	reg.SetChain(source.DataTypeMacro, []string{
 		"tushare_macro",
+	})
+	// Market activity (D5): tushare_daily_basic is the only first-class
+	// source (the D5 sample source). Chain holds one entry by design —
+	// multi-source fallback for activity data is a later one-source-one-task.
+	reg.SetChain(source.DataTypeDailyBasic, []string{
+		"tushare_daily_basic",
 	})
 }
 

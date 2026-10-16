@@ -228,6 +228,13 @@ func (m *eqdMockStore) GetTradingDays(context.Context, time.Time, time.Time) ([]
 	return nil, nil
 }
 
+// GetMarketActivityForDateRange（D5）：本文件只测纵向财报因子，活跃度
+// 路径由 factor_formula_test.go 覆盖；这里恒空（无活跃度数据 ⇒ 用了
+// turnover_rate 的公式会得 NaN ⇒ 缺失，正是期望语义）。
+func (m *eqdMockStore) GetMarketActivityForDateRange(context.Context, time.Time, time.Time) ([]domain.MarketActivity, error) {
+	return nil, nil
+}
+
 func (m *eqdMockStore) SaveFactorCacheBatch(_ context.Context, entries []*domain.FactorCacheEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1131,7 +1138,9 @@ func TestLoadStatementBook_EmptyVersusUnusable(t *testing.T) {
 func TestComputeAllFactors_SkipsEmptyVerticalFactors(t *testing.T) {
 	ctx := context.Background()
 
-	wantComputed := []string{"momentum", "value", "quality"}
+	// D5（2026-10-15）：market_activity 是公式型（引用 market_activity 表），
+	// 空库下与 momentum/value/quality 一样「算出 0 个值」→ 计入 Computed。
+	wantComputed := []string{"momentum", "value", "quality", "market_activity"}
 	// D3 起注册表库管理：清单 = 库里定义投影。pending 型因子（名册在册、
 	// 内核待定）显式进 Skipped——「没算」必须说出口（AUD-15 同款纪律），
 	// 且与未登记/无数据区分：reason = ErrFactorKernelUndefined。
