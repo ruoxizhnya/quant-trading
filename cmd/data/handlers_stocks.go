@@ -91,18 +91,27 @@ func stocksCountHandler(store *storage.PostgresStore) gin.HandlerFunc {
 			return
 		}
 
-		var latestDate *string
-		store.DB().QueryRow(ctx, "SELECT MAX(trade_date) FROM ohlcv_daily_qfq").Scan(&latestDate)
-
-		resp := stockCountPayload(byStatus)
-		if latestDate != nil {
-			resp["latest_date"] = *latestDate
+		// DATA-03：这个读数原来在此处就地写 SQL，把 date 扫进 `*string`
+		// （pgx 收到的目标是 `**string`）并**丢弃** Scan 的 error —— 查询本身成功、
+		// 值也回来了，是类型映射不进去，于是 `latest_date` 在任何库里都没出现过，
+		// 而 SPEC 与前端类型都声明了它。现在：读失败 ⇒ 500；库里没有行情 ⇒ 显式 null。
+		latest, err := store.LatestQuoteDate(ctx)
+		if err != nil {
+			httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to read latest quote date: ")
+			return
 		}
-		c.JSON(http.StatusOK, resp)
+		var latestDate *string
+		if latest != nil {
+			formatted := latest.Format("2006-01-02")
+			latestDate = &formatted
+		}
+
+		c.JSON(http.StatusOK, stockCountPayload(byStatus, latestDate))
 	}
 }
 
-// stockCountPayload 把 GROUP BY status 的分组计数摊成 /stocks/count 的响应体（DATA-02）。
+// stockCountPayload 把 GROUP BY status 的分组计数摊成 /stocks/count 的响应体（DATA-02），
+// 并带上最新行情日期（DATA-03）。
 //
 // count 由各档**求和**导出，不是第二次 COUNT(*)：同一趟查询、同一个真相，顺带消掉
 // 「两次查询之间被并发同步改动，于是各档加起来不等于总数」这个窗口 —— 一个写着
@@ -110,7 +119,11 @@ func stocksCountHandler(store *storage.PostgresStore) gin.HandlerFunc {
 //
 // nil 折成空 map：Go 里 nil map 序列化成 `null`，而前端按对象读，`null` 会被当成
 // "这个字段不存在"而不是"票池是空的"。
-func stockCountPayload(byStatus map[string]int64) gin.H {
+//
+// latestDate 为 nil 时序列化成**显式 null**，而不是把键删掉：契约声明了这个字段，
+// 「库里还没有行情」就该是一个能被当场质问的读数，不是缺席 —— 缺席把「没实现」
+// 「读失败」「表是空的」三种情形压成同一个形状，正是 DATA-03 的缺陷。
+func stockCountPayload(byStatus map[string]int64, latestDate *string) gin.H {
 	out := byStatus
 	if out == nil {
 		out = map[string]int64{}
@@ -119,57 +132,83 @@ func stockCountPayload(byStatus map[string]int64) gin.H {
 	for _, n := range out {
 		total += n
 	}
-	return gin.H{"count": total, "by_status": out}
+	return gin.H{"count": total, "by_status": out, "latest_date": latestDate}
 }
+
+// marketIndexCodes 与中文名是「市场概览」的读数面（DATA-07）。
+// 名字由 core 给，前端不再各自维护一份映射（同一概念两处真相）。
+var (
+	marketIndexCodes = []string{"000300.SH", "000001.SH", "399006.SZ"}
+	marketIndexNames = map[string]string{
+		"000300.SH": "沪深300",
+		"000001.SH": "上证指数",
+		"399006.SZ": "创业板指",
+	}
+)
 
 func marketIndexHandler(store *storage.PostgresStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
-		// Return available index data from database.
-		// sh300=000300.SH, sse=000001.SH, cyb=399006.SZ
-		type indexData struct {
-			Code   string  `json:"code"`
-			Name   string  `json:"name"`
-			Close  float64 `json:"close"`
-			Change float64 `json:"change"`
-			Pct    float64 `json:"pct"`
+
+		// DATA-07：原形状是每个代码两趟查询（最新收盘 + 上一期收盘），且两趟的
+		// error 都被丢进 `if err == nil` 的分支里 —— 读失败与「这个指数没数据」
+		// 同样表现为「这一条不出现」。现在一趟取回，读失败就是 500。
+		//
+		// 库里这三个代码当前 0 行（工单 ② 实测，且全库没有指数日线表），
+		// 所以响应是诚实的 `{"indices":[]}`；补指数日线需要新数据源与建表，
+		// 归另立的工单，不在本单夹带。
+		bars, err := store.LatestIndexBars(ctx, marketIndexCodes)
+		if err != nil {
+			httpserver.Wrap(c, http.StatusInternalServerError, err, "failed to read index bars: ")
+			return
 		}
 
-		// Try to get latest close for each index from ohlcv data
-		indices := []string{"000300.SH", "000001.SH", "399006.SZ"}
-		codeToName := map[string]string{
-			"000300.SH": "沪深300",
-			"000001.SH": "上证指数",
-			"399006.SZ": "创业板指",
+		byCode := make(map[string]storage.MarketIndexBar, len(bars))
+		for _, bar := range bars {
+			byCode[bar.Code] = bar
 		}
-
-		result := make([]indexData, 0, len(indices))
-		for _, code := range indices {
-			var close *float64
-			var change, pct float64
-			row := store.DB().QueryRow(ctx,
-				`SELECT close FROM ohlcv_daily_qfq WHERE symbol=$1 ORDER BY trade_date DESC LIMIT 1`, code)
-			if err := row.Scan(&close); err == nil && close != nil {
-				// Get previous close for change/pct
-				var prevClose *float64
-				store.DB().QueryRow(ctx,
-					`SELECT close FROM ohlcv_daily_qfq WHERE symbol=$1 ORDER BY trade_date DESC LIMIT 1 OFFSET 1`, code).Scan(&prevClose)
-				if prevClose != nil && *prevClose > 0 {
-					change = *close - *prevClose
-					pct = (change / *prevClose) * 100
-				}
-				result = append(result, indexData{
-					Code:   code,
-					Name:   codeToName[code],
-					Close:  *close,
-					Change: change,
-					Pct:    pct,
-				})
+		ordered := make([]storage.MarketIndexBar, 0, len(bars))
+		for _, code := range marketIndexCodes {
+			if bar, ok := byCode[code]; ok {
+				ordered = append(ordered, bar)
 			}
 		}
 
-		c.JSON(http.StatusOK, gin.H{"indices": result})
+		c.JSON(http.StatusOK, marketIndexPayload(ordered))
 	}
+}
+
+// marketIndexPayload 把库侧读数摊成 /market/index 的响应（DATA-07）。
+//
+// 单位一律原样透出：volume 是股（DATA-04）、amount 是 CNY（DATA-05），
+// 换算（亿 / 万）是展示层的事，在这里除一次就有了第二处真相。
+//
+// change/pct 在没有上一期收盘时是 null 而不是 0 —— 把「无从算起」显示成
+// 「+0.00%」是假数字；amount 在 turnover 为 NULL 时同理。
+//
+// pct 是**百分数刻度**（1.23 表示 +1.23%），沿用该字段改动前的语义，
+// 展示端不要再乘一次 100。
+func marketIndexPayload(bars []storage.MarketIndexBar) gin.H {
+	entries := make([]gin.H, 0, len(bars))
+	for _, bar := range bars {
+		var change, pct *float64
+		if bar.PrevClose != nil && *bar.PrevClose > 0 {
+			delta := bar.Close - *bar.PrevClose
+			change = &delta
+			rate := delta / *bar.PrevClose * 100
+			pct = &rate
+		}
+		entries = append(entries, gin.H{
+			"code":   bar.Code,
+			"name":   marketIndexNames[bar.Code],
+			"close":  bar.Close,
+			"change": change,
+			"pct":    pct,
+			"volume": bar.Volume,
+			"amount": bar.Turnover,
+		})
+	}
+	return gin.H{"indices": entries}
 }
 func screenStocksHandler(store *storage.PostgresStore) gin.HandlerFunc {
 	return func(c *gin.Context) {

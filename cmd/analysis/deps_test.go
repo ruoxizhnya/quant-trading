@@ -244,6 +244,25 @@ func TestRegisterRoutes_RegistersCoreEndpoints(t *testing.T) {
 		assert.True(t, seen[route],
 			"expected /api-prefixed data route %q to remain registered", route)
 	}
+
+	// DATA-03 (b2) 2026-10-16：`GET /fundamentals/:symbol/history` 存在，但**只在
+	// 数据服务上**（cmd/data/main.go:208），网关刻意不转发，因此不对 SPA 开放。
+	//
+	// 为什么选"明写不开放"而不是"补转发"：PIT 三时刻的数据前提是
+	// `fundamentals_detail`，该表 2026-10-16 实测 **0 行**（摄取链路 = EQD-P1-2，
+	// 未通）。转发过去只会给 SPA 一条恒回 `{"history":null}` 的通道 ——
+	// 一个看起来能用、实际给不出读数的面，比"没有面"更坏。工单 ③ 的注也点了这条：
+	// 通道与数据是两件事，别混着结案。
+	//
+	// 这条断言守的是**决定**本身：将来有人顺手加转发，这里会红，逼他先回答
+	// "这条通道现在能给什么"。判读口径同步写在 docs/SPEC.md §1「PIT 历史读数」。
+	for _, route := range []string{
+		"GET /api/fundamentals/:symbol/history",
+		"GET /fundamentals/:symbol/history",
+	} {
+		assert.False(t, seen[route],
+			"route %q 属数据服务内部面，网关不转发（DATA-03 b2）；要开放得先补 fundamentals_detail 的摄取（EQD-P1-2），并同步 SPEC 与 openapi", route)
+	}
 }
 
 // TestRegisterRoutes_NilMetricsReturns503 confirms the defensive
