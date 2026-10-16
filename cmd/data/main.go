@@ -133,7 +133,8 @@ func registerRoutes(r *gin.Engine, store *storage.PostgresStore, cache storage.C
 	// Index endpoints
 	r.GET("/index/:code/constituents", getIndexConstituentsHandler(tc, store))
 	// 这个 POST 不需要 store：落库在 TushareClient 内部（setup.go:165 注入，
-	// tushare.go:690 调 SaveIndexConstituentBatch）。上一条 GET 要 store 是因为它
+	// tushare.go 的 FetchIndexConstituents 调 SaveIndexConstituentBatch，
+	// DATA-06 后其 error 上抛 ⇒ handler 回 5xx）。上一条 GET 要 store 是因为它
 	// 读库，两者形状不同 —— bdd1949 把 store 加到这里时只改了调用点没改签名，
 	// cmd/data 自 21:38 起编译失败。
 	r.POST("/sync/index-constituents/:index_code", syncIndexConstituentsHandler(tc))
