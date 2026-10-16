@@ -22,6 +22,11 @@ type Scheduler struct {
 	mu       sync.RWMutex
 	entries  map[int]cron.EntryID // scheduleID -> cron entryID
 	jobTypes map[string]JobType   // job type string -> JobType
+	// SYNC-04: start state, guarded by mu. Without it, a Start() that failed
+	// in loadAndScheduleAll and a clean Start() with zero active schedules
+	// both read 0/0 from Stats() — two causes, one shape.
+	isRunning  bool
+	startError string
 }
 
 // NewScheduler creates a new Scheduler.
@@ -43,16 +48,29 @@ func (s *Scheduler) RegisterJobType(name string, jobType JobType) {
 	s.jobTypes[name] = jobType
 }
 
-// Start begins the scheduler.
+// Start begins the scheduler. SYNC-04: the outcome is also recorded on the
+// scheduler itself so Stats() can distinguish "failed to start" from "running,
+// just no active schedules". The signature and the fail-soft contract are
+// unchanged — a failure still returns an error and still does not start cron;
+// cmd/data/main.go keeps deciding the blast radius.
 func (s *Scheduler) Start() error {
 	s.logger.Info().Msg("Starting sync scheduler")
 
 	// Load and schedule all active schedules from database
 	if err := s.loadAndScheduleAll(context.Background()); err != nil {
-		return fmt.Errorf("failed to load schedules: %w", err)
+		err = fmt.Errorf("failed to load schedules: %w", err)
+		s.mu.Lock()
+		s.isRunning = false
+		s.startError = err.Error()
+		s.mu.Unlock()
+		return err
 	}
 
 	s.cron.Start()
+	s.mu.Lock()
+	s.isRunning = true
+	s.startError = ""
+	s.mu.Unlock()
 	s.logger.Info().Msg("Sync scheduler started")
 	return nil
 }
@@ -375,10 +393,18 @@ func (s *Scheduler) resolveJobType(name string) JobType {
 }
 
 // SchedulerStats holds statistics about the scheduler.
+//
+// SYNC-04: is_running/start_error are additive (the three existing fields keep
+// their names and semantics). They settle the 0/0 ambiguity: is_running=false
+// with a non-empty start_error means Start() failed and scheduled syncs will
+// NOT run; is_running=true with zero counts means the scheduler is healthy and
+// there simply is no active schedule. Shapes mirror WorkerStats.IsRunning.
 type SchedulerStats struct {
 	ActiveSchedules int       `json:"active_schedules"`
 	TotalEntries    int       `json:"total_entries"`
 	NextRuns        []NextRun `json:"next_runs,omitempty"`
+	IsRunning       bool      `json:"is_running"`
+	StartError      string    `json:"start_error,omitempty"`
 }
 
 // NextRun represents the next scheduled run for a schedule.
@@ -396,6 +422,8 @@ func (s *Scheduler) Stats() SchedulerStats {
 	stats := SchedulerStats{
 		ActiveSchedules: len(s.entries),
 		TotalEntries:    len(s.cron.Entries()),
+		IsRunning:       s.isRunning,
+		StartError:      s.startError,
 	}
 
 	for scheduleID, entryID := range s.entries {
