@@ -210,6 +210,24 @@ connector 之外无人感知底层表。字段表 / 频率词表 / 聚合口径 
 拥挤度 = `after_close`（收盘后可见，盘中用当日值即偷看）。文档真相见
 SPEC.md「connector 注册契约」节。
 
+**新数据源接入样板（ADR-031 / D5，2026-10-15）**：「挂新数据 → 可挖因子」
+全链路的第一个真实实现（市场活跃度 = Tushare `daily_basic` 换手率族）：
+
+```
+  Tushare daily_basic（api）
+    └─ tushare_daily_basic adapter（声明 after_close + trade_date 锚点 + daily）
+         └─ data.TushareClient.FetchDailyBasic(按日，normalize：缺失=NULL / 脏值跳过 / 全跳过 fail-loud)
+              └─ market_activity 表（Migration 056，(symbol,trade_date,source) 幂等）
+                   └─ expression 字段词表新来源 activity（turnover_rate 族）
+                        └─ market_activity 因子（公式 turnover_rate / ts_mean(·,20) - 1）
+                             └─ factor_cache（按日分数序列，缺失≠0）
+```
+
+PIT 执法点有二：① 声明侧 `after_close`（`TestDailyBasicDeclaration_MustBeAfterClose`
+钉死，改宽即红）；② 取数侧 `GetMarketActivityForDateRange` 的
+`trade_date <= end`（晚于计算日的行结构上不可见）。名册协议变更
+（D3 之后第一个新增名册名）与端到端步骤留档见 SPEC.md「新数据源样板」节。
+
 **多频率进策略视野（ADR-031 / D6，2026-10-15）**：回测只吃日线的现状
 延伸到「日频决策 + 引用当日内分钟特征」，通道是**启动前快照 + 契约注入**，
 不是运行时查询：
@@ -361,5 +379,5 @@ schema / 内核四态 / 版本哈希纪律的文档真相在
 
 ---
 
-_Last updated: 2026-10-15（§7 增补多频率进策略视野 ADR-031 D6；§9 AI 因子挖掘流水线数据流 ADR-031 D8；此前：2026-10-14 §7 增补 connector 注册契约上游闸门 ADR-031 D2；§7 规范层数据流 ADR-031 D1 + §8 因子定义库数据流 ADR-031 D3；表数口径 42 张为 2026-10-12 实测）_
+_Last updated: 2026-10-15（§7 增补新数据源接入样板 ADR-031 D5；此前：§7 增补多频率进策略视野 ADR-031 D6；§9 AI 因子挖掘流水线数据流 ADR-031 D8；2026-10-14 §7 增补 connector 注册契约上游闸门 ADR-031 D2；§7 规范层数据流 ADR-031 D1 + §8 因子定义库数据流 ADR-031 D3；表数口径 42 张为 2026-10-12 实测）_
 _维护规则：服务/端口/schema 分区变更时更新本文件（AGENTS.md Rule 1）；表数不手抄，只给 grep 口径。_

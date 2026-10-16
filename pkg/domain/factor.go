@@ -13,6 +13,17 @@ package domain
 //
 // 纪律：新增计算因子只加种子定义，不在这里加常量；ParseFactorType 仍是
 // 名册的合法集合判定（种子定义的名字必须落在其内——NewRegistry 校验）。
+//
+// ⚠️ D5 协议变更记录（用户批准 2026-10-15，落地 2026-10-16；蓝图 §6
+// 「协议变更纪律」）：
+// FactorMarketActivity 是 D3 之后**第一个新增名册名**。此前名册是冻结面
+// （蓝图 §5.5 / D8 记录「不动态新增因子名」指运行期动态新增；正式协议
+// 变更走评审）。D5 是「挂新数据 → 可挖因子」全链路样板：不新开名册名，
+// 新数据源的公式因子无处登记（size/volatility/growth 三个 pending 名
+// 语义上都不接受活跃度数据，硬塞等于发明数学定义）。故按蓝图 §6 协议
+// 变更纪律走正式变更：加名 + 种子定义带 D3 十字段骨架 + D4 登记四样
+// （公式/哈希/登记人/生效日）+ 蓝图与 SPEC 同步留痕。后续新因子沿用
+// 本路径，不放宽任何校验。
 
 import (
 	"encoding/json"
@@ -36,6 +47,14 @@ const (
 	FactorOCFToNetProfit         FactorType = "ocf_to_net_profit"
 	FactorROEDuPontLeverage      FactorType = "roe_dupont_leverage"
 	FactorInventoryTurnoverDelta FactorType = "inventory_turnover_delta"
+
+	// FactorMarketActivity 市场活跃度因子（D5 新数据源样板，2026-10-16
+	// 协议变更）。引用 market_activity 表（daily_basic 换手率族）的
+	// 公式因子：turnover_rate / ts_mean(turnover_rate, 20) - 1
+	// （相对自身近期历史的异常活跃度）。是本项目「挂新数据 → 可挖
+	// 因子」全链路（蓝图 §4.4）的第一个样板因子，也是 D3 之后第一个
+	// 走正式协议变更新增的名册名（变更记录见本文件头）。
+	FactorMarketActivity FactorType = "market_activity"
 )
 
 func ParseFactorType(s string) (FactorType, bool) {
@@ -62,6 +81,8 @@ func ParseFactorType(s string) (FactorType, bool) {
 		return FactorROEDuPontLeverage, true
 	case string(FactorInventoryTurnoverDelta):
 		return FactorInventoryTurnoverDelta, true
+	case string(FactorMarketActivity):
+		return FactorMarketActivity, true
 	default:
 		return "", false
 	}
@@ -178,6 +199,15 @@ var BuiltinFactorHypotheses = []FactorHypothesis{
 		Hypothesis: "存货周转率变化反映供需格局：周转加快说明需求走强或" +
 			"库存去化顺利，是产业链景气度的早期信号。",
 		Reference: "ADR-022 桥 B1；docs/RESEARCH.md §3.4",
+	},
+	{
+		FactorName: FactorMarketActivity,
+		SourceKind: FactorSourceLiterature,
+		Hypothesis: "高换手（高关注度）的股票吸引更多注意力驱动交易：个人投资者" +
+			"的买入决策受关注度排序影响而非估值排序，注意力冲击带来持续的价格" +
+			"压力与随后的关注度衰减，异常活跃度相对历史均值的变化是可交易的" +
+			"关注度信号。",
+		Reference: "Barber & Odean (2008) All That Glitters；D5 样板（daily_basic 换手率族）",
 	},
 }
 

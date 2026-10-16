@@ -157,6 +157,10 @@ const (
 	FieldSourceMarket FieldSource = "market"
 	// FieldSourceFundamentals 财报来源（domain.Fundamental，PIT 对齐）。
 	FieldSourceFundamentals FieldSource = "fundamentals"
+	// FieldSourceActivity 市场活跃度来源（D5：market_activity 表，
+	// daily_basic 换手率族）。与 market/fundamentals 并列的第三类数据源
+	// ——「挂新数据 → 可挖因子」样板（蓝图 §4.4）在语言侧的落点。
+	FieldSourceActivity FieldSource = "activity"
 	// FieldSourceGroup 横截面分组标签（cs_neutralize 的 group 参数）——不是数据字段。
 	FieldSourceGroup FieldSource = "group"
 )
@@ -170,6 +174,8 @@ const (
 	TableOHLCV = "ohlcv_daily_qfq"
 	// TableFundamentals 财报（PIT 对齐）。
 	TableFundamentals = "stock_fundamentals"
+	// TableMarketActivity 市场活跃度（D5：换手率族，daily_basic 导入）。
+	TableMarketActivity = "market_activity"
 	// TableSectorMap 个股 → 板块映射（cs_neutralize 的 sector 分组标签来源）。
 	TableSectorMap = "stock_sector_map"
 )
@@ -211,6 +217,11 @@ var fieldRegistry = map[string]FieldDef{
 	"roa":     {Source: FieldSourceFundamentals, DependsOn: TableFundamentals},
 	"revenue": {Source: FieldSourceFundamentals, DependsOn: TableFundamentals},
 	"profit":  {Source: FieldSourceFundamentals, DependsOn: TableFundamentals},
+	// 市场活跃度（D5：market_activity 表，换手率族）。收盘后可见
+	// （D2 契约），缺失（停牌/未发布）在求值期为 NaN，不是 0。
+	"turnover_rate":   {Source: FieldSourceActivity, DependsOn: TableMarketActivity},
+	"turnover_rate_f": {Source: FieldSourceActivity, DependsOn: TableMarketActivity},
+	"volume_ratio":    {Source: FieldSourceActivity, DependsOn: TableMarketActivity},
 	// 横截面分组标签（cs_neutralize 的 group 参数）——不是数据字段
 	"sector": {Source: FieldSourceGroup, DependsOn: TableSectorMap},
 }

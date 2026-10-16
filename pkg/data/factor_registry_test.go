@@ -17,9 +17,9 @@ func TestNewRegistry_BuiltinSeedsAllValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("builtin seed definitions must load: %v", err)
 	}
-	// 11 个冻结因子一个不少
-	if got := len(r.Names()); got != 11 {
-		t.Fatalf("registry should hold all 11 frozen factors, got %d: %v", got, r.Names())
+	// D5（2026-10-15）名册协议变更新增 market_activity，种子数 11 → 12。
+	if got := len(r.Names()); got != 12 {
+		t.Fatalf("registry should hold all 12 frozen factors, got %d: %v", got, r.Names())
 	}
 	// 与冻结名册（ParseFactorType）逐一对照：库管理不丢名册里的任何一个
 	roster := []domain.FactorType{
@@ -28,6 +28,7 @@ func TestNewRegistry_BuiltinSeedsAllValid(t *testing.T) {
 		domain.FactorGrossMarginTrend, domain.FactorContractLiabilityRatio,
 		domain.FactorOCFToNetProfit, domain.FactorROEDuPontLeverage,
 		domain.FactorInventoryTurnoverDelta,
+		domain.FactorMarketActivity, // D5 新增（daily_basic 活跃度）
 	}
 	for _, name := range roster {
 		if _, ok := r.Definition(name); !ok {

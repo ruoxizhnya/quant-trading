@@ -210,6 +210,12 @@ func TestSpecDriftFactorOutput(t *testing.T) {
 	assertNoDrift(t, "domain.FactorOutput", "factor_output", FactorOutput{})
 }
 
+// TestSpecDriftMarketActivity 是 D5 新数据类的防漂移锚点：SPEC「规范层
+// Schema」节的市场活跃度字段表 ↔ domain.MarketActivity 反射双向比对。
+func TestSpecDriftMarketActivity(t *testing.T) {
+	assertNoDrift(t, "domain.MarketActivity", "activity", MarketActivity{})
+}
+
 // TestSpecDriftFrequencyVocabulary 频率词表双向比对：SPEC 表格第 0 列是
 // 字面量（"1m"/"15m"/"1d"），第 1 列是 Go 常量名。常量名一并核对——
 // 光对字面量抓不住「Go 常量改名」。

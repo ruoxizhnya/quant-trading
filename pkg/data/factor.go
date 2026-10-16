@@ -23,6 +23,12 @@ type FactorStore interface {
 	// is not optional: a factor computed from a report the market had not yet
 	// seen is a look-ahead bug, not a data-quality issue.
 	GetFundamentalsDetailAsOf(ctx context.Context, fieldCodes []string, asOf time.Time) ([]domain.FundamentalsDetailRow, error)
+	// GetMarketActivityForDateRange serves the market_activity factor (D5).
+	// Its `trade_date <= endDate` filter is the PIT rule for the
+	// after_close declaration (turnover rate does not exist before the
+	// close): a row dated after the compute date must be structurally
+	// invisible, not merely improbable.
+	GetMarketActivityForDateRange(ctx context.Context, startDate, endDate time.Time) ([]domain.MarketActivity, error)
 	GetTradingDays(ctx context.Context, startDate, endDate time.Time) ([]time.Time, error)
 	SaveFactorCacheBatch(ctx context.Context, entries []*domain.FactorCacheEntry) error
 }

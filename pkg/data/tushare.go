@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -22,6 +23,11 @@ const (
 	tushareRateLimitDur = time.Minute
 )
 
+// ErrIndexConstituentPersistFailed 标识「Tushare 取到了但落库失败」这一段
+// （DATA-06）。调用方用 errors.Is 区分失败环节，原始错误经 %w 保留在链里进日志，
+// 不外泄给客户端（本仓 5xx 口径）。
+var ErrIndexConstituentPersistFailed = errors.New("persist index constituents")
+
 // TushareStore defines the interface for tushare data operations.
 type TushareStore interface {
 	SaveStockBatch(ctx context.Context, stocks []domain.Stock) error
@@ -39,6 +45,9 @@ type TushareStore interface {
 	// MacroStore（P2-1）：宏观指标序列写入面（pkg/data/macro.go）。
 	// 同 SupplyChainStore，内嵌以独立命名契约钉住 Save 签名。
 	MacroStore
+	// MarketActivityStore（D5）：市场活跃度观测写入面
+	// （pkg/data/tushare_daily_basic.go，market_activity 表）。
+	MarketActivityStore
 	// SaveRawIngest archives a class-A raw source response (ADR-022 §2,
 	// ingest.raw). Declared here so the archive contract is enforced at
 	// compile time rather than discovered at runtime.
@@ -673,7 +682,8 @@ func (c *TushareClient) fieldFloatPtr(item []any, idx int) *float64 {
 	return &v
 }
 
-// FetchIndexConstituents retrieves index constituents from tushare and saves them to DB.
+// FetchIndexConstituents retrieves index constituents from tushare and saves
+// them to DB. 落库失败返回 error（DATA-06）——返回的切片只在真正落库成功后非空。
 //
 // DATA-01：此处原请求 fields 为 "index_code,con_code,in_date,out_date"，但
 // index_weight 并无 in_date/out_date 两列 —— Tushare 对不存在的字段静默忽略，
@@ -704,8 +714,12 @@ func (c *TushareClient) FetchIndexConstituents(ctx context.Context, indexCode st
 	for i := range constituents {
 		ptrs[i] = &constituents[i]
 	}
+	// DATA-06：落库失败必须上抛。此处原样只 logger.Warn 后返回 (constituents, nil)，
+	// 「取到了、一行没写进去」与「写成功了」在 HTTP 面上不可区分，而调用方
+	// （POST /sync/index-constituents）报的正是成功。错误上抛后由 handler 回 5xx。
 	if err := c.store.SaveIndexConstituentBatch(ctx, ptrs); err != nil {
-		c.logger.Warn().Err(err).Msg("Failed to batch save index constituents")
+		return nil, fmt.Errorf("%w for %s: index_weight fetched %d but saved 0: %w",
+			ErrIndexConstituentPersistFailed, indexCode, len(constituents), err)
 	}
 
 	c.logger.Info().Str("index", indexCode).Int("count", len(constituents)).Msg("Index constituents fetched and saved")
