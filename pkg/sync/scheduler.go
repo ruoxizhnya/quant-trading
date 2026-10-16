@@ -75,11 +75,19 @@ func (s *Scheduler) Start() error {
 	return nil
 }
 
-// Stop gracefully stops the scheduler.
+// Stop gracefully stops the scheduler. SYNC-04 self-review: it also clears
+// is_running so the flag mirrors liveness (the WorkerStats.IsRunning shape this
+// ticket asked to copy) — a stopped scheduler still reporting "running" would
+// make the field name lie to its reader. startError is left untouched: it
+// describes the outcome of the most recent Start(), and a clean Stop after a
+// failed Start is not itself a start failure.
 func (s *Scheduler) Stop() {
 	s.logger.Info().Msg("Stopping sync scheduler")
 	ctx := s.cron.Stop()
 	<-ctx.Done()
+	s.mu.Lock()
+	s.isRunning = false
+	s.mu.Unlock()
 	s.logger.Info().Msg("Sync scheduler stopped")
 }
 
@@ -395,10 +403,13 @@ func (s *Scheduler) resolveJobType(name string) JobType {
 // SchedulerStats holds statistics about the scheduler.
 //
 // SYNC-04: is_running/start_error are additive (the three existing fields keep
-// their names and semantics). They settle the 0/0 ambiguity: is_running=false
-// with a non-empty start_error means Start() failed and scheduled syncs will
-// NOT run; is_running=true with zero counts means the scheduler is healthy and
-// there simply is no active schedule. Shapes mirror WorkerStats.IsRunning.
+// their names and semantics). is_running is a liveness read — true only while
+// the most recent Start() succeeded and Stop() has not run since. They settle
+// the 0/0 ambiguity: is_running=false with a non-empty start_error means
+// Start() failed and scheduled syncs will NOT run; is_running=false with an
+// empty start_error means never started (or already stopped); is_running=true
+// with zero counts means the scheduler is healthy and there simply is no
+// active schedule. Shapes mirror WorkerStats.IsRunning.
 type SchedulerStats struct {
 	ActiveSchedules int       `json:"active_schedules"`
 	TotalEntries    int       `json:"total_entries"`

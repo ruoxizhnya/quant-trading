@@ -101,3 +101,19 @@ func TestStartAfterFailureClearsStartError(t *testing.T) {
 	assert.True(t, stats.IsRunning)
 	assert.Empty(t, stats.StartError, "重试成功后必须清空旧失败原因")
 }
+
+// TestStopClearsIsRunning 把 is_running 钉成**活性**读数而不是「最后一次
+// Start 成功过」—— 工单②要求照抄的形状是 `WorkerStats.IsRunning`
+// （`wp.ctx.Err() == nil`，Stop 后即假）。cron 已停还报运行中，字段名
+// 就骗了读它的人，而「每个数字可被当场质问」正是本单的立单理由。
+func TestStopClearsIsRunning(t *testing.T) {
+	s := NewScheduler(newFakeScheduleStore(), NewQueue(newMockJobStore()))
+	require.NoError(t, s.Start())
+	require.True(t, s.Stats().IsRunning, "前置事实：Start 成功后报运行中")
+
+	s.Stop()
+
+	stats := s.Stats()
+	assert.False(t, stats.IsRunning, "Stop 之后不能再报运行中 —— is_running 必须反映活性")
+	assert.Empty(t, stats.StartError, "正常停止不是启动失败，不该凭空造出一个 start_error")
+}
