@@ -724,7 +724,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   - **⑤ 验收（停用路线，实测证据）**：`grep -rn "SetChain" cmd/data/registry_init.go` 实测 **15 条**链配置（另 1 行为注释提及，共 16 行 grep 输出）。链表与 SPEC 的一致性按「不手抄」原则落实：`docs/SPEC.md`「Adapter registry & fallback chain」节注明整套 Registry 为**纯观测面、链展示设计意图而非已生效的降级**，并点名两条不可达腿（mootdx nil transport / eastmoney 未声明日线·分钟·实时）；完整链表的唯一真源是运行时 `GET /api/datasource/registry/chains` —— 手抄 15 条进文档正是 AUD-45 登记的「清单腐烂」形状，故不抄。`go test ./internal/repoguard/ -run 'TestProductionCodeDoesNotWireETLPipeline|TestRegistryObservabilitySurfaceDoesNotFetch'` exit 0（仓库级两条），替身四条 exit 0。
   - **破坏验证（两腿，均「改坏→红→还原→绿」）**：① `registry_init.go` 末尾追加 `source.NewETLPipeline(reg, nil)` ⇒ `TestProductionCodeDoesNotWireETLPipeline` 红，点名 `cmd/data/registry_init.go:285: NewETLPipeline 调用`；② `registry_handlers.go` 追加带 `h.reg.Fetch(...)` 的方法 ⇒ `TestRegistryObservabilitySurfaceDoesNotFetch` 红，点名 `:185: .Fetch 选择器调用`。还原用 `git checkout --` + **sha256 与基线逐字节一致**（`a8eaa780…` / `d4ed096e…`，`sha256sum -c` 双 OK）。
   - **开发中自抓并修掉的两个假护栏（如实登记，本项目「假护栏比没护栏更糟」的同款自查）**：① 第一版把包内 `ETLPipeline` 字面量也算违规 ⇒ 构造器本体 `return &ETLPipeline{...}` 会中枪，守卫从第一天起常红 —— 收窄为「包外才算接线」；② 第一版照抄 `package_wiring_test.go` 的 `parser.ImportsOnly`，函数体整个不进 AST ⇒ 替身腿全部落空、仓库级测试**假绿** —— 改完整解析（mode 0）后替身腿才真红真绿。
-  - **门禁**：`go build ./...` exit 0；`go vet ./cmd/data ./pkg/data/source ./internal/repoguard` exit 0；`gofmt -l` 对本单 4 个文件空输出（DATA-09 已登记整仓 gofmt 有 8 个别人文件的既有噪声，本单不顺手修）；`go test ./internal/repoguard/` 全量 exit 0（含既有 19 条不受影响）；`go test ./pkg/data/source/` exit 0。
+  - **门禁**：`go build ./...` exit 0；`go vet ./cmd/data ./pkg/data/source ./internal/repoguard` exit 0；`gofmt -l` 对本单 **3 个 Go 文件**空输出（DATA-09 已登记整仓 gofmt 有 8 个别人文件的既有噪声，本单不顺手修）；`go test ./internal/repoguard/ -count=1` 全量 exit 0（**23 条 = 既有 19 + 本单 4**）；`go test ./pkg/data/source/ -count=1` exit 0。
   - **④ 逐条核对**：单位口径未重开（未动任何换算常量）；mootdx SDK 未接（go.mod 无新依赖）；Registry 降级语义未改（registry.go 一字未动）；链配置未删（⑤ 要求 grep 可得且与 SPEC 一致）。
   - **⑥ 边界**：链上各源可靠性（ODR-011 风险表）未议；DATA-10 落地前「链不可达」保持现状。
   - **并行隔离**：主工作树开工时即挂着其他 agent 的未提交改动（`pkg/data/source/contract.go` 一族，且 DATA-09 的合并 `d005187` 在本单核对期间落地），故全程在隔离 worktree 施工，未碰主工作树；合并与否归主任。
@@ -732,9 +732,9 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 ### DATA-10 · 多源 Registry 接线计划（停用状态的显式解禁入口） ⬜ 待做
 
 - **① 目标**：把一条 fallback 链真正接进生产 ingestion（经 `ETLPipeline` 或主任认可的等效路径）并落到对应表；若评估后仍不接，显式复审 DATA-08 的停用裁决并留痕。
-- **② 上下文**（DATA-08 2026-10-16 收口实测）：`Registry.Fetch` 无生产调用方；`ETLPipeline.Process` 的 `Normalizer` 全仓零生产实现；生产 ingestion 直连 `TushareClient`；`capital_flow`/`global_ohlcv` 两条链的 primary adapter 已启用（eastmoney / yahoo_finance），`ohlcv_daily` 的 mootdx/eastmoney 两条备胎腿不可达（nil transport / 未声明该类型）。「未接线」由 `internal/repoguard/registry_etl_wiring_test.go` 钉住 —— 本单落地时该护栏按计划放行（加白名单 + 写理由），放行本身就是接线决策的留痕。
+- **② 上下文**（DATA-08 2026-10-16 收口实测）：`Registry.Fetch` 无生产调用方；`ETLPipeline.Process` 的 `Normalizer` 全仓零生产实现；生产 ingestion 直连 `TushareClient`；`capital_flow`/`global_ohlcv` 两条链的 primary adapter 已启用（eastmoney / yahoo_finance，均无 key、默认启用），`ohlcv_daily` 的 mootdx/eastmoney 两条备胎腿不可达（nil transport / 未声明该类型）。候选落库表现状（2026-10-16 真库 `quant_trading` 只读实测）：`capital_flow` **0 行**、`global_ohlcv` **0 行**、`top_list` **0 行**、`stock_fundamentals` **0 行**、`market_activity` **0 行** —— 全是「表在、没数据」的形状，接线即灌数；另注意本仓**不存在** `capital_flow_daily` 表（`capital_flow` 是 Migration 035 的东财 push2 表，别把两张表的账记混）。「未接线」由 `internal/repoguard/registry_etl_wiring_test.go` 钉住 —— 本单落地时该护栏按计划放行（加白名单 + 写理由），放行本身就是接线决策的留痕。
 - **③ 要求（接线计划，DATA-08 ③ 第一半的兑现）**：候选链按**可达性**排序，逐条给「适配器状态 / 落库表 / 前置条件」三件——
-  1. `capital_flow: [eastmoney]`（首选）：adapter 默认启用、`TableMapper` 已映射 `capital_flow` 表、`BulkInsert` 事务 + upsert 幂等已就绪；表当前 0 行（Tushare 免费额度所限），eastmoney 是免费源。
+  1. `capital_flow: [eastmoney]`（首选）：adapter 默认启用（无 key 公开 push2 接口）、`TableMapper` 已映射 `capital_flow` 表、`BulkInsert` 事务 + upsert 幂等已就绪；表当前 **0 行**（2026-10-16 真库实测；该表属东财线，与 Tushare 额度无关）。
   2. `global_ohlcv: [yahoo_finance, alpha_vantage]`：yahoo 默认启用；境外单位口径 SPEC 已有规定，勿与 A 股口径混。
   3. `daily_basic` / `macro`：adapter 已注册但同步「另立」（P2-1 / D5 既有决议），若先落这两条，须与那两线的排程工单合并考虑，别双开。
   4. `ohlcv_daily` 的备胎腿：前置是 mootdx SDK（新依赖，**须主任批准**）+ 源单位实测 + 同步边界换算（DATA-05 守卫自动开始管）。
