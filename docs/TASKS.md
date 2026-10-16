@@ -729,6 +729,10 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   - **④ 逐条核对**：单位口径未重开（未动任何换算常量）；mootdx SDK 未接（go.mod 无新依赖）；Registry 降级语义未改（registry.go 一字未动）；链配置未删（⑤ 要求 grep 可得且与 SPEC 一致）。
   - **⑥ 边界**：链上各源可靠性（ODR-011 风险表）未议；DATA-10 落地前「链不可达」保持现状。
   - **并行隔离**：主工作树开工时即挂着其他 agent 的未提交改动（`pkg/data/source/contract.go` 一族，且 DATA-09 的合并 `d005187` 在本单核对期间落地），故全程在隔离 worktree 施工，未碰主工作树；合并与否归主任。
+  - **自审修订二（2026-10-16，并入 main `b4f6e91` 后主任令再审一轮，`5bddb90`）**：发现两处「判据意图 ← → 实现」的 gap（均 🟡，正是本单治的「声明≠实现」同族），直接修：
+    1. **规则 A 有函数值旁路**：原判据只认 `NewETLPipeline(...)` 调用形态，`f := source.NewETLPipeline` 存个函数值即绕开（破坏验证实测：旧判据对该形态零命中）。改为包外 **Ident 级**判定 —— 任何 `NewETLPipeline` 引用（调用/函数值/点导入裸名）即红；同包调用规则不变。已知边界写入护栏文件头：类型别名（`type P = source.ETLPipeline` + `P{}`）需 go/types 才防得住，本护栏防漂移不防蓄意。
+    2. **规则 B 写死单文件名**：只查 `registry_handlers.go`，观测面长出新文件（`registry_admin.go`）会静默漏查。改为 `cmd/data/registry_*.go` glob（production），且 **glob 命中为空时自报失败** —— 文件被改名/删光的那一刻不许假绿。
+    - 替身腿 6 → 8（新增函数值旁路腿、解析失败 fail-loud 腿）；破坏验证两腿（函数值注入 ⇒ 规则 A 红且点名 `registry_init.go:314: NewETLPipeline 引用`；观测面注入 `.Fetch` ⇒ 规则 B 红），还原后 sha256 与基线逐字节一致；`go test ./internal/repoguard/ -count=1` 全量 23 条绿。
 
 ### DATA-10 · 多源 Registry 接线计划（停用状态的显式解禁入口） ⬜ 待做
 
