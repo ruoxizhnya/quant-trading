@@ -5,6 +5,17 @@
 // require external configuration (API keys, transports) are constructed
 // defensively: a missing dependency yields a disabled adapter rather
 // than a startup failure.
+//
+// DATA-08（2026-10-16，主任裁决「停用路线」）：这个 Registry 今天**只
+// 服务观测端点**（/api/datasource/registry/status|health|chains，见
+// registry_handlers.go，全部只读）。Registry.Fetch 的唯一生产调用方
+// ETLPipeline 零生产构造点 —— 即下面配置的 fallback 链没有任何生产
+// 路径会真的降级取数，日线/分钟/实时三棵树的链上还有不可达的腿
+// （mootdx 以 nil transport 注册 ⇒ Enabled()=false；eastmoney 只声明
+// capital_flow）。这不是遗漏而是显式停用：接线的前置条件（源单位实测
+// → 同步边界换算 → Normalizer → 与 sync_jobs 的关系）登记在 DATA-10。
+// 「未接线」状态由 internal/repoguard/registry_etl_wiring_test.go 机械
+// 钉住：任何生产代码构造 ETLPipeline、或观测面出现 .Fetch，当场红。
 package main
 
 import (
@@ -29,6 +40,13 @@ import (
 // Vantage key, etc.) are constructed defensively — if the configuration
 // is missing the adapter is registered as disabled. This keeps the
 // service running in degraded mode instead of failing at startup.
+//
+// DATA-08（2026-10-16）：注意本函数的产物**只被观测端点消费** —— 没有
+// 任何生产同步路径经过 Registry.Fetch（数据同步全部直连
+// TushareClient，见 handlers_sync.go / sync_handlers.go）。链配置保留
+// 是为了让 /api/datasource/registry/* 展示真实意图，不是为了宣称降级
+// 能力已生效；两者的区别见 configureFallbackChains 的设计注释与
+// docs/SPEC.md「Adapter registry & fallback chain」节。
 func buildDataSourceRegistry(tushareClient *data.TushareClient, logger zerolog.Logger) *source.Registry {
 	reg := source.NewRegistry()
 
@@ -172,6 +190,14 @@ func buildDataSourceRegistry(tushareClient *data.TushareClient, logger zerolog.L
 // Registry.Fetch. The first element is the primary; subsequent
 // elements are tried on retryable failure.
 //
+// DATA-08（2026-10-16，主任裁决「停用路线」）—— 读这些链之前先知道
+// 它们今天的真实状态：**没有任何生产调用方**。Registry.Fetch 的唯一
+// 生产调用方 ETLPipeline 零构造点，数据同步全部直连 TushareClient
+// （handlers_sync.go / sync_handlers.go）。因此下面每条链描述的是
+// **设计意图**，由 /api/datasource/registry/chains 如实展示；它不是
+// 「降级已生效」的宣称。接线前置条件与计划见 DATA-10；「未接线」由
+// internal/repoguard/registry_etl_wiring_test.go 机械钉住。
+//
 // Design notes:
 //
 //   - Daily OHLCV: tushare (authoritative, with full history) is
@@ -186,6 +212,9 @@ func buildDataSourceRegistry(tushareClient *data.TushareClient, logger zerolog.L
 //
 //   - Realtime quote: mootdx is primary (5-level depth, low latency).
 //     Eastmoney push2 is the fallback when the SDK is unavailable.
+//     ⚠️ 这条备胎关系今天同样不成立（DATA-05 核对）：eastmoney 只声明
+//     capital_flow，Fetch(realtime_quote) 直接 ErrUnsupported —— 链上留着
+//     它是 chain drift 的形状，Registry.Fetch 会 loud-skip（CR-39）。
 //
 //   - Capital flow: eastmoney is the only first-class source today.
 //     The chain contains just one entry; tushare's flow is separate

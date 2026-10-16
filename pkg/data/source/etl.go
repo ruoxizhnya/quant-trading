@@ -33,6 +33,14 @@ func toStoragePoints(in []UnifiedDataPoint) []storage.UnifiedDataPoint {
 // Why a pipeline type? Centralizing the flow here keeps the per-adapter
 // code focused on normalization; the pipeline handles cross-cutting
 // concerns (logging, metrics, retry policy).
+//
+// DATA-08（2026-10-16，主任裁决「停用路线」）：本类型今天**零生产调用
+// 方** —— 生产数据同步全部直连 pkg/data.TushareClient（handlers_sync.go /
+// sync_handlers.go），不过 Registry。因此 Registry.Fetch 的 fallback 链
+// 实际不可达；链路保持实现与测试覆盖（零件先写、后接线），接线前置
+// 条件（源单位实测 → 同步边界换算 → Normalizer → 与 sync_jobs 的关系）
+// 登记在 DATA-10。该状态由 internal/repoguard/registry_etl_wiring_test.go
+// 机械钉住：生产代码出现 NewETLPipeline 调用即红。
 type ETLPipeline struct {
 	Registry *Registry
 	// CR-21 (ODR-012): Store is now `storage.BulkInserter` (the interface
@@ -43,6 +51,9 @@ type ETLPipeline struct {
 }
 
 // NewETLPipeline constructs a pipeline. Either field may be nil for tests.
+//
+// DATA-08（2026-10-16）：生产侧零调用方（裁决「停用路线」）—— 今天的
+// 构造点只有 etl_test.go / integration_test.go。接线见 DATA-10。
 func NewETLPipeline(reg *Registry, store storage.BulkInserter) *ETLPipeline {
 	return &ETLPipeline{Registry: reg, Store: store}
 }
@@ -66,8 +77,13 @@ type ProcessResult struct {
 //  2. Normalize FetchResponse.Items → []UnifiedDataPoint.
 //  3. Validate (lightweight field checks).
 //  4. Deduplicate.
-//  5. Persist via Store.BulkInsert (currently a stub; Sprint 1 wires the
-//     real insert).
+//  5. Persist via Store.BulkInsert. The insert is a real implementation
+//     (pkg/storage/bulk_insert.go: single transaction, per-row
+//     ON CONFLICT upsert, table selected by DataType) — an earlier
+//     version of this comment called it "a stub; Sprint 1 wires the
+//     real insert", which went stale when ODR-011 landed the real
+//     BulkInsert (dfec481). 叙述与实现分叉正是本项目反复登记的缺陷
+//     家族，故此处按实现如实描述。
 //
 // Persistence is delegated to the storage layer; the pipeline does not
 // know SQL. Adapters only need to return FetchResponse; storage knows
