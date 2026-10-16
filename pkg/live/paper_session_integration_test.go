@@ -133,7 +133,7 @@ func openReadOnlyStore(t *testing.T, ctx context.Context) *storage.PostgresStore
 	})
 	require.NoError(t, err)
 
-	store, err := storage.NewPostgresStore(ctx, dsn)
+	store, err := storage.NewPostgresStoreConnected(ctx, dsn)
 	if err != nil {
 		t.Skipf("跳过：连不上库（%v）", err)
 	}

@@ -178,7 +178,7 @@ func adjDSN(t *testing.T) string {
 
 func openAdjStore(t *testing.T, ctx context.Context) *storage.PostgresStore {
 	t.Helper()
-	store, err := storage.NewPostgresStore(ctx, adjDSN(t))
+	store, err := storage.NewPostgresStoreConnected(ctx, adjDSN(t))
 	if err != nil {
 		t.Skipf("跳过 P2-8 取证：连不上库（%v）。先 `docker compose up -d postgres`", err)
 	}

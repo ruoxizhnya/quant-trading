@@ -38,7 +38,7 @@ func obs01DSN() string {
 
 func openObs01Store(t *testing.T, ctx context.Context) *storage.PostgresStore {
 	t.Helper()
-	store, err := storage.NewPostgresStore(ctx, obs01DSN())
+	store, err := storage.NewPostgresStoreConnected(ctx, obs01DSN())
 	if err != nil {
 		t.Skipf("跳过 OBS-01 真库取证：连不上库（%v）", err)
 	}

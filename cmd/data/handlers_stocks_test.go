@@ -60,7 +60,7 @@ func TestStockCountPayload_Shape(t *testing.T) {
 // 的假红窗口。语义层面（NULL/空串折同一档、跨档相加）的独立核对在
 // pkg/storage/stocks_status_test.go，本条只管**通道**：键名、类型、序列化形状。
 func TestStocksCountHandler_StatusSplitMatchesDatabase(t *testing.T) {
-	store, err := storage.NewPostgresStore(context.Background(), stocksCountTestDSN)
+	store, err := storage.NewPostgresStoreConnected(context.Background(), stocksCountTestDSN)
 	if err != nil {
 		t.Skipf("skipping test: cannot connect to DB: %v", err)
 	}

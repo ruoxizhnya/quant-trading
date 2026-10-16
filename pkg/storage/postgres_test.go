@@ -16,7 +16,7 @@ import (
 func testStore(t *testing.T) *PostgresStore {
 	t.Helper()
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx,
+	store, err := NewPostgresStoreConnected(ctx,
 		"postgres://postgres:postgres@localhost:5432/quant_trading?sslmode=disable")
 	if err != nil {
 		t.Skipf("skipping test: cannot connect to DB: %v", err)
@@ -51,8 +51,8 @@ func skipIfNoSeedData(t *testing.T, store *PostgresStore, table string) {
 	}
 }
 
-func TestNewPostgresStore(t *testing.T) {
-	// Use SkipIfNoDB convention — if docker compose postgres is not running,
+func TestNewPostgresStoreConnected_Connects(t *testing.T) {
+	// SkipIfNoDB convention — if the local Postgres is not running,
 	// skip the test rather than fail. Matches testStore() helper pattern.
 	store := testStore(t)
 	require.NotNil(t, store)
@@ -748,10 +748,14 @@ func TestFundamentalsDetailSchema_FrozenSemantics(t *testing.T) {
 	assert.Contains(t, index, "ON fundamentals_detail (ts_code, field_code, end_date DESC)")
 }
 
-// TestFundamentalsDetailSchema_AppliedByMigrate checks the inline migration
-// really lands the table in a live database. testStore() runs migrate() and
-// skips when no Postgres is reachable (the default on a machine without
-// Docker), matching the rest of this package's convention.
+// TestFundamentalsDetailSchema_AppliedByMigrate checks that the inline
+// migration's table is really present in a live database.
+//
+// DATA-09 改了这条断言的证据形状：testStore() 现在走**不迁移**入口，所以本用例
+// 证明的是「已迁移的开发库里这张表在」，而不再顺带触发 migrate()。「migrate() 真能
+// 把它建出来」那一半属于显式迁移路径，由 integration tag 下的一次性容器套件
+// （pkg/storage/integration_test.go）负责 —— 那里才是在空库上跑构造。
+// 连不上 Postgres 仍然 skip，与本包其余部分一致。
 func TestFundamentalsDetailSchema_AppliedByMigrate(t *testing.T) {
 	store := testStore(t)
 	defer store.Close()
@@ -760,7 +764,9 @@ func TestFundamentalsDetailSchema_AppliedByMigrate(t *testing.T) {
 	err := store.DB().QueryRow(context.Background(),
 		`SELECT is_nullable FROM information_schema.columns
 		 WHERE table_name = 'fundamentals_detail' AND column_name = 'ann_date'`).Scan(&nullable)
-	require.NoError(t, err, "fundamentals_detail.ann_date must exist after migrate()")
+	require.NoError(t, err,
+		"fundamentals_detail.ann_date 不在库里 —— 本用例不再触发 migrate()（DATA-09）；"+
+			"这是一次没迁移过的库？起一次服务或跑 tagged 集成套件")
 	assert.Equal(t, "NO", nullable, "ann_date must be NOT NULL for PIT alignment")
 }
 

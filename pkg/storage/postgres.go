@@ -15,8 +15,62 @@ type PostgresStore struct {
 	logger zerolog.Logger
 }
 
-// NewPostgresStore creates a new PostgresStore with the given connection string.
+// NewPostgresStore creates a new PostgresStore with the given connection string
+// and **applies the inline migrations** (migrationStatements()) plus the
+// builtin-factor hypothesis seed.
+//
+// DATA-09 (2026-10-16): this is the only carrier of「应用迁移」, and it is meant
+// for the startup / deploy path — `cmd/data`, `pkg/bootstrap`, `cmd/dualrun`, and
+// the `integration`-tagged suite that boots a throwaway container. It is not for
+// tests: calling it from a default-build test really does rewrite the shared
+// development database (measured 2026-10-15 — one `go test ./pkg/data/...`
+// applied Migration 054's whole-table ×1000 to 3,926,510 rows, unauthorised and
+// unannounced; the sentinel in `data_migrations` then makes it non-replayable).
+// Tests connect with NewPostgresStoreConnected. The split is pinned by
+// internal/repoguard/store_migration_isolation_test.go, in both directions:
+// a default-build test calling this, or production calling the non-migrating
+// entry, both go red.
 func NewPostgresStore(ctx context.Context, connString string) (*PostgresStore, error) {
+	store, err := connectPostgresStore(ctx, connString)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := store.migrate(ctx); err != nil {
+		store.pool.Close()
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	// P2-3：把内置因子的假设来源写进库（只补没有的，不覆盖人写的）。
+	// 失败只记日志 —— 假设来源查不到会降级到代码里的内置表，不至于让服务起不来。
+	if _, err := store.SeedBuiltinFactorHypotheses(ctx); err != nil {
+		store.logger.Warn().Err(err).Msg("Failed to seed factor hypotheses — 查询会回退到代码里的内置表")
+	}
+
+	store.logger.Info().Msg("PostgreSQL/TimescaleDB connection established")
+	return store, nil
+}
+
+// NewPostgresStoreConnected opens the pool and verifies it with a ping, but
+// runs **no migrations and no seed** — the database is taken as it is.
+//
+// This is the entry for DB-touching tests: the shared development database must
+// keep its migration state (and its rows) outside of `go test`. It presupposes
+// an already-migrated database — on a fresh one these tests fail with
+// "relation … does not exist", and the fix is to start a service once (or run
+// the integration-tagged suite), not to reach for NewPostgresStore.
+//
+// It must never be called from production code: doing so would let a service
+// boot against an unmigrated schema, i.e. use this entry to bypass the
+// migration gate. internal/repoguard/store_migration_isolation_test.go asserts
+// zero production callers.
+func NewPostgresStoreConnected(ctx context.Context, connString string) (*PostgresStore, error) {
+	return connectPostgresStore(ctx, connString)
+}
+
+// connectPostgresStore builds and verifies the pool. Neither migrating nor
+// seeding happens here — that is what distinguishes the two public entries.
+func connectPostgresStore(ctx context.Context, connString string) (*PostgresStore, error) {
 	logger := logging.WithContext(map[string]any{"component": "postgres_store"})
 
 	poolConfig, err := pgxpool.ParseConfig(connString)
@@ -39,20 +93,7 @@ func NewPostgresStore(ctx context.Context, connString string) (*PostgresStore, e
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	store := &PostgresStore{pool: pool, logger: logger}
-	if err := store.migrate(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("failed to run migrations: %w", err)
-	}
-
-	// P2-3：把内置因子的假设来源写进库（只补没有的，不覆盖人写的）。
-	// 失败只记日志 —— 假设来源查不到会降级到代码里的内置表，不至于让服务起不来。
-	if _, err := store.SeedBuiltinFactorHypotheses(ctx); err != nil {
-		logger.Warn().Err(err).Msg("Failed to seed factor hypotheses — 查询会回退到代码里的内置表")
-	}
-
-	logger.Info().Msg("PostgreSQL/TimescaleDB connection established")
-	return store, nil
+	return &PostgresStore{pool: pool, logger: logger}, nil
 }
 
 // Close closes the database connection pool.

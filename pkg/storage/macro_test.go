@@ -131,7 +131,7 @@ func TestMacroSchemaDDL_HasProvenanceColumns(t *testing.T) {
 // EnsureSchema 一致」的可执行形态——information_schema + pg_constraint 就是
 // 无 psql 时的 \d。
 func TestMacroSchema_RealDBCatalogMatchesDDL(t *testing.T) {
-	store := scNewStore(t) // NewPostgresStore 已跑 migrate()（含 050）
+	store := scNewStore(t) // 不迁移入口（DATA-09）；读已迁移的开发库
 	ctx := context.Background()
 	db := store.DB()
 
