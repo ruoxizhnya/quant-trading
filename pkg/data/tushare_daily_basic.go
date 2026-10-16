@@ -55,7 +55,15 @@ type MarketActivityStore interface {
 // 但整行缺身份列（ts_code 空 / trade_date 不可解析）或数值脏 → 跳过并
 // 计数，全部跳过 → fail-loud（上游形状变故，拒绝以「导入 0 行」伪装成功）。
 // 响应缺任何一列（整个响应没有该列）→ 报错，形状不符契约。
+//
+// tradeDate 必须是 "YYYYMMDD"：格式不对在**本地**拦下（INVALID_INPUT），
+// 不让它变成一次无谓的上游请求 + 上游的口径不明报错。PIT 身份（日期）
+// 是这条链路的锚点，格式错误必须点名到参数。
 func (c *TushareClient) FetchDailyBasic(ctx context.Context, tradeDate string) ([]domain.MarketActivity, error) {
+	if _, err := time.Parse("20060102", tradeDate); err != nil {
+		return nil, apperrors.New(apperrors.ErrCodeInvalidInput, fmt.Sprintf(
+			"daily_basic trade_date 必须是 YYYYMMDD（got %q）", tradeDate))
+	}
 	resp, err := c.call(ctx, "daily_basic", map[string]interface{}{
 		"trade_date": tradeDate,
 	}, dailyBasicFields)

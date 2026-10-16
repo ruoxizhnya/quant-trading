@@ -14,7 +14,8 @@ package domain
 // 纪律：新增计算因子只加种子定义，不在这里加常量；ParseFactorType 仍是
 // 名册的合法集合判定（种子定义的名字必须落在其内——NewRegistry 校验）。
 //
-// ⚠️ D5 协议变更记录（2026-10-15，用户批准，蓝图 §6「协议变更纪律」）：
+// ⚠️ D5 协议变更记录（用户批准 2026-10-15，落地 2026-10-16；蓝图 §6
+// 「协议变更纪律」）：
 // FactorMarketActivity 是 D3 之后**第一个新增名册名**。此前名册是冻结面
 // （蓝图 §5.5 / D8 记录「不动态新增因子名」指运行期动态新增；正式协议
 // 变更走评审）。D5 是「挂新数据 → 可挖因子」全链路样板：不新开名册名，
@@ -47,7 +48,7 @@ const (
 	FactorROEDuPontLeverage      FactorType = "roe_dupont_leverage"
 	FactorInventoryTurnoverDelta FactorType = "inventory_turnover_delta"
 
-	// FactorMarketActivity 市场活跃度因子（D5 新数据源样板，2026-10-15
+	// FactorMarketActivity 市场活跃度因子（D5 新数据源样板，2026-10-16
 	// 协议变更）。引用 market_activity 表（daily_basic 换手率族）的
 	// 公式因子：turnover_rate / ts_mean(turnover_rate, 20) - 1
 	// （相对自身近期历史的异常活跃度）。是本项目「挂新数据 → 可挖

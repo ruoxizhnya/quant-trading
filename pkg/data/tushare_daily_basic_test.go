@@ -165,6 +165,21 @@ func TestFetchDailyBasic_PropagatesSaveError(t *testing.T) {
 	require.True(t, errors.Is(err, saveErr), "落库失败必须上传（含原始错误链），got: %v", err)
 }
 
+// TestFetchDailyBasic_RejectsMalformedTradeDate 钉住本地前置校验：
+// 日期格式不对不发上游请求（省一次配额 + 报错点名参数），而不是让上游
+// 返回一个口径不明的错误。
+func TestFetchDailyBasic_RejectsMalformedTradeDate(t *testing.T) {
+	rec := &d5RecStore{}
+	client := newSupplyChainTestClient(stubTushare(t, d5Body, 200), rec)
+
+	for _, bad := range []string{"", "2026-10-14", "202610140", "20261301", "abcd1234"} {
+		_, err := client.FetchDailyBasic(context.Background(), bad)
+		require.Errorf(t, err, "非法 trade_date %q 必须被拦下", bad)
+		require.Contains(t, err.Error(), "YYYYMMDD", "报错要点名参数格式：%v", err)
+	}
+	require.Empty(t, rec.activity, "非法日期不得产生任何落库")
+}
+
 // TestProbeDailyBasic_NoSideEffects 钉住探测语义：只取不落。
 func TestProbeDailyBasic_NoSideEffects(t *testing.T) {
 	rec := &d5RecStore{}

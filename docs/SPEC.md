@@ -618,7 +618,7 @@ connector 的 wire schema 与 `Data` map 都不承载它，故列为保留记号
 **已知边界（D2 如实登记）**：① `mootdx` 分钟表 `amount` 为 NULL 时
 `Turnover` 记 0 —— 字段级折零由 D2 在契约文档收编（D1 已点名），本单不改
 ETL 行为；② 产业链 fetcher（`pkg/data/supply_chain.go`）不走 Registry，
-其时间语义在此成文登记为已知边界。**注**：D5（2026-10-15）落地的样板源是
+其时间语义在此成文登记为已知边界。**注**：D5（2026-10-16）落地的样板源是
 **`daily_basic` 市场活跃度**（`tushare_daily_basic` adapter），**不是**产业链
 adapter——后者仍不在册，建它属后续「一源一单」；③ `tushare` 财报
 connector 的 wire schema / `Data` map **未透出 `ann_date`** —— 真实披露日
@@ -1035,7 +1035,7 @@ D3 之后**第一个新增名册名** `market_activity`（`domain.FactorMarketAc
 | 输入字段 | `turnover_rate`（D1 规范层新字段，来源 `activity`） |
 | 口径 | `z-score` |
 | 前视纪律 | `trade_date`（横截面日频因子；`after_close` 声明的取数侧由 `GetMarketActivityForDateRange` 的 `trade_date <= end` 执法） |
-| 生效日 | `2026-10-15`（D5 落地日） |
+| 生效日 | `2026-10-16`（D5 落地日；用户批准于 2026-10-15） |
 
 **为什么不是裸换手率（leaf）**：水平值受个股流通盘结构影响不可比，相对
 自身历史的偏离才是关注度**变化**信号（Barber & Odean 注意力机制的作用量
@@ -1064,8 +1064,15 @@ D3 之后**第一个新增名册名** `market_activity`（`domain.FactorMarketAc
 
 - 只做**一个源 + 一个因子**（样板）：第二个源、AI 挖掘消费（D8）另立；
    `moneyflow` / `index_dailybasic` 等其余可访问源未接入。
+- **多日分片导入不是原子的**（`TushareDailyBasicAdapter.Fetch` 如实声明）：
+  范围内每天独立「取数 → normalize → 落库」，落库以日为事务边界；中途失败
+  报错返回但**之前成功的天已入库**。逐日 upsert 幂等 ⇒ 失败后重跑整个范围安全；
+  调用方须把返回 error 读作「该范围未完整导入」而非「什么都没写」。
+- **日期参数在本地前置校验**（`FetchDailyBasic` 要求 `YYYYMMDD`）：
+  格式错误以 `INVALID_INPUT` 拦下，不消耗一次上游请求；PIT 身份（交易日）
+  是这条链路的锚点，必须点名到参数。
 - 未接入生产同步环路：数据经 adapter `Fetch`（按日迭代）导入，尚无
-  `cmd/data` 的定时同步任务（与宏观 P2-1 同姿态——先打通链路，调度另立）。
+   `cmd/data` 的定时同步任务（与宏观 P2-1 同姿态——先打通链路，调度另立）。
 - 策略侧 `OHLCVDataProvider` 已能供应活跃度字段，但回测引擎尚未在
   快照阶段注入活跃度数据（用该字段的策略会得到明确报错而非静默 0）；
   注入属后续「新数据进回测视野」工单（与 D6 同型）。

@@ -14,7 +14,7 @@ package domain
 //     线从未实现（全仓无 Compute* 出口），没有可公式化的现算数值。
 //     D3 不发明数学定义（超出「不改任何因子数学定义」的边界），登记
 //     为「名册在册、内核待定」，查询 fail-closed。
-//   - market_activity（D5，2026-10-15）：公式型——新数据源样板的第一个
+//   - market_activity（D5，2026-10-16）：公式型——新数据源样板的第一个
 //     因子，引用 market_activity 表的 turnover_rate 字段（D1 规范层新
 //     数据类），「挂新数据 → 可挖因子」全链路的活证据。
 //
@@ -125,7 +125,7 @@ var BuiltinFactorDefinitions = []FactorDefinition{
 		Lookahead:     "trade_date",
 	},
 	{
-		// D5 新数据源样板因子（2026-10-15 名册协议变更，见 factor.go 头）。
+		// D5 新数据源样板因子（2026-10-16 名册协议变更落地，见 factor.go 头）。
 		// 数学定义：异常活跃度 = 当日换手率 / 近 20 个交易日（含当日）
 		// 平均换手率 - 1。正值 = 活跃度高于自身近期基线（关注度升温），
 		// 负值 = 活跃度低于基线（关注度退潮）。横截面 z-score 口径。
@@ -142,7 +142,7 @@ var BuiltinFactorDefinitions = []FactorDefinition{
 		Validity:      "turnover_rate > 0 and ts_mean(turnover_rate, 20) > 0",
 		Caliber:       CaliberZScore,
 		InputFields:   []string{"turnover_rate"},
-		EffectiveFrom: "2026-10-15",
+		EffectiveFrom: "2026-10-16",
 		Lookahead:     "trade_date",
 		Lookback:      30,
 	},

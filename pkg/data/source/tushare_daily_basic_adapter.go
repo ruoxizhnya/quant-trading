@@ -100,6 +100,13 @@ func (a *TushareDailyBasicAdapter) Schema(dataType string) (DataSchema, error) {
 //
 // The response items mirror the persisted rows (same contract as the
 // macro adapter): missing values are visible as nil in Data, never 0.
+//
+// ⚠️ 多日逐日落库的语义（如实声明，别当原子性）：范围内的**每一天**独立
+// 走「取数 → normalize → 落库」，落库以日为事务边界。因此中途某天失败时
+// 报错返回，但**当天之前已成功的天已经入库**（不是全有或全无）。这是有意
+// 的选择：① 逐日 upsert 幂等（同键重导刷新），失败后重跑整个范围安全；
+// ② 把 400 天读成一个大事务会让失败重来的代价从「补缺口」变成「全量重导」。
+// 调用方应把「返回 error」理解为「该范围未完整导入」而非「什么都没写」。
 func (a *TushareDailyBasicAdapter) Fetch(ctx context.Context, req FetchRequest) (*FetchResponse, error) {
 	if err := Validate(req); err != nil {
 		return nil, err

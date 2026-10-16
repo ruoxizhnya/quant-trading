@@ -40,7 +40,7 @@ func TestMarketActivityRegistration_FourItemsAndPinnedResolution(t *testing.T) {
 	require.Equal(t, domain.RegistrationActive, reg.Status)
 	require.Equal(t, def.VersionHash(), reg.VersionHash, "登记哈希 = 定义的内容指纹（同一算法）")
 	require.Equal(t, "D5-sample", reg.Registrar)
-	require.Equal(t, "2026-10-15", def.EffectiveFrom)
+	require.Equal(t, "2026-10-16", def.EffectiveFrom)
 
 	// 新引用（按名解析）命中该版。
 	eff, hash, ok := book.ResolveEffective(domain.FactorMarketActivity)
