@@ -813,9 +813,30 @@ FactorComputer.ComputeFactorByName(ctx, name, date)
   fail-closed 报错而非静默 0——定义补齐属后续工单。
 - 公式型因子的 universe 规则：全 market 字段 → OHLCV 出现过的股票；
   全 fundamentals 字段 → 财报快照股票；混源 → 并集（缺侧 NaN → 缺失）。
-  三个公式型因子均不混源。
+  种子名册的公式型因子均单源；混源并集路径在取数侧已实现，D4 登记的
+  新因子若混源会一次拉齐多张来源表——成本面见下条。
 - `pkg/backtest/cache/factor_cache.go` 的回测预热清单是存量库外清单
   （基线登记），收敛到 Registry 读取留待 D6。
+- **公式型因子现算的取数成本形状（REV-02，2026-10-16 登记）**：
+  `loadFactorSeries`（`pkg/data/factor_formula.go`）按（计算日 × 因子）
+  各自拉取窗口数据，**无跨因子、跨日共享**。来源形状逐类实测
+  （2026-10-16，本机库）：market 源 → `GetOHLCVForDateRange` **无 symbol
+  过滤 = 全市场区间扫描**，Lookback=30 自然日窗口内 5,569 标的 ×
+  22 交易日 = 122,097 行，单次秒级；activity 源 →
+  `GetMarketActivityForDateRange` 同为全市场区间扫描（`market_activity`
+  现 0 行，形态同构）；fundamentals 源 → `GetFundamentalsSnapshot`
+  单日快照，非区间扫描（`stock_fundamentals` 现 0 行）。
+  **放大面 = 计算日数 × 行情/活跃度系因子数**：
+  `ComputeAllFactors(parallel=true)` 当日的行情系与活跃度系因子并发各扫
+  一遍；`ComputeFactorsForRange` 历史回填 N 日即 N 个批次，每批一刷
+  （批内因子数不是常数——D4/D8 登记的新公式因子进同一取数路径，
+  系数随登记数增长）。**适用面结论（本期裁决 (a2)：登记成文，不做共享
+  预取）**：handler 单日按名单因子路径 = 一次全市场扫描，秒级可接受，
+  **保留现状是有意的，不是遗漏**；批量回填在预取落地前须自控视野
+  （分区间跑、错峰跑），跑出来的「慢」是形状如此，不是代码坏。
+  共享预取（请求级缓存 / 按「日区间 × 来源表」预取一次，数值与现路径
+  对拍一致）另立工单再做——那是对拍纪律下的独立行为变更，不该夹进
+  文档登记单。
 
 ### 已知边界（D1 如实登记）
 
