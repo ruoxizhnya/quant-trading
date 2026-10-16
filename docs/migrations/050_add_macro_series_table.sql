@@ -14,8 +14,11 @@
 --                 LPR_1Y / LPR_5Y / USDCNY_CLOSE，目录见 pkg/data/macro.go
 --                 的 macroIndicatorSpecs）。
 --   freq      —— 频率（M=月 / D=日）。
---   obs_date  —— 观察日（DATE，PIT；月频取当月首日，日频取自然日。fx_daily
+--   obs_date  —— 观察日（DATE，观察时点；月频取当月首日，日频取自然日。fx_daily
 --                 的 trade_date 为 GMT 口径，原样入库不做时区转换）。
+--                 注意：**可见/PIT 过滤锚点是 as_of（导入时刻），不是 obs_date**
+--                 —— 观测日早于真实发布日，见 pkg/data/source/declarations.go
+--                 宏观声明（2026-10-16 用户裁决 A）。
 --   value     —— 观测值；unit 为计量单位（% / 亿元 / 点 / 汇率）。
 -- 影响面: 新建 quant schema（幂等，048/049 已建则顺延）+ 一张表 + 一个查询索引，
 --       无存量数据迁移。

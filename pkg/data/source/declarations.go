@@ -10,7 +10,9 @@ import "github.com/ruoxizhnya/quant-trading/pkg/domain/market"
 // 声明口径的裁决依据（保守：不早于真实可见时刻）：
 //   - 日更聚合数据（日线 bar / 资金流 / 龙虎榜）→ after_close；
 //   - 披露驱动数据（财报 / 公告 / 宏观 / 新闻）→ announcement_day；
-//   - 实时快照 / 日内 bar（观察即可见 / 周期结束可见）→ custom + 判定表达。
+//   - 实时快照 / 日内 bar（观察即可见 / 周期结束可见）→ custom + 判定表达；
+//   - 例外：宏观（披露驱动，announcement_day）的可见锚点取 **as_of（导入时刻）**
+//     而非 obs_date —— 观测日早于真实发布日，见 TushareMacroAdapter 声明。
 //
 // 待办边界（D1 在 SPEC 已点名，此处如实登记不越界）：
 //   - mootdx 分钟表 amount 为 NULL 时 Turnover 记 0 —— 字段级折零由 D2 收编，
@@ -56,18 +58,29 @@ func (a *TushareAdapter) Declarations() []ConnectorDeclaration {
 }
 
 // Declarations implements DataSourceAdapter.Declarations.
-// 宏观指标为发布驱动的事件流（发布后方可见）。wire schema 只有 obs_date
-// （**观测日**，月频取当月首日）与 as_of（导入时刻），上游不携带发布日
-// 字段；锚点取 obs_date，对齐 P2-1 既有「obs_date 为 PIT」的口径。
-// 注意：观测日**早于**真实发布日（9 月 CPI 10 月中才发布），此处声明与
-// 真实可见时刻的缺口已登记为跟进项（TASKS D2-R1）——是否改判宏观层 PIT 门
-// 需 P2-1 层裁决，不在 D2 范围。
+// 宏观指标为发布驱动的事件流（发布后方可见）。wire schema 有 obs_date
+// （**观测日**，月频取当月首日）与 as_of（**导入时刻**）两列，上游不携带
+// 发布日字段。
+//
+// 可见锚点取 **as_of（导入时刻）**，不取 obs_date —— 这是 P2-1「obs_date 为
+// PIT」口径的**正式收紧**（2026-10-16 用户裁决 A）。理由：obs_date 是观测日、
+// **早于**真实发布日（9 月 CPI 10 月中才发布），拿它当可见锚点 = 声明「观测日
+// 当天即可见」，任何按 obs_date 做 PIT 过滤的消费方一接线即前视；as_of 是导入
+// 时刻，数据至少在导入时才可能到手 ⇒ as_of ≥ 真实发布日，按 as_of 过滤**不早于**
+// 真实可见时刻（保守）。代价是失去发布日精度，用户 2026-10-16 裁决接受。
+//
+// 时间语义仍标 announcement_day：宏观确为披露驱动（见
+// market.VisibleOnAnnouncementDay 注释「财报 / 公告 / 宏观发布」），换的只是
+// 承载可见时刻的**字段**（保守代理）。
+//
+// ⚠️ 此声明被守卫钉死（tushare_macro_adapter_test.go 的
+// TestMacroDeclaration_AnchorIsConservativeAsOf）：锚点改回 obs_date → 测试红。
 func (a *TushareMacroAdapter) Declarations() []ConnectorDeclaration {
 	return []ConnectorDeclaration{
 		{
 			DataType:      DataTypeMacro,
 			TimeSemantics: market.VisibleOnAnnouncementDay,
-			VisibleField:  "obs_date",
+			VisibleField:  "as_of",
 			Frequency:     market.FreqSpecEvent,
 		},
 	}

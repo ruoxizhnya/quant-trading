@@ -601,7 +601,7 @@ schema 里投影同名字段是**可选**的——D2 时代 `ann_date` 只在规
 | --- | --- | --- | --- |
 | tushare | `ohlcv_daily` | `after_close` | `daily` |
 | tushare | `fundamentals` | `announcement_day`（锚点=`ann_date` 保留记号 = **披露日**，非报告期截止日；D2-R1 起同时投影进 wire schema） | `event` |
-| tushare_macro | `macro_series` | `announcement_day`（锚点=`obs_date`，见已知边界④） | `event` |
+| tushare_macro | `macro_series` | `announcement_day`（锚点=`as_of` **导入时刻**，保守；2026-10-16 裁决 A 收紧，见已知边界④） | `event` |
 | tushare_daily_basic | `daily_basic` | `after_close`（锚点=`trade_date`；**D5 高危场景第一个真实考卷**） | `daily` |
 | mootdx | `realtime_quote` | `custom`（观察时刻即可见） | `intraday` |
 | mootdx | `ohlcv_minute` | `custom`（bar 周期结束即可见） | `intraday` |
@@ -634,16 +634,21 @@ adapter——后者仍不在册，建它属后续「一源一单」；③（**D2
 `Schema(DataTypeFundamental)` 增 `ann_date`（date，非必填），锚点从「悬空、
 不可实测」变为「可实测」，投影类型由 `validateReservedAnchorProjection` 执法。
 真实披露日仍由底层 `data.TushareClient` 直写 `stock_fundamentals.ann_date`
-（规范层 `market.Fundamental.AnnDate` 承载可见语义）；④ `tushare_macro` 的
-可见锚点声明为 `obs_date`，但 `obs_date` 是**观测日**（月频取当月首日），
-真实发布日**晚于**它——声明口径对齐 P2-1 既有「obs_date 为 PIT」约定。
-**D2-R1 复核结论（2026-10-16，证据指针见 TASKS D2-R1）**：该缺口**当前不可达**
-（决策路径零消费方：`pkg/backtest` / `pkg/strategy` / `pkg/mining` 对 macro 零
-引用；因子输入字段词表无宏观来源；唯一读者是只读 API `GET /api/macro/series`），
-故**不是现行前视**；但**声明本身不保守**（声称 obs_date 当天可见，真实发布
-更晚）——任何按 `obs_date` 做 PIT 过滤的新消费方一接线即达。收紧方案（锚点改
-`as_of` 导入时刻 / 补发布日列）触及 P2-1 的 PIT 口径，**待 P2-1 层裁决**，本单
-不改；裁决前宏观数据的前置义务：**只可按 `as_of` 过滤，不得按 `obs_date` 过滤**。
+（规范层 `market.Fundamental.AnnDate` 承载可见语义）；④ `tushare_macro` 的可见
+锚点**已收紧为 `as_of`（导入时刻）** —— **2026-10-16 用户裁决 A，正式变更 P2-1 的
+「obs_date 为 PIT」口径**。变更前：锚点声明为 `obs_date`，但 `obs_date` 是**观测日**
+（月频取当月首日），真实发布日**晚于**它（9 月 CPI 10 月中才发布）⇒ 声明「观测日
+当天可见」**不保守**，任何按 `obs_date` 做 PIT 过滤的消费方一接线即前视。收紧后：
+锚点取 `as_of`（导入时刻；wire schema 已有 datetime 列，无需 DDL）⇒ `as_of ≥ 真实
+发布日`，按 `as_of` 过滤**不早于**真实可见时刻（保守）；代价是失去发布日精度（用户
+裁决接受）。时间语义仍为 `announcement_day`（宏观确为披露驱动，换的只是承载可见
+时刻的字段）。**现状核验（D2-R1，证据指针见 TASKS D2-R1）**：变更前该缺口**当前
+不可达**（决策路径零消费方：`pkg/backtest` / `pkg/strategy` / `pkg/mining` 对 macro
+零引用；因子输入字段词表无宏观来源；唯一读者是只读 API `GET /api/macro/series`），
+故**不是现行前视**。**正式义务（自本变更起）**：宏观数据的 PIT 过滤**只可按
+`as_of`**，**不得按 `obs_date`**；`obs_date` 仍是**观察日**（数据模型身份列之一），
+但不再是可见锚点。守卫钉死见 `pkg/data/source/tushare_macro_adapter_test.go` 的
+`TestMacroDeclaration_AnchorIsConservativeAsOf`。
 
 ### 透明路由
 

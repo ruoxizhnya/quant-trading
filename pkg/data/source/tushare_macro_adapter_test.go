@@ -18,6 +18,7 @@ import (
 
 	"github.com/ruoxizhnya/quant-trading/pkg/data"
 	"github.com/ruoxizhnya/quant-trading/pkg/domain"
+	"github.com/ruoxizhnya/quant-trading/pkg/domain/market"
 	"github.com/ruoxizhnya/quant-trading/pkg/storage"
 )
 
@@ -163,4 +164,42 @@ func TestTushareMacroAdapter_HealthCheckProbes(t *testing.T) {
 	a := NewTushareMacroAdapter(newMacroStubClient(t, &macroStubStore{}))
 	require.NoError(t, a.HealthCheck(context.Background()), "stub 恒 200，探测必须过")
 	assert.Equal(t, 200, a.RateLimit().RequestsPerMinute)
+}
+
+// TestMacroDeclaration_AnchorIsConservativeAsOf 是宏观可见锚点收紧（2026-10-16
+// 用户裁决 A）的破坏验证靶子，同 D5 的 TestDailyBasicDeclaration_MustBeAfterClose：
+// 钉住「宏观可见锚点 = as_of（导入时刻，保守）」这一**政策**，而不是抄一遍常量。
+//
+// 为什么不能用 obs_date：obs_date 是**观测日**（月频取当月首日），真实发布日
+// **晚于**它（9 月 CPI 10 月中才发布）。拿 obs_date 当可见锚点 = 声明「观测日
+// 当天即可见」，任何按它做 PIT 过滤的消费方一接线即前视。as_of 是导入时刻，
+// ≥ 真实发布日 ⇒ 按 as_of 过滤不早于真实可见时刻（保守）。
+//
+// 破坏腿（改坏 → 红 → 还原 → 绿）：把 declarations.go 的 VisibleField 从
+// "as_of" 改回 "obs_date" → 本测试当场红。
+func TestMacroDeclaration_AnchorIsConservativeAsOf(t *testing.T) {
+	a := NewTushareMacroAdapter(newMacroStubClient(t, &macroStubStore{}))
+	decls := a.Declarations()
+	require.Len(t, decls, 1)
+
+	d := decls[0]
+	assert.Equal(t, DataTypeMacro, d.DataType)
+	assert.Equal(t, market.VisibleOnAnnouncementDay, d.TimeSemantics,
+		"宏观是披露驱动事件流，语义仍是 announcement_day（换的只是承载可见时刻的字段）")
+	assert.Equal(t, "as_of", d.VisibleField,
+		"可见锚点必须是 as_of（导入时刻，保守）：obs_date 是观测日、早于真实发布日，拿它当可见点 = 前视")
+	assert.Equal(t, market.FreqSpecEvent, d.Frequency, "宏观是事件流，频率口径 event")
+
+	// 锚点字段必须真的在 wire schema 里、且类型能承载时间（date/datetime）——
+	// 否则 validateVisibleAnchor 在注册期就会拒收这条声明。
+	schema, err := a.Schema(DataTypeMacro)
+	require.NoError(t, err)
+	var asOf *SchemaField
+	for i := range schema.Fields {
+		if schema.Fields[i].Name == "as_of" {
+			asOf = &schema.Fields[i]
+		}
+	}
+	require.NotNil(t, asOf, "锚点 as_of 必须在 wire schema 里（否则注册期拒收）")
+	assert.Equal(t, "datetime", asOf.Type, "as_of 是导入时刻，类型 datetime")
 }

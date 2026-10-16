@@ -2868,9 +2868,14 @@ paths:
 
         Every row carries `source` + `as_of` provenance columns. The unique
         key (indicator, freq, obs_date, source) makes re-imports idempotent
-        and keeps different sources side by side. `obs_date` is PIT: monthly
-        indicators use the first day of the month; `fx_daily`'s `trade_date`
-        is stored as returned (GMT, per Tushare docs — no timezone shift).
+        and keeps different sources side by side. `obs_date` is the
+        **observation date** (monthly indicators use the first day of the
+        month); `fx_daily`'s `trade_date` is stored as returned (GMT, per
+        Tushare docs — no timezone shift). The **visibility (point-in-time)
+        anchor is `as_of` (import time), not `obs_date`**: macro values are
+        released *after* their observation date (September CPI lands mid
+        October), so backtest filtering must bound by `as_of`, never by
+        `obs_date`.
 
         `indicator` is required. `freq` (M/D), the inclusive `start_date` /
         `end_date` bounds, and `limit` (row cap: default 1000, max 5000) are
