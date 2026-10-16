@@ -2345,8 +2345,18 @@ POST /api/sync/jobs/:id/cancel    - Cancel a running sync job
 POST /api/sync/jobs/:id/retry     - Retry a failed sync job
 GET  /api/sync/jobs/:id/progress  - SSE stream of job progress
 GET  /api/sync/workers            - Worker stats
+GET  /api/sync/scheduler/stats    - Scheduler stats (response contract below)
 POST /api/sync/schedules          - Create a schedule
 ```
+
+> **`GET /api/sync/scheduler/stats` 响应契约**（SYNC-04，2026-10-16）：
+> `{"active_schedules":N,"total_entries":N,"next_runs":[…],"is_running":bool,"start_error":"…"}`。
+> `is_running` 恒在，是**活性**读数（`Stop()` 后置回 false）；`start_error` 仅在
+> `Scheduler.Start()` 失败时出现（`omitempty`）。两个旧计数同报 0 的成因由此可区分：
+> `is_running=false` 且 `start_error` 非空 = 调度器启动失败，排程**不会**触发；
+> `is_running=false` 且 `start_error` 缺席 = 从未启动或已停止（正常服务中不该出现，
+> 启动接线由 `cmd/data/wiring_guard_test.go` 钉住）；`is_running=true` 且计数为 0 =
+> 正常启动、确实没有 active 排程。三个旧字段未改名、未改语义（纯增量；消费方见 ui 仓 A-08）。
 
 > **类型清单以代码为准**：`pkg/sync/types/types.go` 的 `JobType` 常量
 > （`stocks` / `ohlcv` / `ohlcv_all` / `fundamental` / `fundamentals` /
