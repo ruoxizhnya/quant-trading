@@ -739,6 +739,11 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
   - **门禁**：`go build ./...` exit 0；`go vet ./cmd/data ./pkg/data` exit 0；`gofmt -l` 五个改动文件空输出；`go test ./cmd/data -run 'TestSyncIndexConstituents_|TestDataRouter|TestStockCountPayload|TestStocksCountHandler'` exit 0；`go test ./pkg/data` 全量 **1 条既有红**：`TestAdjustmentBasis_QfqLookAheadLeaksIntoBacktest` —— 按 D1 先例本单复跑确认 **基线（stash 移开本单改动后）同样红**，非本单引入，登记不修。诚实边界：`-race` 本机跑不了（无 gcc）。
   - **文档同步**：`docs/SPEC.md` 端点行加指针 + 新增「DATA-06 响应形状」节（成功两数恒等的原因、500 静态文案、哨兵机制、以及 **GET 回源路径语义随之一致**：`GetIndexConstituents` DB 空时回源共用本函数，旧行为是把未落库的行直接回给调用方，现在如实 500）。`docs/openapi.yaml` 未登记过该端点（机器可读契约本就没有这条），不动。
   - **④ 逐条核对**：`SaveIndexConstituentBatch` 签名/批量语义未动（只改调用方对 error 的处理）；`normalizeIndexConstituents` 未动（反证腿钉住区间语义）；`stocks` 表未碰；DATA-02/03 未顺手修；零新依赖。`cmd/data/main.go` 只更新了指向 `tushare.go:690` 的易漂移行号注释。
+  - **自审修订（2026-10-16，审本单三个 commit 的 diff 后追加，不改写上面原始记录）**：三处真问题，都在叙述与机制的口径上，行为面复核无新问题。
+    1. **测试文件头注释与断言不符**：原第 1 条写「落库失败 ⇒ 5xx…原始错误可追溯」—— 那是对外可见的口径，而我中途实测证伪并改掉了（本仓 `httpserver.Error` 对 5xx 一律脱敏，断言改成了「静态环节文案对外、内部原因不外泄」），文件头没跟着改。这正是本单登记的缺陷家族「叙述与护栏各说各话」，我自己又踩了一次。已按断言现状改写注释，并把「原始错误可追溯」的落点写实：error 链上的 `%w` 逐腿断言在 `pkg/data/tushare_index_constituents_persist_test.go`，HTTP 面只保证环节可辨。
+    2. **落点 bullet 的 handler 机制描述有歧义**：原句读起来像「Error + 只进日志」，实际是两条通道 —— 落库失败经哨兵走 `FailCause`（静态文案 + cause 进日志），其余错误走 `httpserver.Error`（5xx 同样脱敏）。已在本条订正；上文「裁决 ③」与「对外错误形状」两条与实现一致，不动。另订正一个记法：错误串的实际字面是 `index_weight fetched 354 but saved 0`（数字为真值，活进程日志留证），原始记录里写的 `N` 是规范形式不是字面。
+    3. **「更新行号注释」措辞不实**：`main.go:135` 那条注释我实际是**移除**了 `tushare.go:690` 的行号引用（改成按函数名指位），不是更新成新行号 —— 行号引用是本仓反复登记的漂移源，撤掉比续号稳。原句按字面读会误以为留着一个新行号。
+    - **rebase 后证据有效性复核（如实边界）**：base 从 `2eba0a7` 移到 `ca06c8b`（d5 两笔落地），其对本单依赖面的改动只在 `TushareStore` 接口追加 `MarketActivityStore`；fetch→persist→error 路径与 handler 行为未变，故活进程 curl 证据仍适用。本单 rebase 后**未重跑真实 Tushare 调用**（省共享限流），复跑的是：`go build ./...` / `go vet` / `gofmt -l` / 两文件全部测试 + `Tushare|IndexConstituent|Constituents` 邻域回归，全部 exit 0。
 
 ---
 
