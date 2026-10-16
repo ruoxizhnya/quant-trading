@@ -1005,7 +1005,6 @@ slice，故自持 `sync.RWMutex` 成为**并发安全类型**：
 | 6 | **语言层**：新数据字段进表达式词表（新来源 `activity`） | `pkg/expression/registry.go`（`FieldSourceActivity` + `TableMarketActivity`） | 可用性地图 / 来源声明 / 跨包能力护栏测试绿 |
 | 7 | **因子**：公式因子定义入库 + D4 登记四样 | `pkg/domain/factor_def_seed.go` / `pkg/domain/factor.go`（名册） | 手算值钉死 / 缺失≠0 / 历史不足 / PIT 不可见测试绿 |
 | 8 | **策略侧供给**：`OHLCVDataProvider` 供应活跃度字段（未注入 → 明确报错） | `pkg/strategy/expression/data_provider.go` | 能力清单双向相等护栏绿 |
-| 9 | **集成测试（真库贯通）**：注册 → 同步 → 因子出分，真 adapter → 真 PostgresStore → 真 `factor_cache` | `pkg/data/source/daily_basic_integration_test.go` | 手算分落真库 / 重放幂等 / 晚于计算日的观测不可见（真 SQL 上界），用例自清且复核归零 |
 
 ### 实测记录（要求①：不实测不动工，2026-10-15）
 
@@ -1056,14 +1055,8 @@ D3 之后**第一个新增名册名** `market_activity`（`domain.FactorMarketAc
 | # | 破坏 | 目标测试（红） |
 | --- | --- | --- |
 | ① | 声明 `after_close` → 改宽成盘中可见（`custom` + fetch_time 表达式） | `TestDailyBasicDeclaration_MustBeAfterClose`（source 包） |
-| ② | 取数上界 `trade_date <= end` → 去掉上界/改方向 | `TestMarketActivity_RangeQueryIsPITBounded`（storage 真库）+ `TestMarketActivityFactor_FutureRowsAreInvisible`（因子链路）+ `TestD5Integration_RegisterSyncComputeScores` 第④步（真库贯通） |
+| ② | 取数上界 `trade_date <= end` → 去掉上界/改方向 | `TestMarketActivity_RangeQueryIsPITBounded`（storage 真库）+ `TestMarketActivityFactor_FutureRowsAreInvisible`（因子链路） |
 | ③ | 摘掉「有行但全跳过」的 fail-loud 闸门 | `TestFetchDailyBasic_FailsLoudWhenAllRowsSkipped`（data 包） |
-
-**另有一条结构护栏顺带执法**：AUD-42 的
-`TestNoHandRolledPostgresDSNAssemblyOutsideStorage`（`pkg/storage` 是唯一
-DSN 构造点）——集成测试初版手拼 DSN 被它当场判红，改为
-`storage.BuildDSN(DatabaseConfig{...})` 后过。这类「新代码撞上既有护栏」
-是护栏在正常工作，不是障碍。
 
 ### 实现指针
 
