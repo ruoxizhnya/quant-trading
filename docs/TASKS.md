@@ -700,7 +700,7 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **⑤ 验收**：一条行为测试钉住「响应的 volume/amount 与库里逐字段相等」；接口或浏览器实测显示真值（或删格后界面一致）；`go build ./...` + `go vet` + `gofmt -l` 干净。
 - **⑥ 边界**：只做「界面有指标但没有数据通道」这一条。
 
-### DATA-08 · 多源 fallback 链零生产调用方（Registry 只服务观测端点） ⬜ 待做
+### DATA-08 · 多源 fallback 链零生产调用方（Registry 只服务观测端点） ✅ 完成（2026-10-16，branch `task/data-08-registry-unwired`）
 
 - **① 目标**：`Registry.Fetch` 在生产里有真实调用方并落到某张表，或者把这条链明确停用（配置 + 注释 + SPEC 一致标注「未启用」）。
 - **② 上下文**（2026-10-15 DATA-05 实测，逐行 grep）：`ETLPipeline.Process`（`pkg/data/source/etl.go:75`）是 `Registry.Fetch`（`pkg/data/source/registry.go:150`）的唯一生产调用方，而 `ETLPipeline` 在 cmd/pkg 非测试代码里**零调用方**；Registry 只被 `cmd/data/registry_handlers.go` 的 status/health/chains 观测端点使用。⇒ `ohlcv_daily: [tushare, mootdx, eastmoney]` 今天不会真的降级取数。同族先例：SYNC-01（「函数写得对但零调用方」，编译期与行为测试都看不见）。
@@ -708,6 +708,40 @@ verified-by: 台账换代归档（2026-10-14）；R1 frontmatter 由 DOCS-02 补
 - **④ 约束与非目标**：单位口径已在 DATA-05 收口，本单不重开；**不在本单顺手接 mootdx SDK**（新依赖需主任批准）；不改 Registry 的降级语义本身。
 - **⑤ 验收**：停用路线 —— `grep -rn "SetChain" cmd/data/registry_init.go` 与 SPEC 的链表一致且注明未启用；接线路线 —— 有一条从 HTTP/作业层真的走一次的测试（不是直接调 Process 的行为测试）。
 - **⑥ 边界**：只判断「链是否可达」；链上各源的可靠性（ODR-011 风险表）另议。
+- **✅ 完成记录（2026-10-16，分支 `task/data-08-registry-unwired`，隔离 worktree `.workbuddy-ai/worktrees/data-08`）**：
+  - **裁决 ③ = 停用路线**（主任 2026-10-16 当面二选一确认）。理由五条，全部有实测支撑：
+    1. **⑥ 的边界就是「只判断链是否可达」** —— 本单的职责是给这条链一个明确的状态，不是新建 ingestion 能力。
+    2. **接线不是「接个线」，是新建一条生产写路径**：`ETLPipeline.Process` 要求调用方传入 `Normalizer`，而全仓生产代码**零个** `source.Normalizer` 实现（grep 实测；`equitydeep.NewNormalizer` 是另一条 ingestion 线的类，不经 Registry）。接线 = 新写规范化层 + 新端点/作业 + 落库对拍，宽度是一个特性单。
+    3. **生产 ingestion 全线绕开 Registry 是既定架构，不是疏忽**：`handlers_sync.go` / `sync_handlers.go` 直连 `TushareClient`（`FetchDailyOHLCV` / `FetchTradingCalendar` / `FetchIndexConstituents`，落库在客户端内部）；连 macro（P2-1）与 daily_basic（D5）的 adapter 都是「注册即观测、同步另立」（SPEC 明载「调度另立」）。在 ETL 上平行再接一条 ingestion，等于给同一件事两套架构，须主任级决策而非工单内顺手。
+    4. **在途 DATA-09 与任何新库写路径有交互**（测试迁移隔离刚收口），本单不宜同时扩大写面。
+    5. **停用路线可完整满足 ⑤**，且与 AUD-45/46 的哲学一致：「零调用方」本身不是缺陷，但必须是**可见且刻意**的状态 —— 本次就是把这个状态钉出来。
+  - **落点（代码侧，commit 1）**：
+    - `internal/repoguard/registry_etl_wiring_test.go`（新）：机械钉住「未接线」——规则 A：生产代码（cmd/pkg/internal 非测试文件）出现 `NewETLPipeline` 调用、或**包外**出现 `ETLPipeline` 复合字面量 ⇒ 红；规则 B：`registry_handlers.go` 出现 `.Fetch` 选择器 ⇒ 红。替身腿当场证明牙口（跨包调用/同包调用/包外字面量各红；构造器本体的包内字面量与只读观测形态放行）。
+    - `cmd/data/registry_init.go`：包文档、`buildDataSourceRegistry` 文档、`configureFallbackChains` 设计注释三处补 DATA-08 状态；顺带订正 realtime 链的**假声明**——「eastmoney 是 SDK 不可用时的备胎」今天不成立（eastmoney 只声明 capital_flow，`Fetch(realtime_quote)` 直接 ErrUnsupported，链腿是 chain drift 形状）。
+    - `pkg/data/source/etl.go`：类型/构造器文档补 DATA-08 状态；**订正一处过期注释**——Process 步骤 5 原写 "BulkInsert (currently a stub; Sprint 1 wires the real insert)"，而真实实现早已随 ODR-011 落地（`dfec481`，实测 git log -S 归因；CR-21 只是接口抽取）。叙述与实现分叉正是本仓反复登记的缺陷家族，故按实现改写。
+  - **落点（文档侧，commit 2）**：`docs/SPEC.md` 两处——「已知边界」里「链本身何时接通属另一工单」改为 DATA-08 收口事实；「Adapter registry & fallback chain」端点块加注：三端点纯观测、链展示设计意图而非已生效的降级、不可达腿点名、DATA-10 前置与护栏指针。
+  - **③ 第一半（接线计划）的兑现**：不停用不等于不留计划 —— 新立 **DATA-10**（见下），把「哪条工单/什么路径/落哪张表/与 sync_jobs 的关系」写全，含候选链按可达性排序与前置条件。
+  - **⑤ 验收（停用路线，实测证据）**：`grep -rn "SetChain" cmd/data/registry_init.go` 实测 **15 条**链配置（另 1 行为注释提及，共 16 行 grep 输出）。链表与 SPEC 的一致性按「不手抄」原则落实：`docs/SPEC.md`「Adapter registry & fallback chain」节注明整套 Registry 为**纯观测面、链展示设计意图而非已生效的降级**，并点名两条不可达腿（mootdx nil transport / eastmoney 未声明日线·分钟·实时）；完整链表的唯一真源是运行时 `GET /api/datasource/registry/chains` —— 手抄 15 条进文档正是 AUD-45 登记的「清单腐烂」形状，故不抄。`go test ./internal/repoguard/ -run 'TestProductionCodeDoesNotWireETLPipeline|TestRegistryObservabilitySurfaceDoesNotFetch'` exit 0（仓库级两条），替身四条 exit 0。
+  - **破坏验证（两腿，均「改坏→红→还原→绿」）**：① `registry_init.go` 末尾追加 `source.NewETLPipeline(reg, nil)` ⇒ `TestProductionCodeDoesNotWireETLPipeline` 红，点名 `cmd/data/registry_init.go:285: NewETLPipeline 调用`；② `registry_handlers.go` 追加带 `h.reg.Fetch(...)` 的方法 ⇒ `TestRegistryObservabilitySurfaceDoesNotFetch` 红，点名 `:185: .Fetch 选择器调用`。还原用 `git checkout --` + **sha256 与基线逐字节一致**（`a8eaa780…` / `d4ed096e…`，`sha256sum -c` 双 OK）。
+  - **开发中自抓并修掉的两个假护栏（如实登记，本项目「假护栏比没护栏更糟」的同款自查）**：① 第一版把包内 `ETLPipeline` 字面量也算违规 ⇒ 构造器本体 `return &ETLPipeline{...}` 会中枪，守卫从第一天起常红 —— 收窄为「包外才算接线」；② 第一版照抄 `package_wiring_test.go` 的 `parser.ImportsOnly`，函数体整个不进 AST ⇒ 替身腿全部落空、仓库级测试**假绿** —— 改完整解析（mode 0）后替身腿才真红真绿。
+  - **门禁**：`go build ./...` exit 0；`go vet ./cmd/data ./pkg/data/source ./internal/repoguard` exit 0；`gofmt -l` 对本单 4 个文件空输出（DATA-09 已登记整仓 gofmt 有 8 个别人文件的既有噪声，本单不顺手修）；`go test ./internal/repoguard/` 全量 exit 0（含既有 19 条不受影响）；`go test ./pkg/data/source/` exit 0。
+  - **④ 逐条核对**：单位口径未重开（未动任何换算常量）；mootdx SDK 未接（go.mod 无新依赖）；Registry 降级语义未改（registry.go 一字未动）；链配置未删（⑤ 要求 grep 可得且与 SPEC 一致）。
+  - **⑥ 边界**：链上各源可靠性（ODR-011 风险表）未议；DATA-10 落地前「链不可达」保持现状。
+  - **并行隔离**：主工作树开工时即挂着其他 agent 的未提交改动（`pkg/data/source/contract.go` 一族，且 DATA-09 的合并 `d005187` 在本单核对期间落地），故全程在隔离 worktree 施工，未碰主工作树；合并与否归主任。
+
+### DATA-10 · 多源 Registry 接线计划（停用状态的显式解禁入口） ⬜ 待做
+
+- **① 目标**：把一条 fallback 链真正接进生产 ingestion（经 `ETLPipeline` 或主任认可的等效路径）并落到对应表；若评估后仍不接，显式复审 DATA-08 的停用裁决并留痕。
+- **② 上下文**（DATA-08 2026-10-16 收口实测）：`Registry.Fetch` 无生产调用方；`ETLPipeline.Process` 的 `Normalizer` 全仓零生产实现；生产 ingestion 直连 `TushareClient`；`capital_flow`/`global_ohlcv` 两条链的 primary adapter 已启用（eastmoney / yahoo_finance），`ohlcv_daily` 的 mootdx/eastmoney 两条备胎腿不可达（nil transport / 未声明该类型）。「未接线」由 `internal/repoguard/registry_etl_wiring_test.go` 钉住 —— 本单落地时该护栏按计划放行（加白名单 + 写理由），放行本身就是接线决策的留痕。
+- **③ 要求（接线计划，DATA-08 ③ 第一半的兑现）**：候选链按**可达性**排序，逐条给「适配器状态 / 落库表 / 前置条件」三件——
+  1. `capital_flow: [eastmoney]`（首选）：adapter 默认启用、`TableMapper` 已映射 `capital_flow` 表、`BulkInsert` 事务 + upsert 幂等已就绪；表当前 0 行（Tushare 免费额度所限），eastmoney 是免费源。
+  2. `global_ohlcv: [yahoo_finance, alpha_vantage]`：yahoo 默认启用；境外单位口径 SPEC 已有规定，勿与 A 股口径混。
+  3. `daily_basic` / `macro`：adapter 已注册但同步「另立」（P2-1 / D5 既有决议），若先落这两条，须与那两线的排程工单合并考虑，别双开。
+  4. `ohlcv_daily` 的备胎腿：前置是 mootdx SDK（新依赖，**须主任批准**）+ 源单位实测 + 同步边界换算（DATA-05 守卫自动开始管）。
+  - 入口路径二选一并写明理由：(a) HTTP 层 —— 仿 `POST /sync/index-constituents/:index_code` 新增同步端点，DATA-06 的 (a1) 上抛口径直接适用；(b) 作业层 —— `sync_schedules`（cron）→ `sync_jobs` → worker 既有链路（SYNC-01/02/04 已修生命周期），扩 executor 或加 job_type，与 `sync_handlers.go` 的 `e.tc` 模式对齐。
+- **④ 约束与非目标**：不重复 DATA-08 已做的停用标注（本单是解禁不是重贴）；新依赖须主任批准；不改 Registry 降级语义；单位口径不重开（DATA-04/05 已定，接线只做「换算到规范层」）；不借本单修 DATA-03 的吞错家族。
+- **⑤ 验收**：一条从 HTTP/作业层**真的走一次**的测试（不是直接调 `Process` 的行为测试）—— DATA-08 ⑤ 接线路线的原话；落库后抽样比对（写进去的行与源响应逐字段一致）；`go build ./...` + `go vet` + `gofmt -l`（本单文件）干净；护栏白名单条目带理由；SPEC 的「Adapter registry & fallback chain」注从「未启用」改为该链的实况。
+- **⑥ 边界**：只接**一条**链（一源一单）；链上各源可靠性（ODR-011 风险表）另议；调度策略（cron 表达式、错峰）另议。
 
 ### DATA-09 · 库侧测试会跑 migrate()，把 DML 迁移直接作用在共享开发库上 ✅ 完成（2026-10-16，branch `task/data-09-test-migration`：`4a29393`）
 
